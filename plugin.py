@@ -9,8 +9,7 @@ import pcbnew
 class JLCPCBPlugin(pcbnew.ActionPlugin):
     def __init__(self):
         super(JLCPCBPlugin, self).__init__()
-        self.InitLogger()
-        self.logger = logging.getLogger(__name__)
+
         self.name = "JLCPCB Tools"
         self.category = "Pick and Place geneartion"
         self.pcbnew_icon_support = hasattr(self, "show_toolbar_button")
@@ -19,25 +18,41 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
         self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
         self.description = "Generate a JLCPCB conform CPL file"
 
+    def setup(self):
+        self.board = pcbnew.GetBoard()
+        self.path, self.filename = os.path.split(self.board.GetFileName())
+        self.InitLogger()
+        self.logger = logging.getLogger(__name__)
+
     def generate_bom(self):
         pass
 
     @staticmethod
-    def is_smd_footprint(footprint):
-        return footprint.GetAttributes() == 2
+    def decode_attributes(footprint):
+        attributes = {}
+        val = footprint.GetAttributes()
+        attributes["tht"] = bool(val & 0b1)
+        attributes["smd"] = bool(val & 0b10)
+        attributes["not_in_schematic"] = bool(val & 0b100)
+        attributes["exclude_from_pos"] = bool(val & 0b1000)
+        attributes["exclude_from_bom"] = bool(val & 0b1000)
+        attributes["other"] = not (attributes["tht"] or attributes["smd"])
+        return attributes
 
     def generate_cpl(self):
-        board = pcbnew.GetBoard()
-        path, filename = os.path.split(board.GetFileName())
-        cplname = f"CPL-{filename.split('.')[0]}.csv"
-        with open(os.path.join(path, cplname), "w", newline="") as csvfile:
+
+        cplname = f"CPL-{self.filename.split('.')[0]}.csv"
+        with open(os.path.join(self.path, cplname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
-            footprints = sorted(board.GetFootprints(), key=lambda fp: fp.GetReference())
+            footprints = sorted(
+                self.board.GetFootprints(), key=lambda fp: fp.GetReference()
+            )
             for footprint in footprints:
-                if not self.is_smd_footprint(footprint):
+                attributes = self.decode_attributes(footprint)
+                if not attributes.get("smd"):
                     self.logger.info(
                         f"{footprint.GetReference()} is no SMD footprint and therefore skipped!"
                     )
@@ -55,6 +70,7 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
                 )
 
     def Run(self):
+        self.setup()
         self.generate_cpl()
 
     def InitLogger(self):
