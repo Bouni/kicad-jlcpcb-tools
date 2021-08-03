@@ -19,6 +19,9 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
         self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
         self.description = "Generate a JLCPCB conform CPL file"
 
+    def generate_bom(self):
+        pass
+
     @staticmethod
     def is_smd_footprint(footprint):
         return footprint.GetAttributes() == 2
@@ -59,7 +62,7 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
 
-        log_file = "C:/temp/jlcpcb.log"
+        log_file = os.path.join(self.path, "jlcpcb.log")
 
         # set up logger
         logging.basicConfig(
