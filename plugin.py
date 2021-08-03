@@ -24,9 +24,6 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
         self.InitLogger()
         self.logger = logging.getLogger(__name__)
 
-    def generate_bom(self):
-        pass
-
     @staticmethod
     def decode_attributes(footprint):
         attributes = {}
@@ -40,7 +37,6 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
         return attributes
 
     def generate_cpl(self):
-
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
         with open(os.path.join(self.path, cplname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
@@ -52,9 +48,9 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
             )
             for footprint in footprints:
                 attributes = self.decode_attributes(footprint)
-                if not attributes.get("smd"):
+                if attributes.get("exclude_from_pos"):
                     self.logger.info(
-                        f"{footprint.GetReference()} is no SMD footprint and therefore skipped!"
+                        f"{footprint.GetReference()} is marked as 'exclude from POS' and skipped!"
                     )
                     continue
                 writer.writerow(
@@ -69,9 +65,47 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
                     ]
                 )
 
+    def generate_bom(self):
+        bomname = f"BOM-{self.filename.split('.')[0]}.csv"
+        with open(os.path.join(self.path, bomname), "w", newline="") as csvfile:
+            writer = csv.writer(csvfile, delimiter=",")
+            writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
+            footprints = {}
+            for footprint in self.board.GetFootprints():
+                attributes = self.decode_attributes(footprint)
+                if attributes.get("exclude_from_bom"):
+                    self.logger.info(
+                        f"{footprint.GetReference()} is marked as 'exclude from BOM' and skipped!"
+                    )
+                    continue
+                lcsc = footprint.GetProperties().get("LCSC")
+                if not lcsc:
+                    self.logger.error(
+                        f"{footprint.GetReference()} has no LCSC attribute and skipped!"
+                    )
+                    continue
+                if not lcsc in footprints:
+                    footprints[lcsc] = {
+                        "comment": footprint.GetValue(),
+                        "designators": [footprint.GetReference()],
+                        "footprint": footprint.GetFPID().GetLibItemName(),
+                    }
+                else:
+                    footprints[lcsc]["designators"].append(footprint.GetReference())
+            for lcsc, data in footprints.items():
+                writer.writerow(
+                    [
+                        data["comment"],
+                        ",".join(data["designators"]),
+                        data["footprint"],
+                        lcsc,
+                    ]
+                )
+
     def Run(self):
         self.setup()
         self.generate_cpl()
+        self.generate_bom()
 
     def InitLogger(self):
         # Remove all handlers associated with the root logger object.
