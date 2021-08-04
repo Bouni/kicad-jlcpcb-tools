@@ -48,8 +48,10 @@ class Dialog(wx.Dialog):
             size=(800, 300),
             style=wx.TE_MULTILINE | wx.TE_READONLY,
         )
-        description = wx.StaticText(panel, label="Export gerber and zip files.")
-        execbtn = wx.Button(panel, label="Export")
+        description = wx.StaticText(
+            panel, label="Generate JLCPCB production and assembly files."
+        )
+        execbtn = wx.Button(panel, label="Generate")
         clsbtn = wx.Button(panel, label="Close")
         clsbtn.Bind(wx.EVT_BUTTON, self.close)
         execbtn.Bind(wx.EVT_BUTTON, self.exec)
@@ -104,7 +106,6 @@ class Dialog(wx.Dialog):
         self.board = GetBoard()
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
-        self.logger.info("Setup finished")
 
     def create_folders(self):
         """Create output folders if they not already exist."""
