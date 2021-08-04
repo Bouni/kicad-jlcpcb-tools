@@ -2,30 +2,51 @@ import csv
 import logging
 import os
 import sys
+from pathlib import Path
+from zipfile import ZipFile
 
-import pcbnew
+from pcbnew import *
 
 
-class JLCPCBPlugin(pcbnew.ActionPlugin):
+class JLCPCBPlugin(ActionPlugin):
     def __init__(self):
         super(JLCPCBPlugin, self).__init__()
 
         self.name = "JLCPCB Tools"
-        self.category = "Pick and Place geneartion"
+        self.category = "Fabrication data generation"
         self.pcbnew_icon_support = hasattr(self, "show_toolbar_button")
         self.show_toolbar_button = True
         path, filename = os.path.split(os.path.abspath(__file__))
         self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
-        self.description = "Generate a JLCPCB conform CPL file"
+        self.description = "Generate JLCPCB conform Gerber, Excellon, BOM and CPL files"
 
     def setup(self):
-        self.board = pcbnew.GetBoard()
+        """Setup when Run is called, before the board is not available."""
+        self.board = GetBoard()
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.InitLogger()
         self.logger = logging.getLogger(__name__)
+        self.create_folders()
+
+    def create_folders(self):
+        """Create output folders if they not already exist."""
+        Path(os.path.join(self.path, "jlcpcb", "assembly")).mkdir(
+            parents=True, exist_ok=True
+        )
+        Path(os.path.join(self.path, "jlcpcb", "gerber")).mkdir(
+            parents=True, exist_ok=True
+        )
+
+    def Run(self):
+        """Run is caled when the action button is clicked."""
+        self.setup()
+        self.generate_geber_excellon()
+        self.generate_cpl()
+        self.generate_bom()
 
     @staticmethod
     def decode_attributes(footprint):
+        """Decode the footprint attributes. Didn't came up with a solution from pcbnew so far."""
         attributes = {}
         val = footprint.GetAttributes()
         attributes["tht"] = bool(val & 0b1)
@@ -36,9 +57,80 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
         attributes["other"] = not (attributes["tht"] or attributes["smd"])
         return attributes
 
+    def generate_geber_excellon(self):
+        """Generating Gerber and Excellon files"""
+        # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
+        self.logger.info(f"Start generating Gerber files")
+        gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
+        pctl = PLOT_CONTROLLER(self.board)
+        popt = pctl.GetPlotOptions()
+        popt.SetOutputDirectory(gerberdir)
+        popt.SetPlotFrameRef(False)
+        popt.SetSketchPadLineWidth(FromMM(0.1))
+        popt.SetAutoScale(False)
+        popt.SetScale(1)
+        popt.SetMirror(False)
+        popt.SetUseGerberAttributes(True)
+        popt.SetIncludeGerberNetlistInfo(True)
+        popt.SetCreateGerberJobFile(False)
+        popt.SetUseGerberProtelExtensions(False)
+        popt.SetExcludeEdgeLayer(False)
+        popt.SetUseAuxOrigin(True)
+        popt.SetSubtractMaskFromSilk(False)
+        popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
+        popt.SetSkipPlotNPTH_Pads(False)
+        plot_plan = [
+            ("CuTop", F_Cu, "Top layer"),
+            ("CuBottom", B_Cu, "Bottom layer"),
+            ("SilkTop", F_SilkS, "Silk top"),
+            ("SilkBottom", B_SilkS, "Silk top"),
+            ("MaskBottom", B_Mask, "Mask bottom"),
+            ("MaskTop", F_Mask, "Mask top"),
+            ("EdgeCuts", Edge_Cuts, "Edges"),
+        ]
+        for layer_info in plot_plan:
+            if layer_info[1] <= B_Cu:
+                popt.SetSkipPlotNPTH_Pads(True)
+            else:
+                popt.SetSkipPlotNPTH_Pads(False)
+            pctl.SetLayer(layer_info[1])
+            pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
+            if pctl.PlotLayer() == False:
+                self.logger.error(f"Error ploting {layer_info[2]}")
+            self.logger.info(f"Successfully ploted {layer_info[2]}")
+        pctl.ClosePlot()
+        self.logger.info(f"Start generating Excellon files")
+        drlwriter = EXCELLON_WRITER(self.board)
+        mirror = False
+        minimalHeader = False
+        offset = wxPoint(0, 0)
+        mergeNPTH = False
+        drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
+        drlwriter.SetFormat(True)
+        genDrl = True
+        genMap = False
+        drlwriter.CreateDrillandMapFilesSet(pctl.GetPlotDirName(), genDrl, genMap)
+        self.logger.info(f"Finished generating Excellon files")
+        self.zip_gerber_excellon(gerberdir)
+
+    def zip_gerber_excellon(self, gerberdir):
+        self.logger.info(f"Start generating ZIP file")
+        zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
+        with ZipFile(
+            os.path.join(self.path, "jlcpcb", "gerber", zipname), "w"
+        ) as zipfile:
+            for folderName, subfolders, filenames in os.walk(gerberdir):
+                for filename in filenames:
+                    filePath = os.path.join(folderName, filename)
+                    zipfile.write(filePath, os.path.basename(filePath))
+        self.logger.info(f"Finished generating ZIP file")
+
     def generate_cpl(self):
+        self.logger.info(f"Start generating CPL file")
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
-        with open(os.path.join(self.path, cplname), "w", newline="") as csvfile:
+        with open(
+            os.path.join(self.path, "jlcpcb", "assembly", cplname), "w", newline=""
+        ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
@@ -58,16 +150,20 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
                         footprint.GetReference(),
                         footprint.GetValue(),
                         footprint.GetFPID().GetLibItemName(),
-                        pcbnew.ToMM(footprint.GetPosition().x),
-                        pcbnew.ToMM(footprint.GetPosition().y),
+                        ToMM(footprint.GetPosition().x),
+                        ToMM(footprint.GetPosition().y),
                         footprint.GetOrientation() / 10,
                         "top" if footprint.GetLayer() == 0 else "bottom",
                     ]
                 )
+        self.logger.info(f"Finished generating CPL file")
 
     def generate_bom(self):
+        self.logger.info(f"Start generating BOM file")
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
-        with open(os.path.join(self.path, bomname), "w", newline="") as csvfile:
+        with open(
+            os.path.join(self.path, "jlcpcb", "assembly", bomname), "w", newline=""
+        ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             footprints = {}
@@ -101,18 +197,14 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
                         lcsc,
                     ]
                 )
-
-    def Run(self):
-        self.setup()
-        self.generate_cpl()
-        self.generate_bom()
+        self.logger.info(f"Finished generating BOM file")
 
     def InitLogger(self):
         # Remove all handlers associated with the root logger object.
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
 
-        log_file = os.path.join(self.path, "jlcpcb.log")
+        log_file = os.path.join(self.path, "jlcpcb", "jlcpcb.log")
 
         # set up logger
         logging.basicConfig(
