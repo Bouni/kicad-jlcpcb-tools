@@ -1,6 +1,7 @@
 import csv
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from zipfile import ZipFile
@@ -265,10 +266,14 @@ class Dialog(wx.Dialog):
                 else:
                     footprints[lcsc]["designators"].append(footprint.GetReference())
             for lcsc, data in footprints.items():
+                designators = sorted(
+                    data["designators"],
+                    key=lambda r: int(re.search("\d+", r)[0]),
+                )
                 writer.writerow(
                     [
                         data["comment"],
-                        ",".join(data["designators"]),
+                        ",".join(designators),
                         data["footprint"],
                         lcsc,
                     ]
