@@ -96,7 +96,7 @@ class Dialog(wx.Dialog):
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y.%m.%d %H:%M:%S"
         )
         handler.setFormatter(formatter)
         root.addHandler(handler)
@@ -131,7 +131,6 @@ class Dialog(wx.Dialog):
     def generate_geber(self):
         """Generating Gerber files"""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
-        self.logger.info(f"Start generating Gerber files")
         pctl = PLOT_CONTROLLER(self.board)
         popt = pctl.GetPlotOptions()
         # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
@@ -181,7 +180,6 @@ class Dialog(wx.Dialog):
         pctl.ClosePlot()
 
     def generate_excellon(self):
-        self.logger.info(f"Start generating Excellon files")
         drlwriter = EXCELLON_WRITER(self.board)
         mirror = False
         minimalHeader = False
@@ -195,7 +193,6 @@ class Dialog(wx.Dialog):
         self.logger.info(f"Finished generating Excellon files")
 
     def zip_gerber_excellon(self):
-        self.logger.info(f"Start generating ZIP file")
         zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
         with ZipFile(os.path.join(self.gerberdir, zipname), "w") as zipfile:
             for folderName, subfolders, filenames in os.walk(self.gerberdir):
@@ -207,7 +204,6 @@ class Dialog(wx.Dialog):
         self.logger.info(f"Finished generating ZIP file")
 
     def generate_cpl(self):
-        self.logger.info(f"Start generating CPL file")
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
         with open(os.path.join(self.assemblydir, cplname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
@@ -242,7 +238,6 @@ class Dialog(wx.Dialog):
         self.logger.info(f"Finished generating CPL file")
 
     def generate_bom(self):
-        self.logger.info(f"Start generating BOM file")
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
         with open(os.path.join(self.assemblydir, bomname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
