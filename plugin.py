@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from zipfile import ZipFile
 
+import wx
 from pcbnew import *
 
 
@@ -20,13 +21,90 @@ class JLCPCBPlugin(ActionPlugin):
         self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
         self.description = "Generate JLCPCB conform Gerber, Excellon, BOM and CPL files"
 
+    def Run(self):
+        """Run is caled when the action button is clicked."""
+        dialog = Dialog(None)
+        dialog.Center()
+        dialog.ShowModal()
+        dialog.Destroy()
+
+
+class Dialog(wx.Dialog):
+    def __init__(self, parent):
+        wx.Dialog.__init__(
+            self, parent, id=-1, title="KiCAD JLCPCB tools", size=(820, 420)
+        )
+        self.SetIcon(
+            wx.Icon(
+                os.path.join(
+                    os.path.abspath(os.path.dirname(__file__)), "jlcpcb-icon.png"
+                )
+            )
+        )
+        panel = wx.Panel(self)
+        log = wx.TextCtrl(
+            panel,
+            wx.ID_ANY,
+            size=(800, 300),
+            style=wx.TE_MULTILINE | wx.TE_READONLY,
+        )
+        description = wx.StaticText(panel, label="Export gerber and zip files.")
+        execbtn = wx.Button(panel, label="Export")
+        clsbtn = wx.Button(panel, label="Close")
+        clsbtn.Bind(wx.EVT_BUTTON, self.close)
+        execbtn.Bind(wx.EVT_BUTTON, self.exec)
+        buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
+        buttonSizer.Add(execbtn)
+        buttonSizer.Add(clsbtn)
+        layout = wx.BoxSizer(wx.VERTICAL)
+        layout.Add(description, flag=wx.EXPAND | wx.BOTTOM | wx.TOP | wx.LEFT, border=5)
+        layout.Add(buttonSizer, flag=wx.EXPAND | wx.LEFT, border=5)
+        layout.Add(
+            log, flag=wx.EXPAND | wx.BOTTOM | wx.TOP | wx.LEFT | wx.RIGHT, border=5
+        )
+        panel.SetSizer(layout)
+        panel.Refresh()
+        panel.Layout()
+        # redirect text here
+        sys.stdout = log
+        self.init_logger()
+
+    def close(self, e):
+        e.Skip()
+        self.Close()
+
+    def exec(self, e):
+        e.Skip()
+        self.setup()
+        self.generate_geber()
+        self.generate_excellon()
+        self.zip_gerber_excellon()
+        self.generate_cpl()
+        self.generate_bom()
+
+    def init_logger(self):
+        # Remove all handlers associated with the root logger object.
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+
+        root = logging.getLogger()
+        root.setLevel(logging.DEBUG)
+
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+        root.addHandler(handler)
+        self.logger = logging.getLogger(__name__)
+
     def setup(self):
         """Setup when Run is called, before the board is not available."""
         self.board = GetBoard()
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
-        self.InitLogger()
-        self.logger = logging.getLogger(__name__)
+        self.logger.info("Setup finished")
 
     def create_folders(self):
         """Create output folders if they not already exist."""
@@ -34,15 +112,6 @@ class JLCPCBPlugin(ActionPlugin):
         Path(self.assemblydir).mkdir(parents=True, exist_ok=True)
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
-
-    def Run(self):
-        """Run is caled when the action button is clicked."""
-        self.setup()
-        self.generate_geber
-        self.generate_excellon()
-        self.zip_gerber_excellon()
-        self.generate_cpl()
-        self.generate_bom()
 
     @staticmethod
     def decode_attributes(footprint):
@@ -126,9 +195,7 @@ class JLCPCBPlugin(ActionPlugin):
     def zip_gerber_excellon(self):
         self.logger.info(f"Start generating ZIP file")
         zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
-        with ZipFile(
-            os.path.join(self.gerberdir, zipname), "w"
-        ) as zipfile:
+        with ZipFile(os.path.join(self.gerberdir, zipname), "w") as zipfile:
             for folderName, subfolders, filenames in os.walk(self.gerberdir):
                 for filename in filenames:
                     if not filename.endswith(("gbr", "drl")):
@@ -140,9 +207,7 @@ class JLCPCBPlugin(ActionPlugin):
     def generate_cpl(self):
         self.logger.info(f"Start generating CPL file")
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
-        with open(
-            os.path.join(self.assemblydir, cplname), "w", newline=""
-        ) as csvfile:
+        with open(os.path.join(self.assemblydir, cplname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
@@ -173,9 +238,7 @@ class JLCPCBPlugin(ActionPlugin):
     def generate_bom(self):
         self.logger.info(f"Start generating BOM file")
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
-        with open(
-            os.path.join(self.assemblydir, bomname), "w", newline=""
-        ) as csvfile:
+        with open(os.path.join(self.assemblydir, bomname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             footprints = {}
@@ -210,49 +273,6 @@ class JLCPCBPlugin(ActionPlugin):
                     ]
                 )
         self.logger.info(f"Finished generating BOM file")
-
-    def InitLogger(self):
-        # Remove all handlers associated with the root logger object.
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
-
-        log_file = os.path.join(self.path, "jlcpcb", "jlcpcb.log")
-
-        # set up logger
-        logging.basicConfig(
-            level=logging.DEBUG,
-            filename=log_file,
-            filemode="w",
-            format="%(asctime)s %(name)s %(lineno)d:%(message)s",
-            datefmt="%m-%d %H:%M:%S",
-        )
-
-        stdout_logger = logging.getLogger("STDOUT")
-        sl_out = StreamToLogger(stdout_logger, logging.INFO)
-        sys.stdout = sl_out
-
-        stderr_logger = logging.getLogger("STDERR")
-        sl_err = StreamToLogger(stderr_logger, logging.ERROR)
-        sys.stderr = sl_err
-
-
-class StreamToLogger(object):
-    """
-    Fake file-like stream object that redirects writes to a logger instance.
-    """
-
-    def __init__(self, logger, log_level=logging.INFO):
-        self.logger = logger
-        self.log_level = log_level
-        self.linebuf = ""
-
-    def write(self, buf):
-        for line in buf.rstrip().splitlines():
-            self.logger.log(self.log_level, line.rstrip())
-
-    def flush(self, *args, **kwargs):
-        """No-op for wrapper"""
-        pass
 
 
 JLCPCBPlugin().register()
