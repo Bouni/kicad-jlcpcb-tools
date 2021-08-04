@@ -24,23 +24,23 @@ class JLCPCBPlugin(ActionPlugin):
         """Setup when Run is called, before the board is not available."""
         self.board = GetBoard()
         self.path, self.filename = os.path.split(self.board.GetFileName())
+        self.create_folders()
         self.InitLogger()
         self.logger = logging.getLogger(__name__)
-        self.create_folders()
 
     def create_folders(self):
         """Create output folders if they not already exist."""
-        Path(os.path.join(self.path, "jlcpcb", "assembly")).mkdir(
-            parents=True, exist_ok=True
-        )
-        Path(os.path.join(self.path, "jlcpcb", "gerber")).mkdir(
-            parents=True, exist_ok=True
-        )
+        self.assemblydir = os.path.join(self.path, "jlcpcb", "assembly")
+        Path(self.assemblydir).mkdir(parents=True, exist_ok=True)
+        self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
+        Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
 
     def Run(self):
         """Run is caled when the action button is clicked."""
         self.setup()
-        self.generate_geber_excellon()
+        self.generate_geber
+        self.generate_excellon()
+        self.zip_gerber_excellon()
         self.generate_cpl()
         self.generate_bom()
 
@@ -57,28 +57,37 @@ class JLCPCBPlugin(ActionPlugin):
         attributes["other"] = not (attributes["tht"] or attributes["smd"])
         return attributes
 
-    def generate_geber_excellon(self):
-        """Generating Gerber and Excellon files"""
+    def generate_geber(self):
+        """Generating Gerber files"""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
         self.logger.info(f"Start generating Gerber files")
-        gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         pctl = PLOT_CONTROLLER(self.board)
         popt = pctl.GetPlotOptions()
-        popt.SetOutputDirectory(gerberdir)
-        popt.SetPlotFrameRef(False)
-        popt.SetSketchPadLineWidth(FromMM(0.1))
-        popt.SetAutoScale(False)
-        popt.SetScale(1)
-        popt.SetMirror(False)
-        popt.SetUseGerberAttributes(True)
-        popt.SetIncludeGerberNetlistInfo(True)
-        popt.SetCreateGerberJobFile(False)
+        # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
+        popt.SetOutputDirectory(self.gerberdir)
+
+        # Plot format to Gerber
+        # https://github.com/KiCad/kicad-source-mirror/blob/master/include/plotter.h#L67-L78
+        popt.SetFormat(1)
+
+        # General Options
+        popt.SetPlotValue(True)
+        popt.SetPlotReference(True)
+        popt.SetPlotInvisibleText(False)
+
+        popt.SetSketchPadsOnFabLayers(False)
+
+        # Gerber Options
         popt.SetUseGerberProtelExtensions(False)
-        popt.SetExcludeEdgeLayer(False)
-        popt.SetUseAuxOrigin(True)
+        popt.SetCreateGerberJobFile(False)
         popt.SetSubtractMaskFromSilk(False)
-        popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
-        popt.SetSkipPlotNPTH_Pads(False)
+
+        popt.SetUseGerberX2format(True)
+        popt.SetIncludeGerberNetlistInfo(True)
+        popt.SetDisableGerberMacros(False)
+
+        popt.SetPlotFrameRef(False)
+        popt.SetExcludeEdgeLayer(True)
         plot_plan = [
             ("CuTop", F_Cu, "Top layer"),
             ("CuBottom", B_Cu, "Bottom layer"),
@@ -99,6 +108,8 @@ class JLCPCBPlugin(ActionPlugin):
                 self.logger.error(f"Error ploting {layer_info[2]}")
             self.logger.info(f"Successfully ploted {layer_info[2]}")
         pctl.ClosePlot()
+
+    def generate_excellon(self):
         self.logger.info(f"Start generating Excellon files")
         drlwriter = EXCELLON_WRITER(self.board)
         mirror = False
@@ -106,21 +117,22 @@ class JLCPCBPlugin(ActionPlugin):
         offset = wxPoint(0, 0)
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
-        drlwriter.SetFormat(True)
+        drlwriter.SetFormat(False)
         genDrl = True
         genMap = False
-        drlwriter.CreateDrillandMapFilesSet(pctl.GetPlotDirName(), genDrl, genMap)
+        drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
         self.logger.info(f"Finished generating Excellon files")
-        self.zip_gerber_excellon(gerberdir)
 
-    def zip_gerber_excellon(self, gerberdir):
+    def zip_gerber_excellon(self):
         self.logger.info(f"Start generating ZIP file")
         zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
         with ZipFile(
-            os.path.join(self.path, "jlcpcb", "gerber", zipname), "w"
+            os.path.join(self.gerberdir, zipname), "w"
         ) as zipfile:
-            for folderName, subfolders, filenames in os.walk(gerberdir):
+            for folderName, subfolders, filenames in os.walk(self.gerberdir):
                 for filename in filenames:
+                    if not filename.endswith(("gbr", "drl")):
+                        continue
                     filePath = os.path.join(folderName, filename)
                     zipfile.write(filePath, os.path.basename(filePath))
         self.logger.info(f"Finished generating ZIP file")
@@ -129,7 +141,7 @@ class JLCPCBPlugin(ActionPlugin):
         self.logger.info(f"Start generating CPL file")
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
         with open(
-            os.path.join(self.path, "jlcpcb", "assembly", cplname), "w", newline=""
+            os.path.join(self.assemblydir, cplname), "w", newline=""
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
@@ -162,7 +174,7 @@ class JLCPCBPlugin(ActionPlugin):
         self.logger.info(f"Start generating BOM file")
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
         with open(
-            os.path.join(self.path, "jlcpcb", "assembly", bomname), "w", newline=""
+            os.path.join(self.assemblydir, bomname), "w", newline=""
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
