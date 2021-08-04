@@ -215,7 +215,11 @@ class Dialog(wx.Dialog):
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
             footprints = sorted(
-                self.board.GetFootprints(), key=lambda fp: fp.GetReference()
+                self.board.GetFootprints(),
+                key=lambda fp: (
+                    fp.GetValue(),
+                    int(re.search("\d+", fp.GetReference())[0]),
+                ),
             )
             for footprint in footprints:
                 attributes = self.decode_attributes(footprint)
