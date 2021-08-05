@@ -18,6 +18,7 @@ except ImportError:
     subprocess.check_call(["python", "-m", "pip", "install", "pandas"])
     import pandas as pd
 
+# import xlrd, install it if not installed
 try:
     import xlrd
 except ImportError:
@@ -25,7 +26,6 @@ except ImportError:
     import sys
 
     subprocess.check_call(["python", "-m", "pip", "install", "xlrd"])
-    import xlrd
 
 import requests
 
