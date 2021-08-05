@@ -125,6 +125,14 @@ class LibraryTab(wx.Panel):
         self.table.SetColSize(2, 150)
         self.table.SetColLabelValue(3, "LCSC")
         self.table.SetColSize(3, 150)
+        self.table.SetSelectionMode(wx.grid.Grid.SelectRows)
+        self.table.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, self.onRowClick)
+
+    def onRowClick(self, e):
+        fp = self.footprints[e.GetRow()]
+        self.logger.info(fp.GetReference())
+        fp.SetProperty("LCSC", "Bouni")
+        self.populate_table()
 
     def populate_table(self):
         self.get_footprints()
@@ -165,8 +173,8 @@ class Dialog(wx.Dialog):
         log = wx.TextCtrl(
             panel, wx.ID_ANY, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 200)
         )
-        sys.stdout = log # redirect stdout = log textbox
-        self.init_logger() # set logger to log to stdout = log textbox
+        sys.stdout = log  # redirect stdout = log textbox
+        self.init_logger()  # set logger to log to stdout = log textbox
 
         notebook = wx.Notebook(panel)
         fabrication_tab = FabricationTab(notebook)
