@@ -130,7 +130,10 @@ class LibraryTab(wx.Panel):
 
     def onRowClick(self, e):
         fp = self.footprints[e.GetRow()]
+        # Select Multiple and click on Row to trigger event
+        # If no selection, use clickerd row
         self.logger.info(fp.GetReference())
+        self.logger.info(self.table.GetSelectedRows())
         fp.SetProperty("LCSC", "Bouni")
         self.populate_table()
 
