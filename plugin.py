@@ -38,23 +38,19 @@ class FabricationTab(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
 
-        # panel = wx.Panel(self)
         log = wx.TextCtrl(
             self, wx.ID_ANY, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 400)
         )
-        # description = wx.StaticText(
-        #     panel, label="Generate JLCPCB production and assembly files."
-        # )
+        description = wx.StaticText(
+            self, label="Generate JLCPCB production and assembly files."
+        )
         generate_button = wx.Button(self, label="Generate")
-        # clsbtn = wx.Button(panel, label="Close")
-        # clsbtn.Bind(wx.EVT_BUTTON, self.close)
         generate_button.Bind(wx.EVT_BUTTON, self.generate)
 
         buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
         buttonSizer.Add(generate_button)
-        # buttonSizer.Add(clsbtn)
         layout = wx.BoxSizer(wx.VERTICAL)
-        # layout.Add(description, flag=wx.EXPAND | wx.BOTTOM | wx.TOP | wx.LEFT, border=5)
+        layout.Add(description, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
         layout.Add(buttonSizer, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
         layout.Add(
             log, flag=wx.EXPAND | wx.BOTTOM | wx.TOP | wx.LEFT | wx.RIGHT, border=5
@@ -65,10 +61,11 @@ class FabricationTab(wx.Panel):
         # redirect text here
         sys.stdout = log
         self.init_logger()
-        self.fabrication = JLCPCBFabrication()
 
     def generate(self, e):
+        """Generate Fabrication data."""
         e.Skip()
+        self.fabrication = JLCPCBFabrication()
         self.fabrication.setup()
         self.fabrication.generate_geber()
         self.fabrication.generate_excellon()
