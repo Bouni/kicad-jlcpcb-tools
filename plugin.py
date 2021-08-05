@@ -7,6 +7,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import wx
+import wx.grid
 from pcbnew import *
 
 from .fabrication import JLCPCBFabrication
@@ -48,9 +49,6 @@ class FabricationTab(wx.Panel):
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(description, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
         layout.Add(buttonSizer, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
-        # layout.Add(
-        #     log, flag=wx.EXPAND | wx.BOTTOM | wx.TOP | wx.LEFT | wx.RIGHT, border=5
-        # )
         self.SetSizer(layout)
         self.Refresh()
         self.Layout()
@@ -67,47 +65,79 @@ class FabricationTab(wx.Panel):
         self.fabrication.generate_bom()
 
 
+class DataGrid(wx.grid.Grid):
+    def __init__(self, parent):
+        wx.grid.Grid.__init__(self, parent, -1)
+        self.CreateGrid(9, 2)
+
+
 class LibraryTab(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
         description = wx.StaticText(
             self, label="Generate JLCPCB production and assembly files."
         )
+        self.logger = logging.getLogger(__name__)
         self.download_button = wx.Button(self, label="Update library", size=(200, -1))
         self.download_button.Bind(wx.EVT_BUTTON, self.download)
-        self.ready = False
+
+        self.progress = wx.Gauge(self, wx.ID_ANY, 100)
+
+        self.setup_table()
 
         buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
         buttonSizer.Add(
             self.download_button, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5
         )
+        buttonSizer.Add(
+            self.progress, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5
+        )
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(description, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
         layout.Add(buttonSizer, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
+        layout.Add(self.table, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
         self.SetSizer(layout)
         self.Refresh()
         self.Layout()
-        self.logger = logging.getLogger(__name__)
-        self.logger.info("Library")
-        self.library = JLCPCBLibrary()
 
-    def setup(self):
-        if not os.path.isfile(self.library.xls):
-            wx.MessageBox("No library found, will download it now!")
-            self.download()
-        wx.MessageBox("Load library data, please wait ...")
-        self.status_text.SetLabel(f"Load data, please wait ...")
-        self.library.load_data(self.status_text)
-        self.status_text.SetLabel(f"Library ready")
-        self.ready = True
+        self.library = JLCPCBLibrary()
+        self.populate_table()
+
+    def get_footprints(self):
+        self.board = GetBoard()
+        self.footprints = sorted(
+            self.board.GetFootprints(),
+            key=lambda fp: (
+                str(fp.GetFPID().GetLibItemName()),
+                int(re.search("\d+", fp.GetReference())[0]),
+            ),
+        )
+
+    def setup_table(self):
+        self.get_footprints()
+        self.table = wx.grid.Grid(self, wx.ID_ANY, size=(-1, 300))
+        self.table.CreateGrid(len(self.footprints), 4)
+        self.table.SetColLabelValue(0, "Reference")
+        self.table.SetColSize(0, 150)
+        self.table.SetColLabelValue(1, "Value")
+        self.table.SetColSize(1, 150)
+        self.table.SetColLabelValue(2, "Footprint")
+        self.table.SetColSize(2, 150)
+        self.table.SetColLabelValue(3, "LCSC")
+        self.table.SetColSize(3, 150)
+
+    def populate_table(self):
+        self.get_footprints()
+        for row, fp in enumerate(self.footprints):
+            self.table.SetCellValue(row, 0, str(fp.GetReference()))
+            self.table.SetCellValue(row, 1, str(fp.GetValue()))
+            self.table.SetCellValue(row, 2, str(fp.GetFPID().GetLibItemName()))
+            self.table.SetCellValue(row, 3, str(fp.GetProperties().get("LCSC", "")))
 
     def download(self, e):
         """Download latest library data."""
         e.Skip()
-        # self.status_text.SetLabel("Downloading, please wait ...")
-        # self.library.download()
-        # self.status_text.SetLabel(f"Library ready, {self.library.partcount} entries")
-        # wx.MessageBox("Download of latest library finished!")
+        self.library.download(self.progress)
 
 
 class Dialog(wx.Dialog):
@@ -135,9 +165,8 @@ class Dialog(wx.Dialog):
         log = wx.TextCtrl(
             panel, wx.ID_ANY, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 200)
         )
-        # redirect text here
-        sys.stdout = log
-        self.init_logger()
+        sys.stdout = log # redirect stdout = log textbox
+        self.init_logger() # set logger to log to stdout = log textbox
 
         notebook = wx.Notebook(panel)
         fabrication_tab = FabricationTab(notebook)
@@ -149,7 +178,6 @@ class Dialog(wx.Dialog):
         sizer.Add(notebook, 1, wx.EXPAND)
         sizer.Add(log, 1, wx.EXPAND)
         panel.SetSizer(sizer)
-
         self.Show()
 
     def init_logger(self):
