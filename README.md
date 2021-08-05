@@ -9,9 +9,16 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 
 And all that with a simple click on a button 😎
 
+## Future plans
+
+- [x] Generate all neccessary files for JLCPCB PCB production and assembly
+- [x] Fetch library data from JLCPCB
+- [ ] Create interface to select and assign JLCPCB Parts to components
+
 ## Warning 🔥
 
 **This plugin is not yet very well tested and only works for KiCAD 5.99 aka nightly builds!**
+
 **This is under a lot of developments, so concider this README out of date all the time 😏**
 
 If you find any sort of problems, please create an issue so that I can hopefully fix it!
