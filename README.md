@@ -13,7 +13,7 @@ And all that with a simple click on a button 😎
 
 - [x] Generate all neccessary files for JLCPCB PCB production and assembly
 - [x] Fetch library data from JLCPCB
-- [ ] Create interface to select and assign JLCPCB Parts to components
+- [x] Create interface to select and assign JLCPCB Parts to components
 
 ## Warning 🔥
 
@@ -28,6 +28,8 @@ If you find any sort of problems, please create an issue so that I can hopefully
 Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\users\<username>\Documents\kicad\5.99\scripting\plugins\` on linux that would be `/home/<username>/.local/share/kicad/5.99/scripting/plugins`.
 
 ## Usage 🥳
+
+![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
 
 Open up your board in `pcbnew` where you should see a shiny new JLCPCB button.
 
