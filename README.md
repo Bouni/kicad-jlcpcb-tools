@@ -31,6 +31,11 @@ Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\
 
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
 
+### Parts Library
+This lets you select one or multiple footprints that are on the PCB and search the JLCPCB parts database for a part that fits your needs.
+When you click the part of your choice, the LCSC number will be assigned to the footprint(s).
+
+### Fabrication data
 To generate the production files, simply click the generate button and it will generate the files in your project folder.
 A new directory called `jlcpcb` is created, in there two seperate foldes are created, `gerber` and `assembly`.
 
