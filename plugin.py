@@ -65,10 +65,96 @@ class FabricationTab(wx.Panel):
         self.fabrication.generate_bom()
 
 
-class DataGrid(wx.grid.Grid):
+class LibraryGrid(wx.grid.Grid):
     def __init__(self, parent):
-        wx.grid.Grid.__init__(self, parent, -1)
-        self.CreateGrid(9, 2)
+        wx.grid.Grid.__init__(self, parent, -1, size=(-1, 600))
+        self.CreateGrid(0, 9)
+        self.HideRowLabels()
+        self.SetColLabelValue(0, "LCSC")
+        self.SetColSize(0, 100)
+        self.SetColLabelValue(1, "Part No.")
+        self.SetColSize(1, 100)
+        self.SetColLabelValue(2, "Package")
+        self.SetColSize(2, 100)
+        self.SetColLabelValue(3, "Solder Joints")
+        self.SetColSize(3, 100)
+        self.SetColLabelValue(4, "Type")
+        self.SetColSize(4, 100)
+        self.SetColLabelValue(5, "Manufacturer")
+        self.SetColSize(5, 100)
+        self.SetColLabelValue(6, "Price")
+        self.SetColSize(6, 100)
+        self.SetColLabelValue(7, "Stock")
+        self.SetColSize(7, 100)
+        self.SetColLabelValue(8, "Description")
+        self.SetColSize(8, 360)
+
+
+class PartSelectorDialog(wx.Dialog):
+    """Modal dialog for JLCPCB part search and selection"""
+
+    def __init__(self, parent):
+        super(PartSelectorDialog, self).__init__(
+            parent,
+            title="JLCPCB library",
+            size=(1200, 620),
+            style=wx.DEFAULT_DIALOG_STYLE | wx.CLOSE_BOX,
+        )
+        self.logger = logging.getLogger(__name__)
+        self.library = parent.library
+        panel = wx.Panel(self)
+        self.selection = ""
+        self.keyword = wx.TextCtrl(panel, size=(400, 20))
+        self.basic = wx.CheckBox(panel, label="Basic")
+        self.basic.SetValue(True)
+        self.extended = wx.CheckBox(panel, label="Extended")
+        self.extended.SetValue(True)
+        search_button = wx.Button(panel, -1, label="Search", size=(50, 20))
+        searchSizer = wx.BoxSizer(wx.HORIZONTAL)
+        searchSizer.Add(
+            self.keyword, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5
+        )
+        searchSizer.Add(self.basic, flag=wx.TOP | wx.LEFT | wx.RIGHT, border=5)
+        searchSizer.Add(self.extended, flag=wx.TOP | wx.LEFT | wx.RIGHT, border=5)
+        searchSizer.Add(search_button, flag=wx.TOP | wx.LEFT | wx.RIGHT, border=5)
+
+        search_button.Bind(wx.EVT_BUTTON, self.onSearch)
+
+        self.table = LibraryGrid(panel)
+        self.table.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, self.onSelect)
+
+        layout = wx.BoxSizer(wx.VERTICAL)
+        layout.Add(searchSizer, flag=wx.EXPAND | wx.ALL | wx.CENTER, border=5)
+        layout.Add(self.table, flag=wx.ALL | wx.CENTER, border=5)
+        panel.SetSizer(layout)
+
+    def onSearch(self, e):
+        result = self.library.search(
+            self.keyword.GetValue(), self.basic.GetValue(), self.extended.GetValue()
+        )
+        self.populate_table(result)
+        e.skip()
+
+    def onSelect(self, e):
+        self.selection = self.table.GetCellValue(e.GetRow(), 0)
+        self.EndModal(wx.ID_OK)
+        e.skip()
+
+    def populate_table(self, data):
+        self.table.DeleteRows(numRows=self.table.GetNumberRows())
+        row = 0
+        for index, part in data.iterrows():
+            self.table.AppendRows()
+            self.table.SetCellValue(row, 0, str(part["LCSC_Part"]))
+            self.table.SetCellValue(row, 1, str(part["MFR_Part"]))
+            self.table.SetCellValue(row, 2, str(part["Package"]))
+            self.table.SetCellValue(row, 3, str(part["Solder_Joint"]))
+            self.table.SetCellValue(row, 4, str(part["Library_Type"]))
+            self.table.SetCellValue(row, 5, str(part["Manufacturer"]))
+            self.table.SetCellValue(row, 6, str(part["Price"]))
+            self.table.SetCellValue(row, 7, str(part["Stock"]))
+            self.table.SetCellValue(row, 8, str(part["Description"]))
+            row += 1
 
 
 class LibraryTab(wx.Panel):
@@ -94,12 +180,11 @@ class LibraryTab(wx.Panel):
         )
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(description, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
-        layout.Add(buttonSizer, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
+        layout.Add(buttonSizer, flag=wx.EXPAND | wx.TOP | wx.RIGHT, border=5)
         layout.Add(self.table, flag=wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, border=5)
         self.SetSizer(layout)
         self.Refresh()
         self.Layout()
-
         self.library = JLCPCBLibrary()
         self.populate_table()
 
@@ -129,13 +214,23 @@ class LibraryTab(wx.Panel):
         self.table.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, self.onRowClick)
 
     def onRowClick(self, e):
-        fp = self.footprints[e.GetRow()]
-        # Select Multiple and click on Row to trigger event
-        # If no selection, use clickerd row
-        self.logger.info(fp.GetReference())
-        self.logger.info(self.table.GetSelectedRows())
-        fp.SetProperty("LCSC", "Bouni")
-        self.populate_table()
+        # fp = self.footprints[e.GetRow()]
+        clicked = self.footprints[e.GetRow()]
+        self.selected = [self.footprints[idx] for idx in self.table.GetSelectedRows()]
+        if clicked not in self.selected:
+            self.selected.append(clicked)
+        if not self.library.loaded:
+            busy_dialog = wx.BusyInfo("Loading library data, please wait ...")
+            self.library.load()
+            busy_dialog = None
+        dialog = PartSelectorDialog(self)
+        result = dialog.ShowModal()
+        if result == wx.ID_OK:
+            value = dialog.selection
+            for fp in self.selected:
+                fp.SetProperty("LCSC", str(value))
+            self.populate_table()
+        dialog.Destroy()
 
     def populate_table(self):
         self.get_footprints()

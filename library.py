@@ -36,6 +36,7 @@ class JLCPCBLibrary:
         self.xls = os.path.join(self.xlsdir, "jlcpcb_parts.xls")
         self.csv = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
         self.df = None
+        self.loaded = False
         self.logger = logging.getLogger(__name__)
 
     def create_folders(self):
@@ -64,44 +65,32 @@ class JLCPCBLibrary:
         progress.SetValue(0)
 
     def load(self):
-        self.logger.info("Start loading library")
         self.df = pd.concat(pd.read_excel(self.xls, sheet_name=None), ignore_index=True)
         self.df.columns = self.df.columns.map(lambda x: x.replace(" ", "_"))
         self.df.columns = self.df.columns.map(lambda x: x.replace(".", "_"))
         self.partcount = len(self.df)
         self.logger.info(f"Loaded Library with {self.partcount} parts")
+        self.loaded = True
 
-    def search(
-        self,
-        lcsc_part="",
-        first_category="",
-        second_category="",
-        mfr_part="",
-        package="",
-        solder_joint="",
-        mfr="",
-        library_type="",
-        description="",
-    ):
-        query_parts = []
-        if lcsc_part:
-            query_parts.append(f"(LCSC_Part.str.match('{lcsc_part}'))")
-        if first_category:
-            query_parts.append(f"(First_Category.str.match('{first_category}'))")
-        if second_category:
-            query_parts.append(f"(Second_Category.str.match('{second_category}'))")
-        if mfr_part:
-            query_parts.append(f"(MFR_Part.str.contains('{mfr_part}'))")
-        if package:
-            query_parts.append(f"(Package.str.contains('{package}'))")
-        if solder_joint:
-            query_parts.append(f"(Solder_Joint.str.match('{solder_joint}'))")
-        if mfr:
-            query_parts.append(f"(Manufacturer.str.contains('{mfr}'))")
-        if library_type:
-            query_parts.append(f"(Library_Type.str.match('{library_type}'))")
-        if description:
-            query_parts.append(f"(Description.str.contains('{description}'))")
-        query = " & ".join(query_parts)
-        print(query)
-        print(self.df[self.df.eval(query)])
+    def search(self, keyword="", basic=True, extended=False):
+        if len(keyword) < 3:
+            return []
+        query = [
+            f"(LCSC_Part.str.contains('{keyword}'))",
+            f"(First_Category.str.contains('{keyword}'))",
+            f"(Second_Category.str.contains('{keyword}'))",
+            f"(MFR_Part.str.contains('{keyword}'))",
+            f"(Package.str.contains('{keyword}'))",
+            f"(Manufacturer.str.contains('{keyword}'))",
+            f"(Description.str.contains('{keyword}'))",
+        ]
+        df = self.df
+        types = []
+        if basic:
+            types.append("Basic")
+        if extended:
+            types.append("Extended")
+        df = df[df.Library_Type.isin(types)]
+        query = " | ".join(query)
+        result = df[df.eval(query)]
+        return result
