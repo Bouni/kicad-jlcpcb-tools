@@ -53,6 +53,8 @@ class JLCBCBTools(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE,
         )
 
+        self.library = JLCPCBLibrary()
+
         # ---------------------------------------------------------------------
         self.logbox = wx.TextCtrl(
             self,
@@ -280,7 +282,7 @@ class PartSelectorDialog(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE,
         )
         self.logger = logging.getLogger(__name__)
-        self.library = JLCPCBLibrary()
+        self.library = parent.library
 
         self.SetSizeHints(wx.Size(1200, -1), wx.DefaultSize)
 
@@ -444,14 +446,12 @@ class PartSelectorDialog(wx.Dialog):
             self.basic_checkbox.GetValue(),
             self.extended_checkbox.GetValue(),
         )
-        self.logger.info(result)
         self.populate_part_list(result)
 
     def populate_part_list(self, parts):
         """Populate the list with the result of the search."""
         self.part_list.DeleteAllItems()
         for index, part in parts.iterrows():
-            self.logger.info(part)
             self.part_list.AppendItem(
                 [
                     str(part["LCSC_Part"]),
