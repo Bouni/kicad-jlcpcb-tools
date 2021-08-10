@@ -128,7 +128,7 @@ class JLCPCBFabrication:
                         footprint.GetValue(),
                         footprint.GetFPID().GetLibItemName(),
                         ToMM(footprint.GetPosition().x),
-                        ToMM(footprint.GetPosition().y),
+                        ToMM(footprint.GetPosition().y) * -1,
                         footprint.GetOrientation() / 10,
                         "top" if footprint.GetLayer() == 0 else "bottom",
                     ]
