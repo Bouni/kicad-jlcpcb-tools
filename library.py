@@ -6,8 +6,10 @@ import time
 from pathlib import Path
 
 # Hack to avoid wx + pandas error "ValueError: unknown locale: en-GB"
-locale.setlocale(locale.LC_ALL, "en")
-
+try:
+    locale.setlocale(locale.LC_ALL, "en")
+except:
+    pass
 # import pandas, install it if not installed and import afterwards
 try:
     import pandas as pd
