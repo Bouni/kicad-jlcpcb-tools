@@ -2,17 +2,24 @@ import csv
 import logging
 import os
 import re
+import requests
+import csv
+
 from pathlib import Path
 from zipfile import ZipFile
 
 from pcbnew import *
 
-from .helpers import get_exclude_from_bom, get_exclude_from_pos
+from .helpers import (
+    get_exclude_from_bom,
+    get_exclude_from_pos,
+)
 
 
 class JLCPCBFabrication:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self.corrections = self.get_corrections()
 
     def setup(self):
         """Setup when Run is called, before the board is not available."""
@@ -26,6 +33,27 @@ class JLCPCBFabrication:
         Path(self.assemblydir).mkdir(parents=True, exist_ok=True)
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
+
+    def get_corrections(self):
+        """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
+        url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
+        r = requests.get(url)
+        c = csv.reader(r.text.splitlines(), delimiter=",", quotechar="\"")
+        return list(c)[1:]
+
+    def fix_rotation(self, footprint):
+        original = footprint.GetOrientation()
+        # we need to devide by 10 to get 180 out of 1800 for example.
+        # This might be a bug in 5.99
+        rotation = original / 10
+        for pattern, correction in self.corrections:
+            if re.match(pattern, str(footprint.GetFPID().GetLibItemName())):
+                if footprint.GetLayer() == 0:
+                    rotation = (rotation + int(correction)) % 360
+                else:
+                    rotation = (rotation - int(correction)) % 360
+                self.logger.info(f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees")
+        return rotation
 
     def generate_geber(self):
         """Generating Gerber files"""
@@ -129,7 +157,7 @@ class JLCPCBFabrication:
                         footprint.GetFPID().GetLibItemName(),
                         ToMM(footprint.GetPosition().x),
                         ToMM(footprint.GetPosition().y) * -1,
-                        footprint.GetOrientation() / 10,
+                        self.fix_rotation(footprint),
                         "top" if footprint.GetLayer() == 0 else "bottom",
                     ]
                 )
