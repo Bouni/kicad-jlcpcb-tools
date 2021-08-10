@@ -7,6 +7,8 @@ from zipfile import ZipFile
 
 from pcbnew import *
 
+from .helpers import get_exclude_from_bom, get_exclude_from_pos
+
 
 class JLCPCBFabrication:
     def __init__(self):
@@ -24,19 +26,6 @@ class JLCPCBFabrication:
         Path(self.assemblydir).mkdir(parents=True, exist_ok=True)
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
-
-    @staticmethod
-    def decode_attributes(footprint):
-        """Decode the footprint attributes. Didn't came up with a solution from pcbnew so far."""
-        attributes = {}
-        val = footprint.GetAttributes()
-        attributes["tht"] = bool(val & 0b1)
-        attributes["smd"] = bool(val & 0b10)
-        attributes["not_in_schematic"] = bool(val & 0b100)
-        attributes["exclude_from_pos"] = bool(val & 0b1000)
-        attributes["exclude_from_bom"] = bool(val & 0b1000)
-        attributes["other"] = not (attributes["tht"] or attributes["smd"])
-        return attributes
 
     def generate_geber(self):
         """Generating Gerber files"""
@@ -128,8 +117,7 @@ class JLCPCBFabrication:
                 ),
             )
             for footprint in footprints:
-                attributes = self.decode_attributes(footprint)
-                if attributes.get("exclude_from_pos"):
+                if get_exclude_from_pos(footprint):
                     self.logger.info(
                         f"{footprint.GetReference()} is marked as 'exclude from POS' and skipped!"
                     )
@@ -154,8 +142,7 @@ class JLCPCBFabrication:
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             footprints = {}
             for footprint in self.board.GetFootprints():
-                attributes = self.decode_attributes(footprint)
-                if attributes.get("exclude_from_bom"):
+                if get_exclude_from_bom(footprint):
                     self.logger.info(
                         f"{footprint.GetReference()} is marked as 'exclude from BOM' and skipped!"
                     )
