@@ -2,10 +2,10 @@
 
 Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 
- - Gerber files
- - Excellon files
- - BOM file
- - CPL file
+- Gerber files
+- Excellon files
+- BOM file
+- CPL file
 
 And all that with a simple click on a button 😎
 
@@ -29,14 +29,23 @@ Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\
 
 ## Usage 🥳
 
+Chekout this screencast, it shows quickly how to use this plugin:
+
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
 
-### Parts Library
-This lets you select one or multiple footprints that are on the PCB and search the JLCPCB parts database for a part that fits your needs.
-When you click the part of your choice, the LCSC number will be assigned to the footprint(s).
+### Toggle BOM / CPL attributes
 
-### Fabrication data
-To generate the production files, simply click the generate button and it will generate the files in your project folder.
+You can easily toggle the `exclude from BOM` and `exclude from CPL` attributes of one or multiple footprints.
+
+### Select LCSC parts from the JLCPCB parts database
+
+Select one or multiple footprints, click select part. In the upcoming modal dialog, search for parts, select the one of your choice and click select part.
+The LCSC number of your selection will then be assigned to the footprints.
+
+### Generate fabrication data
+
+Generate all neccessary assambly files for your board with a simple click.
+
 A new directory called `jlcpcb` is created, in there two seperate foldes are created, `gerber` and `assembly`.
 
 In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and ziped, ready for upload to JLCPCB.
@@ -44,6 +53,4 @@ The zipfile is named `GERBER-<projectname>.zip`
 
 In the assembly folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
 
-To exclude footprints from the assembly files, you can select if they should be excluded from BOM and/or CPL by checking the checkboxes in the lower right corner.
-
-![KiCAD exclude from BOM or CPL](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/exclude.png)
+Footprints are included into the BOM and CPL files accordning to their `exclude from BOM` and `exclude from CPL` attributes.
