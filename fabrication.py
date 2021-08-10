@@ -50,9 +50,10 @@ class JLCPCBFabrication:
             if re.match(pattern, str(footprint.GetFPID().GetLibItemName())):
                 if footprint.GetLayer() == 0:
                     rotation = (rotation + int(correction)) % 360
+                    self.logger.info(f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees")
                 else:
                     rotation = (rotation - int(correction)) % 360
-                self.logger.info(f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees")
+                    self.logger.info(f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees")
         return rotation
 
     def generate_geber(self):
