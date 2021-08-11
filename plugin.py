@@ -474,6 +474,3 @@ class PartSelectorDialog(wx.Dialog):
             return
         self.selection = self.part_list.GetTextValue(row, 0)
         self.EndModal(wx.ID_OK)
-
-
-JLCPCBPlugin().register()
