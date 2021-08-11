@@ -2,27 +2,20 @@ import csv
 import logging
 import os
 import re
-import requests
-import csv
-
 from pathlib import Path
 from zipfile import ZipFile
 
+import requests
 from pcbnew import *
 
-from .helpers import (
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-)
+from .helpers import get_exclude_from_bom, get_exclude_from_pos
 
 
 class JLCPCBFabrication:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self.plugin_path, _ = os.path.split(os.path.abspath(__file__))
         self.corrections = self.get_corrections()
-
-    def setup(self):
-        """Setup when Run is called, before the board is not available."""
         self.board = GetBoard()
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
@@ -35,13 +28,23 @@ class JLCPCBFabrication:
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
 
     def get_corrections(self):
-        """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
-        url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
-        r = requests.get(url)
-        c = csv.reader(r.text.splitlines(), delimiter=",", quotechar="\"")
-        return list(c)[1:]
+        """Try loading rotation corrections from local file, if not present, load them from GitHub."""
+        csvfile = os.path.join(self.plugin_path, "corrections", "cpl_rotations_db.csv")
+        if os.path.isfile(csvfile):
+            self.logger.info(f"Load corrections from {csvfile}")
+            with open(csvfile) as f:
+                c = csv.reader(f, delimiter=",", quotechar='"')
+                return list(c)[1:]
+        else:
+            """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
+            url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
+            self.logger.info(f"Load corrections from {url}")
+            r = requests.get(url)
+            c = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
+            return list(c)[1:]
 
     def fix_rotation(self, footprint):
+        """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
         # we need to devide by 10 to get 180 out of 1800 for example.
         # This might be a bug in 5.99
@@ -50,10 +53,14 @@ class JLCPCBFabrication:
             if re.match(pattern, str(footprint.GetFPID().GetLibItemName())):
                 if footprint.GetLayer() == 0:
                     rotation = (rotation + int(correction)) % 360
-                    self.logger.info(f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees")
+                    self.logger.info(
+                        f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees"
+                    )
                 else:
                     rotation = (rotation - int(correction)) % 360
-                    self.logger.info(f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees")
+                    self.logger.info(
+                        f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
+                    )
         return rotation
 
     def generate_geber(self):
@@ -108,6 +115,7 @@ class JLCPCBFabrication:
         pctl.ClosePlot()
 
     def generate_excellon(self):
+        """Generate Excellon files."""
         drlwriter = EXCELLON_WRITER(self.board)
         mirror = False
         minimalHeader = False
@@ -121,6 +129,7 @@ class JLCPCBFabrication:
         self.logger.info(f"Finished generating Excellon files")
 
     def zip_gerber_excellon(self):
+        """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
         zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
         with ZipFile(os.path.join(self.gerberdir, zipname), "w") as zipfile:
             for folderName, subfolders, filenames in os.walk(self.gerberdir):
@@ -132,6 +141,7 @@ class JLCPCBFabrication:
         self.logger.info(f"Finished generating ZIP file")
 
     def generate_cpl(self):
+        """Generate placement file (CPL)."""
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
         with open(os.path.join(self.assemblydir, cplname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
@@ -165,6 +175,7 @@ class JLCPCBFabrication:
         self.logger.info(f"Finished generating CPL file")
 
     def generate_bom(self):
+        """Generate BOM file."""
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
         with open(os.path.join(self.assemblydir, bomname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
