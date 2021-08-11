@@ -241,7 +241,6 @@ class JLCBCBTools(wx.Dialog):
     def generate_fabrication_data(self, e):
         """Generate Fabrication data."""
         self.fabrication = JLCPCBFabrication()
-        self.fabrication.setup()
         self.fabrication.generate_geber()
         self.fabrication.generate_excellon()
         self.fabrication.zip_gerber_excellon()
