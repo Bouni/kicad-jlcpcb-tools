@@ -7,13 +7,7 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 - BOM file
 - CPL file
 
-And all that with a simple click on a button 😎
-
-## Future plans
-
-- [x] Generate all neccessary files for JLCPCB PCB production and assembly
-- [x] Fetch library data from JLCPCB
-- [x] Create interface to select and assign JLCPCB Parts to components
+Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
 
 ## Warning 🔥
 
@@ -29,7 +23,7 @@ Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\
 
 ## Usage 🥳
 
-Chekout this screencast, it shows quickly how to use this plugin:
+Checkout this screencast, it shows quickly how to use this plugin:
 
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
 
