@@ -54,3 +54,8 @@ The zipfile is named `GERBER-<projectname>.zip`
 In the assembly folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
 
 Footprints are included into the BOM and CPL files accordning to their `exclude from BOM` and `exclude from CPL` attributes.
+
+## Footprint rotation correction
+
+JLCPCB seems to need corrected rotation information. @matthewlai implemented that in his [JLCKicadTools](https://github.com/matthewlai/JLCKicadTools) and I adopted his work in this plugin as well.
+You can either have a local .csv file in `kicad-jlcpcb-tools/corrections/cpl_rotations_db.csv` and if that is not present, Matthews file is loaded from GitHub.
