@@ -155,6 +155,11 @@ class JLCBCBTools(wx.Dialog):
         )
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         tool_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
+        self.toggle_bom_cpl_button = wx.Button(
+            self, wx.ID_ANY, u"Toggle BOM/CPL", wx.DefaultPosition, (150, -1), 0
+        )
+        self.toggle_bom_cpl_button.Bind(wx.EVT_BUTTON, self.toogle_bom_cpl)
+        tool_sizer.Add(self.toggle_bom_cpl_button, 0, wx.ALL, 5)
         self.toggle_bom_button = wx.Button(
             self, wx.ID_ANY, u"Toggle BOM", wx.DefaultPosition, (150, -1), 0
         )
@@ -212,6 +217,16 @@ class JLCBCBTools(wx.Dialog):
         for fp in self.footprints:
             if str(fp.GetReference()) == ref:
                 return fp
+
+    def toogle_bom_cpl(self, e):
+        """Toggle the exclude from BOM/POS attribute of a footprint."""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            ref = self.footprint_list.GetTextValue(row, 0)
+            fp = self.get_footprint_by_ref(ref)
+            set_exclude_from_bom(fp)
+            set_exclude_from_pos(fp)
+        self.populate_footprint_list()
 
     def toogle_bom(self, e):
         """Toggle the exclude from BOM attribute of a footprint."""
