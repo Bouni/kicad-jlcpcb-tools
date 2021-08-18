@@ -33,8 +33,29 @@ class JLCPCBFabrication:
         csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
         if os.path.isfile(csvfile):
             with open(csvfile, "r+") as f:
-                c = csv.reader(f, delimiter=",", quotechar='"')
-                self.parts = {row[0]: row[1] for row in c}
+                reader = csv.reader(f, delimiter=",", quotechar='"')
+                self.parts = {
+                    row[0]: {"lcsc": row[1], "source": row[2]} for row in reader
+                }
+        # Here we check what LCSC properties are set on the footprints, these assignments come from the schematic.
+        for fp in self.board.GetFootprints():
+            reference = fp.GetReference()
+            lcsc = fp.GetProperties().get("LCSC")
+            if not lcsc:
+                continue
+            self.parts[reference] = {"lcsc": lcsc, "source": "schematic"}
+            self.logger.info(
+                f"Part {reference} was set to '{lcsc}' from the schematic property!"
+            )
+        self.save_part_assignments()
+
+    def save_part_assignments(self):
+        """Write part assignments to a csv file"""
+        csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
+        with open(csvfile, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, delimiter=",", quotechar='"')
+            for part, values in self.parts.items():
+                writer.writerow([part, values["lcsc"], values["source"]])
 
     def get_corrections(self):
         """Try loading rotation corrections from local file, if not present, load them from GitHub."""
@@ -195,7 +216,7 @@ class JLCPCBFabrication:
                         f"{footprint.GetReference()} is marked as 'exclude from BOM' and skipped!"
                     )
                     continue
-                lcsc = footprint.GetProperties().get("LCSC")
+                lcsc = self.parts.get(footprint.GetReference(), {}).get("LCSC", "")
                 if not lcsc:
                     self.logger.error(
                         f"{footprint.GetReference()} has no LCSC attribute and skipped!"

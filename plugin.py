@@ -65,6 +65,10 @@ class JLCBCBTools(wx.Dialog):
         self.logbox.SetMinSize(wx.Size(-1, 150))
         sys.stdout = self.logbox  # redirect stdout = log textbox
         self.init_logger()  # set logger to log to stdout = log textbox
+
+        # ---------------------------------------------------------------------
+        self.library = JLCPCBLibrary()
+        self.fabrication = JLCPCBFabrication()
         # ---------------------------------------------------------------------
 
         self.SetSizeHints(wx.Size(800, -1), wx.DefaultSize)
@@ -173,12 +177,6 @@ class JLCBCBTools(wx.Dialog):
 
         self.Centre(wx.BOTH)
 
-        self.setup()
-
-    def setup(self):
-        self.library = JLCPCBLibrary()
-        self.fabrication = JLCPCBFabrication()
-
     def get_footprints(self):
         """get all footprints from the board"""
         self.board = GetBoard()
@@ -199,7 +197,11 @@ class JLCBCBTools(wx.Dialog):
                     str(fp.GetReference()),
                     str(fp.GetValue()),
                     str(fp.GetFPID().GetLibItemName()),
-                    str(fp.GetProperties().get("LCSC", "")),
+                    str(
+                        self.fabrication.parts.get(str(fp.GetReference()), {}).get(
+                            "lcsc", ""
+                        )
+                    ),
                     "No" if get_exclude_from_bom(fp) else "Yes",
                     "No" if get_exclude_from_pos(fp) else "Yes",
                 ]
@@ -238,8 +240,12 @@ class JLCBCBTools(wx.Dialog):
                 row = self.footprint_list.ItemToRow(item)
                 ref = self.footprint_list.GetTextValue(row, 0)
                 fp = self.get_footprint_by_ref(ref)
-                fp.SetProperty("LCSC", str(dialog.selection))
+                self.fabrication.parts[ref] = {
+                    "lcsc": str(dialog.selection),
+                    "source": "csv",
+                }
             self.populate_footprint_list()
+            self.fabrication.save_part_assignments()
         dialog.Destroy()
 
     def generate_fabrication_data(self, e):
