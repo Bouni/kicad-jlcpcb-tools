@@ -19,6 +19,7 @@ class JLCPCBFabrication:
         self.board = GetBoard()
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
+        self.load_part_assigments()
 
     def create_folders(self):
         """Create output folders if they not already exist."""
@@ -27,11 +28,18 @@ class JLCPCBFabrication:
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
 
+    def load_part_assigments(self):
+        self.parts = {}
+        csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
+        if os.path.isfile(csvfile):
+            with open(csvfile, "r+") as f:
+                c = csv.reader(f, delimiter=",", quotechar='"')
+                self.parts = {row[0]: row[1] for row in c}
+
     def get_corrections(self):
         """Try loading rotation corrections from local file, if not present, load them from GitHub."""
         csvfile = os.path.join(self.plugin_path, "corrections", "cpl_rotations_db.csv")
         if os.path.isfile(csvfile):
-            self.logger.info(f"Load corrections from {csvfile}")
             with open(csvfile) as f:
                 c = csv.reader(f, delimiter=",", quotechar='"')
                 return list(c)[1:]
