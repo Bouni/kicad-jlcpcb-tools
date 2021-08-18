@@ -53,8 +53,6 @@ class JLCBCBTools(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE,
         )
 
-        self.library = JLCPCBLibrary()
-
         # ---------------------------------------------------------------------
         self.logbox = wx.TextCtrl(
             self,
@@ -175,6 +173,12 @@ class JLCBCBTools(wx.Dialog):
 
         self.Centre(wx.BOTH)
 
+        self.setup()
+
+    def setup(self):
+        self.library = JLCPCBLibrary()
+        self.fabrication = JLCPCBFabrication()
+
     def get_footprints(self):
         """get all footprints from the board"""
         self.board = GetBoard()
@@ -240,7 +244,6 @@ class JLCBCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, e):
         """Generate Fabrication data."""
-        self.fabrication = JLCPCBFabrication()
         self.fabrication.generate_geber()
         self.fabrication.generate_excellon()
         self.fabrication.zip_gerber_excellon()
