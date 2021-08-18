@@ -88,6 +88,16 @@ class JLCBCBTools(wx.Dialog):
         self.generate_button.Bind(wx.EVT_BUTTON, self.generate_fabrication_data)
         button_sizer.Add(self.generate_button, 0, wx.ALL, 5)
 
+        self.layer_selection = wx.Choice(
+            self,
+            wx.ID_ANY,
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            ["Auto", "1 Layer", "2 Layers", "4 Layers", "6 Layers"],
+            0,
+        )
+        self.layer_selection.SetSelection(0)
+        button_sizer.Add(self.layer_selection, 0, wx.ALL, 5)
         # ---------------------------------------------------------------------
 
         layout.Add(button_sizer, 1, wx.ALL | wx.EXPAND, 5)
@@ -265,7 +275,13 @@ class JLCBCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, e):
         """Generate Fabrication data."""
-        self.fabrication.generate_geber()
+        layer_selection = self.layer_selection.GetSelection()
+        if layer_selection != 0:
+            layer_count = int(self.layer_selection.GetString(layer_selection)[:1])
+        else:
+            layer_count = None
+        self.logger.info(layer_count)
+        self.fabrication.generate_geber(layer_count)
         self.fabrication.generate_excellon()
         self.fabrication.zip_gerber_excellon()
         self.fabrication.generate_cpl()
