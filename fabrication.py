@@ -122,6 +122,11 @@ class JLCPCBFabrication:
 
         popt.SetPlotFrameRef(False)
         popt.SetExcludeEdgeLayer(True)
+
+        # delete all existing files in the output directory first
+        for f in os.listdir(self.gerberdir):
+            os.remove(os.path.join(self.gerberdir, f))
+
         plot_plan = [
             ("CuTop", F_Cu, "Top layer"),
             ("CuBottom", B_Cu, "Bottom layer"),
