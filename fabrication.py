@@ -92,7 +92,7 @@ class JLCPCBFabrication:
                     )
         return rotation
 
-    def generate_geber(self):
+    def generate_geber(self, layer_count=None):
         """Generating Gerber files"""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
         pctl = PLOT_CONTROLLER(self.board)
@@ -127,15 +127,54 @@ class JLCPCBFabrication:
         for f in os.listdir(self.gerberdir):
             os.remove(os.path.join(self.gerberdir, f))
 
-        plot_plan = [
-            ("CuTop", F_Cu, "Top layer"),
-            ("CuBottom", B_Cu, "Bottom layer"),
-            ("SilkTop", F_SilkS, "Silk top"),
-            ("SilkBottom", B_SilkS, "Silk top"),
-            ("MaskBottom", B_Mask, "Mask bottom"),
-            ("MaskTop", F_Mask, "Mask top"),
-            ("EdgeCuts", Edge_Cuts, "Edges"),
-        ]
+        # if no layer_count is given, get the layer count from the board
+        if not layer_count:
+            layer_count = self.board.GetCopperLayerCount()
+
+        if layer_count == 1:
+            plot_plan = [
+                ("CuTop", F_Cu, "Top layer"),
+                ("SilkTop", F_SilkS, "Silk top"),
+                ("MaskTop", F_Mask, "Mask top"),
+                ("EdgeCuts", Edge_Cuts, "Edges"),
+            ]
+        elif layer_count == 2:
+            plot_plan = [
+                ("CuTop", F_Cu, "Top layer"),
+                ("SilkTop", F_SilkS, "Silk top"),
+                ("MaskTop", F_Mask, "Mask top"),
+                ("CuBottom", B_Cu, "Bottom layer"),
+                ("SilkBottom", B_SilkS, "Silk top"),
+                ("MaskBottom", B_Mask, "Mask bottom"),
+                ("EdgeCuts", Edge_Cuts, "Edges"),
+            ]
+        elif layer_count == 4:
+            plot_plan = [
+                ("CuTop", F_Cu, "Top layer"),
+                ("SilkTop", F_SilkS, "Silk top"),
+                ("MaskTop", F_Mask, "Mask top"),
+                ("CuIn1", In1_Cu, "Inner layer 1"),
+                ("CuIn2", In2_Cu, "Inner layer 2"),
+                ("CuBottom", B_Cu, "Bottom layer"),
+                ("SilkBottom", B_SilkS, "Silk top"),
+                ("MaskBottom", B_Mask, "Mask bottom"),
+                ("EdgeCuts", Edge_Cuts, "Edges"),
+            ]
+        elif layer_count == 6:
+            plot_plan = [
+                ("CuTop", F_Cu, "Top layer"),
+                ("SilkTop", F_SilkS, "Silk top"),
+                ("MaskTop", F_Mask, "Mask top"),
+                ("CuIn1", In1_Cu, "Inner layer 1"),
+                ("CuIn2", In2_Cu, "Inner layer 2"),
+                ("CuIn3", In3_Cu, "Inner layer 3"),
+                ("CuIn4", In4_Cu, "Inner layer 4"),
+                ("CuBottom", B_Cu, "Bottom layer"),
+                ("SilkBottom", B_SilkS, "Silk top"),
+                ("MaskBottom", B_Mask, "Mask bottom"),
+                ("EdgeCuts", Edge_Cuts, "Edges"),
+            ]
+
         for layer_info in plot_plan:
             if layer_info[1] <= B_Cu:
                 popt.SetSkipPlotNPTH_Pads(True)
@@ -221,7 +260,7 @@ class JLCPCBFabrication:
                         f"{footprint.GetReference()} is marked as 'exclude from BOM' and skipped!"
                     )
                     continue
-                lcsc = self.parts.get(footprint.GetReference(), {}).get("LCSC", "")
+                lcsc = self.parts.get(footprint.GetReference(), {}).get("lcsc", "")
                 if not lcsc:
                     self.logger.error(
                         f"{footprint.GetReference()} has no LCSC attribute and skipped!"
