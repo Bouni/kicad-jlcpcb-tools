@@ -329,16 +329,6 @@ class PartSelectorDialog(wx.Dialog):
             self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), 0
         )
         button_sizer.Add(self.keyword, 0, wx.ALL, 5)
-        self.basic_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, u"Basic", wx.DefaultPosition, wx.DefaultSize, 0
-        )
-        self.basic_checkbox.SetValue(True)
-        button_sizer.Add(self.basic_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
-        self.extended_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, u"Extended", wx.DefaultPosition, wx.DefaultSize, 0
-        )
-        self.extended_checkbox.SetValue(True)
-        button_sizer.Add(self.extended_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
         self.search_button = wx.Button(
             self,
             wx.ID_ANY,
@@ -349,6 +339,16 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.search_button.Bind(wx.EVT_BUTTON, self.search)
         button_sizer.Add(self.search_button, 0, wx.ALL, 5)
+        self.basic_checkbox = wx.CheckBox(
+            self, wx.ID_ANY, u"Basic", wx.DefaultPosition, wx.DefaultSize, 0
+        )
+        self.basic_checkbox.SetValue(True)
+        button_sizer.Add(self.basic_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
+        self.extended_checkbox = wx.CheckBox(
+            self, wx.ID_ANY, u"Extended", wx.DefaultPosition, wx.DefaultSize, 0
+        )
+        self.extended_checkbox.SetValue(True)
+        button_sizer.Add(self.extended_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
 
         button_sizer.Add((0, 0), 1, wx.EXPAND, 5)
 
@@ -364,10 +364,60 @@ class PartSelectorDialog(wx.Dialog):
         self.download_gauge.SetValue(0)
         self.download_gauge.SetMinSize(wx.Size(-1, 24))
         button_sizer.Add(self.download_gauge, 0, wx.ALL, 5)
-        # ---------------------------------------------------------------------
 
         layout.Add(button_sizer, 1, wx.ALL, 5)
+        # ---------------------------------------------------------------------
+        filter_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
+        package_filter_layout = wx.BoxSizer(wx.VERTICAL)
+        package_filter_title = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Packages",
+            wx.DefaultPosition,
+        )
+        package_filter_layout.Add(package_filter_title)
+        package_filter_search = wx.TextCtrl(
+            self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), 0
+        )
+        package_filter_search.Bind(wx.EVT_TEXT, self.OnPackageFilter)
+        package_filter_layout.Add(package_filter_search)
+        self.package_filter_list = wx.ListBox(
+            self,
+            wx.ID_ANY,
+            wx.DefaultPosition,
+            (300, -1),
+            choices=[],
+            style=wx.LB_EXTENDED,
+        )
+        package_filter_layout.Add(self.package_filter_list)
+        filter_sizer.Add(package_filter_layout, 1, wx.ALL, 5)
+
+        manufacturer_filter_layout = wx.BoxSizer(wx.VERTICAL)
+        manufacturer_filter_title = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Manufacturers",
+            wx.DefaultPosition,
+        )
+        manufacturer_filter_layout.Add(manufacturer_filter_title)
+        manufacturer_filter_search = wx.TextCtrl(
+            self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), 0
+        )
+        manufacturer_filter_search.Bind(wx.EVT_TEXT, self.OnManufacturerFilter)
+        manufacturer_filter_layout.Add(manufacturer_filter_search)
+        self.manufacturer_filter_list = wx.ListBox(
+            self,
+            wx.ID_ANY,
+            wx.DefaultPosition,
+            (300, -1),
+            choices=[],
+            style=wx.LB_EXTENDED,
+        )
+        manufacturer_filter_layout.Add(self.manufacturer_filter_list)
+        filter_sizer.Add(manufacturer_filter_layout, 1, wx.ALL, 5)
+
+        layout.Add(filter_sizer, 1, wx.ALL, 5)
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(wx.Size(-1, 400))
@@ -461,6 +511,29 @@ class PartSelectorDialog(wx.Dialog):
 
         self.Centre(wx.BOTH)
 
+        if not self.library.loaded:
+            self.load_library()
+        self.package_filter_choices = self.library.get_packages()
+        self.package_filter_list.Set(self.package_filter_choices)
+        self.manufacturer_filter_choices = self.library.get_manufacturers()
+        self.manufacturer_filter_list.Set(self.manufacturer_filter_choices)
+
+    def OnPackageFilter(self, e):
+        search = e.GetString().lower()
+        choices = [c for c in self.package_filter_choices if search in c.lower()]
+        if choices != []:
+            self.package_filter_list.Set(choices)
+        else:
+            self.package_filter_list.Set([""])
+
+    def OnManufacturerFilter(self, e):
+        search = e.GetString().lower()
+        choices = [c for c in self.manufacturer_filter_choices if search in c.lower()]
+        if choices != []:
+            self.manufacturer_filter_list.Set(choices)
+        else:
+            self.manufacturer_filter_list.Set([""])
+
     def load_library(self):
         """Load library data from the excel file into a pandas dataframe"""
         busy_dialog = wx.BusyInfo("Loading library data, please wait ...")
@@ -476,10 +549,22 @@ class PartSelectorDialog(wx.Dialog):
         """Search the dataframe for the keyword."""
         if not self.library.loaded:
             self.load_library()
+
+        filtered_packages = self.package_filter_list.GetStrings()
+        packages = [
+            filtered_packages[i] for i in self.package_filter_list.GetSelections()
+        ]
+        filtered_manufacturers = self.manufacturer_filter_list.GetStrings()
+        manufacturers = [
+            filtered_manufacturers[i]
+            for i in self.manufacturer_filter_list.GetSelections()
+        ]
         result = self.library.search(
             self.keyword.GetValue(),
             self.basic_checkbox.GetValue(),
             self.extended_checkbox.GetValue(),
+            packages,
+            manufacturers,
         )
         self.populate_part_list(result)
 
