@@ -81,7 +81,13 @@ class JLCPCBLibrary:
         return [str(mfr) for mfr in self.df["Manufacturer"].unique()]
 
     def search(
-        self, keyword="", basic=True, extended=False, packages=[], manufacturers=[]
+        self,
+        keyword="",
+        basic=True,
+        extended=False,
+        assert_stock=False,
+        packages=[],
+        manufacturers=[],
     ):
         if len(keyword) < 3:
             return []
@@ -99,6 +105,8 @@ class JLCPCBLibrary:
         if extended:
             types.append("Extended")
         df = df[df.Library_Type.isin(types)]
+        if assert_stock:
+            df = df[df.Stock > 0]
         if packages:
             df = df[df.Package.isin(packages)]
         if manufacturers:
