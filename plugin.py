@@ -13,12 +13,9 @@ import wx.xrc
 from pcbnew import *
 
 from .fabrication import JLCPCBFabrication
-from .helpers import (
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-    set_exclude_from_bom,
-    set_exclude_from_pos,
-)
+from .helpers import (get_exclude_from_bom, get_exclude_from_pos,
+                      set_exclude_from_bom, set_exclude_from_pos,
+                      toggle_exclude_from_bom, toggle_exclude_from_pos)
 from .library import JLCPCBLibrary
 
 
@@ -234,8 +231,8 @@ class JLCBCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
             fp = self.get_footprint_by_ref(ref)
-            set_exclude_from_bom(fp)
-            set_exclude_from_pos(fp)
+            toggle_exclude_from_bom(fp)
+            toggle_exclude_from_pos(fp)
         self.populate_footprint_list()
 
     def toogle_bom(self, e):
@@ -244,7 +241,7 @@ class JLCBCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
             fp = self.get_footprint_by_ref(ref)
-            set_exclude_from_bom(fp)
+            toggle_exclude_from_bom(fp)
         self.populate_footprint_list()
 
     def toogle_cpl(self, e):
@@ -253,7 +250,7 @@ class JLCBCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
             fp = self.get_footprint_by_ref(ref)
-            set_exclude_from_pos(fp)
+            toggle_exclude_from_pos(fp)
         self.populate_footprint_list()
 
     def select_part(self, e):
