@@ -16,6 +16,7 @@ from .fabrication import JLCPCBFabrication
 from .helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
+    get_footprint_by_ref,
     set_exclude_from_bom,
     set_exclude_from_pos,
     toggle_exclude_from_bom,
@@ -144,16 +145,16 @@ class JLCBCBTools(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.bom = self.footprint_list.AppendTextColumn(
-            u"BOM",
+            u"in BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=60,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.cpl = self.footprint_list.AppendTextColumn(
-            u"CPL",
+            u"in CPL",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=60,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
@@ -224,18 +225,12 @@ class JLCBCBTools(wx.Dialog):
                 ]
             )
 
-    def get_footprint_by_ref(self, ref):
-        """get a footprint from the list of footprints by its Reference."""
-        for fp in self.footprints:
-            if str(fp.GetReference()) == ref:
-                return fp
-
     def toogle_bom_cpl(self, e):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = self.get_footprint_by_ref(ref)
+            fp = get_footprint_by_ref(self.board, ref)
             toggle_exclude_from_bom(fp)
             toggle_exclude_from_pos(fp)
         self.populate_footprint_list()
@@ -246,7 +241,7 @@ class JLCBCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = self.get_footprint_by_ref(ref)
+            fp = get_footprint_by_ref(self.board, ref)
             toggle_exclude_from_bom(fp)
         self.populate_footprint_list()
         self.fabrication.save_part_assignments()
@@ -256,7 +251,7 @@ class JLCBCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = self.get_footprint_by_ref(ref)
+            fp = get_footprint_by_ref(self.board, ref)
             toggle_exclude_from_pos(fp)
         self.populate_footprint_list()
         self.fabrication.save_part_assignments()
@@ -269,7 +264,7 @@ class JLCBCBTools(wx.Dialog):
             for item in self.footprint_list.GetSelections():
                 row = self.footprint_list.ItemToRow(item)
                 ref = self.footprint_list.GetTextValue(row, 0)
-                fp = self.get_footprint_by_ref(ref)
+                fp = get_footprint_by_ref(self.board, ref)
                 self.fabrication.parts[ref]["lcsc"] = str(dialog.selection)
             self.populate_footprint_list()
             self.fabrication.save_part_assignments()
@@ -282,7 +277,6 @@ class JLCBCBTools(wx.Dialog):
             layer_count = int(self.layer_selection.GetString(layer_selection)[:1])
         else:
             layer_count = None
-        self.logger.info(layer_count)
         self.fabrication.generate_geber(layer_count)
         self.fabrication.generate_excellon()
         self.fabrication.zip_gerber_excellon()
