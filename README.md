@@ -9,6 +9,10 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 
 Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
 
+![The main window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/main.png)
+
+![The parts library window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_library.png)
+
 ## Warning 🔥
 
 **This plugin is not yet very well tested and only works for KiCAD 5.99 aka nightly builds!**
