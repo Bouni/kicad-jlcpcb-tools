@@ -13,9 +13,14 @@ import wx.xrc
 from pcbnew import *
 
 from .fabrication import JLCPCBFabrication
-from .helpers import (get_exclude_from_bom, get_exclude_from_pos,
-                      set_exclude_from_bom, set_exclude_from_pos,
-                      toggle_exclude_from_bom, toggle_exclude_from_pos)
+from .helpers import (
+    get_exclude_from_bom,
+    get_exclude_from_pos,
+    set_exclude_from_bom,
+    set_exclude_from_pos,
+    toggle_exclude_from_bom,
+    toggle_exclude_from_pos,
+)
 from .library import JLCPCBLibrary
 
 
@@ -234,6 +239,7 @@ class JLCBCBTools(wx.Dialog):
             toggle_exclude_from_bom(fp)
             toggle_exclude_from_pos(fp)
         self.populate_footprint_list()
+        self.fabrication.save_part_assignments()
 
     def toogle_bom(self, e):
         """Toggle the exclude from BOM attribute of a footprint."""
@@ -243,6 +249,7 @@ class JLCBCBTools(wx.Dialog):
             fp = self.get_footprint_by_ref(ref)
             toggle_exclude_from_bom(fp)
         self.populate_footprint_list()
+        self.fabrication.save_part_assignments()
 
     def toogle_cpl(self, e):
         """Toggle the exclude from POS attribute of a footprint."""
@@ -252,6 +259,7 @@ class JLCBCBTools(wx.Dialog):
             fp = self.get_footprint_by_ref(ref)
             toggle_exclude_from_pos(fp)
         self.populate_footprint_list()
+        self.fabrication.save_part_assignments()
 
     def select_part(self, e):
         """Select and assign a LCSC Part number to a footprint via modal dialog."""
@@ -262,10 +270,7 @@ class JLCBCBTools(wx.Dialog):
                 row = self.footprint_list.ItemToRow(item)
                 ref = self.footprint_list.GetTextValue(row, 0)
                 fp = self.get_footprint_by_ref(ref)
-                self.fabrication.parts[ref] = {
-                    "lcsc": str(dialog.selection),
-                    "source": "csv",
-                }
+                self.fabrication.parts[ref]["lcsc"] = str(dialog.selection)
             self.populate_footprint_list()
             self.fabrication.save_part_assignments()
         dialog.Destroy()
