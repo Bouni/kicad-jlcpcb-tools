@@ -3,6 +3,12 @@ SMD = 1
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
+    
+def get_footprint_by_ref(board, ref):
+    """get a footprint from the list of footprints by its Reference."""
+    for fp in board.GetFootprints():
+        if str(fp.GetReference()) == ref:
+            return fp
 
 def get_bit(value, bit):
     return value & (1 << bit)
@@ -61,7 +67,7 @@ def set_tht(footprint):
     val = footprint.GetAttributes()
     val = set_bit(val, THT)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, THT))
 
 
 def set_smd(footprint):
@@ -70,34 +76,43 @@ def set_smd(footprint):
     val = footprint.GetAttributes()
     val = set_bit(val, SMD)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, SMD))
 
 
-def set_exclude_from_pos(footprint):
+def set_exclude_from_pos(footprint, v):
     if not footprint:
         return
     val = footprint.GetAttributes()
-    val = set_bit(val, EXCLUDE_FROM_POS)
+    if v: 
+        val = set_bit(val, EXCLUDE_FROM_POS)
+    else:
+        val = clear_bit(val, EXCLUDE_FROM_POS)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, EXCLUDE_FROM_POS))
 
 
-def set_exclude_from_bom(footprint):
+def set_exclude_from_bom(footprint, v):
     if not footprint:
         return
     val = footprint.GetAttributes()
-    val = set_bit(val, EXCLUDE_FROM_BOM)
+    if v: 
+        val = set_bit(val, EXCLUDE_FROM_BOM)
+    else:
+        val = clear_bit(val, EXCLUDE_FROM_BOM)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, EXCLUDE_FROM_BOM))
 
 
-def set_not_in_schematic(footprint):
+def set_not_in_schematic(footprint, v):
     if not footprint:
         return
     val = footprint.GetAttributes()
-    val = set_bit(val, NOT_IN_SCHEMATIC)
+    if v: 
+        val = set_bit(val, NOT_IN_SCHEMATIC)
+    else:
+        val = clear_bit(val, NOT_IN_SCHEMATIC)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, NOT_IN_SCHEMATIC))
 
 
 def toggle_tht(footprint):
@@ -106,7 +121,7 @@ def toggle_tht(footprint):
     val = footprint.GetAttributes()
     val = toggle_bit(val, THT)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, THT))
 
 
 def toggle_smd(footprint):
@@ -115,7 +130,7 @@ def toggle_smd(footprint):
     val = footprint.GetAttributes()
     val = toggle_bit(val, SMD)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, SMD))
 
 
 def toggle_exclude_from_pos(footprint):
@@ -124,7 +139,7 @@ def toggle_exclude_from_pos(footprint):
     val = footprint.GetAttributes()
     val = toggle_bit(val, EXCLUDE_FROM_POS)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, EXCLUDE_FROM_POS))
 
 
 def toggle_exclude_from_bom(footprint):
@@ -133,7 +148,7 @@ def toggle_exclude_from_bom(footprint):
     val = footprint.GetAttributes()
     val = toggle_bit(val, EXCLUDE_FROM_BOM)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, EXCLUDE_FROM_BOM))
 
 
 def toggle_not_in_schematic(footprint):
@@ -142,4 +157,4 @@ def toggle_not_in_schematic(footprint):
     val = footprint.GetAttributes()
     val = toggle_bit(val, NOT_IN_SCHEMATIC)
     footprint.SetAttributes(val)
-    return bool(val)
+    return bool(get_bit(val, NOT_IN_SCHEMATIC))
