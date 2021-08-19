@@ -74,7 +74,15 @@ class JLCPCBLibrary:
         self.logger.info(f"Loaded Library with {self.partcount} parts")
         self.loaded = True
 
-    def search(self, keyword="", basic=True, extended=False):
+    def get_packages(self):
+        return [str(pkg) for pkg in self.df["Package"].unique()]
+
+    def get_manufacturers(self):
+        return [str(mfr) for mfr in self.df["Manufacturer"].unique()]
+
+    def search(
+        self, keyword="", basic=True, extended=False, packages=[], manufacturers=[]
+    ):
         if len(keyword) < 3:
             return []
         query = [
@@ -82,8 +90,6 @@ class JLCPCBLibrary:
             f"(First_Category.str.contains('{keyword}'))",
             f"(Second_Category.str.contains('{keyword}'))",
             f"(MFR_Part.str.contains('{keyword}'))",
-            f"(Package.str.contains('{keyword}'))",
-            f"(Manufacturer.str.contains('{keyword}'))",
             f"(Description.str.contains('{keyword}'))",
         ]
         df = self.df
@@ -93,6 +99,10 @@ class JLCPCBLibrary:
         if extended:
             types.append("Extended")
         df = df[df.Library_Type.isin(types)]
+        if packages:
+            df = df[df.Package.isin(packages)]
+        if manufacturers:
+            df = df[df.Manufacturer.isin(manufacturers)]
         query = " | ".join(query)
         result = df[df.eval(query)]
         return result
