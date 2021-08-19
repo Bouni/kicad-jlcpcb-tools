@@ -3,12 +3,14 @@ SMD = 1
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
-    
+
+
 def get_footprint_by_ref(board, ref):
     """get a footprint from the list of footprints by its Reference."""
     for fp in board.GetFootprints():
         if str(fp.GetReference()) == ref:
             return fp
+
 
 def get_bit(value, bit):
     return value & (1 << bit)
@@ -83,7 +85,7 @@ def set_exclude_from_pos(footprint, v):
     if not footprint:
         return
     val = footprint.GetAttributes()
-    if v: 
+    if v:
         val = set_bit(val, EXCLUDE_FROM_POS)
     else:
         val = clear_bit(val, EXCLUDE_FROM_POS)
@@ -95,7 +97,7 @@ def set_exclude_from_bom(footprint, v):
     if not footprint:
         return
     val = footprint.GetAttributes()
-    if v: 
+    if v:
         val = set_bit(val, EXCLUDE_FROM_BOM)
     else:
         val = clear_bit(val, EXCLUDE_FROM_BOM)
@@ -107,7 +109,7 @@ def set_not_in_schematic(footprint, v):
     if not footprint:
         return
     val = footprint.GetAttributes()
-    if v: 
+    if v:
         val = set_bit(val, NOT_IN_SCHEMATIC)
     else:
         val = clear_bit(val, NOT_IN_SCHEMATIC)
