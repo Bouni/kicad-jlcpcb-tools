@@ -350,6 +350,12 @@ class PartSelectorDialog(wx.Dialog):
         self.extended_checkbox.SetValue(True)
         button_sizer.Add(self.extended_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
 
+        self.assert_stock_checkbox = wx.CheckBox(
+            self, wx.ID_ANY, u"in Stock", wx.DefaultPosition, wx.DefaultSize, 0
+        )
+        self.assert_stock_checkbox.SetValue(True)
+        button_sizer.Add(self.assert_stock_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
+
         button_sizer.Add((0, 0), 1, wx.EXPAND, 5)
 
         self.download_button = wx.Button(
@@ -563,6 +569,7 @@ class PartSelectorDialog(wx.Dialog):
             self.keyword.GetValue(),
             self.basic_checkbox.GetValue(),
             self.extended_checkbox.GetValue(),
+            self.assert_stock_checkbox.GetValue(),
             packages,
             manufacturers,
         )
