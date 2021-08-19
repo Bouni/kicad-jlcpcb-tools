@@ -8,7 +8,13 @@ from zipfile import ZipFile
 import requests
 from pcbnew import *
 
-from .helpers import get_exclude_from_bom, get_exclude_from_pos
+from .helpers import (
+    get_exclude_from_bom,
+    get_exclude_from_pos,
+    get_footprint_by_ref,
+    set_exclude_from_bom,
+    set_exclude_from_pos,
+)
 
 
 class JLCPCBFabrication:
@@ -29,24 +35,31 @@ class JLCPCBFabrication:
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
 
     def load_part_assigments(self):
+        # Read all footprints and their maybe set LCSC property
         self.parts = {}
+        for fp in self.board.GetFootprints():
+            reference = fp.GetReference()
+            lcsc = fp.GetProperties().get("LCSC", "")
+            self.parts[reference] = {"lcsc": lcsc}
+        # Read all settings from the csv and overwrite if neccessary
         csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
         if os.path.isfile(csvfile):
             with open(csvfile, "r+") as f:
-                reader = csv.reader(f, delimiter=",", quotechar='"')
-                self.parts = {
-                    row[0]: {"lcsc": row[1], "source": row[2]} for row in reader
-                }
-        # Here we check what LCSC properties are set on the footprints, these assignments come from the schematic.
-        for fp in self.board.GetFootprints():
-            reference = fp.GetReference()
-            lcsc = fp.GetProperties().get("LCSC")
-            if not lcsc:
-                continue
-            self.parts[reference] = {"lcsc": lcsc, "source": "schematic"}
-            self.logger.info(
-                f"Part {reference} was set to '{lcsc}' from the schematic property!"
-            )
+                reader = csv.DictReader(
+                    f,
+                    delimiter=",",
+                    quotechar='"',
+                    fieldnames=["ref", "lcsc", "bom", "pos"],
+                )
+                for row in reader:
+                    if row["ref"] in self.parts:
+                        # Only set lcsc value from CSV if not already set from footprint property
+                        if not self.parts[row["ref"]]["lcsc"]:
+                            self.parts[row["ref"]]["lcsc"] = row["lcsc"]
+                        # set the exclude from BOM / POS attribute of the footprint from CSV
+                        fp = get_footprint_by_ref(self.board, row["ref"])
+                        set_exclude_from_bom(fp, bool(int(row["bom"])))
+                        set_exclude_from_pos(fp, bool(int(row["pos"])))
         self.save_part_assignments()
 
     def save_part_assignments(self):
@@ -55,7 +68,10 @@ class JLCPCBFabrication:
         with open(csvfile, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f, delimiter=",", quotechar='"')
             for part, values in self.parts.items():
-                writer.writerow([part, values["lcsc"], values["source"]])
+                fp = get_footprint_by_ref(self.board, part)
+                bom = get_exclude_from_bom(fp)
+                pos = get_exclude_from_pos(fp)
+                writer.writerow([part, values["lcsc"], int(bom), int(pos)])
 
     def get_corrections(self):
         """Try loading rotation corrections from local file, if not present, load them from GitHub."""
@@ -231,7 +247,7 @@ class JLCPCBFabrication:
             for footprint in footprints:
                 if get_exclude_from_pos(footprint):
                     self.logger.info(
-                        f"{footprint.GetReference()} is marked as 'exclude from POS' and skipped!"
+                        f"{footprint.GetReference()} is marked as 'exclude from POS' and is skipped!"
                     )
                     continue
                 writer.writerow(
@@ -257,13 +273,13 @@ class JLCPCBFabrication:
             for footprint in self.board.GetFootprints():
                 if get_exclude_from_bom(footprint):
                     self.logger.info(
-                        f"{footprint.GetReference()} is marked as 'exclude from BOM' and skipped!"
+                        f"{footprint.GetReference()} is marked as 'exclude from BOM' and is skipped!"
                     )
                     continue
                 lcsc = self.parts.get(footprint.GetReference(), {}).get("lcsc", "")
                 if not lcsc:
                     self.logger.error(
-                        f"{footprint.GetReference()} has no LCSC attribute and skipped!"
+                        f"{footprint.GetReference()} has no LCSC attribute and is skipped!"
                     )
                     continue
                 if not lcsc in footprints:
