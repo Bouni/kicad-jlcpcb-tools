@@ -20,22 +20,12 @@ except ImportError:
     subprocess.check_call(["python", "-m", "pip", "install", "pandas"])
     import pandas as pd
 
-# import xlrd, install it if not installed
-try:
-    import xlrd
-except ImportError:
-    import subprocess
-    import sys
-
-    subprocess.check_call(["python", "-m", "pip", "install", "xlrd"])
-
 import requests
 
 
 class JLCPCBLibrary:
     def __init__(self):
         self.create_folders()
-        self.xls = os.path.join(self.xlsdir, "jlcpcb_parts.xls")
         self.csv = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
         self.df = None
         self.loaded = False
@@ -48,28 +38,48 @@ class JLCPCBLibrary:
         Path(self.xlsdir).mkdir(parents=True, exist_ok=True)
 
     def download(self, progress):
-        """Download XLS and convert it into CSV"""
+        """Download CSV"""
         self.logger.info("Start downloading library")
-        XLS_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
-        with open(self.xls, "wb") as xls:
-            r = requests.get(XLS_URL, allow_redirects=True, stream=True)
+        CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
+        with open(self.csv, "wb") as csv:
+            r = requests.get(CSV_URL, allow_redirects=True, stream=True)
             total_length = r.headers.get("content-length")
             if total_length is None:  # no content length header
-                xls.write(r.content)
+                csv.write(r.content)
             else:
                 dl = 0
                 total_length = int(total_length)
-                progress.SetRange(total_length)
+                if progress:
+                    progress.SetRange(total_length)
                 for data in r.iter_content(chunk_size=4096):
                     dl += len(data)
-                    progress.SetValue(dl)
-                    xls.write(data)
-        progress.SetValue(0)
+                    if progress:
+                        progress.SetValue(dl)
+                    csv.write(data)
+        if progress:
+            progress.SetValue(0)
 
     def load(self):
-        self.df = pd.concat(pd.read_excel(self.xls, sheet_name=None), ignore_index=True)
-        self.df.columns = self.df.columns.map(lambda x: x.replace(" ", "_"))
-        self.df.columns = self.df.columns.map(lambda x: x.replace(".", "_"))
+        self.df = pd.read_csv(
+            self.csv,
+            encoding="iso-8859-1",
+            header=0,
+            names=[
+                "LCSC_Part",
+                "First_Category",
+                "Second_Category",
+                "MFR_Part",
+                "Package",
+                "Solder_Joint",
+                "Manufacturer",
+                "Library_Type",
+                "Description",
+                "Datasheet",
+                "Price",
+                "Stock",
+            ],
+            index_col=False
+        )
         self.partcount = len(self.df)
         self.logger.info(f"Loaded Library with {self.partcount} parts")
         self.loaded = True
