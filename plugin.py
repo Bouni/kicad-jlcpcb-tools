@@ -71,6 +71,10 @@ class JLCBCBTools(wx.Dialog):
 
         # ---------------------------------------------------------------------
         self.library = JLCPCBLibrary()
+        if not os.path.isfile(self.library.csv):
+            busy_dialog = wx.BusyInfo("Downloading library file, please wait ...")
+            self.library.download(None)
+            busy_dialog = None
         self.fabrication = JLCPCBFabrication()
         # ---------------------------------------------------------------------
 
