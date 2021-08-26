@@ -18,7 +18,8 @@ from .helpers import (
 
 
 class JLCPCBFabrication:
-    def __init__(self):
+    def __init__(self, parent):
+        self.parent = parent
         self.logger = logging.getLogger(__name__)
         self.plugin_path, _ = os.path.split(os.path.abspath(__file__))
         self.corrections = self.get_corrections()

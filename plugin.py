@@ -70,12 +70,8 @@ class JLCBCBTools(wx.Dialog):
         self.init_logger()  # set logger to log to stdout = log textbox
 
         # ---------------------------------------------------------------------
-        self.library = JLCPCBLibrary()
-        if not os.path.isfile(self.library.csv):
-            busy_dialog = wx.BusyInfo("Downloading library file, please wait ...")
-            self.library.download(None)
-            busy_dialog = None
-        self.fabrication = JLCPCBFabrication()
+        self.library = JLCPCBLibrary(self)
+        self.fabrication = JLCPCBFabrication(self)
         # ---------------------------------------------------------------------
 
         self.SetSizeHints(wx.Size(800, -1), wx.DefaultSize)
@@ -106,6 +102,12 @@ class JLCBCBTools(wx.Dialog):
         self.layer_selection.SetSelection(0)
         button_sizer.Add(self.layer_selection, 0, wx.ALL, 5)
         # ---------------------------------------------------------------------
+        button_sizer.Add(wx.StaticText(self), wx.EXPAND)
+        self.download_button = wx.Button(
+            self, wx.ID_ANY, u"Update library", wx.DefaultPosition, wx.DefaultSize, 0
+        )
+        self.download_button.Bind(wx.EVT_BUTTON, self.load_library)
+        button_sizer.Add(self.download_button, 0, wx.ALL, 5)
 
         layout.Add(button_sizer, 1, wx.ALL | wx.EXPAND, 5)
 
@@ -190,14 +192,33 @@ class JLCBCBTools(wx.Dialog):
         table_sizer.Add(tool_sizer, 1, wx.EXPAND, 5)
         # ---------------------------------------------------------------------
 
+        self.gauge = wx.Gauge(
+            self, wx.ID_ANY, 100, wx.DefaultPosition, (100, -1), wx.GA_HORIZONTAL
+        )
+        self.gauge.SetValue(0)
+        self.gauge.SetMinSize(wx.Size(-1, 5))
+
         layout.Add(table_sizer, 1, wx.ALL | wx.EXPAND, 5)
 
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
         self.Layout()
 
         self.Centre(wx.BOTH)
+
+        wx.CallLater(0, self.load_library)
+
+    def load_library(self, e=None):
+        if not os.path.isfile(self.library.csv) or e:
+            busy_dialog = wx.BusyInfo("Downloading library file, please wait ...")
+            self.library.download()
+            busy_dialog = None
+        if not self.library.loaded or e:
+            busy_dialog = wx.BusyInfo("Loading library data, please wait ...")
+            self.library.load()
+            busy_dialog = None
 
     def get_footprints(self):
         """get all footprints from the board"""
@@ -262,6 +283,7 @@ class JLCBCBTools(wx.Dialog):
 
     def select_part(self, e):
         """Select and assign a LCSC Part number to a footprint via modal dialog."""
+        self.load_library()
         dialog = PartSelectorDialog(self)
         result = dialog.ShowModal()
         if result == wx.ID_OK:
@@ -359,21 +381,6 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.assert_stock_checkbox.SetValue(True)
         button_sizer.Add(self.assert_stock_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
-
-        button_sizer.Add((0, 0), 1, wx.EXPAND, 5)
-
-        self.download_button = wx.Button(
-            self, wx.ID_ANY, u"Update library", wx.DefaultPosition, wx.DefaultSize, 0
-        )
-        self.download_button.Bind(wx.EVT_BUTTON, self.download)
-        button_sizer.Add(self.download_button, 0, wx.ALL, 5)
-        wx.Gauge()
-        self.download_gauge = wx.Gauge(
-            self, wx.ID_ANY, 100, wx.DefaultPosition, (100, -1), wx.GA_HORIZONTAL
-        )
-        self.download_gauge.SetValue(0)
-        self.download_gauge.SetMinSize(wx.Size(-1, 24))
-        button_sizer.Add(self.download_gauge, 0, wx.ALL, 5)
 
         layout.Add(button_sizer, 1, wx.ALL, 5)
         # ---------------------------------------------------------------------
@@ -543,17 +550,6 @@ class PartSelectorDialog(wx.Dialog):
             self.manufacturer_filter_list.Set(choices)
         else:
             self.manufacturer_filter_list.Set([""])
-
-    def load_library(self):
-        """Load library data from the excel file into a pandas dataframe"""
-        busy_dialog = wx.BusyInfo("Loading library data, please wait ...")
-        self.library.load()
-        busy_dialog = None
-
-    def download(self, e):
-        """Download latest excel with library data."""
-        self.library.download(self.download_gauge)
-        self.load_library()
 
     def search(self, e):
         """Search the dataframe for the keyword."""
