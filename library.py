@@ -24,7 +24,8 @@ import requests
 
 
 class JLCPCBLibrary:
-    def __init__(self):
+    def __init__(self, parent):
+        self.parent = parent
         self.create_folders()
         self.csv = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
         self.df = None
@@ -37,8 +38,14 @@ class JLCPCBLibrary:
         self.xlsdir = os.path.join(path, "jlcpcb")
         Path(self.xlsdir).mkdir(parents=True, exist_ok=True)
 
-    def download(self, progress):
-        """Download CSV"""
+    def setup_progress_gauge(self, total=None):
+        self.parent.gauge.SetRange(total)
+
+    def update_progress_gauge(self, value=None):
+        self.parent.gauge.SetValue(value)
+
+    def download(self):
+        """Download CSV from JLCPCB"""
         self.logger.info("Start downloading library")
         CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
         with open(self.csv, "wb") as csv:
@@ -47,20 +54,23 @@ class JLCPCBLibrary:
             if total_length is None:  # no content length header
                 csv.write(r.content)
             else:
-                dl = 0
-                total_length = int(total_length)
-                if progress:
-                    progress.SetRange(total_length)
+                progress = 0
+                self.setup_progress_gauge(int(total_length))
                 for data in r.iter_content(chunk_size=4096):
-                    dl += len(data)
-                    if progress:
-                        progress.SetValue(dl)
+                    progress += len(data)
+                    self.update_progress_gauge(progress)
                     csv.write(data)
-        if progress:
-            progress.SetValue(0)
+        self.update_progress_gauge(0)
 
     def load(self):
-        self.df = pd.read_csv(
+        """Load JLCPCB library data from CSV inro pandas data frame"""
+        chunksize = 4096
+        rows = 0
+        with open(self.csv) as csvfile:
+            rows = len(csvfile.readlines())
+        self.setup_progress_gauge(rows)
+        data = []
+        with pd.read_csv(
             self.csv,
             encoding="iso-8859-1",
             header=0,
@@ -78,16 +88,26 @@ class JLCPCBLibrary:
                 "Price",
                 "Stock",
             ],
-            index_col=False
-        )
-        self.partcount = len(self.df)
-        self.logger.info(f"Loaded Library with {self.partcount} parts")
-        self.loaded = True
+            index_col=False,
+            chunksize=chunksize,
+        ) as reader:
+            progress = 0
+            for chunk in reader:
+                progress += chunksize
+                self.update_progress_gauge(progress)
+                data.append(chunk)
+            self.update_progress_gauge(0)
+            self.df = pd.concat(data, sort=False)
+            self.partcount = len(self.df)
+            self.logger.info(f"Loaded Library with {self.partcount} parts")
+            self.loaded = True
 
     def get_packages(self):
+        """Get all distinct packages from the library"""
         return [str(pkg) for pkg in self.df["Package"].unique()]
 
     def get_manufacturers(self):
+        """Get all distinct manufacturers from the library"""
         return [str(mfr) for mfr in self.df["Manufacturer"].unique()]
 
     def search(
@@ -99,6 +119,7 @@ class JLCPCBLibrary:
         packages=[],
         manufacturers=[],
     ):
+        """Search library for passed on criteria"""
         if len(keyword) < 3:
             return []
         query = [
