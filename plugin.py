@@ -211,14 +211,13 @@ class JLCBCBTools(wx.Dialog):
         wx.CallLater(0, self.load_library)
 
     def load_library(self, e=None):
+        """Download and load library data if necessary or actively requested"""
         if not os.path.isfile(self.library.csv) or e:
-            busy_dialog = wx.BusyInfo("Downloading library file, please wait ...")
-            self.library.download()
-            busy_dialog = None
+            with wx.BusyInfo("Downloading library file, please wait ..."):
+                self.library.download()
         if not self.library.loaded or e:
-            busy_dialog = wx.BusyInfo("Loading library data, please wait ...")
-            self.library.load()
-            busy_dialog = None
+            with wx.BusyInfo("Loading library data, please wait ..."):
+                self.library.load()
 
     def get_footprints(self):
         """get all footprints from the board"""
