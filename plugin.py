@@ -18,6 +18,7 @@ from .helpers import (
     get_exclude_from_pos,
     get_footprint_by_ref,
     get_footprint_keys,
+    get_version_info,
     set_exclude_from_bom,
     set_exclude_from_pos,
     toggle_exclude_from_bom,
@@ -29,7 +30,6 @@ from .library import JLCPCBLibrary
 class JLCPCBPlugin(ActionPlugin):
     def __init__(self):
         super(JLCPCBPlugin, self).__init__()
-
         self.name = "JLCPCB Tools"
         self.category = "Fabrication data generation"
         self.pcbnew_icon_support = hasattr(self, "show_toolbar_button")
@@ -51,7 +51,7 @@ class JLCBCBTools(wx.Dialog):
             self,
             parent,
             id=wx.ID_ANY,
-            title=u"JLCPCB Tools",
+            title=f"JLCPCB Tools [{get_version_info()}]",
             pos=wx.DefaultPosition,
             size=wx.Size(906, 600),
             style=wx.DEFAULT_DIALOG_STYLE,
@@ -84,7 +84,7 @@ class JLCBCBTools(wx.Dialog):
         self.generate_button = wx.Button(
             self,
             wx.ID_ANY,
-            u"Generate fabrication files",
+            "Generate fabrication files",
             wx.DefaultPosition,
             wx.DefaultSize,
             0,
@@ -105,7 +105,7 @@ class JLCBCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
         button_sizer.Add(wx.StaticText(self), wx.EXPAND)
         self.download_button = wx.Button(
-            self, wx.ID_ANY, u"Update library", wx.DefaultPosition, wx.DefaultSize, 0
+            self, wx.ID_ANY, "Update library", wx.DefaultPosition, wx.DefaultSize, 0
         )
         self.download_button.Bind(wx.EVT_BUTTON, self.load_library)
         button_sizer.Add(self.download_button, 0, wx.ALL, 5)
@@ -124,42 +124,42 @@ class JLCBCBTools(wx.Dialog):
         )
         self.footprint_list.SetMinSize(wx.Size(750, 400))
         self.reference = self.footprint_list.AppendTextColumn(
-            u"Reference",
+            "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.value = self.footprint_list.AppendTextColumn(
-            u"Value",
+            "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=200,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint = self.footprint_list.AppendTextColumn(
-            u"Footprint",
+            "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=200,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
-            u"LCSC",
+            "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.bom = self.footprint_list.AppendTextColumn(
-            u"in BOM",
+            "in BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=60,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.cpl = self.footprint_list.AppendTextColumn(
-            u"in CPL",
+            "in CPL",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=60,
             align=wx.ALIGN_CENTER,
@@ -171,22 +171,22 @@ class JLCBCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         self.select_part_button = wx.Button(
-            self, wx.ID_ANY, u"Select part", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Select part", wx.DefaultPosition, (150, -1), 0
         )
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         tool_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         self.toggle_bom_cpl_button = wx.Button(
-            self, wx.ID_ANY, u"Toggle BOM/CPL", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Toggle BOM/CPL", wx.DefaultPosition, (150, -1), 0
         )
         self.toggle_bom_cpl_button.Bind(wx.EVT_BUTTON, self.toogle_bom_cpl)
         tool_sizer.Add(self.toggle_bom_cpl_button, 0, wx.ALL, 5)
         self.toggle_bom_button = wx.Button(
-            self, wx.ID_ANY, u"Toggle BOM", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Toggle BOM", wx.DefaultPosition, (150, -1), 0
         )
         self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toogle_bom)
         tool_sizer.Add(self.toggle_bom_button, 0, wx.ALL, 5)
         self.toggle_cpl_button = wx.Button(
-            self, wx.ID_ANY, u"Toggle CPL", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Toggle CPL", wx.DefaultPosition, (150, -1), 0
         )
         self.toggle_cpl_button.Bind(wx.EVT_BUTTON, self.toogle_cpl)
         tool_sizer.Add(self.toggle_cpl_button, 0, wx.ALL, 5)
@@ -334,7 +334,7 @@ class PartSelectorDialog(wx.Dialog):
             self,
             parent,
             id=wx.ID_ANY,
-            title=u"JLCPCB Library",
+            title="JLCPCB Library",
             pos=wx.DefaultPosition,
             size=wx.Size(1206, 600),
             style=wx.DEFAULT_DIALOG_STYLE,
@@ -355,7 +355,7 @@ class PartSelectorDialog(wx.Dialog):
         self.search_button = wx.Button(
             self,
             wx.ID_ANY,
-            u"Search",
+            "Search",
             wx.DefaultPosition,
             wx.DefaultSize,
             0,
@@ -363,18 +363,18 @@ class PartSelectorDialog(wx.Dialog):
         self.search_button.Bind(wx.EVT_BUTTON, self.search)
         button_sizer.Add(self.search_button, 0, wx.ALL, 5)
         self.basic_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, u"Basic", wx.DefaultPosition, wx.DefaultSize, 0
+            self, wx.ID_ANY, "Basic", wx.DefaultPosition, wx.DefaultSize, 0
         )
         self.basic_checkbox.SetValue(True)
         button_sizer.Add(self.basic_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
         self.extended_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, u"Extended", wx.DefaultPosition, wx.DefaultSize, 0
+            self, wx.ID_ANY, "Extended", wx.DefaultPosition, wx.DefaultSize, 0
         )
         self.extended_checkbox.SetValue(True)
         button_sizer.Add(self.extended_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
 
         self.assert_stock_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, u"in Stock", wx.DefaultPosition, wx.DefaultSize, 0
+            self, wx.ID_ANY, "in Stock", wx.DefaultPosition, wx.DefaultSize, 0
         )
         self.assert_stock_checkbox.SetValue(True)
         button_sizer.Add(self.assert_stock_checkbox, 0, wx.TOP | wx.LEFT | wx.RIGHT, 8)
@@ -444,63 +444,63 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.part_list.SetMinSize(wx.Size(1050, 500))
         self.reference = self.part_list.AppendTextColumn(
-            u"LCSC",
+            "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.number = self.part_list.AppendTextColumn(
-            u"MFR Number",
+            "MFR Number",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.package = self.part_list.AppendTextColumn(
-            u"Package",
+            "Package",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.joints = self.part_list.AppendTextColumn(
-            u"Joints",
+            "Joints",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.type = self.part_list.AppendTextColumn(
-            u"Type",
+            "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=80,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.manufacturer = self.part_list.AppendTextColumn(
-            u"Manufacturer",
+            "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.decription = self.part_list.AppendTextColumn(
-            u"Description",
+            "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=300,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.price = self.part_list.AppendTextColumn(
-            u"Price",
+            "Price",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.stock = self.part_list.AppendTextColumn(
-            u"Stock",
+            "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_CENTER,
@@ -511,7 +511,7 @@ class PartSelectorDialog(wx.Dialog):
         # ---------------------------------------------------------------------
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         self.select_part_button = wx.Button(
-            self, wx.ID_ANY, u"Select part", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Select part", wx.DefaultPosition, (150, -1), 0
         )
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         tool_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
