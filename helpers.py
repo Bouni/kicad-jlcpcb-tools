@@ -1,3 +1,4 @@
+import os
 import re
 
 THT = 0
@@ -5,6 +6,14 @@ SMD = 1
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
+
+
+def get_version_info():
+    """Get git short commit hash without haveing git installed."""
+    path, filename = os.path.split(os.path.abspath(__file__))
+    with open(os.path.join(path, ".git", "FETCH_HEAD")) as f:
+        v = f.read()
+    return v[:7]
 
 
 def get_footprint_keys(fp):
