@@ -1,8 +1,23 @@
+import re
+
 THT = 0
 SMD = 1
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
+
+
+def get_footprint_keys(fp):
+    """get keys from footprint for sorting."""
+    try:
+        package = str(fp.GetFPID().GetLibItemName())
+    except:
+        package = ""
+    try:
+        refrerence = int(re.search("\d+", fp.GetReference())[0])
+    except:
+        refrerence = 0
+    return (package, refrerence)
 
 
 def get_footprint_by_ref(board, ref):

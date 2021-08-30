@@ -17,6 +17,7 @@ from .helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_footprint_by_ref,
+    get_footprint_keys,
     set_exclude_from_bom,
     set_exclude_from_pos,
     toggle_exclude_from_bom,
@@ -224,10 +225,7 @@ class JLCBCBTools(wx.Dialog):
         self.board = GetBoard()
         self.footprints = sorted(
             self.board.GetFootprints(),
-            key=lambda fp: (
-                str(fp.GetFPID().GetLibItemName()),
-                int(re.search("\d+", fp.GetReference())[0]),
-            ),
+            key=get_footprint_keys,
         )
 
     def populate_footprint_list(self):
