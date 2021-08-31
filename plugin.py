@@ -18,9 +18,8 @@ from .helpers import (
     get_exclude_from_pos,
     get_footprint_by_ref,
     get_footprint_keys,
+    get_valid_footprints,
     get_version_info,
-    set_exclude_from_bom,
-    set_exclude_from_pos,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
@@ -224,7 +223,7 @@ class JLCBCBTools(wx.Dialog):
         """get all footprints from the board"""
         self.board = GetBoard()
         self.footprints = sorted(
-            self.board.GetFootprints(),
+            get_valid_footprints(self.board),
             key=get_footprint_keys,
         )
 
