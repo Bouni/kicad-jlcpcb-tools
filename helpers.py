@@ -9,11 +9,11 @@ NOT_IN_SCHEMATIC = 4
 
 
 def get_version_info():
-    """Get git short commit hash without haveing git installed."""
+    """Get version info"""
     path, filename = os.path.split(os.path.abspath(__file__))
-    with open(os.path.join(path, ".git", "FETCH_HEAD")) as f:
+    with open(os.path.join(path, "VERSION")) as f:
         v = f.read()
-    return v[:7]
+    return v
 
 
 def get_footprint_keys(fp):
