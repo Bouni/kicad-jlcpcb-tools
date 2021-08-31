@@ -51,7 +51,7 @@ class JLCBCBTools(wx.Dialog):
             self,
             parent,
             id=wx.ID_ANY,
-            title=f"JLCPCB Tools [{get_version_info()}]",
+            title=f"JLCPCB Tools [ Version: {get_version_info()} ]",
             pos=wx.DefaultPosition,
             size=wx.Size(906, 600),
             style=wx.DEFAULT_DIALOG_STYLE,
