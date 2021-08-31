@@ -16,6 +16,15 @@ def get_version_info():
     return v
 
 
+def get_valid_footprints(board):
+    """Get all footprints that have a vaild reference (drop all REF**)"""
+    footprints = []
+    for fp in board.GetFootprints():
+        if re.match(r"\w\d+", fp.GetReference()):
+            footprints.append(fp)
+    return footprints
+
+
 def get_footprint_keys(fp):
     """get keys from footprint for sorting."""
     try:
@@ -31,7 +40,7 @@ def get_footprint_keys(fp):
 
 def get_footprint_by_ref(board, ref):
     """get a footprint from the list of footprints by its Reference."""
-    for fp in board.GetFootprints():
+    for fp in get_valid_footprints(board):
         if str(fp.GetReference()) == ref:
             return fp
 

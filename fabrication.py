@@ -12,6 +12,7 @@ from .helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_footprint_by_ref,
+    get_valid_footprints,
     set_exclude_from_bom,
     set_exclude_from_pos,
 )
@@ -38,7 +39,7 @@ class JLCPCBFabrication:
     def load_part_assigments(self):
         # Read all footprints and their maybe set LCSC property
         self.parts = {}
-        for fp in self.board.GetFootprints():
+        for fp in get_valid_footprints(self.board):
             reference = fp.GetReference()
             lcsc = fp.GetProperties().get("LCSC", "")
             self.parts[reference] = {"lcsc": lcsc}
@@ -239,7 +240,7 @@ class JLCPCBFabrication:
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
             footprints = sorted(
-                self.board.GetFootprints(),
+                get_valid_footprints(self.board),
                 key=lambda fp: (
                     fp.GetValue(),
                     int(re.search("\d+", fp.GetReference())[0]),
@@ -271,7 +272,7 @@ class JLCPCBFabrication:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             footprints = {}
-            for footprint in self.board.GetFootprints():
+            for footprint in get_valid_footprints(self.board):
                 if get_exclude_from_bom(footprint):
                     self.logger.info(
                         f"{footprint.GetReference()} is marked as 'exclude from BOM' and is skipped!"
