@@ -11,8 +11,8 @@ NOT_IN_SCHEMATIC = 4
 def get_version_info():
     """Get version info"""
     path, filename = os.path.split(os.path.abspath(__file__))
-    with open(os.path.join(path, "VERSION")) as f:
-        v = f.read()
+    with open(os.path.join(path, ".git", "FETCH_HEAD")) as f:
+        v = f.read()[:7]
     return v
 
 
