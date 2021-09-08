@@ -72,7 +72,7 @@ class JLCPCBLibrary:
         data = []
         with pd.read_csv(
             self.csv,
-            encoding="iso-8859-1",
+            encoding="gbk",
             header=0,
             names=[
                 "LCSC_Part",
