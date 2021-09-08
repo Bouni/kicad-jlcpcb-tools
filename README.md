@@ -1,5 +1,7 @@
 # KiCAD JLCPCB tools
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/I3I364QTM)
+
 Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 
 - Gerber files
