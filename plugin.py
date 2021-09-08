@@ -174,6 +174,11 @@ class JLCBCBTools(wx.Dialog):
         )
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         tool_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
+        self.remove_part_button = wx.Button(
+            self, wx.ID_ANY, "Remove part", wx.DefaultPosition, (150, -1), 0
+        )
+        self.remove_part_button.Bind(wx.EVT_BUTTON, self.remove_part)
+        tool_sizer.Add(self.remove_part_button, 0, wx.ALL, 5)
         self.toggle_bom_cpl_button = wx.Button(
             self, wx.ID_ANY, "Toggle BOM/CPL", wx.DefaultPosition, (150, -1), 0
         )
@@ -286,11 +291,19 @@ class JLCBCBTools(wx.Dialog):
             for item in self.footprint_list.GetSelections():
                 row = self.footprint_list.ItemToRow(item)
                 ref = self.footprint_list.GetTextValue(row, 0)
-                fp = get_footprint_by_ref(self.board, ref)
                 self.fabrication.parts[ref]["lcsc"] = str(dialog.selection)
             self.populate_footprint_list()
             self.fabrication.save_part_assignments()
         dialog.Destroy()
+
+    def remove_part(self, e):
+        """Remove an assigned a LCSC Part number to a footprint."""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            ref = self.footprint_list.GetTextValue(row, 0)
+            self.fabrication.parts[ref]["lcsc"] = ""
+            self.populate_footprint_list()
+            self.fabrication.save_part_assignments()
 
     def generate_fabrication_data(self, e):
         """Generate Fabrication data."""
