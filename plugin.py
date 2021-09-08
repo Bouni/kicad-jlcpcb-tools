@@ -112,7 +112,7 @@ class JLCBCBTools(wx.Dialog):
         self.download_button.Bind(wx.EVT_BUTTON, self.load_library)
         button_sizer.Add(self.download_button, 0, wx.ALL, 5)
 
-        layout.Add(button_sizer, 1, wx.ALL | wx.EXPAND, 5)
+        layout.Add(button_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -169,7 +169,7 @@ class JLCBCBTools(wx.Dialog):
         )
         self.get_footprints()
         self.populate_footprint_list()
-        table_sizer.Add(self.footprint_list, 0, wx.ALL | wx.EXPAND, 5)
+        table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
         # ---------------------------------------------------------------------
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         self.select_part_button = wx.Button(
@@ -201,7 +201,7 @@ class JLCBCBTools(wx.Dialog):
         self.gauge.SetValue(0)
         self.gauge.SetMinSize(wx.Size(-1, 5))
 
-        layout.Add(table_sizer, 1, wx.ALL | wx.EXPAND, 5)
+        layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
 
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
