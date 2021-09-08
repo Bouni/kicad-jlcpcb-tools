@@ -11,6 +11,7 @@ import wx.dataview
 import wx.grid
 import wx.xrc
 from pcbnew import *
+from wx.core import ID_ANY
 
 from .fabrication import JLCPCBFabrication
 from .helpers import (
@@ -374,6 +375,7 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.search_button.Bind(wx.EVT_BUTTON, self.search)
         button_sizer.Add(self.search_button, 0, wx.ALL, 5)
+
         self.basic_checkbox = wx.CheckBox(
             self, wx.ID_ANY, "Basic", wx.DefaultPosition, wx.DefaultSize, 0
         )
@@ -444,6 +446,14 @@ class PartSelectorDialog(wx.Dialog):
         filter_sizer.Add(manufacturer_filter_layout, 1, wx.ALL, 5)
 
         layout.Add(filter_sizer, 1, wx.ALL, 5)
+
+        result_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.result_count = wx.StaticText(
+            self, wx.ID_ANY, "0 Results", wx.DefaultPosition, wx.DefaultSize
+        )
+        result_sizer.Add(self.result_count, 0, wx.LEFT, 5)
+        layout.Add(result_sizer, 1, wx.LEFT, 5)
+
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(wx.Size(-1, 400))
@@ -582,6 +592,7 @@ class PartSelectorDialog(wx.Dialog):
             packages,
             manufacturers,
         )
+        self.result_count.SetLabel(f"{len(result)} Results")
         self.populate_part_list(result)
 
     def populate_part_list(self, parts):
