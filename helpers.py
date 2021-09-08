@@ -14,7 +14,7 @@ def get_version_info():
     fetch_head = os.path.join(path, ".git", "FETCH_HEAD")
     if not os.path.isfile(fetch_head):
         return "unknown"
-    with open() as f:
+    with open(fetch_head) as f:
         v = f.read()[:7]
     return v
 
