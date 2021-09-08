@@ -506,7 +506,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
 
-        table_sizer.Add(self.part_list, 0, wx.ALL | wx.EXPAND, 5)
+        table_sizer.Add(self.part_list, 20, wx.ALL | wx.EXPAND, 5)
         # ---------------------------------------------------------------------
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         self.select_part_button = wx.Button(
@@ -517,7 +517,7 @@ class PartSelectorDialog(wx.Dialog):
         table_sizer.Add(tool_sizer, 1, wx.EXPAND, 5)
         # ---------------------------------------------------------------------
 
-        layout.Add(table_sizer, 1, wx.ALL | wx.EXPAND, 5)
+        layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
         self.Layout()
