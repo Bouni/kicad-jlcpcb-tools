@@ -1,11 +1,12 @@
 import csv
+import io
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 from zipfile import ZipFile
 
+import requests
 import wx
 import wx.dataview
 import wx.grid
@@ -537,6 +538,11 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         tool_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
+        self.part_details_button = wx.Button(
+            self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
+        )
+        self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
+        tool_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
         table_sizer.Add(tool_sizer, 1, wx.EXPAND, 5)
         # ---------------------------------------------------------------------
 
@@ -621,3 +627,98 @@ class PartSelectorDialog(wx.Dialog):
             return
         self.selection = self.part_list.GetTextValue(row, 0)
         self.EndModal(wx.ID_OK)
+
+    def get_part_details(self, e):
+        """Fetch part details from LCSC and show them in a modal."""
+        item = self.part_list.GetSelection()
+        row = self.part_list.ItemToRow(item)
+        if row == -1:
+            return
+        part = self.part_list.GetTextValue(row, 0)
+        dialog = PartDetailsDialog(self, part)
+        result = dialog.ShowModal()
+
+
+class PartDetailsDialog(wx.Dialog):
+    def __init__(self, parent, part):
+        self.part = part
+        wx.Dialog.__init__(
+            self,
+            parent,
+            id=wx.ID_ANY,
+            title="JLCPCB Part Details",
+            pos=wx.DefaultPosition,
+            size=wx.Size(800, 600),
+            style=wx.DEFAULT_DIALOG_STYLE,
+        )
+        self.logger = logging.getLogger(__name__)
+
+        layout = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.data_list = wx.dataview.DataViewListCtrl(
+            self,
+            wx.ID_ANY,
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            style=wx.dataview.DV_SINGLE,
+        )
+        self.property = self.data_list.AppendTextColumn(
+            "Property",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=200,
+            align=wx.ALIGN_LEFT,
+        )
+        self.value = self.data_list.AppendTextColumn(
+            "Value",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=300,
+            align=wx.ALIGN_LEFT,
+        )
+        layout.Add(self.data_list, 20, wx.ALL | wx.EXPAND, 5)
+
+        self.get_part_data()
+
+        if self.picture:
+            staticImage = wx.StaticBitmap(
+                self,
+                wx.ID_ANY,
+                self.get_scaled_bitmap(self.picture, 200, 200),
+                wx.DefaultPosition,
+                (200, 200),
+                0,
+            )
+            layout.Add(staticImage, 10, wx.ALL | wx.EXPAND, 5)
+        self.SetSizer(layout)
+        self.Layout()
+
+        self.Centre(wx.BOTH)
+
+    def get_scaled_bitmap(self, url, width, height):
+        content = requests.get(url).content
+        io_bytes = io.BytesIO(content)
+        image = wx.Image(io_bytes)
+        image = image.Scale(width, height, wx.IMAGE_QUALITY_HIGH)
+        result = wx.Bitmap(image)
+        return result
+
+    def get_part_data(self):
+        r = requests.get(
+            f"https://wwwapi.lcsc.com/v1/products/detail?product_code={self.part}"
+        )
+        parameters = {
+            "productCode": "Product Code",
+            "productModel": "Model",
+            "parentCatalogName": "Main Category",
+            "catalogName": "Sub Category",
+            "brandNameEn": "Brand",
+            "encapStandard": "Package",
+            "productUnit": "Unit",
+            "productWeight": "Weight",
+        }
+        data = r.json()
+        for k, v in parameters.items():
+            self.data_list.AppendItem([v, str(data[k])])
+        for item in data["paramVOList"]:
+            self.data_list.AppendItem([item["paramNameEn"], str(item["paramValueEn"])])
+
+        self.picture = data["productImages"][0]
