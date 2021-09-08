@@ -336,7 +336,7 @@ class PartSelectorDialog(wx.Dialog):
             title="JLCPCB Library",
             pos=wx.DefaultPosition,
             size=wx.Size(1206, 600),
-            style=wx.DEFAULT_DIALOG_STYLE,
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
         self.logger = logging.getLogger(__name__)
         self.library = parent.library
