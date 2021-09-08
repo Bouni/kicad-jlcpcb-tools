@@ -53,10 +53,7 @@ class JLCBCBTools(wx.Dialog):
             title=f"JLCPCB Tools [ Version: {get_version_info()} ]",
             pos=wx.DefaultPosition,
             size=wx.Size(906, 600),
-            style=wx.DEFAULT_DIALOG_STYLE
-            | wx.RESIZE_BORDER
-            | wx.MAXIMIZE_BOX
-            | wx.MINIMIZE_BOX,
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
         # ---------------------------------------------------------------------
