@@ -718,7 +718,7 @@ class PartDetailsDialog(wx.Dialog):
         data = r.json()
         for k, v in parameters.items():
             self.data_list.AppendItem([v, str(data[k])])
-        for item in data["paramVOList"]:
+        for item in data.get("paramVOList"):
             self.data_list.AppendItem([item["paramNameEn"], str(item["paramValueEn"])])
 
         self.picture = data["productImages"][0]
