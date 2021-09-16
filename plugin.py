@@ -129,42 +129,48 @@ class JLCBCBTools(wx.Dialog):
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.value = self.footprint_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=200,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=200,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.bom = self.footprint_list.AppendTextColumn(
             "in BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=60,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.cpl = self.footprint_list.AppendTextColumn(
             "in CPL",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=60,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.get_footprints()
         self.populate_footprint_list()
@@ -196,6 +202,11 @@ class JLCBCBTools(wx.Dialog):
         )
         self.toggle_cpl_button.Bind(wx.EVT_BUTTON, self.toogle_cpl)
         tool_sizer.Add(self.toggle_cpl_button, 0, wx.ALL, 5)
+        self.part_details_button = wx.Button(
+            self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
+        )
+        self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
+        tool_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
         table_sizer.Add(tool_sizer, 1, wx.EXPAND, 5)
         # ---------------------------------------------------------------------
 
@@ -319,6 +330,17 @@ class JLCBCBTools(wx.Dialog):
         self.fabrication.zip_gerber_excellon()
         self.fabrication.generate_cpl()
         self.fabrication.generate_bom()
+
+    def get_part_details(self, e):
+        """Fetch part details from LCSC and show them in a modal."""
+        item = self.footprint_list.GetSelection()
+        row = self.footprint_list.ItemToRow(item)
+        if row == -1:
+            return
+        part = self.footprint_list.GetTextValue(row, 3)
+        if part is not "":
+            dialog = PartDetailsDialog(self, part)
+            result = dialog.ShowModal()
 
     def init_logger(self):
         """Initialize logger to log into textbox"""
@@ -471,63 +493,72 @@ class PartSelectorDialog(wx.Dialog):
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.number = self.part_list.AppendTextColumn(
             "MFR Number",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.package = self.part_list.AppendTextColumn(
             "Package",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.joints = self.part_list.AppendTextColumn(
             "Joints",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.type = self.part_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=80,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.manufacturer = self.part_list.AppendTextColumn(
             "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.decription = self.part_list.AppendTextColumn(
             "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=300,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.price = self.part_list.AppendTextColumn(
             "Price",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         self.stock = self.part_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
 
         table_sizer.Add(self.part_list, 20, wx.ALL | wx.EXPAND, 5)
@@ -718,7 +749,9 @@ class PartDetailsDialog(wx.Dialog):
         data = r.json()
         for k, v in parameters.items():
             self.data_list.AppendItem([v, str(data[k])])
-        for item in data.get("paramVOList"):
-            self.data_list.AppendItem([item["paramNameEn"], str(item["paramValueEn"])])
-
+        if data.get("paramVOList"):
+            for item in data.get("paramVOList", []):
+                self.data_list.AppendItem(
+                    [item["paramNameEn"], str(item["paramValueEn"])]
+                )
         self.picture = data["productImages"][0]
