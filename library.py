@@ -120,8 +120,8 @@ class JLCPCBLibrary:
         manufacturers=[],
     ):
         """Search library for passed on criteria"""
-        if len(keyword) < 3:
-            return []
+        if len(keyword) < 1:
+            return None
         query = [
             f"(LCSC_Part.str.contains('{keyword}'))",
             f"(First_Category.str.contains('{keyword}'))",
