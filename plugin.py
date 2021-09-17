@@ -635,6 +635,8 @@ class PartSelectorDialog(wx.Dialog):
     def populate_part_list(self, parts):
         """Populate the list with the result of the search."""
         self.part_list.DeleteAllItems()
+        if parts is None:
+            return
         for index, part in parts.iterrows():
             self.part_list.AppendItem(
                 [
