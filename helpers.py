@@ -23,7 +23,7 @@ def get_valid_footprints(board):
     """Get all footprints that have a vaild reference (drop all REF**)"""
     footprints = []
     for fp in board.GetFootprints():
-        if re.match(r"\w\d+", fp.GetReference()):
+        if re.match(r"\w+\d+", fp.GetReference()):
             footprints.append(fp)
     return footprints
 
