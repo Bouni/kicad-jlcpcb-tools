@@ -1,34 +1,20 @@
-import csv
 import locale
 import logging
 import os
 import time
 from pathlib import Path
-
-# Hack to avoid wx + pandas error "ValueError: unknown locale: en-GB"
-try:
-    locale.setlocale(locale.LC_ALL, "en")
-except:
-    pass
-# import pandas, install it if not installed and import afterwards
-try:
-    import pandas as pd
-except ImportError:
-    import subprocess
-    import sys
-
-    subprocess.check_call(["python", "-m", "pip", "install", "pandas"])
-    import pandas as pd
-
 import requests
-
+import sqlite3
+import subprocess
 
 class JLCPCBLibrary:
+    CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
+
     def __init__(self, parent):
         self.parent = parent
         self.create_folders()
         self.csv = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
-        self.df = None
+        self.db = os.path.join(self.xlsdir, "jlcpcb_parts.db")
         self.loaded = False
         self.logger = logging.getLogger(__name__)
 
@@ -44,12 +30,19 @@ class JLCPCBLibrary:
     def update_progress_gauge(self, value=None):
         self.parent.gauge.SetValue(value)
 
+    def need_download(self):
+        """Check if we need to re-download the CSV file and convert to DB"""
+        if not os.path.isfile(self.db) or not os.path.isfile(self.csv) or \
+          os.path.getmtime(self.csv) > os.path.getmtime(self.db):
+            return True
+        # Should check the timestamp of the URL but that is non-trivial
+        return False
+
     def download(self):
-        """Download CSV from JLCPCB"""
-        self.logger.info("Start downloading library")
-        CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
+        """Download CSV from JLCPCB and convert to sqlite3 DB"""
+        self.logger.info("Starting download of library from %s to %s", self.CSV_URL, self.csv)
         with open(self.csv, "wb") as csv:
-            r = requests.get(CSV_URL, allow_redirects=True, stream=True)
+            r = requests.get(self.CSV_URL, allow_redirects=True, stream=True)
             total_length = r.headers.get("content-length")
             if total_length is None:  # no content length header
                 csv.write(r.content)
@@ -62,53 +55,38 @@ class JLCPCBLibrary:
                     csv.write(data)
         self.update_progress_gauge(0)
 
+        # Import into DB, need to use iconv to convert to UTF-8 or later queries will fail
+        # Nuke stderr because sqlite doesn't that each line ends with a comma
+        try:
+            os.unlink(self.db)
+        except FileNotFoundError:
+            pass
+        subprocess.check_call(['sqlite3', self.db, '-cmd', '.import --csv "|iconv -f gbk -t UTF-8 %s" jlcpcb_parts' % (self.csv)],
+                                  stdin = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
+        self.logger.info(f"Converted into %s", self.db)
+
     def load(self):
-        """Load JLCPCB library data from CSV inro pandas data frame"""
-        chunksize = 4096
-        rows = 0
-        with open(self.csv, encoding="gbk") as csvfile:
-            rows = len(csvfile.readlines())
-        self.setup_progress_gauge(rows)
-        data = []
-        with pd.read_csv(
-            self.csv,
-            encoding="gbk",
-            header=0,
-            names=[
-                "LCSC_Part",
-                "First_Category",
-                "Second_Category",
-                "MFR_Part",
-                "Package",
-                "Solder_Joint",
-                "Manufacturer",
-                "Library_Type",
-                "Description",
-                "Datasheet",
-                "Price",
-                "Stock",
-            ],
-            index_col=False,
-            chunksize=chunksize,
-        ) as reader:
-            progress = 0
-            for chunk in reader:
-                progress += chunksize
-                self.update_progress_gauge(progress)
-                data.append(chunk)
-            self.update_progress_gauge(0)
-            self.df = pd.concat(data, sort=False)
-            self.partcount = len(self.df)
-            self.logger.info(f"Loaded Library with {self.partcount} parts")
-            self.loaded = True
+        """Connect to JLCPCB library DB"""
+        self.logger.info(f"Loading %s", self.db)
+
+        self.dbh = sqlite3.connect(self.db)
+        c = self.dbh.cursor()
+        c.execute('SELECT COUNT(*) from jlcpcb_parts')
+        self.partcount = c.fetchone()[0]
+        self.logger.info(f"Loaded Library with {self.partcount} parts")
+        self.loaded = True
 
     def get_packages(self):
         """Get all distinct packages from the library"""
-        return [str(pkg) for pkg in self.df["Package"].unique()]
+        c = self.dbh.cursor()
+        c.execute('SELECT DISTINCT Package from jlcpcb_parts')
+        return sorted([r[0] for r in c])
 
     def get_manufacturers(self):
         """Get all distinct manufacturers from the library"""
-        return [str(mfr) for mfr in self.df["Manufacturer"].unique()]
+        c = self.dbh.cursor()
+        c.execute('SELECT DISTINCT Manufacturer from jlcpcb_parts')
+        return sorted([r[0] for r in c])
 
     def search(
         self,
@@ -122,26 +100,34 @@ class JLCPCBLibrary:
         """Search library for passed on criteria"""
         if len(keyword) < 1:
             return None
-        query = [
-            f"(LCSC_Part.str.contains('{keyword}'))",
-            f"(First_Category.str.contains('{keyword}'))",
-            f"(Second_Category.str.contains('{keyword}'))",
-            f"(MFR_Part.str.contains('{keyword}'))",
-            f"(Description.str.contains('{keyword}'))",
-        ]
-        df = self.df
-        types = []
+        kw = '%' + keyword + '%'
+        query = '''
+SELECT "LCSC Part", "MFR.Part", "Package", "Solder Joint", "Library Type", "Manufacturer", "Description", "Price", "Stock" FROM jlcpcb_parts WHERE
+        ( "LCSC Part" LIKE ? OR
+          "First Category" LIKE ? OR
+          "Second Category" LIKE ? OR
+          "MFR.Part" LIKE ? OR "Description" LIKE ? )'''
+        qargs = [kw, kw, kw, kw, kw]
+
+        ltypes = []
         if basic:
-            types.append("Basic")
+            ltypes.append('"Basic"')
         if extended:
-            types.append("Extended")
-        df = df[df.Library_Type.isin(types)]
+            ltypes.append('"Extended"')
+        if ltypes:
+            query += ' AND "Library Type" IN (%s)' % (','.join(ltypes))
         if assert_stock:
-            df = df[df.Stock > 0]
+            query += ' AND "Stock" > 0'
         if packages:
-            df = df[df.Package.isin(packages)]
+            query += ' AND "Package" IN (%s)' % (','.join(['"' + p + '"' for p in packages]))
         if manufacturers:
-            df = df[df.Manufacturer.isin(manufacturers)]
-        query = " | ".join(query)
-        result = df[df.eval(query)]
-        return result
+            query += ' AND "Manufacturer" IN (%s)' % (','.join(['"' + p + '"' for p in manufacturers]))
+
+        c = self.dbh.cursor()
+        try:
+            c.execute(query, qargs)
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError) as e:
+            self.logger.error('Query failed: %s', str(e))
+
+        res = c.fetchall()
+        return res
