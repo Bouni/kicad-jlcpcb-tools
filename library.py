@@ -7,6 +7,7 @@ import os.path
 import time
 from pathlib import Path
 import requests
+import shlex
 import sqlite3
 import subprocess
 
@@ -126,16 +127,31 @@ class JLCPCBLibrary:
         manufacturers=[],
     ):
         """Search library for passed on criteria"""
+
         if len(keyword) < 1:
-            return None
-        kw = '%' + keyword + '%'
-        query = '''
-SELECT "LCSC Part", "MFR.Part", "Package", "Solder Joint", "Library Type", "Manufacturer", "Description", "Price", "Stock" FROM jlcpcb_parts WHERE
-        ( "LCSC Part" LIKE ? OR
-          "First Category" LIKE ? OR
-          "Second Category" LIKE ? OR
-          "MFR.Part" LIKE ? OR "Description" LIKE ? )'''
-        qargs = [kw, kw, kw, kw, kw]
+            return []
+
+        # Split keyword like shell would (so we can quote spaces etc)
+        try:
+            kws = shlex.split(keyword)
+        except ValueError as e:
+            self.logger.error("Can't split keyword: %s", str(e))
+            return []
+
+        query = 'SELECT "LCSC Part", "MFR.Part", "Package", "Solder Joint", "Library Type", "Manufacturer", "Description", "Price", "Stock" FROM jlcpcb_parts WHERE'
+
+        # Keywords can be in any field but all keywords must be present
+        kwq = []
+        qargs = []
+        for _kw in kws:
+            kw = '%' + _kw + '%'
+            kwq.append( ''' ("LCSC Part" LIKE ? OR
+                             "First Category" LIKE ? OR
+                             "Second Category" LIKE ? OR
+                             "MFR.Part" LIKE ? OR
+                             "Description" LIKE ? )''')
+            qargs.extend([kw, kw, kw, kw, kw])
+        query += ' AND '.join(kwq)
 
         ltypes = []
         if basic:
