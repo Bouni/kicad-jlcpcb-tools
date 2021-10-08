@@ -15,6 +15,8 @@ Furthermore it lets you search the JLCPCB parts database and assign parts direct
 
 ![The parts library window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_library.png)
 
+![The parts details dialog](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_details.png)
+
 ## Warning 🔥
 
 **This plugin is not yet very well tested and only works for KiCAD 5.99 aka nightly builds!**
@@ -42,6 +44,8 @@ You can easily toggle the `exclude from BOM` and `exclude from CPL` attributes o
 Select one or multiple footprints, click select part. In the upcoming modal dialog, search for parts, select the one of your choice and click select part.
 The LCSC number of your selection will then be assigned to the footprints.
 
+![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
+
 ### Generate fabrication data
 
 Generate all neccessary assambly files for your board with a simple click.
@@ -54,6 +58,8 @@ The zipfile is named `GERBER-<projectname>.zip`
 In the assembly folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
 
 Footprints are included into the BOM and CPL files accordning to their `exclude from BOM` and `exclude from CPL` attributes.
+
+![The fabrication files](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/fabrication_files.png)
 
 ## Footprint rotation correction
 
