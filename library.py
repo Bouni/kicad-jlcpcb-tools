@@ -66,7 +66,7 @@ class JLCPCBLibrary:
         """Load JLCPCB library data from CSV inro pandas data frame"""
         chunksize = 4096
         rows = 0
-        with open(self.csv) as csvfile:
+        with open(self.csv, encoding="gbk") as csvfile:
             rows = len(csvfile.readlines())
         self.setup_progress_gauge(rows)
         data = []
