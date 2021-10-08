@@ -230,7 +230,7 @@ class JLCBCBTools(wx.Dialog):
 
     def load_library(self, e=None):
         """Download and load library data if necessary or actively requested"""
-        if not os.path.isfile(self.library.csv) or e:
+        if self.library.need_download() or e:
             with wx.BusyInfo("Downloading library file, please wait ..."):
                 self.library.download()
         if not self.library.loaded or e:
@@ -338,7 +338,7 @@ class JLCBCBTools(wx.Dialog):
         if row == -1:
             return
         part = self.footprint_list.GetTextValue(row, 3)
-        if part is not "":
+        if part != "":
             dialog = PartDetailsDialog(self, part)
             result = dialog.ShowModal()
 
@@ -584,8 +584,6 @@ class PartSelectorDialog(wx.Dialog):
 
         self.Centre(wx.BOTH)
 
-        if not self.library.loaded:
-            self.load_library()
         self.package_filter_choices = self.library.get_packages()
         self.package_filter_list.Set(self.package_filter_choices)
         self.manufacturer_filter_choices = self.library.get_manufacturers()
@@ -637,20 +635,8 @@ class PartSelectorDialog(wx.Dialog):
         self.part_list.DeleteAllItems()
         if parts is None:
             return
-        for index, part in parts.iterrows():
-            self.part_list.AppendItem(
-                [
-                    str(part["LCSC_Part"]),
-                    str(part["MFR_Part"]),
-                    str(part["Package"]),
-                    str(part["Solder_Joint"]),
-                    str(part["Library_Type"]),
-                    str(part["Manufacturer"]),
-                    str(part["Description"]),
-                    str(part["Price"]),
-                    str(part["Stock"]),
-                ]
-            )
+        for p in parts:
+            self.part_list.AppendItem([str(c) for c in p])
 
     def select_part(self, e):
         """Save the selected part number and close the modal."""

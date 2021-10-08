@@ -1,34 +1,23 @@
 import csv
+import datetime
 import locale
 import logging
 import os
+import os.path
 import time
 from pathlib import Path
-
-# Hack to avoid wx + pandas error "ValueError: unknown locale: en-GB"
-try:
-    locale.setlocale(locale.LC_ALL, "en")
-except:
-    pass
-# import pandas, install it if not installed and import afterwards
-try:
-    import pandas as pd
-except ImportError:
-    import subprocess
-    import sys
-
-    subprocess.check_call(["python", "-m", "pip", "install", "pandas"])
-    import pandas as pd
-
 import requests
-
+import sqlite3
+import subprocess
 
 class JLCPCBLibrary:
+    CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
+
     def __init__(self, parent):
         self.parent = parent
         self.create_folders()
-        self.csv = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
-        self.df = None
+        self.csvfn = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
+        self.dbfn = os.path.join(self.xlsdir, "jlcpcb_parts.db")
         self.loaded = False
         self.logger = logging.getLogger(__name__)
 
@@ -44,71 +33,87 @@ class JLCPCBLibrary:
     def update_progress_gauge(self, value=None):
         self.parent.gauge.SetValue(value)
 
+    def need_download(self):
+        """Check if we need to re-download the CSV file and convert to DB"""
+        if not os.path.isfile(self.dbfn) or not os.path.isfile(self.csvfn) or \
+          os.path.getmtime(self.csvfn) > os.path.getmtime(self.dbfn):
+            return True
+        # Should check the timestamp of the URL but that is non-trivial
+        return False
+
     def download(self):
-        """Download CSV from JLCPCB"""
-        self.logger.info("Start downloading library")
-        CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
-        with open(self.csv, "wb") as csv:
-            r = requests.get(CSV_URL, allow_redirects=True, stream=True)
+        """Download CSV from JLCPCB and convert to sqlite3 DB"""
+        self.logger.info("Starting download of library from %s to %s", self.CSV_URL, self.csvfn)
+        with open(self.csvfn, "wb") as csvf:
+            r = requests.get(self.CSV_URL, allow_redirects=True, stream=True)
             total_length = r.headers.get("content-length")
             if total_length is None:  # no content length header
-                csv.write(r.content)
+                csvf.write(r.content)
             else:
                 progress = 0
                 self.setup_progress_gauge(int(total_length))
                 for data in r.iter_content(chunk_size=4096):
                     progress += len(data)
                     self.update_progress_gauge(progress)
-                    csv.write(data)
+                    csvf.write(data)
         self.update_progress_gauge(0)
 
+        # Delete any existing DB
+        try:
+            os.unlink(self.dbfn)
+        except FileNotFoundError:
+            pass
+
+        dbh = sqlite3.connect(self.dbfn)
+        c = dbh.cursor()
+        csvr = csv.reader(open(self.csvfn, encoding = 'gbk'))
+        headers = next(csvr)
+        ncols = len(headers)
+        c.execute('CREATE TABLE jlcpcb_parts (' + ','.join(['"' + h + '"' for h in headers]) + ')')
+
+        # Create query string
+        q = 'INSERT INTO jlcpcb_parts VALUES (' + ','.join(['?'] * ncols) + ')'
+
+        then = datetime.datetime.now()
+        c.execute('BEGIN TRANSACTION')
+        buf = []
+        count = 0
+        chunks = 1000
+        for row in csvr:
+            count += 1
+            if count % chunks == 0:
+                c.executemany(q, buf)
+                buf = []
+            else:
+                buf.append(row[:ncols])
+
+        c.execute('COMMIT')
+        dbh.close()
+        now = datetime.datetime.now()
+
+        self.logger.info(f"Converted into %s in %.3f seconds", os.path.basename(self.dbfn),
+                             (now - then).total_seconds())
+
     def load(self):
-        """Load JLCPCB library data from CSV inro pandas data frame"""
-        chunksize = 4096
-        rows = 0
-        with open(self.csv, encoding="gbk") as csvfile:
-            rows = len(csvfile.readlines())
-        self.setup_progress_gauge(rows)
-        data = []
-        with pd.read_csv(
-            self.csv,
-            encoding="gbk",
-            header=0,
-            names=[
-                "LCSC_Part",
-                "First_Category",
-                "Second_Category",
-                "MFR_Part",
-                "Package",
-                "Solder_Joint",
-                "Manufacturer",
-                "Library_Type",
-                "Description",
-                "Datasheet",
-                "Price",
-                "Stock",
-            ],
-            index_col=False,
-            chunksize=chunksize,
-        ) as reader:
-            progress = 0
-            for chunk in reader:
-                progress += chunksize
-                self.update_progress_gauge(progress)
-                data.append(chunk)
-            self.update_progress_gauge(0)
-            self.df = pd.concat(data, sort=False)
-            self.partcount = len(self.df)
-            self.logger.info(f"Loaded Library with {self.partcount} parts")
-            self.loaded = True
+        """Connect to JLCPCB library DB"""
+        self.dbh = sqlite3.connect(self.dbfn)
+        c = self.dbh.cursor()
+        c.execute('SELECT COUNT(*) from jlcpcb_parts')
+        self.partcount = c.fetchone()[0]
+        self.logger.info(f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn))
+        self.loaded = True
 
     def get_packages(self):
         """Get all distinct packages from the library"""
-        return [str(pkg) for pkg in self.df["Package"].unique()]
+        c = self.dbh.cursor()
+        c.execute('SELECT DISTINCT Package from jlcpcb_parts')
+        return sorted([r[0] for r in c])
 
     def get_manufacturers(self):
         """Get all distinct manufacturers from the library"""
-        return [str(mfr) for mfr in self.df["Manufacturer"].unique()]
+        c = self.dbh.cursor()
+        c.execute('SELECT DISTINCT Manufacturer from jlcpcb_parts')
+        return sorted([r[0] for r in c])
 
     def search(
         self,
@@ -122,26 +127,34 @@ class JLCPCBLibrary:
         """Search library for passed on criteria"""
         if len(keyword) < 1:
             return None
-        query = [
-            f"(LCSC_Part.str.contains('{keyword}'))",
-            f"(First_Category.str.contains('{keyword}'))",
-            f"(Second_Category.str.contains('{keyword}'))",
-            f"(MFR_Part.str.contains('{keyword}'))",
-            f"(Description.str.contains('{keyword}'))",
-        ]
-        df = self.df
-        types = []
+        kw = '%' + keyword + '%'
+        query = '''
+SELECT "LCSC Part", "MFR.Part", "Package", "Solder Joint", "Library Type", "Manufacturer", "Description", "Price", "Stock" FROM jlcpcb_parts WHERE
+        ( "LCSC Part" LIKE ? OR
+          "First Category" LIKE ? OR
+          "Second Category" LIKE ? OR
+          "MFR.Part" LIKE ? OR "Description" LIKE ? )'''
+        qargs = [kw, kw, kw, kw, kw]
+
+        ltypes = []
         if basic:
-            types.append("Basic")
+            ltypes.append('"Basic"')
         if extended:
-            types.append("Extended")
-        df = df[df.Library_Type.isin(types)]
+            ltypes.append('"Extended"')
+        if ltypes:
+            query += ' AND "Library Type" IN (%s)' % (','.join(ltypes))
         if assert_stock:
-            df = df[df.Stock > 0]
+            query += ' AND "Stock" > 0'
         if packages:
-            df = df[df.Package.isin(packages)]
+            query += ' AND "Package" IN (%s)' % (','.join(['"' + p + '"' for p in packages]))
         if manufacturers:
-            df = df[df.Manufacturer.isin(manufacturers)]
-        query = " | ".join(query)
-        result = df[df.eval(query)]
-        return result
+            query += ' AND "Manufacturer" IN (%s)' % (','.join(['"' + p + '"' for p in manufacturers]))
+
+        c = self.dbh.cursor()
+        try:
+            c.execute(query, qargs)
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError) as e:
+            self.logger.error('Query failed: %s', str(e))
+
+        res = c.fetchall()
+        return res
