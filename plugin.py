@@ -68,8 +68,7 @@ class JLCBCBTools(wx.Dialog):
             wx.TE_MULTILINE | wx.TE_READONLY,
         )
         self.logbox.SetMinSize(wx.Size(-1, 150))
-        sys.stdout = self.logbox  # redirect stdout = log textbox
-        self.init_logger()  # set logger to log to stdout = log textbox
+        self.init_logger()
 
         # ---------------------------------------------------------------------
         self.library = JLCPCBLibrary(self)
@@ -351,13 +350,19 @@ class JLCBCBTools(wx.Dialog):
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
 
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(logging.DEBUG)
+        # Log to stderr
+        handler1 = logging.StreamHandler(sys.stderr)
+        handler1.setLevel(logging.DEBUG)
+        # and to our GUI
+        handler2 = logging.StreamHandler(self.logbox)
+        handler2.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y.%m.%d %H:%M:%S"
         )
-        handler.setFormatter(formatter)
-        root.addHandler(handler)
+        handler1.setFormatter(formatter)
+        handler2.setFormatter(formatter)
+        root.addHandler(handler1)
+        root.addHandler(handler2)
         self.logger = logging.getLogger(__name__)
 
     def __del__(self):
