@@ -1,6 +1,9 @@
+import csv
+import datetime
 import locale
 import logging
 import os
+import os.path
 import time
 from pathlib import Path
 import requests
@@ -13,8 +16,8 @@ class JLCPCBLibrary:
     def __init__(self, parent):
         self.parent = parent
         self.create_folders()
-        self.csv = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
-        self.db = os.path.join(self.xlsdir, "jlcpcb_parts.db")
+        self.csvfn = os.path.join(self.xlsdir, "jlcpcb_parts.csv")
+        self.dbfn = os.path.join(self.xlsdir, "jlcpcb_parts.db")
         self.loaded = False
         self.logger = logging.getLogger(__name__)
 
@@ -32,48 +35,72 @@ class JLCPCBLibrary:
 
     def need_download(self):
         """Check if we need to re-download the CSV file and convert to DB"""
-        if not os.path.isfile(self.db) or not os.path.isfile(self.csv) or \
-          os.path.getmtime(self.csv) > os.path.getmtime(self.db):
+        if not os.path.isfile(self.dbfn) or not os.path.isfile(self.csvfn) or \
+          os.path.getmtime(self.csvfn) > os.path.getmtime(self.dbfn):
             return True
         # Should check the timestamp of the URL but that is non-trivial
         return False
 
     def download(self):
         """Download CSV from JLCPCB and convert to sqlite3 DB"""
-        self.logger.info("Starting download of library from %s to %s", self.CSV_URL, self.csv)
-        with open(self.csv, "wb") as csv:
+        self.logger.info("Starting download of library from %s to %s", self.CSV_URL, self.csvfn)
+        with open(self.csvfn, "wb") as csvf:
             r = requests.get(self.CSV_URL, allow_redirects=True, stream=True)
             total_length = r.headers.get("content-length")
             if total_length is None:  # no content length header
-                csv.write(r.content)
+                csvf.write(r.content)
             else:
                 progress = 0
                 self.setup_progress_gauge(int(total_length))
                 for data in r.iter_content(chunk_size=4096):
                     progress += len(data)
                     self.update_progress_gauge(progress)
-                    csv.write(data)
+                    csvf.write(data)
         self.update_progress_gauge(0)
 
-        # Import into DB, need to use iconv to convert to UTF-8 or later queries will fail
-        # Nuke stderr because sqlite doesn't that each line ends with a comma
+        # Delete any existing DB
         try:
-            os.unlink(self.db)
+            os.unlink(self.dbfn)
         except FileNotFoundError:
             pass
-        subprocess.check_call(['sqlite3', self.db, '-cmd', '.import --csv "|iconv -f gbk -t UTF-8 %s" jlcpcb_parts' % (self.csv)],
-                                  stdin = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-        self.logger.info(f"Converted into %s", self.db)
+
+        dbh = sqlite3.connect(self.dbfn)
+        c = dbh.cursor()
+        csvr = csv.reader(open(self.csvfn, encoding = 'gbk'))
+        headers = next(csvr)
+        ncols = len(headers)
+        c.execute('CREATE TABLE jlcpcb_parts (' + ','.join(['"' + h + '"' for h in headers]) + ')')
+
+        # Create query string
+        q = 'INSERT INTO jlcpcb_parts VALUES (' + ','.join(['?'] * ncols) + ')'
+
+        then = datetime.datetime.now()
+        c.execute('BEGIN TRANSACTION')
+        buf = []
+        count = 0
+        chunks = 1000
+        for row in csvr:
+            count += 1
+            if count % chunks == 0:
+                c.executemany(q, buf)
+                buf = []
+            else:
+                buf.append(row[:ncols])
+
+        c.execute('COMMIT')
+        dbh.close()
+        now = datetime.datetime.now()
+
+        self.logger.info(f"Converted into %s in %.3f seconds", os.path.basename(self.dbfn),
+                             (now - then).total_seconds())
 
     def load(self):
         """Connect to JLCPCB library DB"""
-        self.logger.info(f"Loading %s", self.db)
-
-        self.dbh = sqlite3.connect(self.db)
+        self.dbh = sqlite3.connect(self.dbfn)
         c = self.dbh.cursor()
         c.execute('SELECT COUNT(*) from jlcpcb_parts')
         self.partcount = c.fetchone()[0]
-        self.logger.info(f"Loaded Library with {self.partcount} parts")
+        self.logger.info(f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn))
         self.loaded = True
 
     def get_packages(self):
