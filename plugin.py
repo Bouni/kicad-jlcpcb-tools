@@ -339,7 +339,7 @@ class JLCBCBTools(wx.Dialog):
         part = self.footprint_list.GetTextValue(row, 3)
         if part != "":
             dialog = PartDetailsDialog(self, part)
-            result = dialog.ShowModal()
+            dialog.Show()
 
     def init_logger(self):
         """Initialize logger to log into textbox"""
@@ -660,7 +660,7 @@ class PartSelectorDialog(wx.Dialog):
             return
         part = self.part_list.GetTextValue(row, 0)
         dialog = PartDetailsDialog(self, part)
-        result = dialog.ShowModal()
+        dialog.Show()
 
 
 class PartDetailsDialog(wx.Dialog):
