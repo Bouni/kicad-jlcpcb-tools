@@ -35,6 +35,10 @@ Checkout this screencast, it shows quickly how to use this plugin:
 
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
 
+## Keyboard shortcuts
+Windows can be closed with ctrl-w/ctrl-q/command-w/command-w (OS dependent) and escape.
+Pressing enter in the keyword text box will start a search.
+
 ### Toggle BOM / CPL attributes
 
 You can easily toggle the `exclude from BOM` and `exclude from CPL` attributes of one or multiple footprints.
