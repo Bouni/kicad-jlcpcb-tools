@@ -57,6 +57,17 @@ class JLCBCBTools(wx.Dialog):
             size=wx.Size(906, 600),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
+        # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
+        self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
+
+        quitid = wx.NewIdRef()
+        aTable = wx.AcceleratorTable([
+            (wx.ACCEL_CTRL, ord('W'), quitid),
+            (wx.ACCEL_CTRL, ord('Q'), quitid),
+            (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
+            ])
+        self.SetAcceleratorTable(aTable)
+        self.Bind(wx.EVT_MENU, self.do_quit, id = quitid)
 
         # ---------------------------------------------------------------------
         self.logbox = wx.TextCtrl(
@@ -227,6 +238,10 @@ class JLCBCBTools(wx.Dialog):
 
         wx.CallLater(0, self.load_library)
 
+    def do_quit(self, e):
+        self.Destroy()
+        self.EndModal(0)
+
     def load_library(self, e=None):
         """Download and load library data if necessary or actively requested"""
         if self.library.need_download() or e:
@@ -380,6 +395,19 @@ class PartSelectorDialog(wx.Dialog):
             size=wx.Size(1206, 600),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
+
+        # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
+        self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
+
+        quitid = wx.NewIdRef()
+        aTable = wx.AcceleratorTable([
+            (wx.ACCEL_CTRL, ord('W'), quitid),
+            (wx.ACCEL_CTRL, ord('Q'), quitid),
+            (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
+            ])
+        self.SetAcceleratorTable(aTable)
+        self.Bind(wx.EVT_MENU, self.do_quit, id = quitid)
+
         self.logger = logging.getLogger(__name__)
         self.library = parent.library
 
@@ -390,9 +418,12 @@ class PartSelectorDialog(wx.Dialog):
         # ---------------------------------------------------------------------
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.keyword = wx.TextCtrl(
-            self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), 0
+            self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), wx.TE_PROCESS_ENTER
         )
+        self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
         button_sizer.Add(self.keyword, 0, wx.ALL, 5)
+        self.keyword.SetFocus()
+
         self.search_button = wx.Button(
             self,
             wx.ID_ANY,
@@ -594,6 +625,10 @@ class PartSelectorDialog(wx.Dialog):
         self.manufacturer_filter_choices = self.library.get_manufacturers()
         self.manufacturer_filter_list.Set(self.manufacturer_filter_choices)
 
+    def do_quit(self, e):
+        self.Destroy()
+        self.EndModal(0)
+
     def OnPackageFilter(self, e):
         search = e.GetString().lower()
         choices = [c for c in self.package_filter_choices if search in c.lower()]
@@ -675,6 +710,17 @@ class PartDetailsDialog(wx.Dialog):
             size=wx.Size(800, 600),
             style=wx.DEFAULT_DIALOG_STYLE,
         )
+        # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
+        self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
+
+        quitid = wx.NewIdRef()
+        aTable = wx.AcceleratorTable([
+            (wx.ACCEL_CTRL, ord('W'), quitid),
+            (wx.ACCEL_CTRL, ord('Q'), quitid),
+            (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
+            ])
+        self.SetAcceleratorTable(aTable)
+        self.Bind(wx.EVT_MENU, self.do_quit, id = quitid)
         self.logger = logging.getLogger(__name__)
 
         layout = wx.BoxSizer(wx.HORIZONTAL)
@@ -716,6 +762,10 @@ class PartDetailsDialog(wx.Dialog):
         self.Layout()
 
         self.Centre(wx.BOTH)
+
+    def do_quit(self, e):
+        self.Destroy()
+        self.EndModal(0)
 
     def get_scaled_bitmap(self, url, width, height):
         content = requests.get(url).content
