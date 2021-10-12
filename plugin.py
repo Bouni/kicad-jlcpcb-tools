@@ -64,13 +64,15 @@ class JLCBCBTools(wx.Dialog):
         self.panel.Fit()
 
         quitid = wx.NewIdRef()
-        aTable = wx.AcceleratorTable([
-            (wx.ACCEL_CTRL, ord('W'), quitid),
-            (wx.ACCEL_CTRL, ord('Q'), quitid),
-            (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
-            ])
+        aTable = wx.AcceleratorTable(
+            [
+                (wx.ACCEL_CTRL, ord("W"), quitid),
+                (wx.ACCEL_CTRL, ord("Q"), quitid),
+                (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
+            ]
+        )
         self.SetAcceleratorTable(aTable)
-        self.Bind(wx.EVT_MENU, self.do_quit, id = quitid)
+        self.Bind(wx.EVT_MENU, self.do_quit, id=quitid)
 
         # ---------------------------------------------------------------------
         self.logbox = wx.TextCtrl(
@@ -120,11 +122,12 @@ class JLCBCBTools(wx.Dialog):
         self.library_desc = wx.StaticText(
             self,
             wx.ID_ANY,
-            '',
+            "",
             wx.DefaultPosition,
             wx.DefaultSize,
             wx.ALIGN_LEFT,
-            'library_desc')
+            "library_desc",
+        )
         button_sizer.Add(self.library_desc, 0, wx.ALL, 5)
         # ---------------------------------------------------------------------
         button_sizer.Add(self.library_desc, 1, wx.TOP | wx.EXPAND, 10)
@@ -276,7 +279,7 @@ class JLCBCBTools(wx.Dialog):
             self.do_load()
 
     def update_gauge(self, evt):
-        '''Update the progress gauge and handle thread completion'''
+        """Update the progress gauge and handle thread completion"""
         if self.dl_thread.is_alive():
             if self.dl_thread.pos:
                 self.gauge.SetRange(1000)
@@ -287,8 +290,11 @@ class JLCBCBTools(wx.Dialog):
             self.timer.Stop()
             self.dl_thread = None
             now = datetime.datetime.now()
-            self.logger.info('Downloaded into %s in %.3f seconds', os.path.basename(self.library.dbfn),
-                                (now - self.then).total_seconds())
+            self.logger.info(
+                "Downloaded into %s in %.3f seconds",
+                os.path.basename(self.library.dbfn),
+                (now - self.then).total_seconds(),
+            )
             self.gauge.SetRange(1000)
             self.gauge.SetValue(0)
             self.do_load()
@@ -296,16 +302,24 @@ class JLCBCBTools(wx.Dialog):
 
     def do_load(self):
         self.library.load()
-        fntxt = ''
+        fntxt = ""
         if self.library.filename:
-            fntxt = self.library.filename + ' with '
-        self.library_desc.SetLabel(fntxt + '%d parts' % (self.library.partcount))
+            fntxt = self.library.filename + " with "
+        self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
 
     def enable_buttons(self, state):
-        '''Control state of all the buttons'''
-        for b in [self.generate_button, self.download_button, self.select_part_button, self.remove_part_button,
-                      self.toggle_bom_cpl_button, self.toggle_bom_button, self.toggle_cpl_button,
-                      self.part_details_button, self.layer_selection]:
+        """Control state of all the buttons"""
+        for b in [
+            self.generate_button,
+            self.download_button,
+            self.select_part_button,
+            self.remove_part_button,
+            self.toggle_bom_cpl_button,
+            self.toggle_bom_button,
+            self.toggle_cpl_button,
+            self.part_details_button,
+            self.layer_selection,
+        ]:
             if state:
                 b.Enable()
             else:
@@ -461,13 +475,15 @@ class PartSelectorDialog(wx.Dialog):
         self.panel.Fit()
 
         quitid = wx.NewIdRef()
-        aTable = wx.AcceleratorTable([
-            (wx.ACCEL_CTRL, ord('W'), quitid),
-            (wx.ACCEL_CTRL, ord('Q'), quitid),
-            (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
-            ])
+        aTable = wx.AcceleratorTable(
+            [
+                (wx.ACCEL_CTRL, ord("W"), quitid),
+                (wx.ACCEL_CTRL, ord("Q"), quitid),
+                (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
+            ]
+        )
         self.SetAcceleratorTable(aTable)
-        self.Bind(wx.EVT_MENU, self.do_quit, id = quitid)
+        self.Bind(wx.EVT_MENU, self.do_quit, id=quitid)
 
         self.logger = logging.getLogger(__name__)
         self.library = parent.library
@@ -479,7 +495,12 @@ class PartSelectorDialog(wx.Dialog):
         # ---------------------------------------------------------------------
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.keyword = wx.TextCtrl(
-            self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), wx.TE_PROCESS_ENTER
+            self,
+            wx.ID_ANY,
+            wx.EmptyString,
+            wx.DefaultPosition,
+            (300, -1),
+            wx.TE_PROCESS_ENTER,
         )
         self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
         button_sizer.Add(self.keyword, 0, wx.ALL, 5)
@@ -776,13 +797,15 @@ class PartDetailsDialog(wx.Dialog):
         self.panel.Fit()
 
         quitid = wx.NewIdRef()
-        aTable = wx.AcceleratorTable([
-            (wx.ACCEL_CTRL, ord('W'), quitid),
-            (wx.ACCEL_CTRL, ord('Q'), quitid),
-            (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
-            ])
+        aTable = wx.AcceleratorTable(
+            [
+                (wx.ACCEL_CTRL, ord("W"), quitid),
+                (wx.ACCEL_CTRL, ord("Q"), quitid),
+                (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
+            ]
+        )
         self.SetAcceleratorTable(aTable)
-        self.Bind(wx.EVT_MENU, self.do_quit, id = quitid)
+        self.Bind(wx.EVT_MENU, self.do_quit, id=quitid)
         self.logger = logging.getLogger(__name__)
 
         layout = wx.BoxSizer(wx.HORIZONTAL)
@@ -833,7 +856,7 @@ class PartDetailsDialog(wx.Dialog):
                 wx.DefaultPosition,
                 wx.DefaultSize,
                 0,
-                )
+            )
             openpdf.Bind(wx.EVT_BUTTON, self.openpdf)
             rhslayout.Add(openpdf, 10, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
