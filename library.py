@@ -143,8 +143,6 @@ class JLCPCBLibrary:
             )
 
         c = self.dbh.cursor()
-        # self.logger.info('Query: %s', query)
-        # self.logger.info('Args: %s', qargs)
         try:
             c.execute(query, qargs)
         except (sqlite3.ProgrammingError, sqlite3.OperationalError) as e:
