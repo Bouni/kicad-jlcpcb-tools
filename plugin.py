@@ -259,10 +259,6 @@ class JLCBCBTools(wx.Dialog):
         self.Destroy()
         self.EndModal(0)
 
-    def do_quit(self, e):
-        self.Destroy()
-        self.EndModal(0)
-
     def load_library(self, e=None):
         """Download and load library data if necessary or actively requested"""
         if self.dl_thread:
