@@ -852,7 +852,8 @@ class PartDetailsDialog(wx.Dialog):
                 0,
             )
             openpdf.Bind(wx.EVT_BUTTON, self.openpdf)
-            rhslayout.Add(openpdf, 10, wx.ALL | wx.EXPAND, 5)
+            rhslayout.AddStretchSpacer(50)
+            rhslayout.Add(openpdf, 10, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
 
