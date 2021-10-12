@@ -1,16 +1,14 @@
 import csv
-import locale
 import logging
 import os
 import os.path
-import time
-from pathlib import Path
 import re
-import requests
 import shlex
 import sqlite3
-import subprocess
 import threading
+from pathlib import Path
+
+import requests
 
 
 class JLCPCBLibrary:
