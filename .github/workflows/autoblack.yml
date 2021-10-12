@@ -11,10 +11,9 @@ jobs:
           python-version: 3.9
       - name: Install Black
         run: pip install black
-      - name: Run black --check .
-        run: black --check .
-      - name: If needed, commit black changes to the pull request
-        if: ${{ failure() }}
+      - name: Run black .
+        run: black .
+      - name: Commit black changes to the pull request
         uses: EndBug/add-and-commit@v7
         with:
           default_author: github_actions
