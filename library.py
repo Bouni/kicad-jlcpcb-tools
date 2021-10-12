@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import threading
 
+
 class JLCPCBLibrary:
     CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
 
@@ -40,7 +41,7 @@ class JLCPCBLibrary:
                 return False
 
     def download(self):
-        '''Create and return CSV downloader thread'''
+        """Create and return CSV downloader thread"""
         return CSVDownloader(self.dbfn, self.CSV_URL)
 
     def load(self):
@@ -48,18 +49,20 @@ class JLCPCBLibrary:
         self.dbh = sqlite3.connect(self.dbfn)
 
         self.partcount, self.filename, self.size = self.get_info(self.dbh)
-        self.logger.info(f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn))
+        self.logger.info(
+            f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn)
+        )
         self.loaded = True
 
-    def get_info(self, dbh = None):
-        '''Get info, does not use self.dbh because it can be called before load'''
+    def get_info(self, dbh=None):
+        """Get info, does not use self.dbh because it can be called before load"""
         try:
             if not dbh:
                 dbh = sqlite3.connect(self.dbfn)
             c = dbh.cursor()
-            c.execute('SELECT COUNT(*) FROM jlcpcb_parts')
+            c.execute("SELECT COUNT(*) FROM jlcpcb_parts")
             partcount = c.fetchone()[0]
-            c.execute('SELECT filename, size FROM info')
+            c.execute("SELECT filename, size FROM info")
             res = c.fetchone()
             if res:
                 filename, size = res
@@ -74,13 +77,13 @@ class JLCPCBLibrary:
     def get_packages(self):
         """Get all distinct packages from the library"""
         c = self.dbh.cursor()
-        c.execute('SELECT DISTINCT Package from jlcpcb_parts')
+        c.execute("SELECT DISTINCT Package from jlcpcb_parts")
         return sorted([r[0] for r in c])
 
     def get_manufacturers(self):
         """Get all distinct manufacturers from the library"""
         c = self.dbh.cursor()
-        c.execute('SELECT DISTINCT Manufacturer from jlcpcb_parts')
+        c.execute("SELECT DISTINCT Manufacturer from jlcpcb_parts")
         return sorted([r[0] for r in c])
 
     def search(
@@ -110,14 +113,16 @@ class JLCPCBLibrary:
         kwq = []
         qargs = []
         for _kw in kws:
-            kw = '%' + _kw + '%'
-            kwq.append( ''' ("LCSC Part" LIKE ? OR
+            kw = "%" + _kw + "%"
+            kwq.append(
+                """ ("LCSC Part" LIKE ? OR
                              "First Category" LIKE ? OR
                              "Second Category" LIKE ? OR
                              "MFR.Part" LIKE ? OR
-                             "Description" LIKE ? )''')
+                             "Description" LIKE ? )"""
+            )
             qargs.extend([kw, kw, kw, kw, kw])
-        query += ' AND '.join(kwq)
+        query += " AND ".join(kwq)
 
         ltypes = []
         if basic:
@@ -125,27 +130,33 @@ class JLCPCBLibrary:
         if extended:
             ltypes.append('"Extended"')
         if ltypes:
-            query += ' AND "Library Type" IN (%s)' % (','.join(ltypes))
+            query += ' AND "Library Type" IN (%s)' % (",".join(ltypes))
         if assert_stock:
             query += ' AND "Stock" > 0'
         if packages:
-            query += ' AND "Package" IN (%s)' % (','.join(['"' + p + '"' for p in packages]))
+            query += ' AND "Package" IN (%s)' % (
+                ",".join(['"' + p + '"' for p in packages])
+            )
         if manufacturers:
-            query += ' AND "Manufacturer" IN (%s)' % (','.join(['"' + p + '"' for p in manufacturers]))
+            query += ' AND "Manufacturer" IN (%s)' % (
+                ",".join(['"' + p + '"' for p in manufacturers])
+            )
 
         c = self.dbh.cursor()
-        #self.logger.info('Query: %s', query)
-        #self.logger.info('Args: %s', qargs)
+        # self.logger.info('Query: %s', query)
+        # self.logger.info('Args: %s', qargs)
         try:
             c.execute(query, qargs)
         except (sqlite3.ProgrammingError, sqlite3.OperationalError) as e:
-            self.logger.error('Query failed: %s', str(e))
+            self.logger.error("Query failed: %s", str(e))
 
         res = c.fetchall()
         return res
 
+
 class CSVDownloader(threading.Thread):
-    '''CSV download and conversion thread'''
+    """CSV download and conversion thread"""
+
     def __init__(self, dbfn, url):
         threading.Thread.__init__(self)
         self.dbfn = dbfn
@@ -158,7 +169,7 @@ class CSVDownloader(threading.Thread):
         try:
             self.download()
         except Exception as e:
-            print('Failed ' + str(e))
+            print("Failed " + str(e))
             # Cleanup the probably broken database
             try:
                 os.unlink(self.dbfn)
@@ -175,26 +186,30 @@ class CSVDownloader(threading.Thread):
         dbh = sqlite3.connect(self.dbfn)
         c = dbh.cursor()
 
-        r = requests.get(self.url, allow_redirects = True, stream = True)
+        r = requests.get(self.url, allow_redirects=True, stream=True)
         # Check if we get the file size for progress metering
-        size = r.headers.get('Content-Length')
+        size = r.headers.get("Content-Length")
         if size:
             size = int(size)
             self.pos = 0
 
         # Decode body and feed into CSV parser
-        csvr = csv.reader(map(lambda x: x.decode('gbk'), r.raw))
+        csvr = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
 
         # Create tables
         headers = next(csvr)
         ncols = len(headers)
-        c.execute('CREATE TABLE jlcpcb_parts (' + ','.join(['"' + h + '"' for h in headers]) + ')')
-        c.execute('CREATE TABLE info (filename, size)')
+        c.execute(
+            "CREATE TABLE jlcpcb_parts ("
+            + ",".join(['"' + h + '"' for h in headers])
+            + ")"
+        )
+        c.execute("CREATE TABLE info (filename, size)")
 
         # Create query string
-        q = 'INSERT INTO jlcpcb_parts VALUES (' + ','.join(['?'] * ncols) + ')'
+        q = "INSERT INTO jlcpcb_parts VALUES (" + ",".join(["?"] * ncols) + ")"
 
-        c.execute('BEGIN TRANSACTION')
+        c.execute("BEGIN TRANSACTION")
         buf = []
         count = 0
         chunks = 1000
@@ -205,7 +220,7 @@ class CSVDownloader(threading.Thread):
             buf.append(row[:ncols])
             if count % chunks == 0:
                 if self.want_abort:
-                    raise Exception('Aborted')
+                    raise Exception("Aborted")
 
                 if size:
                     self.pos = r.raw.tell() / size
@@ -213,17 +228,17 @@ class CSVDownloader(threading.Thread):
                 buf = []
         # Flush any remaining rows
         if buf:
-                c.executemany(q, buf)
+            c.executemany(q, buf)
 
         dbh.commit()
 
         filename = None
-        contentdisp = r.headers.get('Content-Disposition')
+        contentdisp = r.headers.get("Content-Disposition")
         if contentdisp:
             m = re.findall("filename=(.+)", contentdisp)
             if m:
                 filename = m[0]
-        c.execute('INSERT INTO info VALUES(?, ?)', (filename, size))
+        c.execute("INSERT INTO info VALUES(?, ?)", (filename, size))
         dbh.commit()
         dbh.close()
 
