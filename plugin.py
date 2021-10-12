@@ -1,12 +1,9 @@
-import csv
 import datetime
 import io
 import logging
 import os
 import sys
-from pathlib import Path
 import webbrowser
-from zipfile import ZipFile
 
 import requests
 import wx
