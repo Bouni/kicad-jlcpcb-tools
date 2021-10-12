@@ -28,8 +28,6 @@ from .helpers import (
     toggle_exclude_from_pos,
 )
 from .library import JLCPCBLibrary
-
-
 class JLCPCBPlugin(ActionPlugin):
     def __init__(self):
         super(JLCPCBPlugin, self).__init__()
