@@ -1,9 +1,11 @@
 import csv
+import datetime
 import io
 import logging
 import os
 import sys
 from pathlib import Path
+import webbrowser
 from zipfile import ZipFile
 
 import requests
@@ -59,6 +61,7 @@ class JLCBCBTools(wx.Dialog):
         )
         # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
         self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
+        self.panel.Fit()
 
         quitid = wx.NewIdRef()
         aTable = wx.AcceleratorTable([
@@ -83,6 +86,7 @@ class JLCBCBTools(wx.Dialog):
 
         # ---------------------------------------------------------------------
         self.library = JLCPCBLibrary(self)
+        self.dl_thread = None
         self.fabrication = JLCPCBFabrication(self)
         # ---------------------------------------------------------------------
 
@@ -113,8 +117,17 @@ class JLCBCBTools(wx.Dialog):
         )
         self.layer_selection.SetSelection(0)
         button_sizer.Add(self.layer_selection, 0, wx.ALL, 5)
+        self.library_desc = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            '',
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            wx.ALIGN_LEFT,
+            'library_desc')
+        button_sizer.Add(self.library_desc, 0, wx.ALL, 5)
         # ---------------------------------------------------------------------
-        button_sizer.Add(wx.StaticText(self), wx.EXPAND)
+        button_sizer.Add(self.library_desc, 1, wx.TOP | wx.EXPAND, 10)
         self.download_button = wx.Button(
             self, wx.ID_ANY, "Update library", wx.DefaultPosition, wx.DefaultSize, 0
         )
@@ -125,7 +138,7 @@ class JLCBCBTools(wx.Dialog):
 
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(wx.Size(-1, 400))
+        table_sizer.SetMinSize(wx.Size(-1, 600))
         self.footprint_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
@@ -137,7 +150,7 @@ class JLCBCBTools(wx.Dialog):
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -153,7 +166,7 @@ class JLCBCBTools(wx.Dialog):
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=200,
+            width=300,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -161,7 +174,7 @@ class JLCBCBTools(wx.Dialog):
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=80,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -169,7 +182,7 @@ class JLCBCBTools(wx.Dialog):
         self.bom = self.footprint_list.AppendTextColumn(
             "in BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=60,
+            width=40,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -177,7 +190,7 @@ class JLCBCBTools(wx.Dialog):
         self.cpl = self.footprint_list.AppendTextColumn(
             "in CPL",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=60,
+            width=40,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -236,7 +249,12 @@ class JLCBCBTools(wx.Dialog):
 
         self.Centre(wx.BOTH)
 
-        wx.CallLater(0, self.load_library)
+        # Note: a delay of 0 doesn't work
+        wx.CallLater(1, self.load_library)
+
+    def do_quit(self, e):
+        self.Destroy()
+        self.EndModal(0)
 
     def do_quit(self, e):
         self.Destroy()
@@ -244,12 +262,54 @@ class JLCBCBTools(wx.Dialog):
 
     def load_library(self, e=None):
         """Download and load library data if necessary or actively requested"""
+        if self.dl_thread:
+            return
+
         if self.library.need_download() or e:
-            with wx.BusyInfo("Downloading library file, please wait ..."):
-                self.library.download()
-        if not self.library.loaded or e:
-            with wx.BusyInfo("Loading library data, please wait ..."):
-                self.library.load()
+            self.enable_buttons(False)
+            self.dl_thread = self.library.download()
+            self.timer = wx.Timer(self)
+            self.Bind(wx.EVT_TIMER, self.update_gauge, self.timer)
+            self.timer.Start(200)
+            self.then = datetime.datetime.now()
+        else:
+            self.do_load()
+
+    def update_gauge(self, evt):
+        '''Update the progress gauge and handle thread completion'''
+        if self.dl_thread.is_alive():
+            if self.dl_thread.pos:
+                self.gauge.SetRange(1000)
+                self.gauge.SetValue(self.dl_thread.pos * 1000)
+            else:
+                self.gauge.Pulse()
+        else:
+            self.timer.Stop()
+            self.dl_thread = None
+            now = datetime.datetime.now()
+            self.logger.info('Downloaded into %s in %.3f seconds', os.path.basename(self.library.dbfn),
+                                (now - self.then).total_seconds())
+            self.gauge.SetRange(1000)
+            self.gauge.SetValue(0)
+            self.do_load()
+            self.enable_buttons(True)
+
+    def do_load(self):
+        self.library.load()
+        fntxt = ''
+        if self.library.filename:
+            fntxt = self.library.filename + ' with '
+        self.library_desc.SetLabel(fntxt + '%d parts' % (self.library.partcount))
+
+    def enable_buttons(self, state):
+        '''Control state of all the buttons'''
+        for b in [self.generate_button, self.download_button, self.select_part_button, self.remove_part_button,
+                      self.toggle_bom_cpl_button, self.toggle_bom_button, self.toggle_cpl_button,
+                      self.part_details_button, self.layer_selection]:
+            if state:
+                b.Enable()
+            else:
+                b.Disable()
 
     def get_footprints(self):
         """get all footprints from the board"""
@@ -398,6 +458,7 @@ class PartSelectorDialog(wx.Dialog):
 
         # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
         self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
+        self.panel.Fit()
 
         quitid = wx.NewIdRef()
         aTable = wx.AcceleratorTable([
@@ -527,7 +588,7 @@ class PartSelectorDialog(wx.Dialog):
         self.reference = self.part_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=80,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -551,7 +612,7 @@ class PartSelectorDialog(wx.Dialog):
         self.joints = self.part_list.AppendTextColumn(
             "Joints",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=40,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -712,6 +773,7 @@ class PartDetailsDialog(wx.Dialog):
         )
         # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
         self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
+        self.panel.Fit()
 
         quitid = wx.NewIdRef()
         aTable = wx.AcceleratorTable([
@@ -732,6 +794,7 @@ class PartDetailsDialog(wx.Dialog):
             wx.DefaultSize,
             style=wx.dataview.DV_SINGLE,
         )
+
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
@@ -748,6 +811,9 @@ class PartDetailsDialog(wx.Dialog):
 
         self.get_part_data()
 
+        rhslayout = wx.BoxSizer(wx.VERTICAL)
+        layout.Add(rhslayout, 20, wx.ALL | wx.EXPAND, 5)
+
         if self.picture:
             staticImage = wx.StaticBitmap(
                 self,
@@ -757,7 +823,19 @@ class PartDetailsDialog(wx.Dialog):
                 (200, 200),
                 0,
             )
-            layout.Add(staticImage, 10, wx.ALL | wx.EXPAND, 5)
+            rhslayout.Add(staticImage, 10, wx.ALL | wx.EXPAND, 5)
+
+        if self.pdfurl:
+            openpdf = wx.Button(
+                self,
+                wx.ID_ANY,
+                "Open Datasheet",
+                wx.DefaultPosition,
+                wx.DefaultSize,
+                0,
+                )
+            openpdf.Bind(wx.EVT_BUTTON, self.openpdf)
+            rhslayout.Add(openpdf, 10, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
 
@@ -766,6 +844,10 @@ class PartDetailsDialog(wx.Dialog):
     def do_quit(self, e):
         self.Destroy()
         self.EndModal(0)
+
+    def openpdf(self, e):
+        self.logger.info("opening %s", str(self.pdfurl))
+        webbrowser.open(self.pdfurl)
 
     def get_scaled_bitmap(self, url, width, height):
         content = requests.get(url).content
@@ -788,10 +870,15 @@ class PartDetailsDialog(wx.Dialog):
             "encapStandard": "Package",
             "productUnit": "Unit",
             "productWeight": "Weight",
+            "pdfUrl": "Data Sheet",
         }
         data = r.json()
         for k, v in parameters.items():
-            self.data_list.AppendItem([v, str(data[k])])
+            val = data.get(k)
+            if k == "pdfUrl":
+                self.pdfurl = val
+            if val:
+                self.data_list.AppendItem([v, str(val)])
         if data.get("paramVOList"):
             for item in data.get("paramVOList", []):
                 self.data_list.AppendItem(
