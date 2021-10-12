@@ -783,7 +783,7 @@ class PartDetailsDialog(wx.Dialog):
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
             size=wx.Size(800, 600),
-            style=wx.DEFAULT_DIALOG_STYLE,
+            style=wx.DEFAULT_DIALOG_STYLE | wx.STAY_ON_TOP,
         )
         # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
         self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
