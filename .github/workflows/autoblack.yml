@@ -7,10 +7,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
-      - name: Install Python dependencies
-        run: |
-          pip install pipenv
-          pipenv install --deploy --dev --system
+      #- name: Install Python dependencies
+      #  run: |
+      #    pip install pipenv
+      #    pipenv install --deploy --dev --system
       - uses: wearerequired/lint-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
