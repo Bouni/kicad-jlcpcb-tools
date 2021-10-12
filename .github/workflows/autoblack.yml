@@ -15,5 +15,5 @@ jobs:
           black: true
           auto_fix: true
           commit_message: 'fixup: Format Python code with Black'
-          git_name: 'autoblack'
-          git_email: 'autoblack@users.noreply.github.com'
+          git_name: github-actions[bot]
+          git_email: github-actions[bot]@users.noreply.github.com
