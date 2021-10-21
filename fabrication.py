@@ -41,7 +41,12 @@ class JLCPCBFabrication:
         self.parts = {}
         for fp in get_valid_footprints(self.board):
             reference = fp.GetReference()
-            lcsc = fp.GetProperties().get("LCSC", "")
+            lcsc_keys = [
+                key for key in fp.GetProperties().keys() if "lcsc" in key.lower()
+            ]
+            lcsc = ""
+            if lcsc_keys:
+                lcsc = fp.GetProperties().get(lcsc_keys.pop(0))
             self.parts[reference] = {"lcsc": lcsc}
         # Read all settings from the csv and overwrite if neccessary
         csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
