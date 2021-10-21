@@ -69,7 +69,7 @@ class JLCBCBTools(wx.Dialog):
             ]
         )
         self.SetAcceleratorTable(aTable)
-        self.Bind(wx.EVT_MENU, self.do_quit, id=quitid)
+        self.Bind(wx.EVT_MENU, self.quit_dialog, id=quitid)
 
         # ---------------------------------------------------------------------
         self.logbox = wx.TextCtrl(
@@ -257,7 +257,7 @@ class JLCBCBTools(wx.Dialog):
         # Note: a delay of 0 doesn't work
         wx.CallLater(1, self.load_library)
 
-    def do_quit(self, e):
+    def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
 
@@ -274,7 +274,7 @@ class JLCBCBTools(wx.Dialog):
             self.timer.Start(200)
             self.then = datetime.datetime.now()
         else:
-            self.do_load()
+            self.load_library()
 
     def update_gauge(self, evt):
         """Update the progress gauge and handle thread completion"""
@@ -295,10 +295,10 @@ class JLCBCBTools(wx.Dialog):
             )
             self.gauge.SetRange(1000)
             self.gauge.SetValue(0)
-            self.do_load()
+            self.load_library()
             self.enable_all_buttons(True)
 
-    def do_load(self):
+    def load_library(self):
         self.library.load()
         fntxt = ""
         if self.library.filename:
@@ -499,7 +499,7 @@ class PartSelectorDialog(wx.Dialog):
             ]
         )
         self.SetAcceleratorTable(aTable)
-        self.Bind(wx.EVT_MENU, self.do_quit, id=quitid)
+        self.Bind(wx.EVT_MENU, self.quit_dialog, id=quitid)
 
         self.logger = logging.getLogger(__name__)
         self.library = parent.library
@@ -728,7 +728,7 @@ class PartSelectorDialog(wx.Dialog):
 
         self.enable_toolbar_buttons(False)
 
-    def do_quit(self, e):
+    def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
 
@@ -841,7 +841,7 @@ class PartDetailsDialog(wx.Dialog):
             ]
         )
         self.SetAcceleratorTable(aTable)
-        self.Bind(wx.EVT_MENU, self.do_quit, id=quitid)
+        self.Bind(wx.EVT_MENU, self.quit_dialog, id=quitid)
         self.logger = logging.getLogger(__name__)
 
         layout = wx.BoxSizer(wx.HORIZONTAL)
@@ -901,7 +901,7 @@ class PartDetailsDialog(wx.Dialog):
 
         self.Centre(wx.BOTH)
 
-    def do_quit(self, e):
+    def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
 
