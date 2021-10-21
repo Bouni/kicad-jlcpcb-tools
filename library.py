@@ -160,6 +160,7 @@ class CSVDownloader(threading.Thread):
         self.want_abort = False
         self.start()
         self.pos = None
+        self.logger = logging.getLogger(__name__)
 
     def run(self):
         try:
@@ -171,6 +172,8 @@ class CSVDownloader(threading.Thread):
                 os.unlink(self.dbfn)
             except FileNotFoundError:
                 pass
+            except PermissionError as e:
+                self.logger.error(e)
 
     def download(self):
         # Delete any existing DB

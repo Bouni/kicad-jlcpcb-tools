@@ -131,7 +131,7 @@ class JLCBCBTools(wx.Dialog):
         self.download_button = wx.Button(
             self, wx.ID_ANY, "Update library", wx.DefaultPosition, wx.DefaultSize, 0
         )
-        self.download_button.Bind(wx.EVT_BUTTON, self.load_library)
+        self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
         button_sizer.Add(self.download_button, 0, wx.ALL, 5)
 
         layout.Add(button_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -267,13 +267,13 @@ class JLCBCBTools(wx.Dialog):
         self.enable_toolbar_buttons(False)
 
         # Note: a delay of 0 doesn't work
-        wx.CallLater(1, self.load_library)
+        wx.CallLater(1, self.update_library)
 
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
 
-    def load_library(self, e=None):
+    def update_library(self, e=None):
         """Download and load library data if necessary or actively requested"""
         if self.dl_thread:
             return
@@ -423,7 +423,7 @@ class JLCBCBTools(wx.Dialog):
 
     def select_part(self, e):
         """Select and assign a LCSC Part number to a footprint via modal dialog."""
-        self.load_library()
+        self.update_library()
         dialog = PartSelectorDialog(self)
         result = dialog.ShowModal()
         if result == wx.ID_OK:
