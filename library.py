@@ -55,15 +55,13 @@ class JLCPCBLibrary:
 
     def load(self):
         """Connect to JLCPCB library DB"""
-        # self.dbh = sqlite3.connect(self.dbfn)
-
         self.partcount, self.filename, self.size = self.get_info()
         self.logger.info(
             f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn)
         )
         self.loaded = True
 
-    def get_info(self, dbh=None):
+    def get_info(self):
         """Get info about the state of the database"""
         partcount = 0
         filename = ""
