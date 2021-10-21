@@ -198,8 +198,7 @@ class JLCBCBTools(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.get_footprints()
-        self.populate_footprint_list()
+
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
         # ---------------------------------------------------------------------
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -233,6 +232,16 @@ class JLCBCBTools(wx.Dialog):
         )
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
         tool_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
+        self.hide_bom_checkbox = wx.CheckBox(
+            self, wx.ID_ANY, "Hide non BOM", wx.DefaultPosition, wx.DefaultSize
+        )
+        self.hide_bom_checkbox.Bind(wx.EVT_CHECKBOX, self.OnBomHideChecked)
+        tool_sizer.Add(self.hide_bom_checkbox, 0, wx.ALL, 5)
+        self.hide_cpl_checkbox = wx.CheckBox(
+            self, wx.ID_ANY, "Hide non CPL", wx.DefaultPosition, wx.DefaultSize
+        )
+        self.hide_cpl_checkbox.Bind(wx.EVT_CHECKBOX, self.OnCplHideChecked)
+        tool_sizer.Add(self.hide_cpl_checkbox, 0, wx.ALL, 5)
         table_sizer.Add(tool_sizer, 1, wx.EXPAND, 5)
         # ---------------------------------------------------------------------
 
@@ -246,6 +255,9 @@ class JLCBCBTools(wx.Dialog):
 
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
+
+        self.get_footprints()
+        self.populate_footprint_list()
 
         self.SetSizer(layout)
         self.Layout()
@@ -305,6 +317,12 @@ class JLCBCBTools(wx.Dialog):
             fntxt = self.library.filename + " with "
         self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
 
+    def OnBomHideChecked(self, e):
+        self.populate_footprint_list()
+
+    def OnCplHideChecked(self, e):
+        self.populate_footprint_list()
+
     def OnFootprintSelected(self, e):
         """Enable the toolbar buttons when a selection was made."""
         self.enable_toolbar_buttons(self.footprint_list.GetSelectedItemsCount() > 0)
@@ -353,6 +371,10 @@ class JLCBCBTools(wx.Dialog):
         """Populate/Refresh list of footprints."""
         self.footprint_list.DeleteAllItems()
         for fp in self.footprints:
+            if self.hide_bom_checkbox.GetValue() and get_exclude_from_bom(fp):
+                continue
+            if self.hide_cpl_checkbox.GetValue() and get_exclude_from_pos(fp):
+                continue
             self.footprint_list.AppendItem(
                 [
                     str(fp.GetReference()),
