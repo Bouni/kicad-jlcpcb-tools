@@ -148,7 +148,7 @@ class JLCBCBTools(wx.Dialog):
         )
         self.footprint_list.SetMinSize(wx.Size(750, 400))
         self.footprint_list.Bind(
-            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.footprint_list_selected
+            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
         )
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
@@ -305,7 +305,7 @@ class JLCBCBTools(wx.Dialog):
             fntxt = self.library.filename + " with "
         self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
 
-    def footprint_list_selected(self, e):
+    def OnFootprintSelected(self, e):
         """Enable the toolbar buttons when a selection was made."""
         self.enable_toolbar_buttons(self.footprint_list.GetSelectedItemsCount() > 0)
 
