@@ -1,3 +1,4 @@
+import contextlib
 import csv
 import logging
 import os
@@ -20,6 +21,16 @@ class JLCPCBLibrary:
         self.dbfn = os.path.join(self.xlsdir, "jlcpcb_parts.db")
         self.loaded = False
         self.logger = logging.getLogger(__name__)
+
+    def query_database(self, query, qargs=[]):
+        try:
+            with contextlib.closing(sqlite3.connect(self.dbfn)) as con:
+                with con as cur:
+                    c = cur.execute(query, qargs)
+                    return c.fetchall()
+        except (sqlite3.OperationalError, ValueError) as e:
+            self.logger.error(e)
+            return None
 
     def create_folders(self):
         """Create output folder if not already exist."""
@@ -44,45 +55,37 @@ class JLCPCBLibrary:
 
     def load(self):
         """Connect to JLCPCB library DB"""
-        self.dbh = sqlite3.connect(self.dbfn)
+        # self.dbh = sqlite3.connect(self.dbfn)
 
-        self.partcount, self.filename, self.size = self.get_info(self.dbh)
+        self.partcount, self.filename, self.size = self.get_info()
         self.logger.info(
             f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn)
         )
         self.loaded = True
 
     def get_info(self, dbh=None):
-        """Get info, does not use self.dbh because it can be called before load"""
-        try:
-            if not dbh:
-                dbh = sqlite3.connect(self.dbfn)
-            c = dbh.cursor()
-            c.execute("SELECT COUNT(*) FROM jlcpcb_parts")
-            partcount = c.fetchone()[0]
-            c.execute("SELECT filename, size FROM info")
-            res = c.fetchone()
-            if res:
-                filename, size = res
-            else:
-                return None, None, None
-            if size:
-                size = int(size)
-            return partcount, filename, size
-        except (sqlite3.OperationalError, ValueError) as e:
-            return None, None, None
+        """Get info about the state of the database"""
+        partcount = 0
+        filename = ""
+        size = 0
+        res = self.query_database("SELECT COUNT(*) FROM jlcpcb_parts")
+        if res:
+            partcount = res[0][0]
+        res = self.query_database("SELECT filename, size FROM info")
+        if res:
+            filename, size = res[0]
+        size = int(size)
+        return partcount, filename, size
 
     def get_packages(self):
         """Get all distinct packages from the library"""
-        c = self.dbh.cursor()
-        c.execute("SELECT DISTINCT Package from jlcpcb_parts")
-        return sorted([r[0] for r in c])
+        res = self.query_database("SELECT DISTINCT Package from jlcpcb_parts")
+        return sorted([r[0] for r in res])
 
     def get_manufacturers(self):
         """Get all distinct manufacturers from the library"""
-        c = self.dbh.cursor()
-        c.execute("SELECT DISTINCT Manufacturer from jlcpcb_parts")
-        return sorted([r[0] for r in c])
+        res = self.query_database("SELECT DISTINCT Manufacturer from jlcpcb_parts")
+        return sorted([r[0] for r in res])
 
     def search(
         self,
@@ -140,13 +143,7 @@ class JLCPCBLibrary:
                 ",".join(['"' + p + '"' for p in manufacturers])
             )
 
-        c = self.dbh.cursor()
-        try:
-            c.execute(query, qargs)
-        except (sqlite3.ProgrammingError, sqlite3.OperationalError) as e:
-            self.logger.error("Query failed: %s", str(e))
-
-        res = c.fetchall()
+        res = self.query_database(query, qargs)
         return res
 
 
@@ -181,65 +178,69 @@ class CSVDownloader(threading.Thread):
             os.unlink(self.dbfn)
         except FileNotFoundError:
             pass
+        with contextlib.closing(sqlite3.connect(self.dbfn)) as con:
+            with con as cur:
+                try:
+                    r = requests.get(self.url, allow_redirects=True, stream=True)
+                    # Check if we get the file size for progress metering
+                    size = r.headers.get("Content-Length")
+                    if size:
+                        size = int(size)
+                        self.pos = 0
 
-        dbh = sqlite3.connect(self.dbfn)
-        c = dbh.cursor()
+                    # Decode body and feed into CSV parser
+                    csvr = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
 
-        r = requests.get(self.url, allow_redirects=True, stream=True)
-        # Check if we get the file size for progress metering
-        size = r.headers.get("Content-Length")
-        if size:
-            size = int(size)
-            self.pos = 0
+                    # Create tables
+                    headers = next(csvr)
+                    ncols = len(headers)
+                    con.execute(
+                        "CREATE TABLE jlcpcb_parts ("
+                        + ",".join(['"' + h + '"' for h in headers])
+                        + ")"
+                    )
+                    con.execute("CREATE TABLE info (filename, size)")
 
-        # Decode body and feed into CSV parser
-        csvr = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
+                    # Create query string
+                    q = (
+                        "INSERT INTO jlcpcb_parts VALUES ("
+                        + ",".join(["?"] * ncols)
+                        + ")"
+                    )
 
-        # Create tables
-        headers = next(csvr)
-        ncols = len(headers)
-        c.execute(
-            "CREATE TABLE jlcpcb_parts ("
-            + ",".join(['"' + h + '"' for h in headers])
-            + ")"
-        )
-        c.execute("CREATE TABLE info (filename, size)")
+                    con.execute("BEGIN TRANSACTION")
+                    buf = []
+                    count = 0
+                    chunks = 1000
+                    for row in csvr:
+                        count += 1
+                        # Add to list for batch execution
+                        # The CSV has a trailing comma so trim to match the headers (which don't..)
+                        buf.append(row[:ncols])
+                        if count % chunks == 0:
+                            if self.want_abort:
+                                raise Exception("Aborted")
 
-        # Create query string
-        q = "INSERT INTO jlcpcb_parts VALUES (" + ",".join(["?"] * ncols) + ")"
+                            if size:
+                                self.pos = r.raw.tell() / size
+                            con.executemany(q, buf)
+                            buf = []
+                    # Flush any remaining rows
+                    if buf:
+                        con.executemany(q, buf)
 
-        c.execute("BEGIN TRANSACTION")
-        buf = []
-        count = 0
-        chunks = 1000
-        for row in csvr:
-            count += 1
-            # Add to list for batch execution
-            # The CSV has a trailing comma so trim to match the headers (which don't..)
-            buf.append(row[:ncols])
-            if count % chunks == 0:
-                if self.want_abort:
-                    raise Exception("Aborted")
+                    con.commit()
 
-                if size:
-                    self.pos = r.raw.tell() / size
-                c.executemany(q, buf)
-                buf = []
-        # Flush any remaining rows
-        if buf:
-            c.executemany(q, buf)
-
-        dbh.commit()
-
-        filename = None
-        contentdisp = r.headers.get("Content-Disposition")
-        if contentdisp:
-            m = re.findall("filename=(.+)", contentdisp)
-            if m:
-                filename = m[0]
-        c.execute("INSERT INTO info VALUES(?, ?)", (filename, size))
-        dbh.commit()
-        dbh.close()
+                    filename = None
+                    contentdisp = r.headers.get("Content-Disposition")
+                    if contentdisp:
+                        m = re.findall("filename=(.+)", contentdisp)
+                        if m:
+                            filename = m[0]
+                    cur.execute("INSERT INTO info VALUES(?, ?)", (filename, size))
+                    con.commit()
+                except (sqlite3.OperationalError, ValueError) as e:
+                    self.logger.error(e)
 
     def abort(self):
         self.want_abort = True
