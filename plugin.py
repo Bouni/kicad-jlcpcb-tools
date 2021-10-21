@@ -147,6 +147,9 @@ class JLCBCBTools(wx.Dialog):
             style=wx.dataview.DV_MULTIPLE,
         )
         self.footprint_list.SetMinSize(wx.Size(750, 400))
+        self.footprint_list.Bind(
+            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
+        )
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
@@ -249,6 +252,8 @@ class JLCBCBTools(wx.Dialog):
 
         self.Centre(wx.BOTH)
 
+        self.enable_toolbar_buttons(False)
+
         # Note: a delay of 0 doesn't work
         wx.CallLater(1, self.load_library)
 
@@ -262,7 +267,7 @@ class JLCBCBTools(wx.Dialog):
             return
 
         if self.library.need_download() or e:
-            self.enable_buttons(False)
+            self.enable_all_buttons(False)
             self.dl_thread = self.library.download()
             self.timer = wx.Timer(self)
             self.Bind(wx.EVT_TIMER, self.update_gauge, self.timer)
@@ -291,7 +296,7 @@ class JLCBCBTools(wx.Dialog):
             self.gauge.SetRange(1000)
             self.gauge.SetValue(0)
             self.do_load()
-            self.enable_buttons(True)
+            self.enable_all_buttons(True)
 
     def do_load(self):
         self.library.load()
@@ -300,18 +305,36 @@ class JLCBCBTools(wx.Dialog):
             fntxt = self.library.filename + " with "
         self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
 
-    def enable_buttons(self, state):
+    def OnFootprintSelected(self, e):
+        """Enable the toolbar buttons when a selection was made."""
+        self.enable_toolbar_buttons(self.footprint_list.GetSelectedItemsCount() > 0)
+
+    def enable_all_buttons(self, state):
         """Control state of all the buttons"""
+        self.enable_top_buttons(state)
+        self.enable_toolbar_buttons(state)
+
+    def enable_top_buttons(self, state):
+        """Control the state of all the buttons in the top section"""
         for b in [
             self.generate_button,
             self.download_button,
+            self.layer_selection,
+        ]:
+            if state:
+                b.Enable()
+            else:
+                b.Disable()
+
+    def enable_toolbar_buttons(self, state):
+        """Control the state of all the buttons in toolbar on the right side"""
+        for b in [
             self.select_part_button,
             self.remove_part_button,
             self.toggle_bom_cpl_button,
             self.toggle_bom_button,
             self.toggle_cpl_button,
             self.part_details_button,
-            self.layer_selection,
         ]:
             if state:
                 b.Enable()
@@ -599,6 +622,9 @@ class PartSelectorDialog(wx.Dialog):
             style=wx.dataview.DV_SINGLE,
         )
         self.part_list.SetMinSize(wx.Size(1050, 500))
+        self.part_list.Bind(
+            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected
+        )
         self.reference = self.part_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
@@ -700,6 +726,8 @@ class PartSelectorDialog(wx.Dialog):
         self.manufacturer_filter_choices = self.library.get_manufacturers()
         self.manufacturer_filter_list.Set(self.manufacturer_filter_choices)
 
+        self.enable_toolbar_buttons(False)
+
     def do_quit(self, e):
         self.Destroy()
         self.EndModal(0)
@@ -719,6 +747,21 @@ class PartSelectorDialog(wx.Dialog):
             self.manufacturer_filter_list.Set(choices)
         else:
             self.manufacturer_filter_list.Set([""])
+
+    def OnPartSelected(self, e):
+        """Enable the toolbar buttons when a selection was made."""
+        self.enable_toolbar_buttons(self.part_list.GetSelectedItemsCount() > 0)
+
+    def enable_toolbar_buttons(self, state):
+        """Control the state of all the buttons in toolbar on the right side"""
+        for b in [
+            self.select_part_button,
+            self.part_details_button,
+        ]:
+            if state:
+                b.Enable()
+            else:
+                b.Disable()
 
     def search(self, e):
         """Search the dataframe for the keyword."""
