@@ -622,6 +622,9 @@ class PartSelectorDialog(wx.Dialog):
             style=wx.dataview.DV_SINGLE,
         )
         self.part_list.SetMinSize(wx.Size(1050, 500))
+        self.part_list.Bind(
+            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected
+        )
         self.reference = self.part_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
@@ -723,6 +726,8 @@ class PartSelectorDialog(wx.Dialog):
         self.manufacturer_filter_choices = self.library.get_manufacturers()
         self.manufacturer_filter_list.Set(self.manufacturer_filter_choices)
 
+        self.enable_toolbar_buttons(False)
+
     def do_quit(self, e):
         self.Destroy()
         self.EndModal(0)
@@ -742,6 +747,21 @@ class PartSelectorDialog(wx.Dialog):
             self.manufacturer_filter_list.Set(choices)
         else:
             self.manufacturer_filter_list.Set([""])
+
+    def OnPartSelected(self, e):
+        """Enable the toolbar buttons when a selection was made."""
+        self.enable_toolbar_buttons(self.part_list.GetSelectedItemsCount() > 0)
+
+    def enable_toolbar_buttons(self, state):
+        """Control the state of all the buttons in toolbar on the right side"""
+        for b in [
+            self.select_part_button,
+            self.part_details_button,
+        ]:
+            if state:
+                b.Enable()
+            else:
+                b.Disable()
 
     def search(self, e):
         """Search the dataframe for the keyword."""
