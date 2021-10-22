@@ -962,4 +962,7 @@ class PartDetailsDialog(wx.Dialog):
                 self.data_list.AppendItem(
                     [item["paramNameEn"], str(item["paramValueEn"])]
                 )
-        self.picture = data["productImages"][0]
+        if len(data["productImages"]) > 0:
+            self.picture = data["productImages"][0]
+        else:
+            self.picture = None
