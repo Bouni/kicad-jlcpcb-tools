@@ -470,10 +470,6 @@ class JLCBCBTools(wx.Dialog):
 
     def init_logger(self):
         """Initialize logger to log into textbox"""
-        # Remove all handlers associated with the root logger object.
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
-
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
 
