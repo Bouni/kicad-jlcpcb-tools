@@ -5,7 +5,7 @@ import sys
 
 import wx
 import wx.dataview
-from pcbnew import *
+from pcbnew import GetBoard
 
 from .fabrication import JLCPCBFabrication
 from .helpers import (
@@ -444,6 +444,7 @@ class JLCBCBTools(wx.Dialog):
         part = self.footprint_list.GetTextValue(row, 3)
         if part != "":
             dialog = PartDetailsDialog(self, part)
+
             dialog.Show()
 
     def init_logger(self):
