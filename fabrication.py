@@ -6,7 +6,25 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import requests
-from pcbnew import *
+from pcbnew import (
+    EXCELLON_WRITER,
+    PLOT_CONTROLLER,
+    PLOT_FORMAT_GERBER,
+    B_Cu,
+    B_Mask,
+    B_SilkS,
+    Edge_Cuts,
+    F_Cu,
+    F_Mask,
+    F_SilkS,
+    GetBoard,
+    In1_Cu,
+    In2_Cu,
+    In3_Cu,
+    In4_Cu,
+    ToMM,
+    wxPoint,
+)
 
 from .helpers import (
     get_exclude_from_bom,
