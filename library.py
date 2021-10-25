@@ -20,6 +20,9 @@ class JLCPCBLibrary:
         self.create_folders()
         self.dbfn = os.path.join(self.xlsdir, "jlcpcb_parts.db")
         self.loaded = False
+        self.partcount = 0
+        self.filename = ""
+        self.size = 0
         self.logger = logging.getLogger(__name__)
 
     def query_database(self, query, qargs=[]):
@@ -43,11 +46,8 @@ class JLCPCBLibrary:
         if not os.path.isfile(self.dbfn):
             return True
         else:
-            partcount, filename, size = self.get_info()
-            if not size or size == 0:
-                return True
-            else:
-                return False
+            self.get_info()
+            return self.size == 0
 
     def download(self):
         """Create and return CSV downloader thread"""
@@ -55,7 +55,7 @@ class JLCPCBLibrary:
 
     def load(self):
         """Connect to JLCPCB library DB"""
-        self.partcount, self.filename, self.size = self.get_info()
+        self.get_info()
         self.logger.info(
             f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn)
         )
@@ -63,17 +63,11 @@ class JLCPCBLibrary:
 
     def get_info(self):
         """Get info about the state of the database"""
-        partcount = 0
-        filename = ""
-        size = 0
-        res = self.query_database("SELECT COUNT(*) FROM jlcpcb_parts")
-        if res:
-            partcount = res[0][0]
-        res = self.query_database("SELECT filename, size FROM info")
-        if res:
-            filename, size = res[0]
-        size = int(size)
-        return partcount, filename, size
+        if res := self.query_database("SELECT COUNT(*) FROM jlcpcb_parts"):
+            self.partcount = res[0][0]
+        if res := self.query_database("SELECT filename, size FROM info"):
+            self.filename, size = res[0]
+            self.size = int(size)
 
     def get_packages(self):
         """Get all distinct packages from the library"""
