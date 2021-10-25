@@ -150,16 +150,19 @@ class CSVDownloader(threading.Thread):
 
     def __init__(self, dbfn, url):
         threading.Thread.__init__(self)
+        self.logger = logging.getLogger(__name__)
         self.dbfn = dbfn
         self.url = url
         self.want_abort = False
-        self.start()
+        self.filename = None
+        self.size = None
         self.pos = None
-        self.logger = logging.getLogger(__name__)
+        self.start()
 
     def run(self):
         try:
-            self.download()
+            res = self.download()
+            self.convert(res)
         except Exception as e:
             print("Failed " + str(e))
             # Cleanup the probably broken database
@@ -171,23 +174,39 @@ class CSVDownloader(threading.Thread):
                 self.logger.error(e)
 
     def download(self):
-        # Delete any existing DB
+        self.logger.debug("Start download")
+        r = requests.get(self.url, allow_redirects=True, stream=True)
+        if r.status_code != requests.codes.ok:
+            self.logger.debug("Download failed")
+            return None
+        # Check if we get the file size for progress metering
+        if (size := r.headers.get("Content-Length")) :
+            self.size = int(size)
+            self.pos = 0
+        # Get filename
+        if (cd := r.headers.get("Content-Disposition")) :
+            if (m := re.findall("filename=(.+)", cd)) :
+                self.filename = m[0]
+        self.logger.debug("Download success")
+        return r
+
+    def delete_database(self):
         try:
             os.unlink(self.dbfn)
+            self.logger.debug(f"Successfully deleted database file {self.dbfn}")
         except FileNotFoundError:
-            pass
+            self.logger.error(f"Failed to delete database file {self.dbfn}")
+
+    def convert(self, res):
+        if not res:
+            return
+        self.delete_database()
         with contextlib.closing(sqlite3.connect(self.dbfn)) as con:
             with con as cur:
                 try:
-                    r = requests.get(self.url, allow_redirects=True, stream=True)
-                    # Check if we get the file size for progress metering
-                    size = r.headers.get("Content-Length")
-                    if size:
-                        size = int(size)
-                        self.pos = 0
 
                     # Decode body and feed into CSV parser
-                    csvr = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
+                    csvr = csv.reader(map(lambda x: x.decode("gbk"), res.raw))
 
                     # Create tables
                     headers = next(csvr)
@@ -219,8 +238,8 @@ class CSVDownloader(threading.Thread):
                             if self.want_abort:
                                 raise Exception("Aborted")
 
-                            if size:
-                                self.pos = r.raw.tell() / size
+                            if self.size:
+                                self.pos = res.raw.tell() / self.size
                             con.executemany(q, buf)
                             buf = []
                     # Flush any remaining rows
@@ -229,13 +248,9 @@ class CSVDownloader(threading.Thread):
 
                     con.commit()
 
-                    filename = None
-                    contentdisp = r.headers.get("Content-Disposition")
-                    if contentdisp:
-                        m = re.findall("filename=(.+)", contentdisp)
-                        if m:
-                            filename = m[0]
-                    cur.execute("INSERT INTO info VALUES(?, ?)", (filename, size))
+                    cur.execute(
+                        "INSERT INTO info VALUES(?, ?)", (self.filename, self.size)
+                    )
                     con.commit()
                 except (sqlite3.OperationalError, ValueError) as e:
                     self.logger.error(e)
