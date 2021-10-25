@@ -178,12 +178,12 @@ class CSVDownloader(threading.Thread):
             return False
         self.res = r
         # Check if we get the file size for progress metering
-        if (size := r.headers.get("Content-Length")) :
+        if size := r.headers.get("Content-Length"):
             self.size = int(size)
             self.pos = 0
         # Get filename
-        if (cd := r.headers.get("Content-Disposition")) :
-            if (m := re.findall("filename=(.+)", cd)) :
+        if cd := r.headers.get("Content-Disposition"):
+            if m := re.findall("filename=(.+)", cd):
                 self.filename = m[0]
         self.logger.debug("Download success")
         # Decode body and feed into CSV parser
