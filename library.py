@@ -197,14 +197,15 @@ class CSVDownloader(threading.Thread):
                 f"Failed to delete database file {self.dbfn}, Permission denied!"
             )
 
-    @staticmethod
-    def create_tables(con, headers):
+    def create_tables(self, con, cur, headers):
         con.execute(
             "CREATE TABLE jlcpcb_parts ("
             + ",".join(['"' + h + '"' for h in headers])
             + ")"
         )
         con.execute("CREATE TABLE info (filename, size)")
+        cur.execute("INSERT INTO info VALUES(?, ?)", (self.filename, self.size))
+        con.commit()
 
     def store_data(self, con, csvr, res, ncols):
         # Create query string
@@ -230,10 +231,6 @@ class CSVDownloader(threading.Thread):
             con.executemany(q, buf)
         con.commit()
 
-    def store_attributes(self, con, cur):
-        cur.execute("INSERT INTO info VALUES(?, ?)", (self.filename, self.size))
-        con.commit()
-
     def import_csv(self, res):
         """import CSV data into sqlite3 database."""
         # return if the download failed so that we can use the old db for now
@@ -246,10 +243,9 @@ class CSVDownloader(threading.Thread):
                     # Decode body and feed into CSV parser
                     csvr = csv.reader(map(lambda x: x.decode("gbk"), res.raw))
                     headers = next(csvr)
-                    self.create_tables(con, headers)
+                    self.create_tables(con, cur, headers)
                     ncols = len(headers)
                     self.store_data(con, csvr, res, ncols)
-                    self.store_attributes(con, cur)
                 except (sqlite3.OperationalError, ValueError) as e:
                     self.logger.error(e)
 
