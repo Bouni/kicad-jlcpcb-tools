@@ -162,16 +162,10 @@ class CSVDownloader(threading.Thread):
     def run(self):
         try:
             res = self.download()
-            self.convert(res)
+            self.logger.debug(res)
+            self.import_csv(res)
         except Exception as e:
-            print("Failed " + str(e))
-            # Cleanup the probably broken database
-            try:
-                os.unlink(self.dbfn)
-            except FileNotFoundError:
-                pass
-            except PermissionError as e:
-                self.logger.error(e)
+            self.delete_database()
 
     def download(self):
         self.logger.debug("Start download")
@@ -195,63 +189,67 @@ class CSVDownloader(threading.Thread):
             os.unlink(self.dbfn)
             self.logger.debug(f"Successfully deleted database file {self.dbfn}")
         except FileNotFoundError:
-            self.logger.error(f"Failed to delete database file {self.dbfn}")
+            self.logger.error(
+                f"Failed to delete database file {self.dbfn}, file not found!"
+            )
+        except PermissionError:
+            self.logger.error(
+                f"Failed to delete database file {self.dbfn}, Permission denied!"
+            )
 
-    def convert(self, res):
+    @staticmethod
+    def create_tables(con, headers):
+        con.execute(
+            "CREATE TABLE jlcpcb_parts ("
+            + ",".join(['"' + h + '"' for h in headers])
+            + ")"
+        )
+        con.execute("CREATE TABLE info (filename, size)")
+
+    def store_data(self, con, csvr, res, ncols):
+        # Create query string
+        q = "INSERT INTO jlcpcb_parts VALUES (" + ",".join(["?"] * ncols) + ")"
+        con.execute("BEGIN TRANSACTION")
+        buf = []
+        count = 0
+        chunks = 1000
+        for row in csvr:
+            count += 1
+            # Add to list for batch execution
+            # The CSV has a trailing comma so trim to match the headers (which don't..)
+            buf.append(row[:ncols])
+            if count % chunks == 0:
+                if self.want_abort:
+                    raise Exception("Aborted")
+                if self.size:
+                    self.pos = res.raw.tell() / self.size
+                con.executemany(q, buf)
+                buf = []
+        # Flush any remaining rows
+        if buf:
+            con.executemany(q, buf)
+        con.commit()
+
+    def store_attributes(self, con, cur):
+        cur.execute("INSERT INTO info VALUES(?, ?)", (self.filename, self.size))
+        con.commit()
+
+    def import_csv(self, res):
+        """import CSV data into sqlite3 database."""
+        # return if the download failed so that we can use the old db for now
         if not res:
             return
         self.delete_database()
         with contextlib.closing(sqlite3.connect(self.dbfn)) as con:
             with con as cur:
                 try:
-
                     # Decode body and feed into CSV parser
                     csvr = csv.reader(map(lambda x: x.decode("gbk"), res.raw))
-
-                    # Create tables
                     headers = next(csvr)
+                    self.create_tables(con, headers)
                     ncols = len(headers)
-                    con.execute(
-                        "CREATE TABLE jlcpcb_parts ("
-                        + ",".join(['"' + h + '"' for h in headers])
-                        + ")"
-                    )
-                    con.execute("CREATE TABLE info (filename, size)")
-
-                    # Create query string
-                    q = (
-                        "INSERT INTO jlcpcb_parts VALUES ("
-                        + ",".join(["?"] * ncols)
-                        + ")"
-                    )
-
-                    con.execute("BEGIN TRANSACTION")
-                    buf = []
-                    count = 0
-                    chunks = 1000
-                    for row in csvr:
-                        count += 1
-                        # Add to list for batch execution
-                        # The CSV has a trailing comma so trim to match the headers (which don't..)
-                        buf.append(row[:ncols])
-                        if count % chunks == 0:
-                            if self.want_abort:
-                                raise Exception("Aborted")
-
-                            if self.size:
-                                self.pos = res.raw.tell() / self.size
-                            con.executemany(q, buf)
-                            buf = []
-                    # Flush any remaining rows
-                    if buf:
-                        con.executemany(q, buf)
-
-                    con.commit()
-
-                    cur.execute(
-                        "INSERT INTO info VALUES(?, ?)", (self.filename, self.size)
-                    )
-                    con.commit()
+                    self.store_data(con, csvr, res, ncols)
+                    self.store_attributes(con, cur)
                 except (sqlite3.OperationalError, ValueError) as e:
                     self.logger.error(e)
 
