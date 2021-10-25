@@ -157,22 +157,26 @@ class CSVDownloader(threading.Thread):
         self.filename = None
         self.size = None
         self.pos = None
+        self.headers = None
+        self.ncols = None
         self.start()
 
     def run(self):
         try:
-            res = self.download()
-            self.logger.debug(res)
-            self.import_csv(res)
+            success = self.download()
+            if success:
+                self.import_csv()
         except Exception as e:
             self.delete_database()
 
     def download(self):
+        """Download the CSV, get some meta data from the request and create a CSV reader."""
         self.logger.debug("Start download")
         r = requests.get(self.url, allow_redirects=True, stream=True)
         if r.status_code != requests.codes.ok:
             self.logger.debug("Download failed")
-            return None
+            return False
+        self.res = r
         # Check if we get the file size for progress metering
         if (size := r.headers.get("Content-Length")) :
             self.size = int(size)
@@ -182,9 +186,14 @@ class CSVDownloader(threading.Thread):
             if (m := re.findall("filename=(.+)", cd)) :
                 self.filename = m[0]
         self.logger.debug("Download success")
-        return r
+        # Decode body and feed into CSV parser
+        self.csvr = csv.reader(map(lambda x: x.decode("gbk"), self.res.raw))
+        self.headers = next(self.csvr)
+        self.ncols = len(self.headers)
+        return True
 
     def delete_database(self):
+        """Try to delete the database."""
         try:
             os.unlink(self.dbfn)
             self.logger.debug(f"Successfully deleted database file {self.dbfn}")
@@ -197,33 +206,35 @@ class CSVDownloader(threading.Thread):
                 f"Failed to delete database file {self.dbfn}, Permission denied!"
             )
 
-    def create_tables(self, con, cur, headers):
+    def create_tables(self, con, cur):
+        """Create the sqlite db tables."""
         con.execute(
             "CREATE TABLE jlcpcb_parts ("
-            + ",".join(['"' + h + '"' for h in headers])
+            + ",".join(['"' + h + '"' for h in self.headers])
             + ")"
         )
         con.execute("CREATE TABLE info (filename, size)")
         cur.execute("INSERT INTO info VALUES(?, ?)", (self.filename, self.size))
         con.commit()
 
-    def store_data(self, con, csvr, res, ncols):
+    def store_data(self, con):
+        """Write CSV data into the sqlite db."""
         # Create query string
-        q = "INSERT INTO jlcpcb_parts VALUES (" + ",".join(["?"] * ncols) + ")"
+        q = "INSERT INTO jlcpcb_parts VALUES (" + ",".join(["?"] * self.ncols) + ")"
         con.execute("BEGIN TRANSACTION")
         buf = []
         count = 0
         chunks = 1000
-        for row in csvr:
+        for row in self.csvr:
             count += 1
             # Add to list for batch execution
             # The CSV has a trailing comma so trim to match the headers (which don't..)
-            buf.append(row[:ncols])
+            buf.append(row[: self.ncols])
             if count % chunks == 0:
                 if self.want_abort:
                     raise Exception("Aborted")
                 if self.size:
-                    self.pos = res.raw.tell() / self.size
+                    self.pos = self.res.raw.tell() / self.size
                 con.executemany(q, buf)
                 buf = []
         # Flush any remaining rows
@@ -231,21 +242,14 @@ class CSVDownloader(threading.Thread):
             con.executemany(q, buf)
         con.commit()
 
-    def import_csv(self, res):
+    def import_csv(self):
         """import CSV data into sqlite3 database."""
-        # return if the download failed so that we can use the old db for now
-        if not res:
-            return
         self.delete_database()
         with contextlib.closing(sqlite3.connect(self.dbfn)) as con:
             with con as cur:
                 try:
-                    # Decode body and feed into CSV parser
-                    csvr = csv.reader(map(lambda x: x.decode("gbk"), res.raw))
-                    headers = next(csvr)
-                    self.create_tables(con, cur, headers)
-                    ncols = len(headers)
-                    self.store_data(con, csvr, res, ncols)
+                    self.create_tables(con, cur)
+                    self.store_data(con)
                 except (sqlite3.OperationalError, ValueError) as e:
                     self.logger.error(e)
 
