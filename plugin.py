@@ -1,6 +1,6 @@
 import os
 
-from pcbnew import *
+from pcbnew import ActionPlugin
 
 from .mainwindow import JLCBCBTools
 
