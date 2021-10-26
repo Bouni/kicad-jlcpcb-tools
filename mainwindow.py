@@ -63,7 +63,6 @@ class JLCBCBTools(wx.Dialog):
 
         # ---------------------------------------------------------------------
         self.library = JLCPCBLibrary(self)
-        self.dl_thread = None
         self.fabrication = JLCPCBFabrication(self)
         # ---------------------------------------------------------------------
 
@@ -261,12 +260,11 @@ class JLCBCBTools(wx.Dialog):
 
     def update_library(self, e=None):
         """Download and load library data if necessary or actively requested"""
-        if self.dl_thread:
+        if self.library.download_active:
             return
-
         if self.library.need_download() or e:
             self.enable_all_buttons(False)
-            self.dl_thread = self.library.download()
+            self.library.download()
             self.timer = wx.Timer(self)
             self.Bind(wx.EVT_TIMER, self.update_gauge, self.timer)
             self.timer.Start(200)
@@ -276,21 +274,36 @@ class JLCBCBTools(wx.Dialog):
 
     def update_gauge(self, evt):
         """Update the progress gauge and handle thread completion"""
-        if self.dl_thread.is_alive():
-            if self.dl_thread.pos:
+        if self.library.dl_thread.is_alive():
+            if self.library.dl_thread.pos:
                 self.gauge.SetRange(1000)
-                self.gauge.SetValue(self.dl_thread.pos * 1000)
+                self.gauge.SetValue(self.library.dl_thread.pos * 1000)
             else:
                 self.gauge.Pulse()
         else:
             self.timer.Stop()
-            self.dl_thread = None
-            now = datetime.datetime.now()
-            self.logger.info(
-                "Downloaded into %s in %.3f seconds",
-                os.path.basename(self.library.dbfn),
-                (now - self.then).total_seconds(),
-            )
+            self.library.dl_thread = None
+            self.library.get_info()
+            if not self.library.download_success and self.library.isvalid:
+                wx.MessageBox(
+                    "Download of the CSV failed, will use existing library!",
+                    "Download error",
+                    style=wx.OK | wx.ICON_ERROR,
+                )
+            elif not self.library.download_success and not self.library.isvalid:
+                wx.MessageBox(
+                    "Download of the CSV failed, no existing library found, exit plugin now!",
+                    "Download error",
+                    style=wx.OK | wx.ICON_ERROR,
+                )
+                self.quit_dialog(None)
+            else:
+                now = datetime.datetime.now()
+                self.logger.info(
+                    "Downloaded into %s in %.3f seconds",
+                    os.path.basename(self.library.dbfn),
+                    (now - self.then).total_seconds(),
+                )
             self.gauge.SetRange(1000)
             self.gauge.SetValue(0)
             self.load_library()
