@@ -402,7 +402,19 @@ class JLCBCBTools(wx.Dialog):
     def select_part(self, e):
         """Select and assign a LCSC Part number to a footprint via modal dialog."""
         self.update_library()
-        dialog = PartSelectorDialog(self)
+        # Figure out what LCSC numbers are selected
+        selection = []
+        lcsc = ""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            _lcsc = self.footprint_list.GetTextValue(row, 3)
+            if not _lcsc in selection:
+                selection.append(_lcsc)
+        # if we have not selected more than one LCSC number, pass it to the selection dialog
+        # as search preset
+        if len(selection) == 1:
+            lcsc = selection[0]
+        dialog = PartSelectorDialog(self, lcsc)
         result = dialog.ShowModal()
         if result == wx.ID_OK:
             for item in self.footprint_list.GetSelections():
