@@ -6,7 +6,7 @@ from .partdetails import PartDetailsDialog
 
 
 class PartSelectorDialog(wx.Dialog):
-    def __init__(self, parent):
+    def __init__(self, parent, lcsc_selection=""):
         wx.Dialog.__init__(
             self,
             parent,
@@ -44,7 +44,7 @@ class PartSelectorDialog(wx.Dialog):
         self.keyword = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            wx.EmptyString,
+            lcsc_selection,
             wx.DefaultPosition,
             (300, -1),
             wx.TE_PROCESS_ENTER,
