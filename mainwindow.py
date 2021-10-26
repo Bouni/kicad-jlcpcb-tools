@@ -317,10 +317,7 @@ class JLCBCBTools(wx.Dialog):
             self.download_button,
             self.layer_selection,
         ]:
-            if state:
-                b.Enable()
-            else:
-                b.Disable()
+            b.Enable(bool(state))
 
     def enable_toolbar_buttons(self, state):
         """Control the state of all the buttons in toolbar on the right side"""
@@ -332,10 +329,7 @@ class JLCBCBTools(wx.Dialog):
             self.toggle_cpl_button,
             self.part_details_button,
         ]:
-            if state:
-                b.Enable()
-            else:
-                b.Disable()
+            b.Enable(bool(state))
 
     def get_footprints(self):
         """get all footprints from the board"""

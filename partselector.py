@@ -289,10 +289,7 @@ class PartSelectorDialog(wx.Dialog):
             self.select_part_button,
             self.part_details_button,
         ]:
-            if state:
-                b.Enable()
-            else:
-                b.Disable()
+            b.Enable(bool(state))
 
     def search(self, e):
         """Search the dataframe for the keyword."""
