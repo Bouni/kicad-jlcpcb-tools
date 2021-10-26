@@ -17,13 +17,23 @@ class JLCPCBLibrary:
 
     def __init__(self, parent):
         self.parent = parent
+        self.logger = logging.getLogger(__name__)
         self.create_folders()
         self.dbfn = os.path.join(self.xlsdir, "jlcpcb_parts.db")
         self.loaded = False
         self.partcount = 0
         self.filename = ""
         self.size = 0
-        self.logger = logging.getLogger(__name__)
+        self.dl_thread = None
+        self.download_success = None
+
+    @property
+    def isvalid(self):
+        return os.path.isfile(self.dbfn) and os.path.getsize(self.dbfn) > 0
+
+    @property
+    def download_active(self):
+        return self.dl_thread != None
 
     def query_database(self, query, qargs=[]):
         try:
@@ -43,7 +53,7 @@ class JLCPCBLibrary:
 
     def need_download(self):
         """Check if we need to re-download the CSV file and convert to DB"""
-        if not os.path.isfile(self.dbfn) or os.path.getsize(self.dbfn) <= 0:
+        if not self.isvalid:
             return True
         else:
             self.get_info()
@@ -51,7 +61,8 @@ class JLCPCBLibrary:
 
     def download(self):
         """Create and return CSV downloader thread"""
-        return CSVDownloader(self.dbfn, self.CSV_URL)
+        self.download_success = None
+        self.dl_thread = CSVDownloader(self)
 
     def load(self):
         """Connect to JLCPCB library DB"""
@@ -142,11 +153,10 @@ class JLCPCBLibrary:
 class CSVDownloader(threading.Thread):
     """CSV download and conversion thread"""
 
-    def __init__(self, dbfn, url):
+    def __init__(self, parent):
         threading.Thread.__init__(self)
         self.logger = logging.getLogger(__name__)
-        self.dbfn = dbfn
-        self.url = url
+        self.parent = parent
         self.want_abort = False
         self.filename = None
         self.size = None
@@ -157,8 +167,8 @@ class CSVDownloader(threading.Thread):
 
     def run(self):
         try:
-            success = self.download()
-            if success:
+            self.parent.download_success = self.download()
+            if self.parent.download_success:
                 self.import_csv()
         except Exception as e:
             self.delete_database()
@@ -166,7 +176,7 @@ class CSVDownloader(threading.Thread):
     def download(self):
         """Download the CSV, get some meta data from the request and create a CSV reader."""
         self.logger.debug("Start download")
-        r = requests.get(self.url, allow_redirects=True, stream=True)
+        r = requests.get(self.parent.CSV_URL, allow_redirects=True, stream=True)
         if r.status_code != requests.codes.ok:
             self.logger.debug("Download failed")
             return False
@@ -189,15 +199,15 @@ class CSVDownloader(threading.Thread):
     def delete_database(self):
         """Try to delete the database."""
         try:
-            os.unlink(self.dbfn)
-            self.logger.debug(f"Successfully deleted database file {self.dbfn}")
+            os.unlink(self.parent.dbfn)
+            self.logger.debug(f"Successfully deleted database file {self.parent.dbfn}")
         except FileNotFoundError:
             self.logger.error(
-                f"Failed to delete database file {self.dbfn}, file not found!"
+                f"Failed to delete database file {self.parent.dbfn}, file not found!"
             )
         except PermissionError:
             self.logger.error(
-                f"Failed to delete database file {self.dbfn}, Permission denied!"
+                f"Failed to delete database file {self.parent.dbfn}, Permission denied!"
             )
 
     def create_tables(self, con, cur):
@@ -239,7 +249,7 @@ class CSVDownloader(threading.Thread):
     def import_csv(self):
         """import CSV data into sqlite3 database."""
         self.delete_database()
-        with contextlib.closing(sqlite3.connect(self.dbfn)) as con:
+        with contextlib.closing(sqlite3.connect(self.parent.dbfn)) as con:
             with con as cur:
                 try:
                     self.create_tables(con, cur)
