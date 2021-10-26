@@ -17,10 +17,23 @@ class JLCPCBLibrary:
 
     def __init__(self, parent):
         self.parent = parent
+        self.logger = logging.getLogger(__name__)
         self.create_folders()
         self.dbfn = os.path.join(self.xlsdir, "jlcpcb_parts.db")
         self.loaded = False
-        self.logger = logging.getLogger(__name__)
+        self.partcount = 0
+        self.filename = ""
+        self.size = 0
+        self.dl_thread = None
+        self.download_success = None
+
+    @property
+    def isvalid(self):
+        return os.path.isfile(self.dbfn) and os.path.getsize(self.dbfn) > 0
+
+    @property
+    def download_active(self):
+        return self.dl_thread != None
 
     def query_database(self, query, qargs=[]):
         try:
@@ -40,22 +53,20 @@ class JLCPCBLibrary:
 
     def need_download(self):
         """Check if we need to re-download the CSV file and convert to DB"""
-        if not os.path.isfile(self.dbfn):
+        if not self.isvalid:
             return True
         else:
-            partcount, filename, size = self.get_info()
-            if not size or size == 0:
-                return True
-            else:
-                return False
+            self.get_info()
+            return self.size == 0
 
     def download(self):
         """Create and return CSV downloader thread"""
-        return CSVDownloader(self.dbfn, self.CSV_URL)
+        self.download_success = None
+        self.dl_thread = CSVDownloader(self)
 
     def load(self):
         """Connect to JLCPCB library DB"""
-        self.partcount, self.filename, self.size = self.get_info()
+        self.get_info()
         self.logger.info(
             f"Loaded %s with {self.partcount} parts", os.path.basename(self.dbfn)
         )
@@ -63,17 +74,11 @@ class JLCPCBLibrary:
 
     def get_info(self):
         """Get info about the state of the database"""
-        partcount = 0
-        filename = ""
-        size = 0
-        res = self.query_database("SELECT COUNT(*) FROM jlcpcb_parts")
-        if res:
-            partcount = res[0][0]
-        res = self.query_database("SELECT filename, size FROM info")
-        if res:
-            filename, size = res[0]
-        size = int(size)
-        return partcount, filename, size
+        if res := self.query_database("SELECT COUNT(*) FROM jlcpcb_parts"):
+            self.partcount = res[0][0]
+        if res := self.query_database("SELECT filename, size FROM info"):
+            self.filename, size = res[0]
+            self.size = int(size)
 
     def get_stock(self, lcsc):
         if res := self.query_database(
@@ -155,95 +160,107 @@ class JLCPCBLibrary:
 class CSVDownloader(threading.Thread):
     """CSV download and conversion thread"""
 
-    def __init__(self, dbfn, url):
+    def __init__(self, parent):
         threading.Thread.__init__(self)
-        self.dbfn = dbfn
-        self.url = url
-        self.want_abort = False
-        self.start()
-        self.pos = None
         self.logger = logging.getLogger(__name__)
+        self.parent = parent
+        self.want_abort = False
+        self.filename = None
+        self.size = None
+        self.pos = None
+        self.headers = None
+        self.ncols = None
+        self.start()
 
     def run(self):
         try:
-            self.download()
+            self.parent.download_success = self.download()
+            if self.parent.download_success:
+                self.import_csv()
         except Exception as e:
-            print("Failed " + str(e))
-            # Cleanup the probably broken database
-            try:
-                os.unlink(self.dbfn)
-            except FileNotFoundError:
-                pass
-            except PermissionError as e:
-                self.logger.error(e)
+            self.delete_database()
 
     def download(self):
-        # Delete any existing DB
+        """Download the CSV, get some meta data from the request and create a CSV reader."""
+        self.logger.debug("Start download")
+        r = requests.get(self.parent.CSV_URL, allow_redirects=True, stream=True)
+        if r.status_code != requests.codes.ok:
+            self.logger.debug("Download failed")
+            return False
+        self.res = r
+        # Check if we get the file size for progress metering
+        if size := r.headers.get("Content-Length"):
+            self.size = int(size)
+            self.pos = 0
+        # Get filename
+        if cd := r.headers.get("Content-Disposition"):
+            if m := re.findall("filename=(.+)", cd):
+                self.filename = m[0]
+        self.logger.debug("Download success")
+        # Decode body and feed into CSV parser
+        self.csvr = csv.reader(map(lambda x: x.decode("gbk"), self.res.raw))
+        self.headers = next(self.csvr)
+        self.ncols = len(self.headers)
+        return True
+
+    def delete_database(self):
+        """Try to delete the database."""
         try:
-            os.unlink(self.dbfn)
+            os.unlink(self.parent.dbfn)
+            self.logger.debug(f"Successfully deleted database file {self.parent.dbfn}")
         except FileNotFoundError:
-            pass
-        with contextlib.closing(sqlite3.connect(self.dbfn)) as con:
+            self.logger.error(
+                f"Failed to delete database file {self.parent.dbfn}, file not found!"
+            )
+        except PermissionError:
+            self.logger.error(
+                f"Failed to delete database file {self.parent.dbfn}, Permission denied!"
+            )
+
+    def create_tables(self, con, cur):
+        """Create the sqlite db tables."""
+        con.execute(
+            "CREATE TABLE jlcpcb_parts ("
+            + ",".join(['"' + h + '"' for h in self.headers])
+            + ")"
+        )
+        con.execute("CREATE TABLE info (filename, size)")
+        cur.execute("INSERT INTO info VALUES(?, ?)", (self.filename, self.size))
+        con.commit()
+
+    def store_data(self, con):
+        """Write CSV data into the sqlite db."""
+        # Create query string
+        q = "INSERT INTO jlcpcb_parts VALUES (" + ",".join(["?"] * self.ncols) + ")"
+        con.execute("BEGIN TRANSACTION")
+        buf = []
+        count = 0
+        chunks = 1000
+        for row in self.csvr:
+            count += 1
+            # Add to list for batch execution
+            # The CSV has a trailing comma so trim to match the headers (which don't..)
+            buf.append(row[: self.ncols])
+            if count % chunks == 0:
+                if self.want_abort:
+                    raise Exception("Aborted")
+                if self.size:
+                    self.pos = self.res.raw.tell() / self.size
+                con.executemany(q, buf)
+                buf = []
+        # Flush any remaining rows
+        if buf:
+            con.executemany(q, buf)
+        con.commit()
+
+    def import_csv(self):
+        """import CSV data into sqlite3 database."""
+        self.delete_database()
+        with contextlib.closing(sqlite3.connect(self.parent.dbfn)) as con:
             with con as cur:
                 try:
-                    r = requests.get(self.url, allow_redirects=True, stream=True)
-                    # Check if we get the file size for progress metering
-                    size = r.headers.get("Content-Length")
-                    if size:
-                        size = int(size)
-                        self.pos = 0
-
-                    # Decode body and feed into CSV parser
-                    csvr = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
-
-                    # Create tables
-                    headers = next(csvr)
-                    ncols = len(headers)
-                    con.execute(
-                        "CREATE TABLE jlcpcb_parts ("
-                        + ",".join(['"' + h + '"' for h in headers])
-                        + ")"
-                    )
-                    con.execute("CREATE TABLE info (filename, size)")
-
-                    # Create query string
-                    q = (
-                        "INSERT INTO jlcpcb_parts VALUES ("
-                        + ",".join(["?"] * ncols)
-                        + ")"
-                    )
-
-                    con.execute("BEGIN TRANSACTION")
-                    buf = []
-                    count = 0
-                    chunks = 1000
-                    for row in csvr:
-                        count += 1
-                        # Add to list for batch execution
-                        # The CSV has a trailing comma so trim to match the headers (which don't..)
-                        buf.append(row[:ncols])
-                        if count % chunks == 0:
-                            if self.want_abort:
-                                raise Exception("Aborted")
-
-                            if size:
-                                self.pos = r.raw.tell() / size
-                            con.executemany(q, buf)
-                            buf = []
-                    # Flush any remaining rows
-                    if buf:
-                        con.executemany(q, buf)
-
-                    con.commit()
-
-                    filename = None
-                    contentdisp = r.headers.get("Content-Disposition")
-                    if contentdisp:
-                        m = re.findall("filename=(.+)", contentdisp)
-                        if m:
-                            filename = m[0]
-                    cur.execute("INSERT INTO info VALUES(?, ?)", (filename, size))
-                    con.commit()
+                    self.create_tables(con, cur)
+                    self.store_data(con)
                 except (sqlite3.OperationalError, ValueError) as e:
                     self.logger.error(e)
 
