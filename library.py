@@ -43,7 +43,7 @@ class JLCPCBLibrary:
 
     def need_download(self):
         """Check if we need to re-download the CSV file and convert to DB"""
-        if not os.path.isfile(self.dbfn):
+        if not os.path.isfile(self.dbfn) or os.path.getsize(self.dbfn) <= 0:
             return True
         else:
             self.get_info()
