@@ -75,6 +75,13 @@ class JLCPCBLibrary:
         size = int(size)
         return partcount, filename, size
 
+    def get_stock(self, lcsc):
+        if res := self.query_database(
+            f'SELECT Stock from jlcpcb_parts WHERE "LCSC Part" = "{lcsc}"'
+        ):
+            return res[0][0]
+        return ""
+
     def get_packages(self):
         """Get all distinct packages from the library"""
         res = self.query_database("SELECT DISTINCT Package from jlcpcb_parts")

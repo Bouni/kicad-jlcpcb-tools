@@ -67,7 +67,7 @@ class JLCBCBTools(wx.Dialog):
         self.fabrication = JLCPCBFabrication(self)
         # ---------------------------------------------------------------------
 
-        self.SetSizeHints(wx.Size(800, -1), wx.DefaultSize)
+        self.SetSizeHints(wx.Size(1000, -1), wx.DefaultSize)
 
         layout = wx.BoxSizer(wx.VERTICAL)
 
@@ -154,6 +154,14 @@ class JLCBCBTools(wx.Dialog):
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=80,
+            align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            | wx.dataview.DATAVIEW_COL_SORTABLE,
+        )
+        self.stock = self.footprint_list.AppendTextColumn(
+            "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=80,
             align=wx.ALIGN_CENTER,
@@ -353,16 +361,16 @@ class JLCBCBTools(wx.Dialog):
                 continue
             if self.hide_cpl_checkbox.GetValue() and get_exclude_from_pos(fp):
                 continue
+            lcsc = self.fabrication.parts.get(str(fp.GetReference()), {}).get(
+                "lcsc", ""
+            )
             self.footprint_list.AppendItem(
                 [
                     str(fp.GetReference()),
                     str(fp.GetValue()),
                     str(fp.GetFPID().GetLibItemName()),
-                    str(
-                        self.fabrication.parts.get(str(fp.GetReference()), {}).get(
-                            "lcsc", ""
-                        )
-                    ),
+                    str(lcsc),
+                    str(self.library.get_stock(lcsc)),
                     "No" if get_exclude_from_bom(fp) else "Yes",
                     "No" if get_exclude_from_pos(fp) else "Yes",
                 ]
