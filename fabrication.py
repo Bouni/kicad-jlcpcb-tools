@@ -102,17 +102,28 @@ class JLCPCBFabrication:
     def get_corrections(self):
         """Try loading rotation corrections from local file, if not present, load them from GitHub."""
         csvfile = os.path.join(self.plugin_path, "corrections", "cpl_rotations_db.csv")
+        local = {}
         if os.path.isfile(csvfile):
             with open(csvfile) as f:
                 c = csv.reader(f, delimiter=",", quotechar='"')
-                return list(c)[1:]
-        else:
+                next(c)
+                local = {x[0]: x[1] for x in c}
+        remote = {}
+        try:
             """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
             url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
             self.logger.info(f"Load corrections from {url}")
             r = requests.get(url)
             c = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
-            return list(c)[1:]
+            next(c)
+            remote = {x[0]: x[1] for x in c}
+        except:
+            pass
+        # Merge remote and local, always keep local if duplicate
+        for k, v in remote.items():
+            if k not in local:
+                local[k] = v
+        return local
 
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
@@ -120,7 +131,7 @@ class JLCPCBFabrication:
         # we need to devide by 10 to get 180 out of 1800 for example.
         # This might be a bug in 5.99
         rotation = original / 10
-        for pattern, correction in self.corrections:
+        for pattern, correction in self.corrections.items():
             if re.match(pattern, str(footprint.GetFPID().GetLibItemName())):
                 if footprint.GetLayer() == 0:
                     rotation = (rotation + int(correction)) % 360
