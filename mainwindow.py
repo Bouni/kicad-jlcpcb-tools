@@ -218,7 +218,7 @@ class JLCBCBTools(wx.Dialog):
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
         tool_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
         self.part_sum_button = wx.Button(
-            self, wx.ID_ANY, "Show part costs", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
         )
         self.part_sum_button.Bind(wx.EVT_BUTTON, self.calculate_price)
         tool_sizer.Add(self.part_sum_button, 0, wx.ALL, 5)
