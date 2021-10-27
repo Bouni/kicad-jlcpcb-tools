@@ -8,6 +8,7 @@ from zipfile import ZipFile
 import requests
 from pcbnew import (
     EXCELLON_WRITER,
+    PCB_PLOT_PARAMS,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
     B_Cu,
@@ -160,6 +161,8 @@ class JLCPCBFabrication:
         popt.SetUseGerberX2format(True)
         popt.SetIncludeGerberNetlistInfo(True)
         popt.SetDisableGerberMacros(False)
+
+        popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
 
         popt.SetPlotFrameRef(False)
         popt.SetExcludeEdgeLayer(True)
