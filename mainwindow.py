@@ -217,6 +217,11 @@ class JLCBCBTools(wx.Dialog):
         )
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
         tool_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
+        self.part_sum_button = wx.Button(
+            self, wx.ID_ANY, "Show part costs", wx.DefaultPosition, (150, -1), 0
+        )
+        self.part_sum_button.Bind(wx.EVT_BUTTON, self.calculate_price)
+        tool_sizer.Add(self.part_sum_button, 0, wx.ALL, 5)
         self.hide_bom_checkbox = wx.CheckBox(
             self, wx.ID_ANY, "Hide non BOM", wx.DefaultPosition, wx.DefaultSize
         )
@@ -360,6 +365,25 @@ class JLCBCBTools(wx.Dialog):
             key=get_footprint_keys,
         )
 
+    def calculate_price(self, e):
+        parts = {}
+        count = self.footprint_list.GetItemCount()
+        for i in range(0, count):
+            _lcsc = self.footprint_list.GetTextValue(i, 3)
+            if not _lcsc:
+                continue
+            if not _lcsc in parts:
+                parts[_lcsc] = 1
+            else:
+                parts[_lcsc] += 1
+        _sum = 0.0
+        for part, count in parts.items():
+            price = self.library.get_price(part, count)
+            _sum += price
+        wx.MessageBox(
+            f"The price for all parts sums up to ${round(_sum,2)}", "Price calculation"
+        )
+
     def populate_footprint_list(self):
         """Populate/Refresh list of footprints."""
         self.footprint_list.DeleteAllItems()
@@ -371,6 +395,7 @@ class JLCBCBTools(wx.Dialog):
             lcsc = self.fabrication.parts.get(str(fp.GetReference()), {}).get(
                 "lcsc", ""
             )
+            # self.logger.debug(f"{lcsc}, {self.library.get_price(lcsc, 1)}")
             self.footprint_list.AppendItem(
                 [
                     str(fp.GetReference()),
