@@ -309,6 +309,7 @@ class JLCPCBFabrication:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             footprints = {}
+            non_lcsc_footprints = {}
             for footprint in get_valid_footprints(self.board):
                 if get_exclude_from_bom(footprint):
                     self.logger.info(
@@ -317,18 +318,24 @@ class JLCPCBFabrication:
                     continue
                 lcsc = self.parts.get(footprint.GetReference(), {}).get("lcsc", "")
                 if not lcsc:
-                    self.logger.error(
-                        f"{footprint.GetReference()} has no LCSC attribute and is skipped!"
-                    )
-                    continue
-                if not lcsc in footprints:
-                    footprints[lcsc] = {
-                        "comment": footprint.GetValue(),
-                        "designators": [footprint.GetReference()],
-                        "footprint": footprint.GetFPID().GetLibItemName(),
-                    }
+                    identifier = "{}*{}".format(footprint.GetValue(), footprint.GetFPID().GetLibItemName())
+                    if not identifier in non_lcsc_footprints:
+                        non_lcsc_footprints[identifier] = {
+                            "comment": footprint.GetValue(),
+                            "designators": [footprint.GetReference()],
+                            "footprint": footprint.GetFPID().GetLibItemName(),
+                        }
+                    else:
+                        non_lcsc_footprints[identifier]["designators"].append(footprint.GetReference())
                 else:
-                    footprints[lcsc]["designators"].append(footprint.GetReference())
+                    if not lcsc in footprints:
+                        footprints[lcsc] = {
+                            "comment": footprint.GetValue(),
+                            "designators": [footprint.GetReference()],
+                            "footprint": footprint.GetFPID().GetLibItemName(),
+                        }
+                    else:
+                        footprints[lcsc]["designators"].append(footprint.GetReference())
             for lcsc, data in footprints.items():
                 designators = sorted(
                     data["designators"],
@@ -340,6 +347,15 @@ class JLCPCBFabrication:
                         ",".join(designators),
                         data["footprint"],
                         lcsc,
+                    ]
+                )
+            for _, data in non_lcsc_footprints.items():
+                writer.writerow(
+                    [
+                        data["comment"],
+                        ",".join(designators),
+                        data["footprint"],
+                        "",
                     ]
                 )
         self.logger.info(f"Finished generating BOM file")
