@@ -316,11 +316,6 @@ class JLCPCBFabrication:
                     )
                     continue
                 lcsc = self.parts.get(footprint.GetReference(), {}).get("lcsc", "")
-                if not lcsc:
-                    self.logger.error(
-                        f"{footprint.GetReference()} has no LCSC attribute and is skipped!"
-                    )
-                    continue
                 if not lcsc in footprints:
                     footprints[lcsc] = {
                         "comment": footprint.GetValue(),
