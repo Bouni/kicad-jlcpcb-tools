@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 
+import requests
 import wx
 import wx.dataview
 from pcbnew import GetBoard
@@ -365,6 +366,28 @@ class JLCBCBTools(wx.Dialog):
             key=get_footprint_keys,
         )
 
+    def fetch_price_from_api(self, lcsc, n):
+        r = requests.get(
+            f"https://cart.jlcpcb.com/shoppingCart/smtGood/getComponentDetail?componentCode={lcsc}"
+        )
+        if not r.status_code == requests.codes.ok:
+            self.logger.error(f"Failed to fecth price for {lcsc} from JLC API")
+            return 0
+        data = r.json().get("data")
+        if n <= data.get("leastNumber", 0):
+            return data.get("leastNumberPrice", 0)
+        if prices := data.get("jlcPrices"):
+            for jlcprice in prices:
+                endnumber = jlcprice.get("endNumber")
+                if n < endnumber or endnumber == -1:
+                    return n * jlcprice.get("productPrice")
+        elif prices := data.get("prices"):
+            for price in prices:
+                endnumber = price.get("endNumber")
+                if n < endnumber or endnumber == -1:
+                    return n * price.get("productPrice")
+        return 0
+
     def calculate_price(self, e):
         parts = {}
         count = self.footprint_list.GetItemCount()
@@ -378,10 +401,11 @@ class JLCBCBTools(wx.Dialog):
                 parts[_lcsc] += 1
         _sum = 0.0
         for part, count in parts.items():
-            price = self.library.get_price(part, count)
+            price = self.fetch_price_from_api(part, count * 5)
             _sum += price
         wx.MessageBox(
-            f"The price for all parts sums up to ${round(_sum,2)}", "Price calculation"
+            f"The price for all parts sums up to ${round(_sum,2)} for 5 assembled PCBs",
+            "Price calculation",
         )
 
     def populate_footprint_list(self):

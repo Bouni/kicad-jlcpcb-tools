@@ -80,19 +80,6 @@ class JLCPCBLibrary:
             self.filename, size = res[0]
             self.size = int(size)
 
-    def get_price(self, lcsc, n):
-        if n <= 0 or not lcsc:
-            return 0
-        if res := self.query_database(
-            f'SELECT Price from jlcpcb_parts WHERE "LCSC Part" = "{lcsc}"'
-        ):
-            for graduation in res[0][0].split(","):
-                minmax, price = graduation.strip().split(":")
-                min, max = minmax.split("-")
-                if n >= int(min) and n <= int(max):
-                    return float(price)
-        return 0
-
     def get_stock(self, lcsc):
         if res := self.query_database(
             f'SELECT Stock from jlcpcb_parts WHERE "LCSC Part" = "{lcsc}"'
