@@ -80,6 +80,13 @@ class JLCPCBLibrary:
             self.filename, size = res[0]
             self.size = int(size)
 
+    def get_solder_joints(self, lcsc):
+        if res := self.query_database(
+            f'SELECT "Solder Joint" from jlcpcb_parts WHERE "LCSC Part" = "{lcsc}"'
+        ):
+            return res[0][0]
+        return 0
+
     def get_stock(self, lcsc):
         if res := self.query_database(
             f'SELECT Stock from jlcpcb_parts WHERE "LCSC Part" = "{lcsc}"'

@@ -366,7 +366,8 @@ class JLCBCBTools(wx.Dialog):
             key=get_footprint_keys,
         )
 
-    def fetch_price_from_api(self, lcsc, n):
+    def fetch_price_from_api(self, lcsc, count, solder_joints):
+        assembly_fee = 0.0015
         r = requests.get(
             f"https://cart.jlcpcb.com/shoppingCart/smtGood/getComponentDetail?componentCode={lcsc}"
         )
@@ -374,19 +375,28 @@ class JLCBCBTools(wx.Dialog):
             self.logger.error(f"Failed to fecth price for {lcsc} from JLC API")
             return 0
         data = r.json().get("data")
-        if n <= data.get("leastNumber", 0):
-            return data.get("leastNumberPrice", 0)
+        if count <= data.get("leastNumber", 0):
+            return (
+                data.get("leastNumberPrice", 0),
+                data.get("leastNumber", 0) * solder_joints * assembly_fee,
+            )
         if prices := data.get("jlcPrices"):
             for jlcprice in prices:
                 endnumber = jlcprice.get("endNumber")
-                if n < endnumber or endnumber == -1:
-                    return n * jlcprice.get("productPrice")
+                if count < endnumber or endnumber == -1:
+                    return (
+                        count * jlcprice.get("productPrice"),
+                        count * solder_joints * assembly_fee,
+                    )
         elif prices := data.get("prices"):
             for price in prices:
                 endnumber = price.get("endNumber")
-                if n < endnumber or endnumber == -1:
-                    return n * price.get("productPrice")
-        return 0
+                if count < endnumber or endnumber == -1:
+                    return (
+                        count * price.get("productPrice"),
+                        count * solder_joints * assembly_fee,
+                    )
+        return 0, 0
 
     def calculate_price(self, e):
         parts = {}
@@ -399,12 +409,19 @@ class JLCBCBTools(wx.Dialog):
                 parts[_lcsc] = 1
             else:
                 parts[_lcsc] += 1
+        _assembly_costs = 0.0
         _sum = 0.0
         for part, count in parts.items():
-            price = self.fetch_price_from_api(part, count * 5)
+            solder_joints = int(self.library.get_solder_joints(part))
+            price, assembly_costs = self.fetch_price_from_api(
+                part, count * 5, solder_joints
+            )
+
+            _assembly_costs += assembly_costs
             _sum += price
         wx.MessageBox(
-            f"The price for all parts sums up to ${round(_sum,2)} for 5 assembled PCBs",
+            f"The price for all parts sums up to ${round(_sum,2)} for 5 assembled PCBs\n"
+            f"The assembly costs for 5 PCBs is ${round(_assembly_costs,2)}",
             "Price calculation",
         )
 
