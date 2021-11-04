@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 import sys
+from threading import Thread
 
 import wx
 import wx.dataview
@@ -183,6 +184,10 @@ class JLCBCBTools(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
+
+        # Bind event handler for EVT_GET_STOCK
+        self.EVT_SET_STOCK = wx.Window.NewControlId()
+        self.Connect(-1, -1, self.EVT_SET_STOCK, self.set_stock)
 
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
         # ---------------------------------------------------------------------
@@ -387,6 +392,7 @@ class JLCBCBTools(wx.Dialog):
     def populate_footprint_list(self):
         """Populate/Refresh list of footprints."""
         self.footprint_list.DeleteAllItems()
+        lcsc_numbers = []
         for fp in self.footprints:
             if self.hide_bom_checkbox.GetValue() and get_exclude_from_bom(fp):
                 continue
@@ -395,18 +401,38 @@ class JLCBCBTools(wx.Dialog):
             lcsc = self.fabrication.parts.get(str(fp.GetReference()), {}).get(
                 "lcsc", ""
             )
-            # self.logger.debug(f"{lcsc}, {self.library.get_price(lcsc, 1)}")
+            if not lcsc in lcsc_numbers:
+                lcsc_numbers.append(lcsc)
             self.footprint_list.AppendItem(
                 [
                     str(fp.GetReference()),
                     str(fp.GetValue()),
                     str(fp.GetFPID().GetLibItemName()),
                     str(lcsc),
-                    str(self.library.get_stock(lcsc)),
+                    "",
                     "No" if get_exclude_from_bom(fp) else "Yes",
                     "No" if get_exclude_from_pos(fp) else "Yes",
                 ]
             )
+        # start the thread
+        Thread(target=self.get_stock, args=(lcsc_numbers,)).start()
+
+    def set_stock(self, e):
+        count = self.footprint_list.GetItemCount()
+        for i in range(0, count):
+            _lcsc = self.footprint_list.GetTextValue(i, 3)
+            if v := next(filter(lambda sd: sd["lcsc"] == _lcsc, e.data)):
+                self.footprint_list.SetTextValue(v["stock"], i, 4)
+
+    def get_stock(self, lcsc_numbers):
+        stock_info = []
+        for lcsc in lcsc_numbers:
+            stock = self.library.get_stock(lcsc)
+            stock_info.append({"lcsc": lcsc, "stock": stock})
+        event = wx.PyEvent()
+        event.SetEventType(self.EVT_SET_STOCK)
+        event.data = stock_info
+        wx.PostEvent(self, event)
 
     def toogle_bom_cpl(self, e):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
