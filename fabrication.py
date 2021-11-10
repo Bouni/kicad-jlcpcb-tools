@@ -271,7 +271,9 @@ class JLCPCBFabrication:
     def generate_cpl(self):
         """Generate placement file (CPL)."""
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
-        with open(os.path.join(self.assemblydir, cplname), "w", newline="", encoding='utf-8') as csvfile:
+        with open(
+            os.path.join(self.assemblydir, cplname), "w", newline="", encoding="utf-8"
+        ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
@@ -305,7 +307,9 @@ class JLCPCBFabrication:
     def generate_bom(self):
         """Generate BOM file."""
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
-        with open(os.path.join(self.assemblydir, bomname), "w", newline="", encoding='utf-8') as csvfile:
+        with open(
+            os.path.join(self.assemblydir, bomname), "w", newline="", encoding="utf-8"
+        ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             footprints = {}
