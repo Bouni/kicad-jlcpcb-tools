@@ -566,7 +566,7 @@ class LogBoxHandler(logging.StreamHandler):
         self.textctrl = textctrl
 
     def emit(self, record):
-        """ Pokemon exception that hopefully helps getting this working with threads. """
+        """Pokemon exception that hopefully helps getting this working with threads."""
         try:
             msg = self.format(record)
             self.textctrl.WriteText(msg + "\n")
