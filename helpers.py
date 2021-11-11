@@ -1,11 +1,24 @@
+import logging
 import os
 import re
+
+from pcbnew import wxPoint
 
 THT = 0
 SMD = 1
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
+
+logger = logging.getLogger(__name__)
+
+
+def get_lcsc_value(fp):
+    """Get lcsc from all properties and allow vaious variants."""
+    lcsc_keys = [key for key in fp.GetProperties().keys() if "lcsc" in key.lower()]
+    if lcsc_keys:
+        return fp.GetProperties().get(lcsc_keys.pop(0), "")
+    return ""
 
 
 def get_version_info():
