@@ -115,7 +115,7 @@ class JLCBCBTools(wx.Dialog):
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
@@ -152,23 +152,28 @@ class JLCBCBTools(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.bom = self.footprint_list.AppendTextColumn(
-            "in BOM",
+        self.bom = self.footprint_list.AppendIconTextColumn(
+            "BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.cpl = self.footprint_list.AppendTextColumn(
-            "in CPL",
+        self.pos = self.footprint_list.AppendIconTextColumn(
+            "POS",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-
+        dummy = self.footprint_list.AppendTextColumn(
+            "",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        )
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
 
         self.footprint_list.Bind(
@@ -185,14 +190,14 @@ class JLCBCBTools(wx.Dialog):
         self.remove_part_button = wx.Button(
             self, wx.ID_ANY, "Remove part", wx.DefaultPosition, (150, -1), 0
         )
-        self.toggle_bom_cpl_button = wx.Button(
-            self, wx.ID_ANY, "Toggle BOM/CPL", wx.DefaultPosition, (150, -1), 0
+        self.toggle_bom_pos_button = wx.Button(
+            self, wx.ID_ANY, "Toggle BOM/POS", wx.DefaultPosition, (150, -1), 0
         )
         self.toggle_bom_button = wx.Button(
             self, wx.ID_ANY, "Toggle BOM", wx.DefaultPosition, (150, -1), 0
         )
-        self.toggle_cpl_button = wx.Button(
-            self, wx.ID_ANY, "Toggle CPL", wx.DefaultPosition, (150, -1), 0
+        self.toggle_pos_button = wx.Button(
+            self, wx.ID_ANY, "Toggle POS", wx.DefaultPosition, (150, -1), 0
         )
         self.part_details_button = wx.Button(
             self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
@@ -203,29 +208,29 @@ class JLCBCBTools(wx.Dialog):
         self.hide_bom_checkbox = wx.CheckBox(
             self, wx.ID_ANY, "Hide non BOM", wx.DefaultPosition, wx.DefaultSize
         )
-        self.hide_cpl_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, "Hide non CPL", wx.DefaultPosition, wx.DefaultSize
+        self.hide_pos_checkbox = wx.CheckBox(
+            self, wx.ID_ANY, "Hide non POS", wx.DefaultPosition, wx.DefaultSize
         )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.remove_part_button.Bind(wx.EVT_BUTTON, self.remove_part)
-        self.toggle_bom_cpl_button.Bind(wx.EVT_BUTTON, self.toogle_bom_cpl)
+        self.toggle_bom_pos_button.Bind(wx.EVT_BUTTON, self.toogle_bom_pos)
         self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toogle_bom)
-        self.toggle_cpl_button.Bind(wx.EVT_BUTTON, self.toogle_cpl)
+        self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toogle_pos)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
         self.part_sum_button.Bind(wx.EVT_BUTTON, self.calculate_price)
         self.hide_bom_checkbox.Bind(wx.EVT_CHECKBOX, self.OnBomHideChecked)
-        self.hide_cpl_checkbox.Bind(wx.EVT_CHECKBOX, self.OnCplHideChecked)
+        self.hide_pos_checkbox.Bind(wx.EVT_CHECKBOX, self.OnposHideChecked)
 
         toolbar_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.remove_part_button, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.toggle_bom_cpl_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.toggle_bom_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.toggle_bom_button, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.toggle_cpl_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.toggle_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.part_sum_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_bom_checkbox, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.hide_cpl_checkbox, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.hide_pos_checkbox, 0, wx.ALL, 5)
 
         table_sizer.Add(toolbar_sizer, 1, wx.EXPAND, 5)
 
@@ -279,16 +284,40 @@ class JLCBCBTools(wx.Dialog):
     def populate_footprint_list(self):
         """Populate/Refresh list of footprints."""
         self.footprint_list.DeleteAllItems()
+        icons = [
+            wx.dataview.DataViewIconText(
+                text="",
+                icon=wx.Icon(
+                    wx.Bitmap(
+                        os.path.join(
+                            self.plugin_path, "icons", "mdi-check-circle-outline.png"
+                        )
+                    )
+                ),
+            ),
+            wx.dataview.DataViewIconText(
+                text="",
+                icon=wx.Icon(
+                    wx.Bitmap(
+                        os.path.join(
+                            self.plugin_path, "icons", "mdi-close-circle-outline.png"
+                        )
+                    )
+                ),
+            ),
+        ]
         for part in self.store.read_all():
-            # remove the price from the list
-            part = list(part)
-            part.pop(5)
             # dont show the part if the checkbox for hide BOM is set
-            if self.hide_bom_checkbox.GetValue() and part[5] == "No":
+            if self.hide_bom_checkbox.GetValue() and part[4]:
                 continue
-            # dont show the part if the checkbox for hide CPL is set
-            if self.hide_cpl_checkbox.GetValue() and part[6] == "No":
+            # dont show the part if the checkbox for hide pos is set
+            if self.hide_pos_checkbox.GetValue() and part[5]:
                 continue
+            part.insert(4, "")
+            # decide which icon to use
+            part[5] = icons[part[5]]
+            part[6] = icons[part[6]]
+            part.insert(7, "")
             self.footprint_list.AppendItem(part)
 
     def update_library(self, e=None):
@@ -352,120 +381,74 @@ class JLCBCBTools(wx.Dialog):
     #     self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
 
     def OnBomHideChecked(self, e):
-        pass
+        """Hide all parts from the list that have 'in BOM' set to No."""
+        self.populate_footprint_list()
 
-    #     self.populate_footprint_list()
-
-    def OnCplHideChecked(self, e):
-        pass
-
-    #     self.populate_footprint_list()
+    def OnposHideChecked(self, e):
+        """Hide all parts from the list that have 'in pos' set to No."""
+        self.populate_footprint_list()
 
     def OnFootprintSelected(self, e):
-        pass
-
-    #     """Enable the toolbar buttons when a selection was made."""
-    #     self.enable_toolbar_buttons(self.footprint_list.GetSelectedItemsCount() > 0)
+        """Enable the toolbar buttons when a selection was made."""
+        self.enable_toolbar_buttons(self.footprint_list.GetSelectedItemsCount() > 0)
 
     def enable_all_buttons(self, state):
-        pass
-
-    #     """Control state of all the buttons"""
-    #     self.enable_top_buttons(state)
-    #     self.enable_toolbar_buttons(state)
+        """Control state of all the buttons"""
+        self.enable_top_buttons(state)
+        self.enable_toolbar_buttons(state)
 
     def enable_top_buttons(self, state):
-        pass
-
-    #     """Control the state of all the buttons in the top section"""
-    #     for b in [
-    #         self.generate_button,
-    #         self.download_button,
-    #         self.layer_selection,
-    #     ]:
-    #         b.Enable(bool(state))
+        """Control the state of all the buttons in the top section"""
+        for b in [
+            self.generate_button,
+            self.download_button,
+            self.layer_selection,
+        ]:
+            b.Enable(bool(state))
 
     def enable_toolbar_buttons(self, state):
-        pass
+        """Control the state of all the buttons in toolbar on the right side"""
+        for b in [
+            self.select_part_button,
+            self.remove_part_button,
+            self.toggle_bom_pos_button,
+            self.toggle_bom_button,
+            self.toggle_pos_button,
+            self.part_details_button,
+        ]:
+            b.Enable(bool(state))
 
-    #     """Control the state of all the buttons in toolbar on the right side"""
-    #     for b in [
-    #         self.select_part_button,
-    #         self.remove_part_button,
-    #         self.toggle_bom_cpl_button,
-    #         self.toggle_bom_button,
-    #         self.toggle_cpl_button,
-    #         self.part_details_button,
-    #     ]:
-    #         b.Enable(bool(state))
-
-    def get_footprints(self):
-        pass
-
-    #     """get all footprints from the board"""
-    #     self.board = GetBoard()
-    #     self.footprints = sorted(
-    #         get_valid_footprints(self.board),
-    #         key=get_footprint_keys,
-    #     )
-
-    def calculate_price(self, e):
-        pass
-
-    #     parts = {}
-    #     count = self.footprint_list.GetItemCount()
-    #     for i in range(0, count):
-    #         _lcsc = self.footprint_list.GetTextValue(i, 3)
-    #         if not _lcsc:
-    #             continue
-    #         if not _lcsc in parts:
-    #             parts[_lcsc] = 1
-    #         else:
-    #             parts[_lcsc] += 1
-    #     _sum = 0.0
-    #     for part, count in parts.items():
-    #         price = self.library.get_price(part, count)
-    #         _sum += price
-    #     wx.MessageBox(
-    #         f"The price for all parts sums up to ${round(_sum,2)}", "Price calculation"
-    #     )
-
-    def toogle_bom_cpl(self, e):
-        pass
-
-    #     """Toggle the exclude from BOM/POS attribute of a footprint."""
-    #     for item in self.footprint_list.GetSelections():
-    #         row = self.footprint_list.ItemToRow(item)
-    #         ref = self.footprint_list.GetTextValue(row, 0)
-    #         fp = get_footprint_by_ref(self.board, ref)
-    #         toggle_exclude_from_bom(fp)
-    #         toggle_exclude_from_pos(fp)
-    #     self.populate_footprint_list()
-    #     self.fabrication.save_part_assignments()
+    def toogle_bom_pos(self, e):
+        """Toggle the exclude from BOM/POS attribute of a footprint."""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            ref = self.footprint_list.GetTextValue(row, 0)
+            fp = get_footprint_by_ref(GetBoard(), ref)
+            bom = toggle_exclude_from_bom(fp)
+            pos = toggle_exclude_from_pos(fp)
+            self.store.set_bom(ref, bom)
+            self.store.set_pos(ref, pos)
+        self.populate_footprint_list()
 
     def toogle_bom(self, e):
-        pass
+        """Toggle the exclude from BOM attribute of a footprint."""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            ref = self.footprint_list.GetTextValue(row, 0)
+            fp = get_footprint_by_ref(GetBoard(), ref)
+            bom = toggle_exclude_from_bom(fp)
+            self.store.set_bom(ref, bom)
+        self.populate_footprint_list()
 
-    #     """Toggle the exclude from BOM attribute of a footprint."""
-    #     for item in self.footprint_list.GetSelections():
-    #         row = self.footprint_list.ItemToRow(item)
-    #         ref = self.footprint_list.GetTextValue(row, 0)
-    #         fp = get_footprint_by_ref(self.board, ref)
-    #         toggle_exclude_from_bom(fp)
-    #     self.populate_footprint_list()
-    #     self.fabrication.save_part_assignments()
-
-    def toogle_cpl(self, e):
-        pass
-
-    #     """Toggle the exclude from POS attribute of a footprint."""
-    #     for item in self.footprint_list.GetSelections():
-    #         row = self.footprint_list.ItemToRow(item)
-    #         ref = self.footprint_list.GetTextValue(row, 0)
-    #         fp = get_footprint_by_ref(self.board, ref)
-    #         toggle_exclude_from_pos(fp)
-    #     self.populate_footprint_list()
-    #     self.fabrication.save_part_assignments()
+    def toogle_pos(self, e):
+        """Toggle the exclude from POS attribute of a footprint."""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            ref = self.footprint_list.GetTextValue(row, 0)
+            fp = get_footprint_by_ref(GetBoard(), ref)
+            pos = toggle_exclude_from_pos(fp)
+            self.store.set_pos(ref, pos)
+        self.populate_footprint_list()
 
     def select_part(self, e):
         pass
@@ -518,7 +501,7 @@ class JLCBCBTools(wx.Dialog):
     #     self.fabrication.generate_geber(layer_count)
     #     self.fabrication.generate_excellon()
     #     self.fabrication.zip_gerber_excellon()
-    #     self.fabrication.generate_cpl()
+    #     self.fabrication.generate_pos()
     #     self.fabrication.generate_bom()
 
     def get_part_details(self, e):
@@ -534,7 +517,26 @@ class JLCBCBTools(wx.Dialog):
     #         dialog = PartDetailsDialog(self, part)
 
     #         dialog.Show()
+    def calculate_price(self, e):
+        pass
 
+    #     parts = {}
+    #     count = self.footprint_list.GetItemCount()
+    #     for i in range(0, count):
+    #         _lcsc = self.footprint_list.GetTextValue(i, 3)
+    #         if not _lcsc:
+    #             continue
+    #         if not _lcsc in parts:
+    #             parts[_lcsc] = 1
+    #         else:
+    #             parts[_lcsc] += 1
+    #     _sum = 0.0
+    #     for part, count in parts.items():
+    #         price = self.library.get_price(part, count)
+    #         _sum += price
+    #     wx.MessageBox(
+    #         f"The price for all parts sums up to ${round(_sum,2)}", "Price calculation"
+    #     )
     def init_logger(self):
         """Initialize logger to log into textbox"""
         root = logging.getLogger()
