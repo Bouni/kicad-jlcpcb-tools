@@ -16,7 +16,7 @@ from .helpers import (
 
 
 class Store:
-    """ A storage class to get data from a sqlite database and write it back"""
+    """A storage class to get data from a sqlite database and write it back"""
 
     def __init__(self, project_path):
         self.logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class Store:
         self.sync_board()
 
     def setup(self):
-        """ Check if folders and database exist, setup if not """
+        """Check if folders and database exist, setup if not"""
         if not os.path.isdir(self.datadir):
             self.logger.info(
                 "Data directory 'jlcpcb' does not exist and will be created."
