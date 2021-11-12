@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 import sys
+from threading import Thread
 
 import wx
 import wx.dataview
@@ -202,9 +203,9 @@ class JLCBCBTools(wx.Dialog):
         self.part_details_button = wx.Button(
             self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
         )
-        self.part_sum_button = wx.Button(
-            self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
-        )
+        # self.part_costs_button = wx.Button(
+        #     self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
+        # )
         self.hide_bom_checkbox = wx.CheckBox(
             self, wx.ID_ANY, "Hide non BOM", wx.DefaultPosition, wx.DefaultSize
         )
@@ -218,7 +219,7 @@ class JLCBCBTools(wx.Dialog):
         self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toogle_bom)
         self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toogle_pos)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
-        self.part_sum_button.Bind(wx.EVT_BUTTON, self.calculate_price)
+        # self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_price)
         self.hide_bom_checkbox.Bind(wx.EVT_CHECKBOX, self.OnBomHideChecked)
         self.hide_pos_checkbox.Bind(wx.EVT_CHECKBOX, self.OnposHideChecked)
 
@@ -228,7 +229,7 @@ class JLCBCBTools(wx.Dialog):
         toolbar_sizer.Add(self.toggle_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.toggle_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.part_sum_button, 0, wx.ALL, 5)
+        # toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_bom_checkbox, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_pos_checkbox, 0, wx.ALL, 5)
 
@@ -288,97 +289,30 @@ class JLCBCBTools(wx.Dialog):
             wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(
-                        os.path.join(
-                            self.plugin_path, "icons", "mdi-check-circle-outline.png"
-                        )
-                    )
+                    wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-check.png"))
                 ),
             ),
             wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(
-                        os.path.join(
-                            self.plugin_path, "icons", "mdi-close-circle-outline.png"
-                        )
-                    )
+                    wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-close.png"))
                 ),
             ),
         ]
         for part in self.store.read_all():
-            # dont show the part if the checkbox for hide BOM is set
-            if self.hide_bom_checkbox.GetValue() and part[4]:
-                continue
-            # dont show the part if the checkbox for hide pos is set
-            if self.hide_pos_checkbox.GetValue() and part[5]:
-                continue
+            # add an empty line for stock
             part.insert(4, "")
+            # dont show the part if the checkbox for hide BOM is set
+            if self.hide_bom_checkbox.GetValue() and part[5]:
+                continue
+            # dont show the part if the checkbox for hide POS is set
+            if self.hide_pos_checkbox.GetValue() and part[6]:
+                continue
             # decide which icon to use
             part[5] = icons[part[5]]
             part[6] = icons[part[6]]
             part.insert(7, "")
             self.footprint_list.AppendItem(part)
-
-    def update_library(self, e=None):
-        pass
-
-    #     """Download and load library data if necessary or actively requested"""
-    #     if self.library.download_active:
-    #         return
-    #     if self.library.need_download() or e:
-    #         self.enable_all_buttons(False)
-    #         self.library.download()
-    #         self.timer = wx.Timer(self)
-    #         self.Bind(wx.EVT_TIMER, self.update_gauge, self.timer)
-    #         self.timer.Start(200)
-    #         self.then = datetime.datetime.now()
-    #     else:
-    #         self.load_library()
-
-    # def update_gauge(self, evt):
-    #     """Update the progress gauge and handle thread completion"""
-    #     if self.library.dl_thread.is_alive():
-    #         if self.library.dl_thread.pos:
-    #             self.gauge.SetRange(1000)
-    #             self.gauge.SetValue(self.library.dl_thread.pos * 1000)
-    #         else:
-    #             self.gauge.Pulse()
-    #     else:
-    #         self.timer.Stop()
-    #         self.library.dl_thread = None
-    #         self.library.get_info()
-    #         if not self.library.download_success and self.library.isvalid:
-    #             wx.MessageBox(
-    #                 "Download of the CSV failed, will use existing library!",
-    #                 "Download error",
-    #                 style=wx.OK | wx.ICON_ERROR,
-    #             )
-    #         elif not self.library.download_success and not self.library.isvalid:
-    #             wx.MessageBox(
-    #                 "Download of the CSV failed, no existing library found, exit plugin now!",
-    #                 "Download error",
-    #                 style=wx.OK | wx.ICON_ERROR,
-    #             )
-    #             self.quit_dialog(None)
-    #         else:
-    #             now = datetime.datetime.now()
-    #             self.logger.info(
-    #                 "Downloaded into %s in %.3f seconds",
-    #                 os.path.basename(self.library.dbfn),
-    #                 (now - self.then).total_seconds(),
-    #             )
-    #         self.gauge.SetRange(1000)
-    #         self.gauge.SetValue(0)
-    #         self.load_library()
-    #         self.enable_all_buttons(True)
-
-    # def load_library(self):
-    #     self.library.load()
-    #     fntxt = ""
-    #     if self.library.filename:
-    #         fntxt = self.library.filename + " with "
-    #     self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
 
     def OnBomHideChecked(self, e):
         """Hide all parts from the list that have 'in BOM' set to No."""
@@ -450,6 +384,15 @@ class JLCBCBTools(wx.Dialog):
             self.store.set_pos(ref, pos)
         self.populate_footprint_list()
 
+    def remove_part(self, e):
+        """Remove an assigned a LCSC Part number to a footprint."""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            ref = self.footprint_list.GetTextValue(row, 0)
+            fp = get_footprint_by_ref(GetBoard(), ref)
+            self.store.set_lcsc(ref, "")
+        self.populate_footprint_list()
+
     def select_part(self, e):
         pass
 
@@ -478,10 +421,6 @@ class JLCBCBTools(wx.Dialog):
     #         self.fabrication.save_part_assignments()
     #     dialog.Destroy()
 
-    def remove_part(self, e):
-        pass
-
-    #     """Remove an assigned a LCSC Part number to a footprint."""
     #     for item in self.footprint_list.GetSelections():
     #         row = self.footprint_list.ItemToRow(item)
     #         ref = self.footprint_list.GetTextValue(row, 0)
@@ -517,8 +456,9 @@ class JLCBCBTools(wx.Dialog):
     #         dialog = PartDetailsDialog(self, part)
 
     #         dialog.Show()
-    def calculate_price(self, e):
-        pass
+
+    # def calculate_price(self, e):
+    #     pass
 
     #     parts = {}
     #     count = self.footprint_list.GetItemCount()
@@ -537,11 +477,70 @@ class JLCBCBTools(wx.Dialog):
     #     wx.MessageBox(
     #         f"The price for all parts sums up to ${round(_sum,2)}", "Price calculation"
     #     )
+
+    def update_library(self, e=None):
+        pass
+
+    #     """Download and load library data if necessary or actively requested"""
+    #     if self.library.download_active:
+    #         return
+    #     if self.library.need_download() or e:
+    #         self.enable_all_buttons(False)
+    #         self.library.download()
+    #         self.timer = wx.Timer(self)
+    #         self.Bind(wx.EVT_TIMER, self.update_gauge, self.timer)
+    #         self.timer.Start(200)
+    #         self.then = datetime.datetime.now()
+    #     else:
+    #         self.load_library()
+
+    # def update_gauge(self, evt):
+    #     """Update the progress gauge and handle thread completion"""
+    #     if self.library.dl_thread.is_alive():
+    #         if self.library.dl_thread.pos:
+    #             self.gauge.SetRange(1000)
+    #             self.gauge.SetValue(self.library.dl_thread.pos * 1000)
+    #         else:
+    #             self.gauge.Pulse()
+    #     else:
+    #         self.timer.Stop()
+    #         self.library.dl_thread = None
+    #         self.library.get_info()
+    #         if not self.library.download_success and self.library.isvalid:
+    #             wx.MessageBox(
+    #                 "Download of the CSV failed, will use existing library!",
+    #                 "Download error",
+    #                 style=wx.OK | wx.ICON_ERROR,
+    #             )
+    #         elif not self.library.download_success and not self.library.isvalid:
+    #             wx.MessageBox(
+    #                 "Download of the CSV failed, no existing library found, exit plugin now!",
+    #                 "Download error",
+    #                 style=wx.OK | wx.ICON_ERROR,
+    #             )
+    #             self.quit_dialog(None)
+    #         else:
+    #             now = datetime.datetime.now()
+    #             self.logger.info(
+    #                 "Downloaded into %s in %.3f seconds",
+    #                 os.path.basename(self.library.dbfn),
+    #                 (now - self.then).total_seconds(),
+    #             )
+    #         self.gauge.SetRange(1000)
+    #         self.gauge.SetValue(0)
+    #         self.load_library()
+    #         self.enable_all_buttons(True)
+
+    # def load_library(self):
+    #     self.library.load()
+    #     fntxt = ""
+    #     if self.library.filename:
+    #         fntxt = self.library.filename + " with "
+    #     self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
     def init_logger(self):
         """Initialize logger to log into textbox"""
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
-
         # Log to stderr
         handler1 = logging.StreamHandler(sys.stderr)
         handler1.setLevel(logging.DEBUG)
