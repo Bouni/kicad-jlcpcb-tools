@@ -24,7 +24,7 @@ class Store:
         self.datadir = os.path.join(self.project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
         self.setup()
-        self.sync_board()
+        self.update_from_board()
 
     def setup(self):
         """Check if folders and database exist, setup if not"""
@@ -62,11 +62,28 @@ class Store:
                     ).fetchall()
                 ]
 
-    def create_or_update(self, part):
-        """Create or update a part in the database."""
+    def create_part(self, part):
+        """Create a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                cur.execute("REPLACE INTO part_info VALUES (?,?,?,?,?,?)", part)
+                cur.execute("INSERT INTO part_info VALUES (?,?,?,?,?,?)", part)
+                cur.commit()
+
+    def update_part(self, part):
+        """Update a part in the database, overwrite lcsc if supplied."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                if len(part) == 6:
+                    cur.execute(
+                        "UPDATE part_info set value = ?, footprint = ?, lcsc = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
+                        part[1:] + part[0:1],
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE part_info set value = ?, footprint = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
+                        part[1:] + part[0:1],
+                    )
+
                 cur.commit()
 
     def get_part(self, ref):
@@ -102,20 +119,16 @@ class Store:
                 )
                 cur.commit()
 
-    def overwrite_from_board(self, ref):
-        """Read a part from the board and overwrite the values in the database."""
-        fp = get_footprint_by_ref(GetBoard(), ref)
-        part = [
-            fp.GetReference(),
-            fp.GetValue(),
-            str(fp.GetFPID().GetLibItemName()),
-            get_lcsc_value(fp),
-            get_exclude_from_bom(fp),
-            get_exclude_from_pos(fp),
-        ]
-        self.create_or_update(part)
+    def set_lcsc(self, ref, value):
+        """Change the BOM attribute for a part in the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"UPDATE part_info SET lcsc = '{value}' WHERE reference = '{ref}'"
+                )
+                cur.commit()
 
-    def sync_board(self):
+    def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
         board = GetBoard()
         for fp in get_valid_footprints(board):
@@ -127,12 +140,27 @@ class Store:
                 get_exclude_from_bom(fp),
                 get_exclude_from_pos(fp),
             ]
+            dbpart = self.get_part(part[0])
             # if part is not in the database yet, create it
-            if not self.get_part(part[0]):
+            if not dbpart:
                 self.logger.debug(
                     f"Part {part[0]} does not exist in the database and will be created from the board."
                 )
-                self.create_or_update(part)
+                self.create_part(part)
+            # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
+            elif dbpart and not dbpart[3] and part[3]:
+                self.logger.debug(
+                    f"Part {part[0]} is already in the database but without lcsc value, so the value supplied from the board will be set."
+                )
+                self.update_part(part)
+            # if part in the database, has a lcsc value, update except lcsc
+            elif dbpart and dbpart[3] and part[3]:
+                self.logger.debug(
+                    f"Part {part[0]} is already in the database and has a lcsc value, the value supplied from the board will be ignored."
+                )
+                part.pop(3)
+                self.update_part(part)
+
         self.clean_database()
 
     def clean_database(self):
