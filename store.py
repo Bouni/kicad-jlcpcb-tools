@@ -33,17 +33,21 @@ class Store:
                 "Data directory 'jlcpcb' does not exist and will be created."
             )
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
-        if not os.path.isfile(self.dbfile):
-            self.logger.info("Database does not exist and will be created.")
-            self.create_db()
+        self.create_db()
 
     def create_db(self):
         """Create the sqlite database tables."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 cur.execute(
-                    "CREATE TABLE IF NOT EXISTS part_info"
-                    "(reference NOT NULL PRIMARY KEY,value ,footprint,lcsc,stock,price,bom,cpl)"
+                    "CREATE TABLE IF NOT EXISTS part_info ("
+                    "reference NOT NULL PRIMARY KEY,"
+                    "value TEXT NOT NULL,"
+                    "footprint TEXT NOT NULL,"
+                    "lcsc TEXT,"
+                    "exclude_from_bom NUMERIC DEFAULT 0,"
+                    "exclude_from_pos NUMERIC DEFAULT 0"
+                    ")"
                 )
             cur.commit()
 
@@ -51,15 +55,18 @@ class Store:
         """Read all parts from the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                return cur.execute(
-                    "SELECT * FROM part_info ORDER BY reference COLLATE NOCASE ASC"
-                ).fetchall()
+                return [
+                    list(part)
+                    for part in cur.execute(
+                        "SELECT * FROM part_info ORDER BY reference COLLATE NOCASE ASC"
+                    ).fetchall()
+                ]
 
     def create_or_update(self, part):
-        """Create or update a pert in the database."""
+        """Create or update a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                cur.execute("REPLACE INTO part_info VALUES (?,?,?,?,?,?,?,?)", part)
+                cur.execute("REPLACE INTO part_info VALUES (?,?,?,?,?,?)", part)
                 cur.commit()
 
     def get_part(self, ref):
@@ -77,7 +84,25 @@ class Store:
                 cur.execute("DELETE FROM part_info WHERE reference=?", (ref,))
                 cur.commit()
 
-    def sync_part(self, ref):
+    def set_bom(self, ref, state):
+        """Change the BOM attribute for a part in the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"UPDATE part_info SET exclude_from_bom = '{int(state)}' WHERE reference = '{ref}'"
+                )
+                cur.commit()
+
+    def set_pos(self, ref, state):
+        """Change the BOM attribute for a part in the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"UPDATE part_info SET exclude_from_pos = '{int(state)}' WHERE reference = '{ref}'"
+                )
+                cur.commit()
+
+    def overwrite_from_board(self, ref):
         """Read a part from the board and overwrite the values in the database."""
         fp = get_footprint_by_ref(GetBoard(), ref)
         part = [
@@ -85,10 +110,8 @@ class Store:
             fp.GetValue(),
             str(fp.GetFPID().GetLibItemName()),
             get_lcsc_value(fp),
-            "",
-            "",
-            "No" if get_exclude_from_bom(fp) else "Yes",
-            "No" if get_exclude_from_pos(fp) else "Yes",
+            get_exclude_from_bom(fp),
+            get_exclude_from_pos(fp),
         ]
         self.create_or_update(part)
 
@@ -101,17 +124,23 @@ class Store:
                 fp.GetValue(),
                 str(fp.GetFPID().GetLibItemName()),
                 get_lcsc_value(fp),
-                "",
-                "",
-                "No" if get_exclude_from_bom(fp) else "Yes",
-                "No" if get_exclude_from_pos(fp) else "Yes",
+                get_exclude_from_bom(fp),
+                get_exclude_from_pos(fp),
             ]
+            # if part is not in the database yet, create it
             if not self.get_part(part[0]):
-                self.logger.info(
+                self.logger.debug(
                     f"Part {part[0]} does not exist in the database and will be created from the board."
                 )
                 self.create_or_update(part)
-            else:
-                self.logger.info(
-                    f"Part {part[0]} exists in the database and will be loaded from the database."
+        self.clean_database()
+
+    def clean_database(self):
+        """Delete all parts from the database that are no longer present on the board."""
+        refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(GetBoard())]
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
                 )
+                cur.commit()
