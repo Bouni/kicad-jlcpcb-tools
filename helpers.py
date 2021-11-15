@@ -13,6 +13,16 @@ NOT_IN_SCHEMATIC = 4
 logger = logging.getLogger(__name__)
 
 
+def natural_sort_collation(a, b):
+    """Natural sort collation for use in sqlite."""
+    if a == b:
+        return 0
+    convert = lambda text: int(text) if text.isdigit() else text.lower()
+    alphanum_key = lambda key: [convert(c) for c in re.split("([0-9]+)", key)]
+    natorder = sorted(list, key=alphanum_key)
+    return -1 if natorder.index(a) == 0 else 1
+
+
 def get_lcsc_value(fp):
     """Get lcsc from all properties and allow vaious variants."""
     lcsc_keys = [key for key in fp.GetProperties().keys() if "lcsc" in key.lower()]
