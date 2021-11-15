@@ -12,6 +12,7 @@ from .helpers import (
     get_footprint_by_ref,
     get_lcsc_value,
     get_valid_footprints,
+    natural_sort_collation,
 )
 
 
@@ -54,11 +55,12 @@ class Store:
     def read_all(self):
         """Read all parts from the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            con.create_collation("naturalsort", natural_sort_collation)
             with con as cur:
                 return [
                     list(part)
                     for part in cur.execute(
-                        "SELECT * FROM part_info ORDER BY reference COLLATE NOCASE ASC"
+                        "SELECT * FROM part_info ORDER BY reference COLLATE naturalsort ASC"
                     ).fetchall()
                 ]
 
