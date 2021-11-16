@@ -36,6 +36,7 @@ Checkout this screencast, it shows quickly how to use this plugin:
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
 
 ## Keyboard shortcuts
+
 Windows can be closed with ctrl-w/ctrl-q/command-w/command-w (OS dependent) and escape.
 Pressing enter in the keyword text box will start a search.
 
@@ -69,3 +70,7 @@ Footprints are included into the BOM and CPL files accordning to their `exclude 
 
 JLCPCB seems to need corrected rotation information. @matthewlai implemented that in his [JLCKicadTools](https://github.com/matthewlai/JLCKicadTools) and I adopted his work in this plugin as well.
 You can either have a local .csv file in `kicad-jlcpcb-tools/corrections/cpl_rotations_db.csv` and if that is not present, Matthews file is loaded from GitHub.
+
+## Icons
+
+This plugin makes use of a lot of icons from the excelent [Material Design Icons](https://materialdesignicons.com/)
