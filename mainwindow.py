@@ -61,6 +61,7 @@ class JLCBCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
         # -------------------- Horizontal top buttons -------------------------
         # ---------------------------------------------------------------------
+
         top_button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.generate_button = wx.Button(
             self,
@@ -69,6 +70,16 @@ class JLCBCBTools(wx.Dialog):
             wx.DefaultPosition,
             wx.DefaultSize,
             0,
+        )
+
+        layer_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.layer_icon = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            wx.Bitmap(
+                os.path.join(self.plugin_path, "icons", "mdi-layers-triple-outline.png")
+            ),
+            size=(24, 36),
         )
         self.layer_selection = wx.Choice(
             self,
@@ -79,26 +90,53 @@ class JLCBCBTools(wx.Dialog):
             0,
         )
         self.layer_selection.SetSelection(0)
-        self.library_description = wx.StaticText(
-            self,
-            wx.ID_ANY,
-            "",
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            wx.ALIGN_LEFT,
-            "library_desc",
-        )
+        # self.library_description = wx.StaticText(
+        #     self,
+        #     wx.ID_ANY,
+        #     "",
+        #     wx.DefaultPosition,
+        #     wx.DefaultSize,
+        #     wx.ALIGN_LEFT,
+        #     "library_desc",
+        # )
         self.download_button = wx.Button(
-            self, wx.ID_ANY, "Update library", wx.DefaultPosition, wx.DefaultSize, 0
+            self, wx.ID_ANY, "Update library", wx.DefaultPosition, (150, -1), 0
+        )
+
+        layer_sizer.Add(
+            self.layer_icon, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT | wx.RIGHT, 5
+        )
+        layer_sizer.Add(
+            self.layer_selection,
+            0,
+            wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_LEFT,
+            5,
         )
 
         top_button_sizer.Add(self.generate_button, 0, wx.ALL, 5)
-        top_button_sizer.Add(self.layer_selection, 0, wx.ALL, 5)
-        top_button_sizer.Add(self.library_description, 1, wx.TOP | wx.EXPAND, 10)
-        top_button_sizer.Add(self.download_button, 0, wx.ALL, 5)
+        top_button_sizer.Add(layer_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        # top_button_sizer.Add(self.library_description, 1, wx.TOP | wx.EXPAND, 10)
+        # Add a spacer to push download button to the right
+        top_button_sizer.Add((0, 0), 1, wx.EXPAND, 5)
+        top_button_sizer.Add(
+            self.download_button,
+            0,
+            wx.ALL | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
 
         self.generate_button.Bind(wx.EVT_BUTTON, self.generate_fabrication_data)
         self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
+
+        fab_icon = wx.Bitmap(os.path.join(self.plugin_path, "icons", "fabrication.png"))
+        self.generate_button.SetBitmap(fab_icon)
+        self.generate_button.SetBitmapMargins((2, 0))
+
+        download_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-cloud-download-outline.png")
+        )
+        self.download_button.SetBitmap(download_icon)
+        self.download_button.SetBitmapMargins((2, 0))
 
         # ---------------------------------------------------------------------
         # ----------------------- Footprint List ------------------------------
@@ -200,9 +238,9 @@ class JLCBCBTools(wx.Dialog):
         self.part_details_button = wx.Button(
             self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
         )
-        # self.part_costs_button = wx.Button(
-        #     self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
-        # )
+        self.part_costs_button = wx.Button(
+            self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
+        )
         self.hide_bom_checkbox = wx.CheckBox(
             self, wx.ID_ANY, "Hide non BOM", wx.DefaultPosition, wx.DefaultSize
         )
@@ -216,7 +254,7 @@ class JLCBCBTools(wx.Dialog):
         self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toogle_bom)
         self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toogle_pos)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
-        # self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_price)
+        self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_costs)
         self.hide_bom_checkbox.Bind(wx.EVT_CHECKBOX, self.OnBomHideChecked)
         self.hide_pos_checkbox.Bind(wx.EVT_CHECKBOX, self.OnposHideChecked)
 
@@ -226,9 +264,46 @@ class JLCBCBTools(wx.Dialog):
         toolbar_sizer.Add(self.toggle_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.toggle_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
-        # toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_bom_checkbox, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_pos_checkbox, 0, wx.ALL, 5)
+
+        select_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-database-search-outline.png")
+        )
+        self.select_part_button.SetBitmap(select_icon)
+        self.select_part_button.SetBitmapMargins((2, 0))
+        remove_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-close-box-outline.png")
+        )
+        self.remove_part_button.SetBitmap(remove_icon)
+        self.remove_part_button.SetBitmapMargins((2, 0))
+
+        bom_pos_icon = wx.Bitmap(os.path.join(self.plugin_path, "icons", "bom-pos.png"))
+        self.toggle_bom_pos_button.SetBitmap(bom_pos_icon)
+        self.toggle_bom_pos_button.SetBitmapMargins((2, 0))
+
+        bom_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-format-list-bulleted.png")
+        )
+        self.toggle_bom_button.SetBitmap(bom_icon)
+        self.toggle_bom_button.SetBitmapMargins((2, 0))
+
+        pos_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-crosshairs-gps.png")
+        )
+        self.toggle_pos_button.SetBitmap(pos_icon)
+        self.toggle_pos_button.SetBitmapMargins((2, 0))
+
+        details_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-text-box-search-outline.png")
+        )
+        self.part_details_button.SetBitmap(details_icon)
+        self.part_details_button.SetBitmapMargins((2, 0))
+
+        cost_icon = wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-cash.png"))
+        self.part_costs_button.SetBitmap(cost_icon)
+        self.part_costs_button.SetBitmapMargins((2, 0))
 
         table_sizer.Add(toolbar_sizer, 1, wx.EXPAND, 5)
 
@@ -457,8 +532,8 @@ class JLCBCBTools(wx.Dialog):
 
     #         dialog.Show()
 
-    # def calculate_price(self, e):
-    #     pass
+    def calculate_costs(self, e):
+        pass
 
     #     parts = {}
     #     count = self.footprint_list.GetItemCount()
