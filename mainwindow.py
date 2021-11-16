@@ -118,56 +118,49 @@ class JLCBCBTools(wx.Dialog):
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.value = self.footprint_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=200,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=300,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.stock = self.footprint_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.bom = self.footprint_list.AppendIconTextColumn(
             "BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.pos = self.footprint_list.AppendIconTextColumn(
             "POS",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         dummy = self.footprint_list.AppendTextColumn(
             "",
@@ -176,6 +169,10 @@ class JLCBCBTools(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
+
+        self.footprint_list.Bind(
+            wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self.OnSortFootprintList
+        )
 
         self.footprint_list.Bind(
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
@@ -285,23 +282,21 @@ class JLCBCBTools(wx.Dialog):
     def populate_footprint_list(self):
         """Populate/Refresh list of footprints."""
         self.footprint_list.DeleteAllItems()
-        icons = [
-            wx.dataview.DataViewIconText(
+        icons = {
+            0: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
                     wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-check.png"))
                 ),
             ),
-            wx.dataview.DataViewIconText(
+            1: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
                     wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-close.png"))
                 ),
             ),
-        ]
+        }
         for part in self.store.read_all():
-            # add an empty line for stock
-            part.insert(4, "")
             # dont show the part if the checkbox for hide BOM is set
             if self.hide_bom_checkbox.GetValue() and part[5]:
                 continue
@@ -309,10 +304,15 @@ class JLCBCBTools(wx.Dialog):
             if self.hide_pos_checkbox.GetValue() and part[6]:
                 continue
             # decide which icon to use
-            part[5] = icons[part[5]]
-            part[6] = icons[part[6]]
+            part[5] = icons.get(part[5], icons.get(0))
+            part[6] = icons.get(part[6], icons.get(0))
             part.insert(7, "")
             self.footprint_list.AppendItem(part)
+
+    def OnSortFootprintList(self, e):
+        """Set order_by to the clicked column and trigger list refresh."""
+        self.store.set_order_by(e.GetColumn())
+        self.populate_footprint_list()
 
     def OnBomHideChecked(self, e):
         """Hide all parts from the list that have 'in BOM' set to No."""
