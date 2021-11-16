@@ -24,6 +24,8 @@ class Store:
         self.project_path = project_path
         self.datadir = os.path.join(self.project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
+        self.order_by = "reference"
+        self.order_dir = "ASC"
         self.setup()
         self.update_from_board()
 
@@ -36,6 +38,25 @@ class Store:
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
         self.create_db()
 
+    def set_order_by(self, n):
+        """Set which value we want to order by when getting data from the database"""
+        if n > 6:
+            return
+        order_by = [
+            "reference",
+            "value",
+            "footprint",
+            "lcsc",
+            "stock",
+            "exclude_from_bom",
+            "exclude_from_pos",
+        ]
+        if self.order_by == order_by[n] and self.order_dir == "ASC":
+            self.order_dir = "DESC"
+        else:
+            self.order_by = order_by[n]
+            self.order_dir = "ASC"
+
     def create_db(self):
         """Create the sqlite database tables."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
@@ -46,9 +67,10 @@ class Store:
                     "value TEXT NOT NULL,"
                     "footprint TEXT NOT NULL,"
                     "lcsc TEXT,"
+                    "stock NUMERIC,"
                     "exclude_from_bom NUMERIC DEFAULT 0,"
                     "exclude_from_pos NUMERIC DEFAULT 0"
-                    ")"
+                    ")",
                 )
             cur.commit()
 
@@ -60,7 +82,7 @@ class Store:
                 return [
                     list(part)
                     for part in cur.execute(
-                        "SELECT * FROM part_info ORDER BY reference COLLATE naturalsort ASC"
+                        f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
                     ).fetchall()
                 ]
 
@@ -68,7 +90,7 @@ class Store:
         """Create a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                cur.execute("INSERT INTO part_info VALUES (?,?,?,?,?,?)", part)
+                cur.execute("INSERT INTO part_info VALUES (?,?,?,?,'',?,?)", part)
                 cur.commit()
 
     def update_part(self, part):
