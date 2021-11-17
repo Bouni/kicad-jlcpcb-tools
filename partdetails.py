@@ -150,7 +150,6 @@ class PartDetailsDialog(wx.Dialog):
             "componentBrandEn": "Brand",
             "componentName": "Full name",
             "componentDesignator": "Designator",
-            "componentLibraryType": "Type",
             "componentModelEn": "Model",
             "componentSpecificationEn": "Specification",
             "describe": "Description",
@@ -159,6 +158,11 @@ class PartDetailsDialog(wx.Dialog):
             "leastNumber": "Minimal Quantity",
             "leastNumberPrice": "Minimum price",
         }
+        if parttype := data.get("data", {}).get("componentLibraryType"):
+            if parttype == "base":
+                self.data_list.AppendItem(["Type", "Basic"])
+            elif parttype == "expand":
+                self.data_list.AppendItem(["Type", "Extended"])
         for k, v in parameters.items():
             if val := data.get("data", {}).get(k):
                 self.data_list.AppendItem([v, str(val)])
