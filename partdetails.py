@@ -141,8 +141,21 @@ class PartDetailsDialog(wx.Dialog):
         )
         if r.status_code != requests.codes.ok:
             del self.parent.busy_cursor
-            self.EndModal(-1)
+            wx.MessageBox(
+                "Failed to download part detail from JLCPCB's API",
+                "Error",
+                style=wx.ICON_ERROR,
+            )
+            self.EndModal()
         data = r.json()
+        if not data.get("data"):
+            del self.parent.busy_cursor
+            wx.MessageBox(
+                "Failed to download part detail from JLCPCB's API",
+                "Error",
+                style=wx.ICON_ERROR,
+            )
+            self.EndModal()
         parameters = {
             "componentCode": "Component code",
             "firstTypeNameEn": "Primary category",
