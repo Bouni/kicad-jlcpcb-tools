@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import webbrowser
 
 import requests
@@ -8,16 +9,25 @@ import wx
 
 class PartDetailsDialog(wx.Dialog):
     def __init__(self, parent, part):
-        self.part = part
         wx.Dialog.__init__(
             self,
             parent,
             id=wx.ID_ANY,
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
-            size=wx.Size(800, 600),
+            size=wx.Size(1000, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.STAY_ON_TOP,
         )
+
+        self.logger = logging.getLogger(__name__)
+        self.parent = parent
+        self.part = part
+        self.pdfurl = None
+        self.picture = None
+
+        # ---------------------------------------------------------------------
+        # ---------------------------- Hotkeys --------------------------------
+        # ---------------------------------------------------------------------
         # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
         self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
         self.panel.Fit()
@@ -32,10 +42,10 @@ class PartDetailsDialog(wx.Dialog):
         )
         self.SetAcceleratorTable(aTable)
         self.Bind(wx.EVT_MENU, self.quit_dialog, id=quitid)
-        self.logger = logging.getLogger(__name__)
 
-        layout = wx.BoxSizer(wx.HORIZONTAL)
-
+        # ---------------------------------------------------------------------
+        # ----------------------- Properties List -----------------------------
+        # ---------------------------------------------------------------------
         self.data_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
@@ -43,7 +53,6 @@ class PartDetailsDialog(wx.Dialog):
             wx.DefaultSize,
             style=wx.dataview.DV_SINGLE,
         )
-
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
@@ -56,50 +65,68 @@ class PartDetailsDialog(wx.Dialog):
             width=300,
             align=wx.ALIGN_LEFT,
         )
-        layout.Add(self.data_list, 20, wx.ALL | wx.EXPAND, 5)
 
-        self.get_part_data()
+        # ---------------------------------------------------------------------
+        # ------------------------- Right side ------------------------------
+        # ---------------------------------------------------------------------
+        self.image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            wx.Bitmap(
+                os.path.join(self.parent.plugin_path, "icons", "placeholder.png")
+            ),
+            wx.DefaultPosition,
+            (200, 200),
+            0,
+        )
+        self.openpdf_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Open Datasheet",
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
 
-        rhslayout = wx.BoxSizer(wx.VERTICAL)
-        layout.Add(rhslayout, 20, wx.ALL | wx.EXPAND, 5)
+        self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
 
-        if self.picture:
-            staticImage = wx.StaticBitmap(
-                self,
-                wx.ID_ANY,
-                self.get_scaled_bitmap(self.picture, 200, 200),
-                wx.DefaultPosition,
-                (200, 200),
-                0,
+        pdf_icon = wx.Bitmap(
+            os.path.join(
+                self.parent.plugin_path, "icons", "mdi-file-document-outline.png"
             )
-            rhslayout.Add(staticImage, 10, wx.ALL | wx.EXPAND, 5)
+        )
+        self.openpdf_button.SetBitmap(pdf_icon)
+        self.openpdf_button.SetBitmapMargins((2, 0))
 
-        if self.pdfurl:
-            openpdf = wx.Button(
-                self,
-                wx.ID_ANY,
-                "Open Datasheet",
-                wx.DefaultPosition,
-                wx.DefaultSize,
-                0,
-            )
-            openpdf.Bind(wx.EVT_BUTTON, self.openpdf)
-            rhslayout.AddStretchSpacer(50)
-            rhslayout.Add(openpdf, 10, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
+        # ---------------------------------------------------------------------
+        # ------------------------ Layout and Sizers --------------------------
+        # ---------------------------------------------------------------------
+
+        right_side_layout = wx.BoxSizer(wx.VERTICAL)
+        right_side_layout.Add(self.image, 10, wx.ALL | wx.EXPAND, 5)
+        right_side_layout.AddStretchSpacer(50)
+        right_side_layout.Add(self.openpdf_button, 5, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
+        layout = wx.BoxSizer(wx.HORIZONTAL)
+        layout.Add(self.data_list, 30, wx.ALL | wx.EXPAND, 5)
+        layout.Add(right_side_layout, 10, wx.ALL | wx.EXPAND, 5)
+
         self.SetSizer(layout)
         self.Layout()
-
         self.Centre(wx.BOTH)
+
+        self.get_part_data()
 
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
 
     def openpdf(self, e):
+        """Open the linked datasheet PDF on button click."""
         self.logger.info("opening %s", str(self.pdfurl))
         webbrowser.open(self.pdfurl)
 
     def get_scaled_bitmap(self, url, width, height):
+        """Download a picture from a URL and convert it into a wx Bitmap"""
         content = requests.get(url).content
         io_bytes = io.BytesIO(content)
         image = wx.Image(io_bytes)
@@ -108,33 +135,77 @@ class PartDetailsDialog(wx.Dialog):
         return result
 
     def get_part_data(self):
+        """fetch part data from JLCPCB API and parse it into the table, set picture and PDF link"""
         r = requests.get(
-            f"https://wwwapi.lcsc.com/v1/products/detail?product_code={self.part}"
+            f"https://cart.jlcpcb.com/shoppingCart/smtGood/getComponentDetail?componentCode={self.part}"
         )
-        parameters = {
-            "productCode": "Product Code",
-            "productModel": "Model",
-            "parentCatalogName": "Main Category",
-            "catalogName": "Sub Category",
-            "brandNameEn": "Brand",
-            "encapStandard": "Package",
-            "productUnit": "Unit",
-            "productWeight": "Weight",
-            "pdfUrl": "Data Sheet",
-        }
+        if r.status_code != requests.codes.ok:
+            del self.parent.busy_cursor
+            self.EndModal(-1)
         data = r.json()
+        parameters = {
+            "componentCode": "Component code",
+            "firstTypeNameEn": "Primary category",
+            "secondTypeNameEn": "Secondary category",
+            "componentBrandEn": "Brand",
+            "componentName": "Full name",
+            "componentDesignator": "Designator",
+            "componentLibraryType": "Type",
+            "componentModelEn": "Model",
+            "componentSpecificationEn": "Specification",
+            "describe": "Description",
+            "matchedPartDetail": "Details",
+            "stockCount": "Stock",
+            "leastNumber": "Minimal Quantity",
+            "leastNumberPrice": "Minimum price",
+        }
         for k, v in parameters.items():
-            val = data.get(k)
-            if k == "pdfUrl":
-                self.pdfurl = val
-            if val:
+            if val := data.get("data", {}).get(k):
                 self.data_list.AppendItem([v, str(val)])
-        if data.get("paramVOList"):
-            for item in data.get("paramVOList", []):
-                self.data_list.AppendItem(
-                    [item["paramNameEn"], str(item["paramValueEn"])]
-                )
-        if len(data["productImages"]) > 0:
-            self.picture = data["productImages"][0]
-        else:
-            self.picture = None
+        if prices := data.get("data", {}).get("jlcPrices", []):
+            for price in prices:
+                start = price.get("startNumber")
+                end = price.get("endNumber")
+                if end == -1:
+                    self.data_list.AppendItem(
+                        [
+                            f"JLC Price for >{start}",
+                            str(price.get("productPrice")),
+                        ]
+                    )
+                else:
+                    self.data_list.AppendItem(
+                        [
+                            f"JLC Price for {start}-{end}",
+                            str(price.get("productPrice")),
+                        ]
+                    )
+        if prices := data.get("data", {}).get("prices", []):
+            for price in prices:
+                start = price.get("startNumber")
+                end = price.get("endNumber")
+                if end == -1:
+                    self.data_list.AppendItem(
+                        [
+                            f"LCSC Price for >{start}",
+                            str(price.get("productPrice")),
+                        ]
+                    )
+                else:
+                    self.data_list.AppendItem(
+                        [
+                            f"LCSC Price for {start}-{end}",
+                            str(price.get("productPrice")),
+                        ]
+                    )
+        for attribute in data.get("data", {}).get("attributes", []):
+            self.data_list.AppendItem(
+                [
+                    attribute.get("attribute_name_en"),
+                    str(attribute.get("attribute_value_name")),
+                ]
+            )
+        if picture := data.get("data", {}).get("componentImageUrl"):
+            self.image.SetBitmap(self.get_scaled_bitmap(picture, 200, 200))
+        self.pdfurl = data.get("data", {}).get("dataManualUrl")
+        del self.parent.busy_cursor
