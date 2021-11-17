@@ -43,6 +43,8 @@ class JLCBCBTools(wx.Dialog):
 
         self.plugin_path = os.path.split(os.path.abspath(__file__))[0]
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
+        self.hide_bom_parts = False
+        self.hide_pos_parts = False
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -245,11 +247,11 @@ class JLCBCBTools(wx.Dialog):
         self.part_costs_button = wx.Button(
             self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
         )
-        self.hide_bom_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, "Hide non BOM", wx.DefaultPosition, wx.DefaultSize
+        self.hide_bom_button = wx.Button(
+            self, wx.ID_ANY, "Hide excluded BOM", wx.DefaultPosition, (150, -1), 0
         )
-        self.hide_pos_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, "Hide non POS", wx.DefaultPosition, wx.DefaultSize
+        self.hide_pos_button = wx.Button(
+            self, wx.ID_ANY, "Hide excluded POS", wx.DefaultPosition, (150, -1), 0
         )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
@@ -259,8 +261,8 @@ class JLCBCBTools(wx.Dialog):
         self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toogle_pos)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
         self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_costs)
-        self.hide_bom_checkbox.Bind(wx.EVT_CHECKBOX, self.OnBomHideChecked)
-        self.hide_pos_checkbox.Bind(wx.EVT_CHECKBOX, self.OnposHideChecked)
+        self.hide_bom_button.Bind(wx.EVT_BUTTON, self.OnBomHide)
+        self.hide_pos_button.Bind(wx.EVT_BUTTON, self.OnPosHide)
 
         toolbar_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.remove_part_button, 0, wx.ALL, 5)
@@ -269,8 +271,8 @@ class JLCBCBTools(wx.Dialog):
         toolbar_sizer.Add(self.toggle_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.hide_bom_checkbox, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.hide_pos_checkbox, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.hide_bom_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.hide_pos_button, 0, wx.ALL, 5)
 
         select_icon = wx.Bitmap(
             os.path.join(self.plugin_path, "icons", "mdi-database-search-outline.png")
@@ -308,6 +310,17 @@ class JLCBCBTools(wx.Dialog):
         cost_icon = wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-cash.png"))
         self.part_costs_button.SetBitmap(cost_icon)
         self.part_costs_button.SetBitmapMargins((2, 0))
+
+        self.hide_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-eye-off-outline.png")
+        )
+        self.show_icon = wx.Bitmap(
+            os.path.join(self.plugin_path, "icons", "mdi-eye-outline.png")
+        )
+        self.hide_bom_button.SetBitmap(self.hide_icon)
+        self.hide_bom_button.SetBitmapMargins((2, 0))
+        self.hide_pos_button.SetBitmap(self.hide_icon)
+        self.hide_pos_button.SetBitmapMargins((2, 0))
 
         table_sizer.Add(toolbar_sizer, 1, wx.EXPAND, 5)
 
@@ -376,11 +389,11 @@ class JLCBCBTools(wx.Dialog):
             ),
         }
         for part in self.store.read_all():
-            # dont show the part if the checkbox for hide BOM is set
-            if self.hide_bom_checkbox.GetValue() and part[5]:
+            # dont show the part if hide BOM is set
+            if self.hide_bom_parts and part[5]:
                 continue
-            # dont show the part if the checkbox for hide POS is set
-            if self.hide_pos_checkbox.GetValue() and part[6]:
+            # dont show the part if hide POS is set
+            if self.hide_pos_parts and part[6]:
                 continue
             # decide which icon to use
             part[5] = icons.get(part[5], icons.get(0))
@@ -393,12 +406,34 @@ class JLCBCBTools(wx.Dialog):
         self.store.set_order_by(e.GetColumn())
         self.populate_footprint_list()
 
-    def OnBomHideChecked(self, e):
+    def OnBomHide(self, e):
         """Hide all parts from the list that have 'in BOM' set to No."""
+        self.hide_bom_parts = not self.hide_bom_parts
+        if self.hide_bom_parts:
+            self.hide_bom_button.SetBitmap(wx.Bitmap())
+            self.hide_bom_button.SetBitmap(self.show_icon)
+            self.hide_bom_button.SetBitmapMargins((2, 0))
+            self.hide_bom_button.SetLabel("Show excluded BOM")
+        else:
+            self.hide_bom_button.SetBitmap(wx.Bitmap())
+            self.hide_bom_button.SetBitmap(self.hide_icon)
+            self.hide_bom_button.SetBitmapMargins((2, 0))
+            self.hide_bom_button.SetLabel("Hide excluded BOM")
         self.populate_footprint_list()
 
-    def OnposHideChecked(self, e):
+    def OnPosHide(self, e):
         """Hide all parts from the list that have 'in pos' set to No."""
+        self.hide_pos_parts = not self.hide_pos_parts
+        if self.hide_pos_parts:
+            self.hide_pos_button.SetBitmap(wx.Bitmap())
+            self.hide_pos_button.SetBitmap(self.show_icon)
+            self.hide_pos_button.SetBitmapMargins((2, 0))
+            self.hide_pos_button.SetLabel("Show excluded POS")
+        else:
+            self.hide_pos_button.SetBitmap(wx.Bitmap())
+            self.hide_pos_button.SetBitmap(self.hide_icon)
+            self.hide_pos_button.SetBitmapMargins((2, 0))
+            self.hide_pos_button.SetLabel("Hide excluded POS")
         self.populate_footprint_list()
 
     def OnFootprintSelected(self, e):
@@ -481,8 +516,7 @@ class JLCBCBTools(wx.Dialog):
         part = self.footprint_list.GetTextValue(row, 3)
         if part != "":
             self.busy_cursor = wx.BusyCursor()
-            r = PartDetailsDialog(self, part).Show()
-            self.logger.debug(r)
+            PartDetailsDialog(self, part).Show()
 
     def select_part(self, e):
         pass
