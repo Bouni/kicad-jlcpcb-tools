@@ -18,11 +18,15 @@ from .helpers import (
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
-from .store import Store
 
 # from .library import JLCPCBLibrary
-# from .partdetails import PartDetailsDialog
+from .partdetails import PartDetailsDialog
+from .store import Store
+
 # from .partselector import PartSelectorDialog
+
+logging.getLogger("requests").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
 class JLCBCBTools(wx.Dialog):
@@ -468,6 +472,18 @@ class JLCBCBTools(wx.Dialog):
             self.store.set_lcsc(ref, "")
         self.populate_footprint_list()
 
+    def get_part_details(self, e):
+        """Fetch part details from LCSC and show them in a modal."""
+        item = self.footprint_list.GetSelection()
+        row = self.footprint_list.ItemToRow(item)
+        if row == -1:
+            return
+        part = self.footprint_list.GetTextValue(row, 3)
+        if part != "":
+            self.busy_cursor = wx.BusyCursor()
+            r = PartDetailsDialog(self, part).Show()
+            self.logger.debug(r)
+
     def select_part(self, e):
         pass
 
@@ -517,20 +533,6 @@ class JLCBCBTools(wx.Dialog):
     #     self.fabrication.zip_gerber_excellon()
     #     self.fabrication.generate_pos()
     #     self.fabrication.generate_bom()
-
-    def get_part_details(self, e):
-        pass
-
-    #     """Fetch part details from LCSC and show them in a modal."""
-    #     item = self.footprint_list.GetSelection()
-    #     row = self.footprint_list.ItemToRow(item)
-    #     if row == -1:
-    #         return
-    #     part = self.footprint_list.GetTextValue(row, 3)
-    #     if part != "":
-    #         dialog = PartDetailsDialog(self, part)
-
-    #         dialog.Show()
 
     def calculate_costs(self, e):
         pass
