@@ -1,4 +1,5 @@
 import contextlib
+import csv
 import logging
 import os
 import sqlite3
@@ -184,7 +185,7 @@ class Store:
                 )
                 part.pop(3)
                 self.update_part(part)
-
+        self.import_lagacy_assignments()
         self.clean_database()
 
     def clean_database(self):
@@ -196,3 +197,20 @@ class Store:
                     f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
                 )
                 cur.commit()
+
+    def import_lagacy_assignments(self):
+        """Check if assignments of an old version are found and merge them into the database."""
+        csv_file = os.path.join(self.project_path, "jlcpcb", "part_assignments.csv")
+        if os.path.isfile(csv_file):
+            with open(csv_file) as f:
+                csvreader = csv.DictReader(
+                    f, fieldnames=("reference", "lcsc", "bom", "pos")
+                )
+                for row in csvreader:
+                    self.set_lcsc(row["reference"], row["lcsc"])
+                    self.set_bom(row["reference"], row["bom"])
+                    self.set_pos(row["reference"], row["pos"])
+                    self.logger.debug(
+                        f"Update {row['reference']} from legacy 'part_assignments.csv'"
+                    )
+            os.rename(csv_file, f"{csv_file}.backup")
