@@ -569,25 +569,8 @@ class JLCBCBTools(wx.Dialog):
     #     self.fabrication.generate_bom()
 
     def calculate_costs(self, e):
-        pass
-
-    #     parts = {}
-    #     count = self.footprint_list.GetItemCount()
-    #     for i in range(0, count):
-    #         _lcsc = self.footprint_list.GetTextValue(i, 3)
-    #         if not _lcsc:
-    #             continue
-    #         if not _lcsc in parts:
-    #             parts[_lcsc] = 1
-    #         else:
-    #             parts[_lcsc] += 1
-    #     _sum = 0.0
-    #     for part, count in parts.items():
-    #         price = self.library.get_price(part, count)
-    #         _sum += price
-    #     wx.MessageBox(
-    #         f"The price for all parts sums up to ${round(_sum,2)}", "Price calculation"
-    #     )
+        """Hopefully we will be able to calculate the part costs in the future."""
+        wx.MessageBox("Not yet implemented :-)", "Sorry")
 
     def update_library(self, e=None):
         pass
@@ -648,6 +631,7 @@ class JLCBCBTools(wx.Dialog):
     #     if self.library.filename:
     #         fntxt = self.library.filename + " with "
     #     self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
+
     def init_logger(self):
         """Initialize logger to log into textbox"""
         root = logging.getLogger()
