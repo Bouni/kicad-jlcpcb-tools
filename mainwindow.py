@@ -2,11 +2,12 @@ import datetime
 import logging
 import os
 import sys
-from threading import Thread
 
 import wx
 import wx.dataview
 from pcbnew import GetBoard
+
+from .events import EVT_MESSAGE_EVENT, EVT_RESET_GAUGE_EVENT, EVT_UPDATE_GAUGE_EVENT
 
 # from .fabrication import JLCPCBFabrication
 from .helpers import (
@@ -18,8 +19,7 @@ from .helpers import (
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
-
-# from .library import JLCPCBLibrary
+from .library import Library
 from .partdetails import PartDetailsDialog
 from .store import Store
 
@@ -357,19 +357,45 @@ class JLCBCBTools(wx.Dialog):
         self.Layout()
         self.Centre(wx.BOTH)
 
+        # ---------------------------------------------------------------------
+        # ------------------------ Custom Events ------------------------------
+        # ---------------------------------------------------------------------
+
+        self.Bind(EVT_RESET_GAUGE_EVENT, self.reset_gauge)
+        self.Bind(EVT_UPDATE_GAUGE_EVENT, self.update_gauge)
+        self.Bind(EVT_MESSAGE_EVENT, self.display_message)
+
         self.enable_toolbar_buttons(False)
 
         self.init_logger()
         self.init_store()
+        self.init_library()
 
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
 
+    def init_library(self):
+        """Initialize the parts library"""
+        self.library = Library(self, self.plugin_path)
+
     def init_store(self):
         """Initialize the store of part assignments"""
         self.store = Store(self.project_path)
         self.populate_footprint_list()
+
+    def reset_gauge(self, e):
+        """Initialize the gauge."""
+        self.gauge.SetRange(100)
+        self.gauge.SetValue(0)
+
+    def update_gauge(self, e):
+        """Update the gauge"""
+        self.gauge.SetValue(e.value)
+
+    def display_message(self, e):
+        """Dispaly a message with the data from the event"""
+        wx.MessageBox(e.text, e.title)
 
     def populate_footprint_list(self):
         """Populate/Refresh list of footprints."""
@@ -518,6 +544,14 @@ class JLCBCBTools(wx.Dialog):
             self.busy_cursor = wx.BusyCursor()
             PartDetailsDialog(self, part).Show()
 
+    def update_library(self, e=None):
+        """Update the library from the JLCPCB CSV file."""
+        self.library.update()
+
+    def calculate_costs(self, e):
+        """Hopefully we will be able to calculate the part costs in the future."""
+        wx.MessageBox("Not yet implemented :-)", "Sorry")
+
     def select_part(self, e):
         pass
 
@@ -568,70 +602,6 @@ class JLCBCBTools(wx.Dialog):
     #     self.fabrication.generate_pos()
     #     self.fabrication.generate_bom()
 
-    def calculate_costs(self, e):
-        """Hopefully we will be able to calculate the part costs in the future."""
-        wx.MessageBox("Not yet implemented :-)", "Sorry")
-
-    def update_library(self, e=None):
-        pass
-
-    #     """Download and load library data if necessary or actively requested"""
-    #     if self.library.download_active:
-    #         return
-    #     if self.library.need_download() or e:
-    #         self.enable_all_buttons(False)
-    #         self.library.download()
-    #         self.timer = wx.Timer(self)
-    #         self.Bind(wx.EVT_TIMER, self.update_gauge, self.timer)
-    #         self.timer.Start(200)
-    #         self.then = datetime.datetime.now()
-    #     else:
-    #         self.load_library()
-
-    # def update_gauge(self, evt):
-    #     """Update the progress gauge and handle thread completion"""
-    #     if self.library.dl_thread.is_alive():
-    #         if self.library.dl_thread.pos:
-    #             self.gauge.SetRange(1000)
-    #             self.gauge.SetValue(self.library.dl_thread.pos * 1000)
-    #         else:
-    #             self.gauge.Pulse()
-    #     else:
-    #         self.timer.Stop()
-    #         self.library.dl_thread = None
-    #         self.library.get_info()
-    #         if not self.library.download_success and self.library.isvalid:
-    #             wx.MessageBox(
-    #                 "Download of the CSV failed, will use existing library!",
-    #                 "Download error",
-    #                 style=wx.OK | wx.ICON_ERROR,
-    #             )
-    #         elif not self.library.download_success and not self.library.isvalid:
-    #             wx.MessageBox(
-    #                 "Download of the CSV failed, no existing library found, exit plugin now!",
-    #                 "Download error",
-    #                 style=wx.OK | wx.ICON_ERROR,
-    #             )
-    #             self.quit_dialog(None)
-    #         else:
-    #             now = datetime.datetime.now()
-    #             self.logger.info(
-    #                 "Downloaded into %s in %.3f seconds",
-    #                 os.path.basename(self.library.dbfn),
-    #                 (now - self.then).total_seconds(),
-    #             )
-    #         self.gauge.SetRange(1000)
-    #         self.gauge.SetValue(0)
-    #         self.load_library()
-    #         self.enable_all_buttons(True)
-
-    # def load_library(self):
-    #     self.library.load()
-    #     fntxt = ""
-    #     if self.library.filename:
-    #         fntxt = self.library.filename + " with "
-    #     self.library_desc.SetLabel(fntxt + "%d parts" % (self.library.partcount))
-
     def init_logger(self):
         """Initialize logger to log into textbox"""
         root = logging.getLogger()
@@ -643,7 +613,7 @@ class JLCBCBTools(wx.Dialog):
         handler2 = LogBoxHandler(self.logbox)
         handler2.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s",
+            "%(asctime)s - %(levelname)s - %(funcName)s -  %(message)s",
             datefmt="%Y.%m.%d %H:%M:%S",
         )
         handler1.setFormatter(formatter)
