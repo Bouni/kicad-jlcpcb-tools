@@ -2,8 +2,10 @@ import contextlib
 import csv
 import logging
 import os
+import re
 import sqlite3
 import time
+from datetime import datetime as dt
 from pathlib import Path
 from threading import Thread
 
@@ -33,16 +35,39 @@ class Library:
                 "Data directory 'jlcpcb' does not exist and will be created."
             )
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
+        if not os.path.isfile(self.dbfile):
+            self.update()
 
     def delete_parts_table(self):
-        """Delete a table."""
+        """Delete the parts table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 cur.execute(f"DROP TABLE IF EXISTS parts")
                 cur.commit()
 
+    def create_meta_table(self):
+        """Create the meta table."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"CREATE TABLE IF NOT EXISTS meta ('filename','size','partcount','date','last_update')"
+                )
+                cur.commit()
+
+    def update_meta_data(self, filename, size, partcount, date, last_update):
+        """Update the meta data table."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(f"DELETE from meta")
+                cur.commit()
+                cur.execute(
+                    f"INSERT INTO meta VALUES (?,?,?,?,?)",
+                    (filename, size, partcount, date, last_update),
+                )
+                cur.commit()
+
     def create_parts_table(self, columns):
-        """Create the sqlite database tables."""
+        """Create the parts table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 cols = ",".join([f"'{c}'" for c in columns])
@@ -67,25 +92,34 @@ class Library:
         wx.PostEvent(self.parent, ResetGaugeEvent())
         r = requests.get(self.CSV_URL, allow_redirects=True, stream=True)
         if r.status_code != requests.codes.ok:
-            wx.MessageBox(
-                f"Failed to download the JLCPCB database CSV, error code {r.status_code}",
-                "Download Error",
-                style=wx.ICON_ERROR,
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Download Error",
+                    text=f"Failed to download the JLCPCB database CSV, error code {r.status_code}",
+                    style="error",
+                ),
             )
             return
         size = int(r.headers.get("Content-Length"))
         filename = r.headers.get("Content-Disposition").split("=")[1]
+        date = "unknown"
+        if _date := re.search(r"(\d{4})(\d{2})(\d{2})", filename):
+            date = f"{_date.group(1)}-{_date.group(2)}-{_date.group(3)}"
         self.logger.debug(
             f"Download {filename} with a size of {(size / 1024 / 1024):.2f}MB"
         )
         csv_reader = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
         headers = next(csv_reader)
+        self.create_meta_table()
         self.delete_parts_table()
         self.create_parts_table(headers)
         buffer = []
+        part_count = 0
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             cols = ",".join(["?"] * len(headers))
             query = f"INSERT INTO parts VALUES ({cols})"
+
             for count, row in enumerate(csv_reader):
                 row.pop()
                 buffer.append(row)
@@ -94,9 +128,11 @@ class Library:
                     wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
                     con.executemany(query, buffer)
                     buffer = []
+                part_count = count
             if buffer:
                 con.executemany(query, buffer)
             con.commit()
+        self.update_meta_data(filename, size, part_count, date, dt.now().isoformat())
         wx.PostEvent(self.parent, ResetGaugeEvent())
         end = time.time()
         wx.PostEvent(
@@ -104,5 +140,6 @@ class Library:
             MessageEvent(
                 title="Success",
                 text=f"Sucessfully downloaded and imported the JLCPCB database in {end-start:.2f} seconds!",
+                style="info",
             ),
         )
