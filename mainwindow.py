@@ -395,7 +395,12 @@ class JLCBCBTools(wx.Dialog):
 
     def display_message(self, e):
         """Dispaly a message with the data from the event"""
-        wx.MessageBox(e.text, e.title)
+        styles = {
+            "info": wx.ICON_INFORMATION,
+            "warning": wx.ICON_WARNING,
+            "error": wx.ICON_ERROR,
+        }
+        wx.MessageBox(e.text, e.title, style=styles.get(e.style, wx.ICON_INFORMATION))
 
     def populate_footprint_list(self):
         """Populate/Refresh list of footprints."""
