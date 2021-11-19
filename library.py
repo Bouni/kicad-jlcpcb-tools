@@ -13,6 +13,7 @@ import requests
 import wx
 
 from .events import MessageEvent, ResetGaugeEvent, UpdateGaugeEvent
+from .helpers import natural_sort_collation
 
 
 class Library:
@@ -24,6 +25,8 @@ class Library:
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.plugin_path = plugin_path
+        self.order_by = "lcsc"
+        self.order_dir = "ASC"
         self.datadir = os.path.join(self.plugin_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "parts.db")
         self.setup()
