@@ -21,9 +21,8 @@ from .helpers import (
 )
 from .library import Library
 from .partdetails import PartDetailsDialog
+from .partselector import PartSelectorDialog
 from .store import Store
-
-# from .partselector import PartSelectorDialog
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -45,6 +44,8 @@ class JLCBCBTools(wx.Dialog):
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
         self.hide_bom_parts = False
         self.hide_pos_parts = False
+        self.manufacturers = []
+        self.packages = []
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -409,13 +410,17 @@ class JLCBCBTools(wx.Dialog):
             0: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-check.png"))
+                    wx.Bitmap(
+                        os.path.join(self.plugin_path, "icons", "mdi-check-color.png")
+                    )
                 ),
             ),
             1: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-close.png"))
+                    wx.Bitmap(
+                        os.path.join(self.plugin_path, "icons", "mdi-close-color.png")
+                    )
                 ),
             ),
         }
@@ -558,7 +563,8 @@ class JLCBCBTools(wx.Dialog):
         wx.MessageBox("Not yet implemented :-)", "Sorry")
 
     def select_part(self, e):
-        pass
+        """Select a part from the library and assign it to the selected footprint(s)."""
+        PartSelectorDialog(self).ShowModal()
 
     #     """Select and assign a LCSC Part number to a footprint via modal dialog."""
     #     self.update_library()
