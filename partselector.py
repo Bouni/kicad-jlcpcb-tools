@@ -135,16 +135,16 @@ class PartSelectorDialog(wx.Dialog):
             self, wx.ID_ANY, "in Stock", wx.DefaultPosition, (200, 24), 0
         )
 
-        help_text = wx.StaticText(
-            self,
-            wx.ID_ANY,
-            "Help\n\n"
-            "Keyword applys to all fields, the others are only applied to the corresponding column.\n"
-            "A blank textfield will be ignored.\n"
-            "Use % as wildcard, e.g. %1117% to match AMS1117-5.0 and AMS1117-3.3.\n"
-            "ENTER triggers the search.",
-            size=(530, 100),
-        )
+        # help_text = wx.StaticText(
+        #     self,
+        #     wx.ID_ANY,
+        #     "Help\n\n"
+        #     "Keyword applys to all fields, the others are only applied to the corresponding column.\n"
+        #     "A blank textfield will be ignored.\n"
+        #     "Use % as wildcard, e.g. %1117% to match AMS1117-5.0 and AMS1117-3.3.\n"
+        #     "ENTER triggers the search.",
+        #     size=(530, 100),
+        # )
 
         # self.search_button = wx.Button(
         #     self,
@@ -168,7 +168,6 @@ class PartSelectorDialog(wx.Dialog):
 
         self.basic_checkbox.SetValue(True)
         self.extended_checkbox.SetValue(True)
-        self.assert_stock_checkbox.SetValue(True)
 
         # self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
         # self.search_button.Bind(wx.EVT_BUTTON, self.search)
@@ -245,11 +244,29 @@ class PartSelectorDialog(wx.Dialog):
             5,
         )
 
+        self.search_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Search",
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
         search_sizer = wx.StaticBoxSizer(wx.HORIZONTAL, self, "Search")
         search_sizer.Add(search_sizer_one, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_two, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_three, 0, wx.RIGHT, 50)
-        search_sizer.Add(help_text)
+
+        # search_sizer.Add(help_text)
+
+        self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.manufacturer.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.package.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.category.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.part_no.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.solder_joints.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.search_button.Bind(wx.EVT_BUTTON, self.search)
 
         # search_sizer.Add(self.keyword, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         # search_sizer.Add(self.search_button, 0, wx.ALL, 5)
@@ -357,7 +374,7 @@ class PartSelectorDialog(wx.Dialog):
             style=wx.dataview.DV_SINGLE,
         )
 
-        self.reference = self.part_list.AppendTextColumn(
+        reference = self.part_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=80,
@@ -365,7 +382,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.number = self.part_list.AppendTextColumn(
+        number = self.part_list.AppendTextColumn(
             "MFR Number",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
@@ -373,7 +390,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.package = self.part_list.AppendTextColumn(
+        package = self.part_list.AppendTextColumn(
             "Package",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
@@ -381,7 +398,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.joints = self.part_list.AppendTextColumn(
+        joints = self.part_list.AppendTextColumn(
             "Joints",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=40,
@@ -389,7 +406,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.type = self.part_list.AppendTextColumn(
+        type = self.part_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=80,
@@ -397,7 +414,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.manufacturer = self.part_list.AppendTextColumn(
+        manufacturer = self.part_list.AppendTextColumn(
             "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
@@ -405,7 +422,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.decription = self.part_list.AppendTextColumn(
+        decription = self.part_list.AppendTextColumn(
             "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=300,
@@ -413,7 +430,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.price = self.part_list.AppendTextColumn(
+        price = self.part_list.AppendTextColumn(
             "Price",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
@@ -421,7 +438,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
             | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
-        self.stock = self.part_list.AppendTextColumn(
+        stock = self.part_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
@@ -476,7 +493,7 @@ class PartSelectorDialog(wx.Dialog):
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(search_sizer, 1, wx.ALL, 5)
-        # layout.Add(filter_sizer, 5, wx.ALL, 5)
+        layout.Add(self.search_button, 5, wx.ALL, 5)
         layout.Add(result_sizer, 1, wx.LEFT, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
 
@@ -490,34 +507,6 @@ class PartSelectorDialog(wx.Dialog):
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
-
-    def OnPackageFilter(self, e):
-
-        packages = [
-            x[0] for x in self.parent.library.search_package(e.GetString().lower())
-        ]
-        self.logger.debug(packages)
-        if packages != []:
-            self.package_filter_list.Set(packages)
-        else:
-            self.package_filter_list.Set([""])
-
-    #     search = e.GetString().lower()
-    #     choices = [c for c in self.package_filter_choices if search in c.lower()]
-    #     if choices != []:
-    #         self.package_filter_list.Set(choices)
-    #     else:
-    #         self.package_filter_list.Set([""])
-
-    def OnManufacturerFilter(self, e):
-        pass
-
-    #     search = e.GetString().lower()
-    #     choices = [c for c in self.manufacturer_filter_choices if search in c.lower()]
-    #     if choices != []:
-    #         self.manufacturer_filter_list.Set(choices)
-    #     else:
-    #         self.manufacturer_filter_list.Set([""])
 
     def OnPartSelected(self, e):
         pass
@@ -536,7 +525,24 @@ class PartSelectorDialog(wx.Dialog):
     #         b.Enable(bool(state))
 
     def search(self, e):
-        pass
+        """Search the librery for parts that meet the search criteria."""
+        self.logger.debug(self.parent.library)
+        parameters = {
+            "keyword": self.keyword.GetValue(),
+            "manufacturer": self.manufacturer.GetValue(),
+            "package": self.package.GetValue(),
+            "category": self.category.GetValue(),
+            "part_no": self.part_no.GetValue(),
+            "solder_joints": self.solder_joints.GetValue(),
+            "basic": self.basic_checkbox.GetValue(),
+            "extended": self.extended_checkbox.GetValue(),
+            "stock": self.assert_stock_checkbox.GetValue(),
+        }
+
+        self.logger.debug(self.parent.library)
+        result = self.parent.library.search(parameters)
+        for r in result:
+            self.logger.debug(r)
 
     #     """Search the dataframe for the keyword."""
     #     if not self.library.loaded:
