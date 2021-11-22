@@ -3,9 +3,11 @@ import csv
 import logging
 import os
 import re
+import shlex
 import sqlite3
 import time
 from datetime import datetime as dt
+from ntpath import join
 from pathlib import Path
 from threading import Thread
 
@@ -41,6 +43,72 @@ class Library:
         if not os.path.isfile(self.dbfile):
             self.update()
 
+    def search(self, parameters):
+        """Search the database for parts that meet the given parameters."""
+        columns = [
+            "LCSC Part",
+            "MFR.Part",
+            "Package",
+            "Solder Joint",
+            "Library Type",
+            "Manufacturer",
+            "Description",
+            "Price",
+            "Stock",
+        ]
+        s = ",".join(f'"{c}"' for c in columns)
+        query = f"SELECT {s} FROM parts WHERE "
+
+        try:
+            keywords = shlex.split(parameters["keyword"])
+        except ValueError as e:
+            self.logger.error("Can't split keyword: %s", str(e))
+
+        keyword_columns = [
+            "LCSC Part",
+            "Description",
+        ]
+        query_chunks = []
+        for kw in keywords:
+            q = " OR ".join(f'"{c}" LIKE "%{kw}%"' for c in keyword_columns)
+            query_chunks.append(f"({q})")
+
+        if p := parameters["manufacturer"]:
+            query_chunks.append(f'"Manufacturer" LIKE "{p}"')
+        if p := parameters["package"]:
+            query_chunks.append(f'"Package" LIKE "{p}"')
+        if p := parameters["category"]:
+            query_chunks.append(
+                f'("First Category" LIKE "{p}" OR "Second Category" LIKE "{p}")'
+            )
+        if p := parameters["part_no"]:
+            query_chunks.append(f'"MFR.Part" LIKE "{p}"')
+        if p := parameters["solder_joints"]:
+            query_chunks.append(f'"Solder Joint" LIKE "{p}"')
+
+        library_types = []
+        if parameters["basic"]:
+            library_types.append('"Basic"')
+        if parameters["extended"]:
+            library_types.append('"Extended"')
+        if library_types:
+            query_chunks.append(f'"Library Type" IN ({",".join(library_types)})')
+
+        if parameters["stock"]:
+            query_chunks.append(f'"Stock" > "0"')
+
+        if not query_chunks:
+            return []
+
+        query += " AND ".join(query_chunks)
+        query += " LIMIT 1000"
+
+        self.logger.debug(query)
+
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                return cur.execute(query).fetchall()
+
     def delete_parts_table(self):
         """Delete the parts table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
@@ -53,7 +121,7 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 cur.execute(
-                    f"CREATE TABLE IF NOT EXISTS meta ('filename','size','partcount','date','last_update')"
+                    f"CREATE TABLE IF NOT EXISTS meta ('filename', 'size', 'partcount', 'date', 'last_update')"
                 )
                 cur.commit()
 
@@ -64,7 +132,7 @@ class Library:
                 cur.execute(f"DELETE from meta")
                 cur.commit()
                 cur.execute(
-                    f"INSERT INTO meta VALUES (?,?,?,?,?)",
+                    f"INSERT INTO meta VALUES (?, ?, ?, ?, ?)",
                     (filename, size, partcount, date, last_update),
                 )
                 cur.commit()
@@ -73,7 +141,8 @@ class Library:
         """Create the parts table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                cols = ",".join([f"'{c}'" for c in columns])
+                # {'INTEGER' if c == 'Stock' else ''}
+                cols = ",".join([f" '{c}'" for c in columns])
                 cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
                 cur.commit()
 
