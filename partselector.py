@@ -140,6 +140,24 @@ class PartSelectorDialog(wx.Dialog):
         self.basic_checkbox.SetValue(True)
         self.extended_checkbox.SetValue(True)
 
+        help_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Help",
+            wx.DefaultPosition,
+            (100, -1),
+            0,
+        )
+
+        self.search_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Search",
+            wx.DefaultPosition,
+            (100, -1),
+            0,
+        )
+
         search_sizer_one = wx.BoxSizer(wx.VERTICAL)
         search_sizer_one.Add(keyword_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         search_sizer_one.Add(
@@ -213,22 +231,19 @@ class PartSelectorDialog(wx.Dialog):
             5,
         )
 
-        help_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Help",
-            wx.DefaultPosition,
-            wx.DefaultSize,
+        search_sizer_four = wx.BoxSizer(wx.VERTICAL)
+        search_sizer_four.Add(
+            help_button,
             0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            5,
         )
-
-        self.search_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Search",
-            wx.DefaultPosition,
-            wx.DefaultSize,
+        search_sizer_four.AddSpacer(80)
+        search_sizer_four.Add(
+            self.search_button,
             0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            5,
         )
 
         help_icon = wx.Bitmap(
@@ -247,7 +262,8 @@ class PartSelectorDialog(wx.Dialog):
         search_sizer.Add(search_sizer_one, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_two, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_three, 0, wx.RIGHT, 20)
-        search_sizer.Add(help_button, 0, wx.RIGHT, 20)
+        search_sizer.Add(search_sizer_four, 0, wx.RIGHT, 20)
+        # search_sizer.Add(help_button, 0, wx.RIGHT, 20)
 
         self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.manufacturer.Bind(wx.EVT_TEXT_ENTER, self.search)
@@ -399,7 +415,7 @@ class PartSelectorDialog(wx.Dialog):
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(search_sizer, 1, wx.ALL, 5)
-        layout.Add(self.search_button, 5, wx.ALL, 5)
+        # layout.Add(self.search_button, 5, wx.ALL, 5)
         layout.Add(result_sizer, 1, wx.LEFT, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
 
@@ -504,6 +520,7 @@ class PartSelectorDialog(wx.Dialog):
         The others are not by default.\n
         The keyowrd search field is applied to "LCSC Part", "Description", "MFR.Part",
         "Package" and "Manufacturer".\n
-        Enter triggers the search the same way the search button does.
+        Enter triggers the search the same way the search button does.\n
+        The results are limited to 1000.
         """
         wx.MessageBox(text, title, style=wx.ICON_INFORMATION)
