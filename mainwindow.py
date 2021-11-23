@@ -250,9 +250,9 @@ class JLCBCBTools(wx.Dialog):
         self.part_details_button = wx.Button(
             self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
         )
-        self.part_costs_button = wx.Button(
-            self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
-        )
+        # self.part_costs_button = wx.Button(
+        #     self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
+        # )
         self.hide_bom_button = wx.Button(
             self, wx.ID_ANY, "Hide excluded BOM", wx.DefaultPosition, (150, -1), 0
         )
@@ -266,7 +266,7 @@ class JLCBCBTools(wx.Dialog):
         self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toogle_bom)
         self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toogle_pos)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
-        self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_costs)
+        # self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_costs)
         self.hide_bom_button.Bind(wx.EVT_BUTTON, self.OnBomHide)
         self.hide_pos_button.Bind(wx.EVT_BUTTON, self.OnPosHide)
 
@@ -276,7 +276,7 @@ class JLCBCBTools(wx.Dialog):
         toolbar_sizer.Add(self.toggle_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.toggle_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
+        # toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_pos_button, 0, wx.ALL, 5)
 
@@ -313,9 +313,9 @@ class JLCBCBTools(wx.Dialog):
         self.part_details_button.SetBitmap(details_icon)
         self.part_details_button.SetBitmapMargins((2, 0))
 
-        cost_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-cash.png"))
-        self.part_costs_button.SetBitmap(cost_icon)
-        self.part_costs_button.SetBitmapMargins((2, 0))
+        # cost_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-cash.png"))
+        # self.part_costs_button.SetBitmap(cost_icon)
+        # self.part_costs_button.SetBitmapMargins((2, 0))
 
         self.hide_icon = wx.Bitmap(
             os.path.join(PLUGIN_PATH, "icons", "mdi-eye-off-outline.png")
@@ -567,7 +567,7 @@ class JLCBCBTools(wx.Dialog):
 
     def calculate_costs(self, e):
         """Hopefully we will be able to calculate the part costs in the future."""
-        wx.MessageBox("Not yet implemented :-)", "Sorry")
+        pass
 
     def select_part(self, e):
         """Select a part from the library and assign it to the selected footprint(s)."""
