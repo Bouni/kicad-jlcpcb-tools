@@ -6,6 +6,8 @@ import webbrowser
 import requests
 import wx
 
+from .helpers import PLUGIN_PATH
+
 
 class PartDetailsDialog(wx.Dialog):
     def __init__(self, parent, part):
@@ -72,9 +74,7 @@ class PartDetailsDialog(wx.Dialog):
         self.image = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            wx.Bitmap(
-                os.path.join(self.parent.plugin_path, "icons", "placeholder.png")
-            ),
+            wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "placeholder.png")),
             wx.DefaultPosition,
             (200, 200),
             0,
@@ -91,9 +91,7 @@ class PartDetailsDialog(wx.Dialog):
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
 
         pdf_icon = wx.Bitmap(
-            os.path.join(
-                self.parent.plugin_path, "icons", "mdi-file-document-outline.png"
-            )
+            os.path.join(PLUGIN_PATH, "icons", "mdi-file-document-outline.png")
         )
         self.openpdf_button.SetBitmap(pdf_icon)
         self.openpdf_button.SetBitmapMargins((2, 0))
