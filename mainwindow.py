@@ -13,21 +13,17 @@ from .events import (
     EVT_RESET_GAUGE_EVENT,
     EVT_UPDATE_GAUGE_EVENT,
 )
-
-# from .fabrication import JLCPCBFabrication
+from .fabrication import Fabrication
 from .helpers import (
     PLUGIN_PATH,
-    get_exclude_from_bom,
-    get_exclude_from_pos,
     get_footprint_by_ref,
-    get_footprint_keys,
-    get_valid_footprints,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
 from .library import Library
 from .partdetails import PartDetailsDialog
 from .partselector import PartSelectorDialog
+from .rotations import RotationManagerDialog
 from .store import Store
 
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -111,6 +107,10 @@ class JLCBCBTools(wx.Dialog):
         #     wx.ALIGN_LEFT,
         #     "library_desc",
         # )
+        self.rotation_button = wx.Button(
+            self, wx.ID_ANY, "Manage rotations", wx.DefaultPosition, (150, -1), 0
+        )
+
         self.download_button = wx.Button(
             self, wx.ID_ANY, "Update library", wx.DefaultPosition, (150, -1), 0
         )
@@ -131,6 +131,12 @@ class JLCBCBTools(wx.Dialog):
         # Add a spacer to push download button to the right
         top_button_sizer.Add((0, 0), 1, wx.EXPAND, 5)
         top_button_sizer.Add(
+            self.rotation_button,
+            0,
+            wx.ALL | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
+        top_button_sizer.Add(
             self.download_button,
             0,
             wx.ALL | wx.ALIGN_CENTER_VERTICAL,
@@ -138,11 +144,18 @@ class JLCBCBTools(wx.Dialog):
         )
 
         self.generate_button.Bind(wx.EVT_BUTTON, self.generate_fabrication_data)
+        self.rotation_button.Bind(wx.EVT_BUTTON, self.manage_rotations)
         self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
 
         fab_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "fabrication.png"))
         self.generate_button.SetBitmap(fab_icon)
         self.generate_button.SetBitmapMargins((2, 0))
+
+        rotation_icon = wx.Bitmap(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-format-rotate-90.png")
+        )
+        self.rotation_button.SetBitmap(rotation_icon)
+        self.rotation_button.SetBitmapMargins((2, 0))
 
         download_icon = wx.Bitmap(
             os.path.join(PLUGIN_PATH, "icons", "mdi-cloud-download-outline.png")
@@ -377,6 +390,7 @@ class JLCBCBTools(wx.Dialog):
         self.init_logger()
         self.init_store()
         self.init_library()
+        self.init_fabrication()
 
     def quit_dialog(self, e):
         self.Destroy()
@@ -390,6 +404,10 @@ class JLCBCBTools(wx.Dialog):
         """Initialize the store of part assignments"""
         self.store = Store(self.project_path)
         self.populate_footprint_list()
+
+    def init_fabrication(self):
+        """Initialize the fabrication"""
+        self.fabrication = Fabrication(self)
 
     def reset_gauge(self, e):
         """Initialize the gauge."""
@@ -565,6 +583,10 @@ class JLCBCBTools(wx.Dialog):
         """Update the library from the JLCPCB CSV file."""
         self.library.update()
 
+    def manage_rotations(self, e=None):
+        """Manage rotation corrections."""
+        RotationManagerDialog(self).ShowModal()
+
     def calculate_costs(self, e):
         """Hopefully we will be able to calculate the part costs in the future."""
         pass
@@ -579,54 +601,18 @@ class JLCBCBTools(wx.Dialog):
             selection[reference] = lcsc
         PartSelectorDialog(self, selection).ShowModal()
 
-        # self.store.set_lcsc()
-
-    #     """Select and assign a LCSC Part number to a footprint via modal dialog."""
-    #     self.update_library()
-    #     # Figure out what LCSC numbers are selected
-    #     selection = []
-    #     lcsc = ""
-    #     for item in self.footprint_list.GetSelections():
-    #         row = self.footprint_list.ItemToRow(item)
-    #         _lcsc = self.footprint_list.GetTextValue(row, 3)
-    #         if not _lcsc in selection:
-    #             selection.append(_lcsc)
-    #     # if we have not selected more than one LCSC number, pass it to the selection dialog
-    #     # as search preset
-    #     if len(selection) == 1:
-    #         lcsc = selection[0]
-    #     dialog = PartSelectorDialog(self, lcsc)
-    #     result = dialog.ShowModal()
-    #     if result == wx.ID_OK:
-    #         for item in self.footprint_list.GetSelections():
-    #             row = self.footprint_list.ItemToRow(item)
-    #             ref = self.footprint_list.GetTextValue(row, 0)
-    #             self.fabrication.parts[ref]["lcsc"] = str(dialog.selection)
-    #         self.populate_footprint_list()
-    #         self.fabrication.save_part_assignments()
-    #     dialog.Destroy()
-
-    #     for item in self.footprint_list.GetSelections():
-    #         row = self.footprint_list.ItemToRow(item)
-    #         ref = self.footprint_list.GetTextValue(row, 0)
-    #         self.fabrication.parts[ref]["lcsc"] = ""
-    #         self.populate_footprint_list()
-    #         self.fabrication.save_part_assignments()
-
     def generate_fabrication_data(self, e):
-        pass
-
-    #     """Generate Fabrication data."""
-    #     layer_selection = self.layer_selection.GetSelection()
-    #     if layer_selection != 0:
-    #         layer_count = int(self.layer_selection.GetString(layer_selection)[:1])
-    #     else:
-    #         layer_count = None
-    #     self.fabrication.generate_geber(layer_count)
-    #     self.fabrication.generate_excellon()
-    #     self.fabrication.zip_gerber_excellon()
-    #     self.fabrication.generate_pos()
-    #     self.fabrication.generate_bom()
+        """Generate fabrication data."""
+        layer_selection = self.layer_selection.GetSelection()
+        if layer_selection != 0:
+            layer_count = int(self.layer_selection.GetString(layer_selection)[:1])
+        else:
+            layer_count = None
+        self.fabrication.generate_geber(layer_count)
+        self.fabrication.generate_excellon()
+        self.fabrication.zip_gerber_excellon()
+        self.fabrication.generate_pos()
+        self.fabrication.generate_bom()
 
     def init_logger(self):
         """Initialize logger to log into textbox"""
