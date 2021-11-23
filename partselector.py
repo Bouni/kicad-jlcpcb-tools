@@ -213,6 +213,15 @@ class PartSelectorDialog(wx.Dialog):
             5,
         )
 
+        help_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Help",
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
         self.search_button = wx.Button(
             self,
             wx.ID_ANY,
@@ -222,10 +231,23 @@ class PartSelectorDialog(wx.Dialog):
             0,
         )
 
+        help_icon = wx.Bitmap(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-help-circle-outline.png")
+        )
+        help_button.SetBitmap(help_icon)
+        help_button.SetBitmapMargins((2, 0))
+
+        select_icon = wx.Bitmap(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png")
+        )
+        self.search_button.SetBitmap(select_icon)
+        self.search_button.SetBitmapMargins((2, 0))
+
         search_sizer = wx.StaticBoxSizer(wx.HORIZONTAL, self, "Search")
         search_sizer.Add(search_sizer_one, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_two, 0, wx.RIGHT, 20)
-        search_sizer.Add(search_sizer_three, 0, wx.RIGHT, 50)
+        search_sizer.Add(search_sizer_three, 0, wx.RIGHT, 20)
+        search_sizer.Add(help_button, 0, wx.RIGHT, 20)
 
         self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.manufacturer.Bind(wx.EVT_TEXT_ENTER, self.search)
@@ -234,6 +256,7 @@ class PartSelectorDialog(wx.Dialog):
         self.part_no.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.solder_joints.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.search_button.Bind(wx.EVT_BUTTON, self.search)
+        help_button.Bind(wx.EVT_BUTTON, self.help)
 
         # ---------------------------------------------------------------------
         # ------------------------ Result status line -------------------------
@@ -469,3 +492,18 @@ class PartSelectorDialog(wx.Dialog):
         if part != "":
             self.busy_cursor = wx.BusyCursor()
             PartDetailsDialog(self, part).Show()
+
+    def help(sefl, e):
+        """Show message box with help instructions"""
+        title = "Help"
+        text = """
+        Use % as wildcard selector. \n
+        For example DS24% will match DS2411\n
+        %QFP% wil match LQFP-64 as well as TQFP-32\n
+        The keyword search box is automatically post- and prefixed with wildcard operators.
+        The others are not by default.\n
+        The keyowrd search field is applied to "LCSC Part", "Description", "MFR.Part",
+        "Package" and "Manufacturer".\n
+        Enter triggers the search the same way the search button does.
+        """
+        wx.MessageBox(text, title, style=wx.ICON_INFORMATION)
