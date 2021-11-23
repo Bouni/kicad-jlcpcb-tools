@@ -139,8 +139,7 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 return cur.execute(
-                    f"SELECT * FROM rotation WHERE regex = '?'",
-                    (regex,),
+                    f"SELECT * FROM rotation WHERE regex = '{regex}'"
                 ).fetchone()
 
     def delete_correction_data(self, regex):
@@ -240,6 +239,7 @@ class Library:
         self.create_meta_table()
         self.delete_parts_table()
         self.create_parts_table(headers)
+        self.create_rotation_table()
         buffer = []
         part_count = 0
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
@@ -270,20 +270,6 @@ class Library:
             ),
         )
 
-    def update_rotation_data(self):
-        """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo"""
-        self.create_rotation_table()
-        try:
-            r = requests.get(
-                "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
-            )
-            corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
-            next(corrections)
-            for row in corrections:
-                # if not (_c := self.get_correction_data(row[0])):
-                self.update_correction_data(row[0], row[1])
-        except Exception as e:
-            self.logger.debug(e)
         # """Try loading rotation corrections from local file, if not present, load them from GitHub."""
         # csvfile = os.path.join(self.plugin_path, "corrections", "pos_rotations_db.csv")
         # local = {}

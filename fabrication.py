@@ -34,8 +34,8 @@ class Fabrication:
     def __init__(self, parent):
         self.parent = parent
         self.logger = logging.getLogger(__name__)
-        self.corrections = self.get_corrections()
         self.board = GetBoard()
+        self.corrections = []
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
 
@@ -46,97 +46,26 @@ class Fabrication:
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
 
-    # def load_part_assigments(self):
-    #     # Read all footprints and their maybe set LCSC property
-    #     self.parts = {}
-    #     for fp in get_valid_footprints(self.board):
-    #         reference = fp.GetReference()
-    #         lcsc_keys = [
-    #             key for key in fp.GetProperties().keys() if "lcsc" in key.lower()
-    #         ]
-    #         lcsc = ""
-    #         if lcsc_keys:
-    #             lcsc = fp.GetProperties().get(lcsc_keys.pop(0))
-    #         self.parts[reference] = {"lcsc": lcsc}
-    #     # Read all settings from the csv and overwrite if neccessary
-    #     csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
-    #     if os.path.isfile(csvfile):
-    #         with open(csvfile, "r+") as f:
-    #             reader = csv.DictReader(
-    #                 f,
-    #                 delimiter=",",
-    #                 quotechar='"',
-    #                 fieldnames=["ref", "lcsc", "bom", "pos"],
-    #             )
-    #             for row in reader:
-    #                 if row["ref"] in self.parts:
-    #                     # Only set lcsc value from CSV if not already set from footprint property
-    #                     if not self.parts[row["ref"]]["lcsc"]:
-    #                         self.parts[row["ref"]]["lcsc"] = row["lcsc"]
-    #                     # set the exclude from BOM / POS attribute of the footprint from CSV
-    #                     fp = get_footprint_by_ref(self.board, row["ref"])
-    #                     set_exclude_from_bom(fp, bool(int(row["bom"])))
-    #                     set_exclude_from_pos(fp, bool(int(row["pos"])))
-    #     self.save_part_assignments()
-
-    # def save_part_assignments(self):
-    #     """Write part assignments to a csv file"""
-    #     csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
-    #     with open(csvfile, "w", newline="", encoding="utf-8") as f:
-    #         writer = csv.writer(f, delimiter=",", quotechar='"')
-    #         for part, values in self.parts.items():
-    #             fp = get_footprint_by_ref(self.board, part)
-    #             bom = get_exclude_from_bom(fp)
-    #             pos = get_exclude_from_pos(fp)
-    #             writer.writerow([part, values["lcsc"], int(bom), int(pos)])
-
-    def get_corrections(self):
-        pass
-        # """Try loading rotation corrections from local file, if not present, load them from GitHub."""
-        # csvfile = os.path.join(self.plugin_path, "corrections", "pos_rotations_db.csv")
-        # local = {}
-        # if os.path.isfile(csvfile):
-        #     with open(csvfile) as f:
-        #         c = csv.reader(f, delimiter=",", quotechar='"')
-        #         next(c)
-        #         local = {x[0]: x[1] for x in c}
-        # remote = {}
-        # try:
-        #     """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
-        #     url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/pos_rotations_db.csv"
-        #     self.logger.info(f"Load corrections from {url}")
-        #     r = requests.get(url)
-        #     c = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
-        #     next(c)
-        #     remote = {x[0]: x[1] for x in c}
-        # except:
-        #     pass
-        # # Merge remote and local, always keep local if duplicate
-        # for k, v in remote.items():
-        #     if k not in local:
-        #         local[k] = v
-        # return local
-
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
-        return original
-        # # we need to devide by 10 to get 180 out of 1800 for example.
-        # # This might be a bug in 5.99
-        # rotation = original / 10
-        # for pattern, correction in self.corrections.items():
-        #     if re.match(pattern, str(footprint.GetFPID().GetLibItemName())):
-        #         if footprint.GetLayer() == 0:
-        #             rotation = (rotation + int(correction)) % 360
-        #             self.logger.info(
-        #                 f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees"
-        #             )
-        #         else:
-        #             rotation = (rotation - int(correction)) % 360
-        #             self.logger.info(
-        #                 f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
-        #             )
-        # return rotation
+        # we need to devide by 10 to get 180 out of 1800 for example.
+        # This might be a bug in 5.99 / 6.0 RC
+        rotation = original / 10
+        for regex, correction in self.corrections:
+            if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
+                if footprint.GetLayer() == 0:
+                    rotation = (rotation + int(correction)) % 360
+                    self.logger.info(
+                        f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees"
+                    )
+                else:
+                    rotation = (rotation - int(correction)) % 360
+                    self.logger.info(
+                        f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
+                    )
+                continue
+        return rotation
 
     def generate_geber(self, layer_count=None):
         """Generating Gerber files"""
@@ -264,6 +193,7 @@ class Fabrication:
     def generate_pos(self):
         """Generate placement file (POS)."""
         posname = f"POS-{self.filename.split('.')[0]}.csv"
+        self.corrections = self.parent.library.get_all_correction_data()
         with open(os.path.join(self.assemblydir, posname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(

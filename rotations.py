@@ -1,10 +1,10 @@
+import csv
 import logging
 import os
-from sys import path
 
+import requests
 import wx
 
-# from .events import AssignPartEvent
 from .helpers import PLUGIN_PATH
 
 
@@ -119,29 +119,25 @@ class RotationManagerDialog(wx.Dialog):
         # ------------------------ Right side toolbar -------------------------
         # ---------------------------------------------------------------------
 
-        self.add_button = wx.Button(
-            self, wx.ID_ANY, "Add", wx.DefaultPosition, (150, -1), 0
-        )
-        self.edit_button = wx.Button(
-            self, wx.ID_ANY, "Edit", wx.DefaultPosition, (150, -1), 0
+        self.save_button = wx.Button(
+            self, wx.ID_ANY, "Save", wx.DefaultPosition, (150, -1), 0
         )
         self.delete_button = wx.Button(
             self, wx.ID_ANY, "Delete", wx.DefaultPosition, (150, -1), 0
         )
-
-        self.add_button.Bind(wx.EVT_BUTTON, self.add_correction)
-        self.edit_button.Bind(wx.EVT_BUTTON, self.update_correction)
-        self.delete_button.Bind(wx.EVT_BUTTON, self.delete_correction)
-
-        add_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-plus-circle-outline.png")
+        self.update_button = wx.Button(
+            self, wx.ID_ANY, "Update", wx.DefaultPosition, (150, -1), 0
         )
-        self.add_button.SetBitmap(add_icon)
-        self.add_button.SetBitmapMargins((2, 0))
 
-        edit_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-lead-pencil.png"))
-        self.edit_button.SetBitmap(edit_icon)
-        self.edit_button.SetBitmapMargins((2, 0))
+        self.save_button.Bind(wx.EVT_BUTTON, self.save_correction)
+        self.delete_button.Bind(wx.EVT_BUTTON, self.delete_correction)
+        self.update_button.Bind(wx.EVT_BUTTON, self.download_correction_data)
+
+        save_icon = wx.Bitmap(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-content-save-outline.png")
+        )
+        self.save_button.SetBitmap(save_icon)
+        self.save_button.SetBitmapMargins((2, 0))
 
         delete_icon = wx.Bitmap(
             os.path.join(PLUGIN_PATH, "icons", "mdi-trash-can-outline.png")
@@ -149,10 +145,16 @@ class RotationManagerDialog(wx.Dialog):
         self.delete_button.SetBitmap(delete_icon)
         self.delete_button.SetBitmapMargins((2, 0))
 
+        update_icon = wx.Bitmap(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-cloud-download-outline.png")
+        )
+        self.update_button.SetBitmap(update_icon)
+        self.update_button.SetBitmapMargins((2, 0))
+
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
-        tool_sizer.Add(self.add_button, 0, wx.ALL, 5)
-        tool_sizer.Add(self.edit_button, 0, wx.ALL, 5)
+        tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.delete_button, 0, wx.ALL, 5)
+        tool_sizer.Add(self.update_button, 0, wx.ALL, 5)
         table_sizer.Add(tool_sizer, 3, wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -167,7 +169,6 @@ class RotationManagerDialog(wx.Dialog):
         self.Layout()
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
-        self.add_button.Enable(False)
         self.populate_rotations_list()
 
     def quit_dialog(self, e):
@@ -177,7 +178,7 @@ class RotationManagerDialog(wx.Dialog):
     def enable_toolbar_buttons(self, state):
         """Control the state of all the buttons in toolbar on the right side"""
         for b in [
-            self.edit_button,
+            self.save_button,
             self.delete_button,
         ]:
             b.Enable(bool(state))
@@ -188,22 +189,19 @@ class RotationManagerDialog(wx.Dialog):
         for corrections in self.parent.library.get_all_correction_data():
             self.rotations_list.AppendItem([str(c) for c in corrections])
 
-    def add_correction(self, e):
-        """Add a correction to the database."""
-        regex = self.regex.GetValue()
-        correction = self.correction.GetValue()
-        self.parent.library.insert_correction_data(regex, correction)
-        self.populate_rotations_list()
-
-    def update_correction(self, e):
-        """Update a correction to the database."""
+    def save_correction(self, e):
+        """Add/Update a correction in the database."""
         regex = self.regex.GetValue()
         correction = self.correction.GetValue()
         if regex == self.selection_regex:
             self.parent.library.update_correction_data(regex, correction)
+            self.selection_regex = None
+        elif self.selection_regex == None:
+            self.parent.library.insert_correction_data(regex, correction)
         else:
             self.parent.library.delete_correction_data(self.selection_regex)
             self.parent.library.insert_correction_data(regex, correction)
+            self.selection_regex = None
         self.populate_rotations_list()
 
     def delete_correction(self, e):
@@ -234,6 +232,26 @@ class RotationManagerDialog(wx.Dialog):
     def on_textfield_change(self, e):
         """Check if the Add button should be activated."""
         if self.regex.GetValue() and self.correction.GetValue():
-            self.add_button.Enable(True)
+            self.enable_toolbar_buttons(True)
         else:
-            self.add_button.Enable(False)
+            self.enable_toolbar_buttons(False)
+
+    def download_correction_data(self, e):
+        """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo"""
+        self.parent.library.create_rotation_table()
+        try:
+            r = requests.get(
+                "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
+            )
+            corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
+            next(corrections)
+            for row in corrections:
+                if not self.parent.library.get_correction_data(row[0]):
+                    self.parent.library.insert_correction_data(row[0], row[1])
+                else:
+                    self.logger.info(
+                        f"Correction '{row[0]}' exists already in database with correction value {row[1]}. Leaving this one out."
+                    )
+        except Exception as e:
+            self.logger.debug(e)
+        self.populate_rotations_list()
