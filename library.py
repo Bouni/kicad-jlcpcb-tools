@@ -125,6 +125,61 @@ class Library:
                 )
                 cur.commit()
 
+    def create_rotation_table(self):
+        """Create the rotation table."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"CREATE TABLE IF NOT EXISTS rotation ('regex', 'correction')"
+                )
+                cur.commit()
+
+    def get_correction_data(self, regex):
+        """Get the correction data by its regex."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                return cur.execute(
+                    f"SELECT * FROM rotation WHERE regex = '?'",
+                    (regex,),
+                ).fetchone()
+
+    def delete_correction_data(self, regex):
+        """Delete a correction from the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(f"DELETE FROM rotation WHERE regex = '{regex}'")
+                cur.commit()
+
+    def update_correction_data(self, regex, rotation):
+        """Update a correction in the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"UPDATE rotation SET correction = '{rotation}' WHERE regex = '{regex}'"
+                )
+                cur.commit()
+
+    def insert_correction_data(self, regex, rotation):
+        """Insert a correction into the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"INSERT INTO rotation VALUES (?, ?)",
+                    (regex, rotation),
+                )
+                cur.commit()
+
+    def get_all_correction_data(self):
+        """get all corrections from the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                return [
+                    list(c)
+                    for c in cur.execute(
+                        f"SELECT * FROM rotation ORDER BY regex ASC"
+                    ).fetchall()
+                ]
+
     def update_meta_data(self, filename, size, partcount, date, last_update):
         """Update the meta data table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
@@ -214,3 +269,42 @@ class Library:
                 style="info",
             ),
         )
+
+    def update_rotation_data(self):
+        """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo"""
+        self.create_rotation_table()
+        try:
+            r = requests.get(
+                "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
+            )
+            corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
+            next(corrections)
+            for row in corrections:
+                # if not (_c := self.get_correction_data(row[0])):
+                self.update_correction_data(row[0], row[1])
+        except Exception as e:
+            self.logger.debug(e)
+        # """Try loading rotation corrections from local file, if not present, load them from GitHub."""
+        # csvfile = os.path.join(self.plugin_path, "corrections", "pos_rotations_db.csv")
+        # local = {}
+        # if os.path.isfile(csvfile):
+        #     with open(csvfile) as f:
+        #         c = csv.reader(f, delimiter=",", quotechar='"')
+        #         next(c)
+        #         local = {x[0]: x[1] for x in c}
+        # remote = {}
+        # try:
+        #     """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
+        #     url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/pos_rotations_db.csv"
+        #     self.logger.info(f"Load corrections from {url}")
+        #     r = requests.get(url)
+        #     c = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
+        #     next(c)
+        #     remote = {x[0]: x[1] for x in c}
+        # except:
+        #     pass
+        # # Merge remote and local, always keep local if duplicate
+        # for k, v in remote.items():
+        #     if k not in local:
+        #         local[k] = v
+        # return local
