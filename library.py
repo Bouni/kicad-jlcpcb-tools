@@ -15,7 +15,7 @@ import requests
 import wx
 
 from .events import MessageEvent, ResetGaugeEvent, UpdateGaugeEvent
-from .helpers import natural_sort_collation
+from .helpers import PLUGIN_PATH, natural_sort_collation
 
 
 class Library:
@@ -23,13 +23,12 @@ class Library:
 
     CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
 
-    def __init__(self, parent, plugin_path):
+    def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.plugin_path = plugin_path
         self.order_by = "lcsc"
         self.order_dir = "ASC"
-        self.datadir = os.path.join(self.plugin_path, "jlcpcb")
+        self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "parts.db")
         self.setup()
 
@@ -67,6 +66,9 @@ class Library:
         keyword_columns = [
             "LCSC Part",
             "Description",
+            "MFR.Part",
+            "Package",
+            "Manufacturer",
         ]
         query_chunks = []
         for kw in keywords:
@@ -102,8 +104,6 @@ class Library:
 
         query += " AND ".join(query_chunks)
         query += " LIMIT 1000"
-
-        self.logger.debug(query)
 
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
@@ -141,7 +141,6 @@ class Library:
         """Create the parts table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                # {'INTEGER' if c == 'Stock' else ''}
                 cols = ",".join([f" '{c}'" for c in columns])
                 cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
                 cur.commit()

@@ -7,10 +7,16 @@ import wx
 import wx.dataview
 from pcbnew import GetBoard
 
-from .events import EVT_MESSAGE_EVENT, EVT_RESET_GAUGE_EVENT, EVT_UPDATE_GAUGE_EVENT
+from .events import (
+    EVT_ASSIGN_PART_EVENT,
+    EVT_MESSAGE_EVENT,
+    EVT_RESET_GAUGE_EVENT,
+    EVT_UPDATE_GAUGE_EVENT,
+)
 
 # from .fabrication import JLCPCBFabrication
 from .helpers import (
+    PLUGIN_PATH,
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_footprint_by_ref,
@@ -40,7 +46,6 @@ class JLCBCBTools(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
-        self.plugin_path = os.path.split(os.path.abspath(__file__))[0]
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -84,7 +89,7 @@ class JLCBCBTools(wx.Dialog):
             self,
             wx.ID_ANY,
             wx.Bitmap(
-                os.path.join(self.plugin_path, "icons", "mdi-layers-triple-outline.png")
+                os.path.join(PLUGIN_PATH, "icons", "mdi-layers-triple-outline.png")
             ),
             size=(24, 36),
         )
@@ -135,12 +140,12 @@ class JLCBCBTools(wx.Dialog):
         self.generate_button.Bind(wx.EVT_BUTTON, self.generate_fabrication_data)
         self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
 
-        fab_icon = wx.Bitmap(os.path.join(self.plugin_path, "icons", "fabrication.png"))
+        fab_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "fabrication.png"))
         self.generate_button.SetBitmap(fab_icon)
         self.generate_button.SetBitmapMargins((2, 0))
 
         download_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-cloud-download-outline.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-cloud-download-outline.png")
         )
         self.download_button.SetBitmap(download_icon)
         self.download_button.SetBitmapMargins((2, 0))
@@ -276,47 +281,47 @@ class JLCBCBTools(wx.Dialog):
         toolbar_sizer.Add(self.hide_pos_button, 0, wx.ALL, 5)
 
         select_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-database-search-outline.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png")
         )
         self.select_part_button.SetBitmap(select_icon)
         self.select_part_button.SetBitmapMargins((2, 0))
         remove_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-close-box-outline.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-close-box-outline.png")
         )
         self.remove_part_button.SetBitmap(remove_icon)
         self.remove_part_button.SetBitmapMargins((2, 0))
 
-        bom_pos_icon = wx.Bitmap(os.path.join(self.plugin_path, "icons", "bom-pos.png"))
+        bom_pos_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "bom-pos.png"))
         self.toggle_bom_pos_button.SetBitmap(bom_pos_icon)
         self.toggle_bom_pos_button.SetBitmapMargins((2, 0))
 
         bom_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-format-list-bulleted.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-format-list-bulleted.png")
         )
         self.toggle_bom_button.SetBitmap(bom_icon)
         self.toggle_bom_button.SetBitmapMargins((2, 0))
 
         pos_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-crosshairs-gps.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-crosshairs-gps.png")
         )
         self.toggle_pos_button.SetBitmap(pos_icon)
         self.toggle_pos_button.SetBitmapMargins((2, 0))
 
         details_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-text-box-search-outline.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-text-box-search-outline.png")
         )
         self.part_details_button.SetBitmap(details_icon)
         self.part_details_button.SetBitmapMargins((2, 0))
 
-        cost_icon = wx.Bitmap(os.path.join(self.plugin_path, "icons", "mdi-cash.png"))
+        cost_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-cash.png"))
         self.part_costs_button.SetBitmap(cost_icon)
         self.part_costs_button.SetBitmapMargins((2, 0))
 
         self.hide_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-eye-off-outline.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-eye-off-outline.png")
         )
         self.show_icon = wx.Bitmap(
-            os.path.join(self.plugin_path, "icons", "mdi-eye-outline.png")
+            os.path.join(PLUGIN_PATH, "icons", "mdi-eye-outline.png")
         )
         self.hide_bom_button.SetBitmap(self.hide_icon)
         self.hide_bom_button.SetBitmapMargins((2, 0))
@@ -365,6 +370,7 @@ class JLCBCBTools(wx.Dialog):
         self.Bind(EVT_RESET_GAUGE_EVENT, self.reset_gauge)
         self.Bind(EVT_UPDATE_GAUGE_EVENT, self.update_gauge)
         self.Bind(EVT_MESSAGE_EVENT, self.display_message)
+        self.Bind(EVT_ASSIGN_PART_EVENT, self.assign_part)
 
         self.enable_toolbar_buttons(False)
 
@@ -378,7 +384,7 @@ class JLCBCBTools(wx.Dialog):
 
     def init_library(self):
         """Initialize the parts library"""
-        self.library = Library(self, self.plugin_path)
+        self.library = Library(self)
 
     def init_store(self):
         """Initialize the store of part assignments"""
@@ -393,6 +399,11 @@ class JLCBCBTools(wx.Dialog):
     def update_gauge(self, e):
         """Update the gauge"""
         self.gauge.SetValue(e.value)
+
+    def assign_part(self, e):
+        """Assign a selected LCSC number to a part"""
+        self.store.set_lcsc(e.reference, e.lcsc)
+        self.populate_footprint_list()
 
     def display_message(self, e):
         """Dispaly a message with the data from the event"""
@@ -410,17 +421,13 @@ class JLCBCBTools(wx.Dialog):
             0: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(
-                        os.path.join(self.plugin_path, "icons", "mdi-check-color.png")
-                    )
+                    wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-check-color.png"))
                 ),
             ),
             1: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(
-                        os.path.join(self.plugin_path, "icons", "mdi-close-color.png")
-                    )
+                    wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-close-color.png"))
                 ),
             ),
         }
@@ -564,7 +571,15 @@ class JLCBCBTools(wx.Dialog):
 
     def select_part(self, e):
         """Select a part from the library and assign it to the selected footprint(s)."""
-        PartSelectorDialog(self).ShowModal()
+        selection = {}
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            reference = self.footprint_list.GetTextValue(row, 0)
+            lcsc = self.footprint_list.GetTextValue(row, 3)
+            selection[reference] = lcsc
+        PartSelectorDialog(self, selection).ShowModal()
+
+        # self.store.set_lcsc()
 
     #     """Select and assign a LCSC Part number to a footprint via modal dialog."""
     #     self.update_library()

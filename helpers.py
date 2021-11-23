@@ -2,6 +2,8 @@ import logging
 import os
 import re
 
+PLUGIN_PATH = os.path.split(os.path.abspath(__file__))[0]
+
 THT = 0
 SMD = 1
 EXCLUDE_FROM_POS = 2

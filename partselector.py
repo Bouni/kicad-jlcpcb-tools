@@ -4,11 +4,13 @@ from sys import path
 
 import wx
 
+from .events import AssignPartEvent
+from .helpers import PLUGIN_PATH
 from .partdetails import PartDetailsDialog
 
 
 class PartSelectorDialog(wx.Dialog):
-    def __init__(self, parent, lcsc_selection=""):
+    def __init__(self, parent, parts):
         wx.Dialog.__init__(
             self,
             parent,
@@ -21,6 +23,8 @@ class PartSelectorDialog(wx.Dialog):
 
         self.logger = logging.getLogger(__name__)
         self.parent = parent
+        self.parts = parts
+        lcsc_selection = self.get_existing_selection(parts)
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -39,8 +43,6 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.SetAcceleratorTable(aTable)
         self.Bind(wx.EVT_MENU, self.quit_dialog, id=quitid)
-
-        # self.SetSizeHints(wx.Size(1200, -1), wx.DefaultSize)
 
         # ---------------------------------------------------------------------
         # --------------------------- Search bar ------------------------------
@@ -85,7 +87,7 @@ class PartSelectorDialog(wx.Dialog):
         self.category = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            lcsc_selection,
+            "",
             wx.DefaultPosition,
             (200, 24),
             wx.TE_PROCESS_ENTER,
@@ -135,42 +137,9 @@ class PartSelectorDialog(wx.Dialog):
             self, wx.ID_ANY, "in Stock", wx.DefaultPosition, (200, 24), 0
         )
 
-        # help_text = wx.StaticText(
-        #     self,
-        #     wx.ID_ANY,
-        #     "Help\n\n"
-        #     "Keyword applys to all fields, the others are only applied to the corresponding column.\n"
-        #     "A blank textfield will be ignored.\n"
-        #     "Use % as wildcard, e.g. %1117% to match AMS1117-5.0 and AMS1117-3.3.\n"
-        #     "ENTER triggers the search.",
-        #     size=(530, 100),
-        # )
-
-        # self.search_button = wx.Button(
-        #     self,
-        #     wx.ID_ANY,
-        #     "Search",
-        #     wx.DefaultPosition,
-        #     wx.DefaultSize,
-        #     0,
-        # )
-        # self.basic_checkbox = wx.CheckBox(
-        #     self, wx.ID_ANY, "Basic", wx.DefaultPosition, wx.DefaultSize, 0
-        # )
-        # self.extended_checkbox = wx.CheckBox(
-        #     self, wx.ID_ANY, "Extended", wx.DefaultPosition, wx.DefaultSize, 0
-        # )
-        # self.assert_stock_checkbox = wx.CheckBox(
-        #     self, wx.ID_ANY, "in Stock", wx.DefaultPosition, wx.DefaultSize, 0
-        # )
-
-        # self.keyword.SetFocus()
-
         self.basic_checkbox.SetValue(True)
         self.extended_checkbox.SetValue(True)
 
-        # self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
-        # self.search_button.Bind(wx.EVT_BUTTON, self.search)
         search_sizer_one = wx.BoxSizer(wx.VERTICAL)
         search_sizer_one.Add(keyword_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         search_sizer_one.Add(
@@ -258,8 +227,6 @@ class PartSelectorDialog(wx.Dialog):
         search_sizer.Add(search_sizer_two, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_three, 0, wx.RIGHT, 50)
 
-        # search_sizer.Add(help_text)
-
         self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.manufacturer.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.package.Bind(wx.EVT_TEXT_ENTER, self.search)
@@ -267,89 +234,6 @@ class PartSelectorDialog(wx.Dialog):
         self.part_no.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.solder_joints.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.search_button.Bind(wx.EVT_BUTTON, self.search)
-
-        # search_sizer.Add(self.keyword, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        # search_sizer.Add(self.search_button, 0, wx.ALL, 5)
-        # search_sizer.Add(
-        #     self.basic_checkbox, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 8
-        # )
-        # search_sizer.Add(
-        #     self.extended_checkbox, 0, wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 8
-        # )
-        # search_sizer.Add(
-        #     self.assert_stock_checkbox,
-        #     0,
-        #     wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
-        #     8,
-        # )
-
-        # search_icon = wx.Bitmap(
-        #     os.path.join(self.parent.plugin_path, "icons", "mdi-magnify.png")
-        # )
-        # self.search_button.SetBitmap(search_icon)
-        # self.search_button.SetBitmapMargins((2, 0))
-
-        # ---------------------------------------------------------------------
-        # ------------------ Package / Manufacturer filters -------------------
-        # ---------------------------------------------------------------------
-
-        # package_filter_title = wx.StaticText(
-        #     self,
-        #     wx.ID_ANY,
-        #     "Packages",
-        #     wx.DefaultPosition,
-        # )
-        # package_filter_search = wx.TextCtrl(
-        #     self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), 0
-        # )
-        # package_filter_search.SetHint("e.g. 0603")
-        # self.package_filter_list = wx.ListBox(
-        #     self,
-        #     wx.ID_ANY,
-        #     wx.DefaultPosition,
-        #     (300, 100),
-        #     choices=[],
-        #     style=wx.LB_EXTENDED,
-        # )
-        # manufacturer_filter_title = wx.StaticText(
-        #     self,
-        #     wx.ID_ANY,
-        #     "Manufacturers",
-        #     wx.DefaultPosition,
-        # )
-        # manufacturer_filter_search = wx.TextCtrl(
-        #     self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, (300, -1), 0
-        # )
-        # manufacturer_filter_search.SetHint("e.g. Vishay")
-        # self.manufacturer_filter_list = wx.ListBox(
-        #     self,
-        #     wx.ID_ANY,
-        #     wx.DefaultPosition,
-        #     (300, 100),
-        #     choices=[],
-        #     style=wx.LB_EXTENDED,
-        # )
-
-        # package_filter_search.Bind(wx.EVT_TEXT, self.OnPackageFilter)
-        # manufacturer_filter_search.Bind(wx.EVT_TEXT, self.OnManufacturerFilter)
-
-        # package_filter_layout = wx.BoxSizer(wx.VERTICAL)
-        # package_filter_layout.Add(package_filter_title)
-        # package_filter_layout.Add(
-        #     package_filter_search, 1, wx.TOP | wx.BOTTOM | wx.EXPAND, 5
-        # )
-        # package_filter_layout.Add(self.package_filter_list, 5, wx.EXPAND, 5)
-
-        # manufacturer_filter_layout = wx.BoxSizer(wx.VERTICAL)
-        # manufacturer_filter_layout.Add(manufacturer_filter_title)
-        # manufacturer_filter_layout.Add(
-        #     manufacturer_filter_search, 1, wx.TOP | wx.BOTTOM | wx.EXPAND, 5
-        # )
-        # manufacturer_filter_layout.Add(self.manufacturer_filter_list, 5, wx.EXPAND, 5)
-
-        # filter_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        # filter_sizer.Add(package_filter_layout, 1, wx.RIGHT, 20)
-        # filter_sizer.Add(manufacturer_filter_layout, 1)
 
         # ---------------------------------------------------------------------
         # ------------------------ Result status line -------------------------
@@ -471,16 +355,12 @@ class PartSelectorDialog(wx.Dialog):
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
 
-        check_icon = wx.Bitmap(
-            os.path.join(self.parent.plugin_path, "icons", "mdi-check.png")
-        )
+        check_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-check.png"))
         self.select_part_button.SetBitmap(check_icon)
         self.select_part_button.SetBitmapMargins((2, 0))
 
         details_icon = wx.Bitmap(
-            os.path.join(
-                self.parent.plugin_path, "icons", "mdi-text-box-search-outline.png"
-            )
+            os.path.join(PLUGIN_PATH, "icons", "mdi-text-box-search-outline.png")
         )
         self.part_details_button.SetBitmap(details_icon)
         self.part_details_button.SetBitmapMargins((2, 0))
@@ -489,6 +369,9 @@ class PartSelectorDialog(wx.Dialog):
         tool_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
         table_sizer.Add(tool_sizer, 3, wx.EXPAND, 5)
+
+        # ---------------------------------------------------------------------
+        # ------------------------------ Sizers  ------------------------------
         # ---------------------------------------------------------------------
 
         layout = wx.BoxSizer(wx.VERTICAL)
@@ -499,34 +382,39 @@ class PartSelectorDialog(wx.Dialog):
 
         self.SetSizer(layout)
         self.Layout()
-
         self.Centre(wx.BOTH)
-
         self.enable_toolbar_buttons(False)
+
+    @staticmethod
+    def get_existing_selection(parts):
+        """Check if exactly one LCSC part number is amongst the selected parts."""
+        s = set(val for val in parts.values())
+        if len(s) != 1:
+            return ""
+        else:
+            return list(s)[0]
 
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
 
     def OnPartSelected(self, e):
-        pass
-
-    #     """Enable the toolbar buttons when a selection was made."""
-    #     self.enable_toolbar_buttons(self.part_list.GetSelectedItemsCount() > 0)
+        """Enable the toolbar buttons when a selection was made."""
+        if self.part_list.GetSelectedItemsCount() > 0:
+            self.enable_toolbar_buttons(True)
+        else:
+            self.enable_toolbar_buttons(False)
 
     def enable_toolbar_buttons(self, state):
-        pass
-
-    #     """Control the state of all the buttons in toolbar on the right side"""
-    #     for b in [
-    #         self.select_part_button,
-    #         self.part_details_button,
-    #     ]:
-    #         b.Enable(bool(state))
+        """Control the state of all the buttons in toolbar on the right side"""
+        for b in [
+            self.select_part_button,
+            self.part_details_button,
+        ]:
+            b.Enable(bool(state))
 
     def search(self, e):
         """Search the librery for parts that meet the search criteria."""
-        self.logger.debug(self.parent.library)
         parameters = {
             "keyword": self.keyword.GetValue(),
             "manufacturer": self.manufacturer.GetValue(),
@@ -538,65 +426,46 @@ class PartSelectorDialog(wx.Dialog):
             "extended": self.extended_checkbox.GetValue(),
             "stock": self.assert_stock_checkbox.GetValue(),
         }
-
-        self.logger.debug(self.parent.library)
         result = self.parent.library.search(parameters)
-        for r in result:
-            self.logger.debug(r)
-
-    #     """Search the dataframe for the keyword."""
-    #     if not self.library.loaded:
-    #         self.load_library()
-
-    #     filtered_packages = self.package_filter_list.GetStrings()
-    #     packages = [
-    #         filtered_packages[i] for i in self.package_filter_list.GetSelections()
-    #     ]
-    #     filtered_manufacturers = self.manufacturer_filter_list.GetStrings()
-    #     manufacturers = [
-    #         filtered_manufacturers[i]
-    #         for i in self.manufacturer_filter_list.GetSelections()
-    #     ]
-    #     result = self.library.search(
-    #         self.keyword.GetValue(),
-    #         self.basic_checkbox.GetValue(),
-    #         self.extended_checkbox.GetValue(),
-    #         self.assert_stock_checkbox.GetValue(),
-    #         packages,
-    #         manufacturers,
-    #     )
-    #     self.result_count.SetLabel(f"{len(result)} Results")
-    #     self.populate_part_list(result)
+        self.populate_part_list(result)
 
     def populate_part_list(self, parts):
-        pass
-
-    #     """Populate the list with the result of the search."""
-    #     self.part_list.DeleteAllItems()
-    #     if parts is None:
-    #         return
-    #     for p in parts:
-    #         self.part_list.AppendItem([str(c) for c in p])
+        """Populate the list with the result of the search."""
+        self.part_list.DeleteAllItems()
+        if parts is None:
+            return
+        count = len(parts)
+        if count == 1000:
+            self.result_count.SetLabel(f"{count} Results (limited)")
+        else:
+            self.result_count.SetLabel(f"{count} Results")
+        for p in parts:
+            self.part_list.AppendItem([str(c) for c in p])
 
     def select_part(self, e):
-        pass
-
-    #     """Save the selected part number and close the modal."""
-    #     item = self.part_list.GetSelection()
-    #     row = self.part_list.ItemToRow(item)
-    #     if row == -1:
-    #         return
-    #     self.selection = self.part_list.GetTextValue(row, 0)
-    #     self.EndModal(wx.ID_OK)
+        """Save the selected part number and close the modal."""
+        item = self.part_list.GetSelection()
+        row = self.part_list.ItemToRow(item)
+        if row == -1:
+            return
+        selection = self.part_list.GetTextValue(row, 0)
+        for reference in self.parts.keys():
+            wx.PostEvent(
+                self.parent,
+                AssignPartEvent(
+                    lcsc=selection,
+                    reference=reference,
+                ),
+            )
+        self.EndModal(wx.ID_OK)
 
     def get_part_details(self, e):
-        pass
-
-    #     """Fetch part details from LCSC and show them in a modal."""
-    #     item = self.part_list.GetSelection()
-    #     row = self.part_list.ItemToRow(item)
-    #     if row == -1:
-    #         return
-    #     part = self.part_list.GetTextValue(row, 0)
-    #     dialog = PartDetailsDialog(self, part)
-    #     dialog.Show()
+        """Fetch part details from LCSC and show them in a modal."""
+        item = self.part_list.GetSelection()
+        row = self.part_list.ItemToRow(item)
+        if row == -1:
+            return
+        part = self.part_list.GetTextValue(row, 0)
+        if part != "":
+            self.busy_cursor = wx.BusyCursor()
+            PartDetailsDialog(self, part).Show()
