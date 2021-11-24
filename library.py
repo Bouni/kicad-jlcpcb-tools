@@ -267,6 +267,7 @@ class Library:
                 con.executemany(query, buffer)
             con.commit()
         self.update_meta_data(filename, size, part_count, date, dt.now().isoformat())
+        wx.PostEvent(self.parent, ResetGaugeEvent())
         self.update_stock()
         wx.PostEvent(self.parent, ResetGaugeEvent())
         end = time.time()
@@ -281,8 +282,10 @@ class Library:
 
     def update_stock(self):
         """Update the stock info in the project from the library"""
-        footprints = self.parent.store.read_all()
-        for fp in footprints:
-            if fp[3]:
-                if stock := self.get_stock(fp[3]):
-                    self.parent.store.set_stock(fp[0], stock[0])
+        footprints = [fp for fp in self.parent.store.read_all() if fp[3]]
+        self.logger.info(f"Update stock values for {len(footprints)} footprints")
+        for n, fp in enumerate(footprints):
+            progress = n / len(footprints) * 100
+            if stock := self.get_stock(fp[3]):
+                self.parent.store.set_stock(fp[0], stock[0])
+                wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
