@@ -388,9 +388,9 @@ class JLCBCBTools(wx.Dialog):
         self.enable_toolbar_buttons(False)
 
         self.init_logger()
-        self.init_store()
         self.init_library()
         self.init_fabrication()
+        self.init_store()
 
     def quit_dialog(self, e):
         self.Destroy()
@@ -421,6 +421,7 @@ class JLCBCBTools(wx.Dialog):
     def assign_part(self, e):
         """Assign a selected LCSC number to a part"""
         self.store.set_lcsc(e.reference, e.lcsc)
+        self.store.set_stock(e.reference, e.stock)
         self.populate_footprint_list()
 
     def display_message(self, e):
@@ -450,6 +451,7 @@ class JLCBCBTools(wx.Dialog):
             ),
         }
         for part in self.store.read_all():
+            part[4] = str(part[4])
             # dont show the part if hide BOM is set
             if self.hide_bom_parts and part[5]:
                 continue

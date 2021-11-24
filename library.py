@@ -207,6 +207,14 @@ class Library:
             con.executemany(query, data)
             con.commit()
 
+    def get_stock(self, lcsc):
+        """Get the stock for a given lcsc number"""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                return cur.execute(
+                    f'SELECT Stock FROM parts where "LCSC Part" = "{lcsc}"'
+                ).fetchone()
+
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
         Thread(target=self.download).start()
@@ -259,6 +267,7 @@ class Library:
                 con.executemany(query, buffer)
             con.commit()
         self.update_meta_data(filename, size, part_count, date, dt.now().isoformat())
+        self.update_stock()
         wx.PostEvent(self.parent, ResetGaugeEvent())
         end = time.time()
         wx.PostEvent(
@@ -270,27 +279,10 @@ class Library:
             ),
         )
 
-        # """Try loading rotation corrections from local file, if not present, load them from GitHub."""
-        # csvfile = os.path.join(self.plugin_path, "corrections", "pos_rotations_db.csv")
-        # local = {}
-        # if os.path.isfile(csvfile):
-        #     with open(csvfile) as f:
-        #         c = csv.reader(f, delimiter=",", quotechar='"')
-        #         next(c)
-        #         local = {x[0]: x[1] for x in c}
-        # remote = {}
-        # try:
-        #     """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
-        #     url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/pos_rotations_db.csv"
-        #     self.logger.info(f"Load corrections from {url}")
-        #     r = requests.get(url)
-        #     c = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
-        #     next(c)
-        #     remote = {x[0]: x[1] for x in c}
-        # except:
-        #     pass
-        # # Merge remote and local, always keep local if duplicate
-        # for k, v in remote.items():
-        #     if k not in local:
-        #         local[k] = v
-        # return local
+    def update_stock(self):
+        """Update the stock info in the project from the library"""
+        footprints = self.parent.store.read_all()
+        for fp in footprints:
+            if fp[3]:
+                if stock := self.get_stock(fp[3]):
+                    self.parent.store.set_stock(fp[0], stock[0])

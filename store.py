@@ -148,6 +148,15 @@ class Store:
                 cur.execute("DELETE FROM part_info WHERE reference=?", (ref,))
                 cur.commit()
 
+    def set_stock(self, ref, stock):
+        """Set the stock value for a part in the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"UPDATE part_info SET stock = '{int(stock)}' WHERE reference = '{ref}'"
+                )
+                cur.commit()
+
     def set_bom(self, ref, state):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
