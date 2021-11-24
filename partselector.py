@@ -488,11 +488,13 @@ class PartSelectorDialog(wx.Dialog):
         if row == -1:
             return
         selection = self.part_list.GetTextValue(row, 0)
+        stock = self.part_list.GetTextValue(row, 8)
         for reference in self.parts.keys():
             wx.PostEvent(
                 self.parent,
                 AssignPartEvent(
                     lcsc=selection,
+                    stock=stock,
                     reference=reference,
                 ),
             )
