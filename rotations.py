@@ -24,6 +24,7 @@ class RotationManagerDialog(wx.Dialog):
         self.parent = parent
         self.selection_regex = None
         self.selection_correction = None
+        self.import_lagacy_corrections()
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -255,3 +256,26 @@ class RotationManagerDialog(wx.Dialog):
         except Exception as e:
             self.logger.debug(e)
         self.populate_rotations_list()
+
+    def import_lagacy_corrections(self):
+        """Check if corrections in CSV format are found and import them into the database."""
+        csv_file = os.path.join(PLUGIN_PATH, "corrections", "cpl_rotations_db.csv")
+        if os.path.isfile(csv_file):
+            with open(csv_file) as f:
+                csvreader = csv.DictReader(f, fieldnames=("regex", "correction"))
+                for row in csvreader:
+                    if self.parent.library.get_correction_data(row["regex"]):
+                        self.parent.library.update_correction_data(
+                            row["regex"], row["correction"]
+                        )
+                        self.logger.info(
+                            f"Correction '{row['regex']}' exists already in database with correction value {row['correction']}. Overwrite it with local values from CSV."
+                        )
+                    else:
+                        self.parent.library.insert_correction_data(
+                            row["regex"], row["correction"]
+                        )
+                        self.logger.info(
+                            f"Correction '{row['regex']}' with correction value {row['correction']} is added to the database from local CSV."
+                        )
+            os.rename(csv_file, f"{csv_file}.backup")
