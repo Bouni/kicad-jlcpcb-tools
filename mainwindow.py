@@ -532,8 +532,10 @@ class JLCBCBTools(wx.Dialog):
 
     def toogle_bom_pos(self, e):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
+        selected_rows = []
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
+            selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
             fp = get_footprint_by_ref(GetBoard(), ref)
             bom = toggle_exclude_from_bom(fp)
@@ -541,26 +543,36 @@ class JLCBCBTools(wx.Dialog):
             self.store.set_bom(ref, bom)
             self.store.set_pos(ref, pos)
         self.populate_footprint_list()
+        for row in selected_rows:
+            self.footprint_list.SelectRow(row)
 
     def toogle_bom(self, e):
         """Toggle the exclude from BOM attribute of a footprint."""
+        selected_rows = []
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
+            selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
             fp = get_footprint_by_ref(GetBoard(), ref)
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, bom)
         self.populate_footprint_list()
+        for row in selected_rows:
+            self.footprint_list.SelectRow(row)
 
     def toogle_pos(self, e):
+        selected_rows = []
         """Toggle the exclude from POS attribute of a footprint."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
+            selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
             fp = get_footprint_by_ref(GetBoard(), ref)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, pos)
         self.populate_footprint_list()
+        for row in selected_rows:
+            self.footprint_list.SelectRow(row)
 
     def remove_part(self, e):
         """Remove an assigned a LCSC Part number to a footprint."""
