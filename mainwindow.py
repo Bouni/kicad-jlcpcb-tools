@@ -76,7 +76,7 @@ class JLCBCBTools(wx.Dialog):
             wx.ID_ANY,
             "Generate fabrication files",
             wx.DefaultPosition,
-            wx.DefaultSize,
+            (200, 38),
             0,
         )
 
@@ -108,11 +108,11 @@ class JLCBCBTools(wx.Dialog):
         #     "library_desc",
         # )
         self.rotation_button = wx.Button(
-            self, wx.ID_ANY, "Manage rotations", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Manage rotations", wx.DefaultPosition, (175, 38), 0
         )
 
         self.download_button = wx.Button(
-            self, wx.ID_ANY, "Update library", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Update library", wx.DefaultPosition, (175, 38), 0
         )
 
         layer_sizer.Add(
@@ -229,6 +229,7 @@ class JLCBCBTools(wx.Dialog):
             "",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
+            width=60,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
@@ -246,31 +247,31 @@ class JLCBCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
         toolbar_sizer = wx.BoxSizer(wx.VERTICAL)
         self.select_part_button = wx.Button(
-            self, wx.ID_ANY, "Select part", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Select part", wx.DefaultPosition, (175, 38), 0
         )
         self.remove_part_button = wx.Button(
-            self, wx.ID_ANY, "Remove part", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Remove part", wx.DefaultPosition, (175, 38), 0
         )
         self.toggle_bom_pos_button = wx.Button(
-            self, wx.ID_ANY, "Toggle BOM/POS", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Toggle BOM/POS", wx.DefaultPosition, (175, 38), 0
         )
         self.toggle_bom_button = wx.Button(
-            self, wx.ID_ANY, "Toggle BOM", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Toggle BOM", wx.DefaultPosition, (175, 38), 0
         )
         self.toggle_pos_button = wx.Button(
-            self, wx.ID_ANY, "Toggle POS", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Toggle POS", wx.DefaultPosition, (175, 38), 0
         )
         self.part_details_button = wx.Button(
-            self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (175, 38), 0
         )
         # self.part_costs_button = wx.Button(
-        #     self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (150, -1), 0
+        #     self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (175, 38), 0
         # )
         self.hide_bom_button = wx.Button(
-            self, wx.ID_ANY, "Hide excluded BOM", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Hide excluded BOM", wx.DefaultPosition, (175, 38), 0
         )
         self.hide_pos_button = wx.Button(
-            self, wx.ID_ANY, "Hide excluded POS", wx.DefaultPosition, (150, -1), 0
+            self, wx.ID_ANY, "Hide excluded POS", wx.DefaultPosition, (175, 38), 0
         )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
