@@ -252,6 +252,9 @@ class JLCBCBTools(wx.Dialog):
         self.remove_part_button = wx.Button(
             self, wx.ID_ANY, "Remove part", wx.DefaultPosition, (175, 38), 0
         )
+        self.select_alike_button = wx.Button(
+            self, wx.ID_ANY, "Select alike", wx.DefaultPosition, (175, 38), 0
+        )
         self.toggle_bom_pos_button = wx.Button(
             self, wx.ID_ANY, "Toggle BOM/POS", wx.DefaultPosition, (175, 38), 0
         )
@@ -276,6 +279,7 @@ class JLCBCBTools(wx.Dialog):
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.remove_part_button.Bind(wx.EVT_BUTTON, self.remove_part)
+        self.select_alike_button.Bind(wx.EVT_BUTTON, self.select_alike)
         self.toggle_bom_pos_button.Bind(wx.EVT_BUTTON, self.toogle_bom_pos)
         self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toogle_bom)
         self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toogle_pos)
@@ -286,6 +290,7 @@ class JLCBCBTools(wx.Dialog):
 
         toolbar_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.remove_part_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.select_alike_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.toggle_bom_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.toggle_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.toggle_pos_button, 0, wx.ALL, 5)
@@ -299,11 +304,18 @@ class JLCBCBTools(wx.Dialog):
         )
         self.select_part_button.SetBitmap(select_icon)
         self.select_part_button.SetBitmapMargins((2, 0))
+
         remove_icon = wx.Bitmap(
             os.path.join(PLUGIN_PATH, "icons", "mdi-close-box-outline.png")
         )
         self.remove_part_button.SetBitmap(remove_icon)
         self.remove_part_button.SetBitmapMargins((2, 0))
+
+        alike_icon = wx.Bitmap(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-checkbox-multiple-marked.png")
+        )
+        self.select_alike_button.SetBitmap(alike_icon)
+        self.select_alike_button.SetBitmapMargins((2, 0))
 
         bom_pos_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "bom-pos.png"))
         self.toggle_bom_pos_button.SetBitmap(bom_pos_icon)
@@ -582,6 +594,19 @@ class JLCBCBTools(wx.Dialog):
             fp = get_footprint_by_ref(GetBoard(), ref)
             self.store.set_lcsc(ref, "")
         self.populate_footprint_list()
+
+    def select_alike(self, e):
+        """Select all parts that have the same value and footprint."""
+        item = self.footprint_list.GetSelection()
+        row = self.footprint_list.ItemToRow(item)
+        ref = self.footprint_list.GetValue(row, 0)
+        part = self.store.get_part(ref)
+        for r in range(self.footprint_list.GetItemCount()):
+            value = self.footprint_list.GetValue(r, 1)
+            fp = self.footprint_list.GetValue(r, 2)
+            self.logger.debug(f"{value}:{part[1]} - {fp}:{part[2]}")
+            if part[1] == value and part[2] == fp:
+                self.footprint_list.SelectRow(r)
 
     def get_part_details(self, e):
         """Fetch part details from LCSC and show them in a modal."""
