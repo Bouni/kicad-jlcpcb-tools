@@ -27,26 +27,17 @@ from pcbnew import (
     wxPoint,
 )
 
-from .helpers import (
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-    get_footprint_by_ref,
-    get_valid_footprints,
-    set_exclude_from_bom,
-    set_exclude_from_pos,
-)
+from .helpers import PLUGIN_PATH, get_footprint_by_ref
 
 
-class JLCPCBFabrication:
+class Fabrication:
     def __init__(self, parent):
         self.parent = parent
         self.logger = logging.getLogger(__name__)
-        self.plugin_path, _ = os.path.split(os.path.abspath(__file__))
-        self.corrections = self.get_corrections()
         self.board = GetBoard()
+        self.corrections = []
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
-        self.load_part_assigments()
 
     def create_folders(self):
         """Create output folders if they not already exist."""
@@ -55,84 +46,14 @@ class JLCPCBFabrication:
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
 
-    def load_part_assigments(self):
-        # Read all footprints and their maybe set LCSC property
-        self.parts = {}
-        for fp in get_valid_footprints(self.board):
-            reference = fp.GetReference()
-            lcsc_keys = [
-                key for key in fp.GetProperties().keys() if "lcsc" in key.lower()
-            ]
-            lcsc = ""
-            if lcsc_keys:
-                lcsc = fp.GetProperties().get(lcsc_keys.pop(0))
-            self.parts[reference] = {"lcsc": lcsc}
-        # Read all settings from the csv and overwrite if neccessary
-        csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
-        if os.path.isfile(csvfile):
-            with open(csvfile, "r+") as f:
-                reader = csv.DictReader(
-                    f,
-                    delimiter=",",
-                    quotechar='"',
-                    fieldnames=["ref", "lcsc", "bom", "pos"],
-                )
-                for row in reader:
-                    if row["ref"] in self.parts:
-                        # Only set lcsc value from CSV if not already set from footprint property
-                        if not self.parts[row["ref"]]["lcsc"]:
-                            self.parts[row["ref"]]["lcsc"] = row["lcsc"]
-                        # set the exclude from BOM / POS attribute of the footprint from CSV
-                        fp = get_footprint_by_ref(self.board, row["ref"])
-                        set_exclude_from_bom(fp, bool(int(row["bom"])))
-                        set_exclude_from_pos(fp, bool(int(row["pos"])))
-        self.save_part_assignments()
-
-    def save_part_assignments(self):
-        """Write part assignments to a csv file"""
-        csvfile = os.path.join(self.path, "jlcpcb", "part_assignments.csv")
-        with open(csvfile, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f, delimiter=",", quotechar='"')
-            for part, values in self.parts.items():
-                fp = get_footprint_by_ref(self.board, part)
-                bom = get_exclude_from_bom(fp)
-                pos = get_exclude_from_pos(fp)
-                writer.writerow([part, values["lcsc"], int(bom), int(pos)])
-
-    def get_corrections(self):
-        """Try loading rotation corrections from local file, if not present, load them from GitHub."""
-        csvfile = os.path.join(self.plugin_path, "corrections", "cpl_rotations_db.csv")
-        local = {}
-        if os.path.isfile(csvfile):
-            with open(csvfile) as f:
-                c = csv.reader(f, delimiter=",", quotechar='"')
-                next(c)
-                local = {x[0]: x[1] for x in c}
-        remote = {}
-        try:
-            """Download and parse footprint rotation corrections from Matthew Lai's JLCKicadTool repo"""
-            url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
-            self.logger.info(f"Load corrections from {url}")
-            r = requests.get(url)
-            c = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
-            next(c)
-            remote = {x[0]: x[1] for x in c}
-        except:
-            pass
-        # Merge remote and local, always keep local if duplicate
-        for k, v in remote.items():
-            if k not in local:
-                local[k] = v
-        return local
-
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
         # we need to devide by 10 to get 180 out of 1800 for example.
-        # This might be a bug in 5.99
+        # This might be a bug in 5.99 / 6.0 RC
         rotation = original / 10
-        for pattern, correction in self.corrections.items():
-            if re.match(pattern, str(footprint.GetFPID().GetLibItemName())):
+        for regex, correction in self.corrections:
+            if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
                 if footprint.GetLayer() == 0:
                     rotation = (rotation + int(correction)) % 360
                     self.logger.info(
@@ -143,6 +64,7 @@ class JLCPCBFabrication:
                     self.logger.info(
                         f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
                     )
+                continue
         return rotation
 
     def generate_geber(self, layer_count=None):
@@ -268,41 +190,29 @@ class JLCPCBFabrication:
                     zipfile.write(filePath, os.path.basename(filePath))
         self.logger.info(f"Finished generating ZIP file")
 
-    def generate_cpl(self):
-        """Generate placement file (CPL)."""
-        cplname = f"CPL-{self.filename.split('.')[0]}.csv"
-        with open(
-            os.path.join(self.assemblydir, cplname), "w", newline="", encoding="utf-8"
-        ) as csvfile:
+    def generate_pos(self):
+        """Generate placement file (POS)."""
+        posname = f"POS-{self.filename.split('.')[0]}.csv"
+        self.corrections = self.parent.library.get_all_correction_data()
+        with open(os.path.join(self.assemblydir, posname), "w", newline="") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
-            footprints = sorted(
-                get_valid_footprints(self.board),
-                key=lambda fp: (
-                    fp.GetValue(),
-                    int(re.search("\d+", fp.GetReference())[0]),
-                ),
-            )
-            for footprint in footprints:
-                if get_exclude_from_pos(footprint):
-                    self.logger.info(
-                        f"{footprint.GetReference()} is marked as 'exclude from POS' and is skipped!"
-                    )
-                    continue
+            for part in self.parent.store.read_pos_parts():
+                fp = get_footprint_by_ref(self.board, part[0])
                 writer.writerow(
                     [
-                        footprint.GetReference(),
-                        footprint.GetValue(),
-                        footprint.GetFPID().GetLibItemName(),
-                        ToMM(footprint.GetPosition().x),
-                        ToMM(footprint.GetPosition().y) * -1,
-                        self.fix_rotation(footprint),
-                        "top" if footprint.GetLayer() == 0 else "bottom",
+                        part[0],
+                        part[1],
+                        part[2],
+                        ToMM(fp.GetPosition().x),
+                        ToMM(fp.GetPosition().y) * -1,
+                        self.fix_rotation(fp),
+                        "top" if fp.GetLayer() == 0 else "bottom",
                     ]
                 )
-        self.logger.info(f"Finished generating CPL file")
+        self.logger.info(f"Finished generating POS file")
 
     def generate_bom(self):
         """Generate BOM file."""
@@ -312,33 +222,6 @@ class JLCPCBFabrication:
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
-            footprints = {}
-            for footprint in get_valid_footprints(self.board):
-                if get_exclude_from_bom(footprint):
-                    self.logger.info(
-                        f"{footprint.GetReference()} is marked as 'exclude from BOM' and is skipped!"
-                    )
-                    continue
-                lcsc = self.parts.get(footprint.GetReference(), {}).get("lcsc", "")
-                if not lcsc in footprints:
-                    footprints[lcsc] = {
-                        "comment": footprint.GetValue(),
-                        "designators": [footprint.GetReference()],
-                        "footprint": footprint.GetFPID().GetLibItemName(),
-                    }
-                else:
-                    footprints[lcsc]["designators"].append(footprint.GetReference())
-            for lcsc, data in footprints.items():
-                designators = sorted(
-                    data["designators"],
-                    key=lambda r: int(re.search("\d+", r)[0]),
-                )
-                writer.writerow(
-                    [
-                        data["comment"],
-                        ",".join(designators),
-                        data["footprint"],
-                        lcsc,
-                    ]
-                )
+            for part in self.parent.store.read_bom_parts():
+                writer.writerow(part)
         self.logger.info(f"Finished generating BOM file")
