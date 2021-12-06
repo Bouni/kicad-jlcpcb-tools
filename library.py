@@ -26,7 +26,7 @@ class Library:
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.order_by = "lcsc"
+        self.order_by = "LCSC Part"
         self.order_dir = "ASC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "parts.db")
@@ -41,6 +41,25 @@ class Library:
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
         if not os.path.isfile(self.dbfile):
             self.update()
+
+    def set_order_by(self, n):
+        """Set which value we want to order by when getting data from the database"""
+        order_by = [
+            "LCSC Part",
+            "MFR.Part",
+            "Package",
+            "Solder Joint",
+            "Library Type",
+            "Manufacturer",
+            "Description",
+            "Price",
+            "Stock",
+        ]
+        if self.order_by == order_by[n] and self.order_dir == "ASC":
+            self.order_dir = "DESC"
+        else:
+            self.order_by = order_by[n]
+            self.order_dir = "ASC"
 
     def search(self, parameters):
         """Search the database for parts that meet the given parameters."""
@@ -103,9 +122,13 @@ class Library:
             return []
 
         query += " AND ".join(query_chunks)
+        query += f" ORDER BY \"{self.order_by}\" COLLATE naturalsort {self.order_dir}"
         query += " LIMIT 1000"
 
+        self.logger.debug(query)
+
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            con.create_collation("naturalsort", natural_sort_collation)
             with con as cur:
                 return cur.execute(query).fetchall()
 
