@@ -303,7 +303,6 @@ class PartSelectorDialog(wx.Dialog):
             width=80,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         number = self.part_list.AppendTextColumn(
             "MFR Number",
@@ -311,7 +310,6 @@ class PartSelectorDialog(wx.Dialog):
             width=140,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         package = self.part_list.AppendTextColumn(
             "Package",
@@ -319,7 +317,6 @@ class PartSelectorDialog(wx.Dialog):
             width=100,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         joints = self.part_list.AppendTextColumn(
             "Joints",
@@ -327,7 +324,6 @@ class PartSelectorDialog(wx.Dialog):
             width=40,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         type = self.part_list.AppendTextColumn(
             "Type",
@@ -335,7 +331,6 @@ class PartSelectorDialog(wx.Dialog):
             width=80,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         manufacturer = self.part_list.AppendTextColumn(
             "Manufacturer",
@@ -343,7 +338,6 @@ class PartSelectorDialog(wx.Dialog):
             width=140,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         decription = self.part_list.AppendTextColumn(
             "Description",
@@ -351,7 +345,6 @@ class PartSelectorDialog(wx.Dialog):
             width=300,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         price = self.part_list.AppendTextColumn(
             "Price",
@@ -359,7 +352,6 @@ class PartSelectorDialog(wx.Dialog):
             width=100,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
         stock = self.part_list.AppendTextColumn(
             "Stock",
@@ -367,10 +359,13 @@ class PartSelectorDialog(wx.Dialog):
             width=50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE
-            | wx.dataview.DATAVIEW_COL_SORTABLE,
         )
 
         self.part_list.SetMinSize(wx.Size(1050, 500))
+
+        self.part_list.Bind(
+            wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self.OnSortPartList
+        )
 
         self.part_list.Bind(
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected
@@ -436,6 +431,11 @@ class PartSelectorDialog(wx.Dialog):
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
+
+    def OnSortPartList(self, e):
+        """Set order_by to the clicked column and trigger list refresh."""
+        self.parent.library.set_order_by(e.GetColumn())
+        self.search(None)
 
     def OnPartSelected(self, e):
         """Enable the toolbar buttons when a selection was made."""
