@@ -125,8 +125,6 @@ class Library:
         query += f" ORDER BY \"{self.order_by}\" COLLATE naturalsort {self.order_dir}"
         query += " LIMIT 1000"
 
-        self.logger.debug(query)
-
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
             with con as cur:
