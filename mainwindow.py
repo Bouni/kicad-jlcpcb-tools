@@ -535,6 +535,7 @@ class JLCBCBTools(wx.Dialog):
         for b in [
             self.select_part_button,
             self.remove_part_button,
+            self.select_alike_button,
             self.toggle_bom_pos_button,
             self.toggle_bom_button,
             self.toggle_pos_button,
