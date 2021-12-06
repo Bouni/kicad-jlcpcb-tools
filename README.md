@@ -19,7 +19,7 @@ Furthermore it lets you search the JLCPCB parts database and assign parts direct
 
 ## Warning 🔥
 
-**This plugin is not yet very well tested and only works for KiCAD 5.99 aka nightly builds!**
+**This plugin is not yet very well tested and only works for KiCAD 6.0!**
 
 **This is under a lot of developments, so concider this README out of date all the time 😏**
 
@@ -27,7 +27,7 @@ If you find any sort of problems, please create an issue so that I can hopefully
 
 ## Installation 💾
 
-Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\users\<username>\Documents\kicad\5.99\scripting\plugins\` on linux that would be `/home/<username>/.local/share/kicad/5.99/scripting/plugins`.
+Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\users\<username>\Documents\kicad\6.0\scripting\plugins\` on linux that would be `/home/<username>/.local/share/kicad/6.0/scripting/plugins`.
 
 ## Usage 🥳
 
@@ -46,7 +46,8 @@ You can easily toggle the `exclude from BOM` and `exclude from CPL` attributes o
 
 ### Select LCSC parts from the JLCPCB parts database
 
-Select one or multiple footprints, click select part. In the upcoming modal dialog, search for parts, select the one of your choice and click select part.
+Select one or multiple footprints, click select part. You can select parts with equal value and footprint using the Select alike button.
+In the upcoming modal dialog, search for parts, select the one of your choice and click select part.
 The LCSC number of your selection will then be assigned to the footprints.
 
 ![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
@@ -69,7 +70,7 @@ Footprints are included into the BOM and CPL files accordning to their `exclude 
 ## Footprint rotation correction
 
 JLCPCB seems to need corrected rotation information. @matthewlai implemented that in his [JLCKicadTools](https://github.com/matthewlai/JLCKicadTools) and I adopted his work in this plugin as well.
-You can either have a local .csv file in `kicad-jlcpcb-tools/corrections/cpl_rotations_db.csv` and if that is not present, Matthews file is loaded from GitHub.
+You can download Matthews file from GitHub as well als manage your own corrections in the Rotation manager.
 
 ## Icons
 
