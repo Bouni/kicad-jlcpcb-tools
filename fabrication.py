@@ -11,6 +11,7 @@ from pcbnew import (
     PCB_PLOT_PARAMS,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
+    ZONE_FILLER,
     B_Cu,
     B_Mask,
     B_SilkS,
@@ -23,6 +24,7 @@ from pcbnew import (
     In2_Cu,
     In3_Cu,
     In4_Cu,
+    Refresh,
     ToMM,
     wxPoint,
 )
@@ -45,6 +47,13 @@ class Fabrication:
         Path(self.assemblydir).mkdir(parents=True, exist_ok=True)
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
+
+    def fill_zones(self):
+        """Refill copper zones following user prompt."""
+        filler = ZONE_FILLER(self.board)
+        zones = self.board.Zones()
+        filler.Fill(zones, True)
+        Refresh()
 
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
