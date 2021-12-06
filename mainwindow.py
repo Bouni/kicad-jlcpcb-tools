@@ -604,7 +604,6 @@ class JLCBCBTools(wx.Dialog):
         for r in range(self.footprint_list.GetItemCount()):
             value = self.footprint_list.GetValue(r, 1)
             fp = self.footprint_list.GetValue(r, 2)
-            self.logger.debug(f"{value}:{part[1]} - {fp}:{part[2]}")
             if part[1] == value and part[2] == fp:
                 self.footprint_list.SelectRow(r)
 
