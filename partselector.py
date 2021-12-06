@@ -302,63 +302,63 @@ class PartSelectorDialog(wx.Dialog):
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=80,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         number = self.part_list.AppendTextColumn(
             "MFR Number",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         package = self.part_list.AppendTextColumn(
             "Package",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         joints = self.part_list.AppendTextColumn(
             "Joints",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=40,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         type = self.part_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=80,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         manufacturer = self.part_list.AppendTextColumn(
             "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=140,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         decription = self.part_list.AppendTextColumn(
             "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=300,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         price = self.part_list.AppendTextColumn(
             "Price",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=100,
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         stock = self.part_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=50,
             align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
 
         self.part_list.SetMinSize(wx.Size(1050, 500))
