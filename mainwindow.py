@@ -643,6 +643,7 @@ class JLCBCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, e):
         """Generate fabrication data."""
+        self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
         if layer_selection != 0:
             layer_count = int(self.layer_selection.GetString(layer_selection)[:1])
