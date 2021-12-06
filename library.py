@@ -122,7 +122,7 @@ class Library:
             return []
 
         query += " AND ".join(query_chunks)
-        query += f" ORDER BY \"{self.order_by}\" COLLATE naturalsort {self.order_dir}"
+        query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
         query += " LIMIT 1000"
 
         self.logger.debug(query)
