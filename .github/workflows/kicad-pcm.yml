@@ -22,5 +22,11 @@ jobs:
       - uses: actions/checkout@v2
       - name: Echo latest tag
         run: echo ${{ steps.latest-release.outputs.tag }}
-      - name: List all files
-        run: ls -la
+      - name: zip files
+        run: |
+          mkdir -p archive/{plugins,resources}
+          cp *.py archive/plugins
+          cp *.png archive/plugins
+          cp -r icons archive/plugins
+          cp *.png archive/resources
+          zip -r ${{ steps.latest-release.outputs.tag }}_pcm.zip archive/*
