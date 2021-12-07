@@ -30,3 +30,8 @@ jobs:
           cp -r icons archive/plugins
           cp *.png archive/resources
           zip -r ${{ steps.latest-release.outputs.tag }}_pcm.zip archive/*
+      - name: Store artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: KiCAD-PCM
+          path: ${{ steps.latest-release.outputs.tag }}_pcm.zip
