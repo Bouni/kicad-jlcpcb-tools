@@ -1,36 +1,26 @@
-# This is a basic workflow to help you get started with Actions
+# This is a workflow to generate the zip file and metadata.json for KiCAD PCM
+
+# 
+# https://gitlab.com/kicad/addons/metadata/-/merge_requests/14
 
 name: KiCAD PCM packaging
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the main branch
   release:
     branches: [ main ]
     types:
       - created
- 
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   create_archive:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - uses: oprypin/find-latest-tag@v1
         with:
-          repository:  Bouni/kicad-jlcpcb-tools   # The repository to scan.
-          releases-only: true  # We know that all relevant tags have a GitHub release for them.
-        id: latest-release  # The step ID to refer to later.
-        
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+          repository:  Bouni/kicad-jlcpcb-tools
+          releases-only: true
+        id: latest-release
       - uses: actions/checkout@v2
-
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
+      - name: Echo latest tag
         run: echo ${{ steps.latest-release.outputs.tag }}
+      - name: List all files
+        run: ls -la
