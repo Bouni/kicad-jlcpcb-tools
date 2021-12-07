@@ -22,9 +22,15 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      - uses: oprypin/find-latest-tag@v1
+        with:
+          repository:  Bouni/kicad-jlcpcb-tools   # The repository to scan.
+          releases-only: true  # We know that all relevant tags have a GitHub release for them.
+        id: latest-release  # The step ID to refer to later.
+        
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v2
 
       # Runs a single command using the runners shell
       - name: Run a one-line script
-        run: echo ${{ github.ref }}
+        run: echo ${{ steps.latest-release.outputs.tag }}
