@@ -30,7 +30,7 @@ jobs:
           cp -r icons archive/plugins
           cp *.png archive/resources
           cd archive
-          zip -r ${{ steps.latest-release.outputs.tag }}_PCM.zip .
+          zip -r ../${{ steps.latest-release.outputs.tag }}_PCM.zip .
       - name: Store artifact
         uses: actions/upload-artifact@v2
         with:
