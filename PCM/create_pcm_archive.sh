@@ -2,10 +2,13 @@
 
 # heavily inspired by https://github.com/4ms/4ms-kicad-lib/blob/master/PCM/make_archive.sh
 
-VERSION="2021.12.01"
+VERSION=$1
 
-echo "Clean up old zip files"
+echo "Clean up old files"
 rm -f PCM/*.zip
+rm -rf PCM/archive
+rm -f PCM/metadata.json
+
 
 echo "Create folder structure for ZIP"
 mkdir -p PCM/archive/plugin
@@ -21,6 +24,7 @@ cp PCM/metadata.template.json PCM/metadata.json
 
 echo "Modify archive metadata.json"
 sed -i "s/VERSION_HERE/$VERSION/g" PCM/archive/metadata.json
+sed -i "s/\"kicad_version\": \"6.0\",/\"kicad_version\": \"6.0\"/g" PCM/archive/metadata.json
 sed -i "/SHA256_HERE/d" PCM/archive/metadata.json
 sed -i "/DOWNLOAD_SIZE_HERE/d" PCM/archive/metadata.json
 sed -i "/DOWNLOAD_URL_HERE/d" PCM/archive/metadata.json
@@ -34,9 +38,8 @@ cd ../..
 echo "Gather data for merge request metadata.json"
 DOWNLOAD_SHA256=$(shasum --algorithm 256 PCM/KiCAD-PCM-$VERSION.zip | xargs | cut -d' ' -f1)
 DOWNLOAD_SIZE=$(ls -l PCM/KiCAD-PCM-$VERSION.zip | xargs | cut -d' ' -f5)
-DOWNLOAD_URL="https://github.com/Bouni/kicad-jlcpcb-tools/archive/refs/tags/KiCAD-PCM-$VERSION.zip"
+DOWNLOAD_URL="https:\/\/github.com\/Bouni\/kicad-jlcpcb-tools\/archive\/refs\/tags\/$VERSION\/KiCAD-PCM-$VERSION.zip"
 INSTALL_SIZE=$(unzip -l PCM/KiCAD-PCM-$VERSION.zip | tail -1 | xargs | cut -d' ' -f1)
-
 
 echo "Modify merge request metadata.json"
 sed -i "s/VERSION_HERE/$VERSION/g" PCM/metadata.json
@@ -44,3 +47,4 @@ sed -i "s/SHA256_HERE/$DOWNLOAD_SHA256/g" PCM/metadata.json
 sed -i "s/DOWNLOAD_SIZE_HERE/$DOWNLOAD_SIZE/g" PCM/metadata.json
 sed -i "s/DOWNLOAD_URL_HERE/$DOWNLOAD_URL/g" PCM/metadata.json
 sed -i "s/INSTALL_SIZE_HERE/$INSTALL_SIZE/g" PCM/metadata.json
+
