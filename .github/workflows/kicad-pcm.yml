@@ -23,23 +23,15 @@ jobs:
         
       - name: Checkout repo
         uses: actions/checkout@v2
-        
-      - name: generate metadata.json
-        id: create-json
-        uses: jsdaniell/create-json@1.1.2
-        with:
-          name: "metadata.json"
-          json: ${{ secrets.METADATA_JSON }}
-      - name: Zip files
-        run: |
-          mkdir -p archive/{plugins,resources}
-          cp *.py archive/plugins
-          cp *.png archive/plugins
-          cp -r icons archive/plugins
-          cp *.png archive/resources
-          cp metadata.json archive
+      
+      - name: Create archive and metadata.json
+        run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
+      
       - name: Store artifact
         uses: actions/upload-artifact@v2
         with:
-          name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
-          path: ./archive
+          path: |
+            ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
+            ./PCM/metadata.json
+            
+          
