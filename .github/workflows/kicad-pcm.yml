@@ -33,10 +33,24 @@ jobs:
           name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           path: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
       
-      - name: Store metadata.json artifact
-        uses: actions/upload-artifact@v2
+      - name: Upload ZIP as Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: metadata.json
-          path: ./PCM/metadata.json
+          upload_url: https://github.com/Bouni/kicad-jlcpcb-tools/archive/refs/tags/${{ steps.latest-release.outputs.tag }}/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip 
+          asset_path: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
+          asset_name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
+          asset_content_type: application/zip
+      
+      - name: Upload metadata.josn as Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: https://github.com/Bouni/kicad-jlcpcb-tools/archive/refs/tags/${{ steps.latest-release.outputs.tag }}/metadata.json
+          asset_path: ./PCM/metadata.json
+          asset_name: metadata.json
+          asset_content_type: application/json
             
           
