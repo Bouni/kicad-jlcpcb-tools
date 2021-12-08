@@ -14,21 +14,30 @@ jobs:
   create_archive:
     runs-on: ubuntu-latest
     steps:
-      - uses: oprypin/find-latest-tag@v1
+      - name: Get latest tag
+        uses: oprypin/find-latest-tag@v1
         with:
           repository:  Bouni/kicad-jlcpcb-tools
           releases-only: true
         id: latest-release
-      - uses: actions/checkout@v2
-      - name: Echo latest tag
-        run: echo ${{ steps.latest-release.outputs.tag }}
-      - name: zip files
+        
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        
+      - name: generate metadata.json
+        id: create-json
+        uses: jsdaniell/create-json@1.1.2
+        with:
+          name: "metadata.json"
+          json: ${{ secrets.METADATA_JSON }}
+      - name: Zip files
         run: |
           mkdir -p archive/{plugins,resources}
           cp *.py archive/plugins
           cp *.png archive/plugins
           cp -r icons archive/plugins
           cp *.png archive/resources
+          
       - name: Store artifact
         uses: actions/upload-artifact@v2
         with:
