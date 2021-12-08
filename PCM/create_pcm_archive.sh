@@ -19,7 +19,7 @@ cp PCM/metadata.template.json PCM/archive/metadata.json
 cp PCM/metadata.template.json PCM/metadata.json
 
 echo "Modify archive metadata.json"
-sed -i 's/VERSION_HERE/$VESRION' PCM/archive/metadata.json
+sed -i 's/VERSION_HERE/$VESRION/g' PCM/archive/metadata.json
 sed -i '/SHA256_HERE/d' PCM/archive/metadata.json
 sed -i '/DOWNLOAD_SIZE_HERE/d' PCM/archive/metadata.json
 sed -i '/DOWNLOAD_URL_HERE/d' PCM/archive/metadata.json
@@ -36,8 +36,8 @@ DOWNLOAD_SIZE=$(ls -l PCM/KiCAD-PCM-$VERSION.zip | xargs | cut -d' ' -f5)
 INSTALL_SIZE=$(unzip -l PCM/KiCAD-PCM-$VERSION.zip | tail -1 | xargs | cut -d' ' -f1)
 
 echo "Modify merge request metadata.json"
-sed -i 's/VERSION_HERE/$VESRION' PCM/metadata.json
-sed -i 's/SHA256_HERE/$DOWNLOAD_SHA256' PCM/metadata.json
-sed -i 's/DOWNLOAD_SIZE_HERE/$DOWNLOAD_SIZE' PCM/metadata.json
-sed -i 's/DOWNLOAD_URL_HERE/ToDo' PCM/metadata.json
-sed -i 's/INSTALL_SIZE_HERE/$INSTALL_SIZE' PCM/metadata.json
+sed -i 's/VERSION_HERE/$VESRION/g' PCM/metadata.json
+sed -i 's/SHA256_HERE/$DOWNLOAD_SHA256/g' PCM/metadata.json
+sed -i 's/DOWNLOAD_SIZE_HERE/$DOWNLOAD_SIZE/g' PCM/metadata.json
+sed -i 's/DOWNLOAD_URL_HERE/ToDo/g' PCM/metadata.json
+sed -i 's/INSTALL_SIZE_HERE/$INSTALL_SIZE/g' PCM/metadata.json
