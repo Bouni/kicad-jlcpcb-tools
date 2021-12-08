@@ -33,24 +33,14 @@ jobs:
           name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           path: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
       
-      - name: Upload ZIP as Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
         with:
-          upload_url: https://github.com/Bouni/kicad-jlcpcb-tools/archive/refs/tags/${{ steps.latest-release.outputs.tag }}/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip 
-          asset_path: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           asset_name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
-          asset_content_type: application/zip
+          overwrite: true
+          tag: ${{ steps.latest-release.outputs.tag }}
       
-      - name: Upload metadata.josn as Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: https://github.com/Bouni/kicad-jlcpcb-tools/archive/refs/tags/${{ steps.latest-release.outputs.tag }}/metadata.json
-          asset_path: ./PCM/metadata.json
-          asset_name: metadata.json
-          asset_content_type: application/json
             
           
