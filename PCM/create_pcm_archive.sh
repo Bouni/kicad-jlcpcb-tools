@@ -40,5 +40,5 @@ echo "Modify merge request metadata.json"
 sed -i "s/VERSION_HERE/$VERSION/g" PCM/metadata.json
 sed -i "s/SHA256_HERE/$DOWNLOAD_SHA256/g" PCM/metadata.json
 sed -i "s/DOWNLOAD_SIZE_HERE/$DOWNLOAD_SIZE/g" PCM/metadata.json
-sed -i "s/DOWNLOAD_URL_HERE/ToDo/g" PCM/metadata.json
+sed -i "s/DOWNLOAD_URL_HERE/$DOWNLOAD_URL/g" PCM/metadata.json
 sed -i "s/INSTALL_SIZE_HERE/$INSTALL_SIZE/g" PCM/metadata.json
