@@ -29,10 +29,8 @@ jobs:
           cp *.png archive/plugins
           cp -r icons archive/plugins
           cp *.png archive/resources
-          cd archive
-          zip -r ../${{ steps.latest-release.outputs.tag }}_PCM.zip .
       - name: Store artifact
         uses: actions/upload-artifact@v2
         with:
-          name: KiCAD-PCM
-          path: ${{ steps.latest-release.outputs.tag }}_PCM.zip
+          name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
+          path: ./archive
