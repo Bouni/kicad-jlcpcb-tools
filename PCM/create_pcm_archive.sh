@@ -8,7 +8,8 @@ echo "Clean up old zip files"
 rm -f PCM/*.zip
 
 echo "Create folder structure for ZIP"
-mkdir -p PCM/archive/{plugin,resources}
+mkdir -p PCM/archive/plugin
+mkdir -p PCM/archive/resources
 
 echo "Copy files to destination"
 cp *.py PCM/archive/plugins
