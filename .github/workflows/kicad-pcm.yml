@@ -27,11 +27,16 @@ jobs:
       - name: Create archive and metadata.json
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
       
-      - name: Store artifact
+      - name: Store ZIP artifact
         uses: actions/upload-artifact@v2
         with:
-          path: |
-            ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
-            ./PCM/metadata.json
+          name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
+          path: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
+      
+      - name: Store metadata.json artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: metadata.json
+          path: ./PCM/metadata.json
             
           
