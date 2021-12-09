@@ -11,14 +11,14 @@ rm -f PCM/metadata.json
 
 
 echo "Create folder structure for ZIP"
-mkdir -p PCM/archive/plugin
+mkdir -p PCM/archive/plugins
 mkdir -p PCM/archive/resources
 
 echo "Copy files to destination"
 cp *.py PCM/archive/plugins
 cp *.png PCM/archive/plugins
 cp -r icons PCM/archive/plugins
-cp PCM/logo.png PCM/archive/resources
+cp PCM/icon.png PCM/archive/resources
 cp PCM/metadata.template.json PCM/archive/metadata.json
 cp PCM/metadata.template.json PCM/metadata.json
 
