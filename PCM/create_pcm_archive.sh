@@ -38,7 +38,7 @@ cd ../..
 echo "Gather data for merge request metadata.json"
 DOWNLOAD_SHA256=$(shasum --algorithm 256 PCM/KiCAD-PCM-$VERSION.zip | xargs | cut -d' ' -f1)
 DOWNLOAD_SIZE=$(ls -l PCM/KiCAD-PCM-$VERSION.zip | xargs | cut -d' ' -f5)
-DOWNLOAD_URL="https:\/\/github.com\/Bouni\/kicad-jlcpcb-tools\/archive\/refs\/tags\/$VERSION\/KiCAD-PCM-$VERSION.zip"
+DOWNLOAD_URL="https:\/\/github.com\/Bouni\/kicad-jlcpcb-tools\/releases\/download\/$VERSION\/KiCAD-PCM-$VERSION.zip"
 INSTALL_SIZE=$(unzip -l PCM/KiCAD-PCM-$VERSION.zip | tail -1 | xargs | cut -d' ' -f1)
 
 echo "Modify merge request metadata.json"
