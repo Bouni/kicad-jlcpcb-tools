@@ -1,4 +1,4 @@
-name: autoblack
+name: autoblack PR
 # Found here: https://deepsource.io/blog/auto-code-formatting-python/
 on: [pull_request]
 jobs:
