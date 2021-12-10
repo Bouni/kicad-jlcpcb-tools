@@ -7,7 +7,6 @@ VERSION=$1
 echo "Clean up old files"
 rm -f PCM/*.zip
 rm -rf PCM/archive
-#rm -f PCM/metadata.json
 
 
 echo "Create folder structure for ZIP"
@@ -20,7 +19,6 @@ cp *.png PCM/archive/plugins
 cp -r icons PCM/archive/plugins
 cp PCM/icon.png PCM/archive/resources
 cp PCM/metadata.template.json PCM/archive/metadata.json
-#cp PCM/metadata.template.json PCM/metadata.json
 
 echo "Modify archive metadata.json"
 sed -i "s/VERSION_HERE/$VERSION/g" PCM/archive/metadata.json
@@ -36,15 +34,9 @@ zip -r ../KiCAD-PCM-$VERSION.zip .
 cd ../..
 
 echo "Gather data for repo rebuild"
+echo VERSION=$VERSION >> $GITHUB_ENV
 echo DOWNLOAD_SHA256=$(shasum --algorithm 256 PCM/KiCAD-PCM-$VERSION.zip | xargs | cut -d' ' -f1) >> $GITHUB_ENV
 echo DOWNLOAD_SIZE=$(ls -l PCM/KiCAD-PCM-$VERSION.zip | xargs | cut -d' ' -f5) >> $GITHUB_ENV
 echo DOWNLOAD_URL="https:\/\/github.com\/Bouni\/kicad-jlcpcb-tools\/releases\/download\/$VERSION\/KiCAD-PCM-$VERSION.zip" >> $GITHUB_ENV
 echo INSTALL_SIZE=$(unzip -l PCM/KiCAD-PCM-$VERSION.zip | tail -1 | xargs | cut -d' ' -f1) >> $GITHUB_ENV
-
-#echo "Modify merge request metadata.json"
-#sed -i "s/VERSION_HERE/$VERSION/g" PCM/metadata.json
-#sed -i "s/SHA256_HERE/$DOWNLOAD_SHA256/g" PCM/metadata.json
-#sed -i "s/DOWNLOAD_SIZE_HERE/$DOWNLOAD_SIZE/g" PCM/metadata.json
-#sed -i "s/DOWNLOAD_URL_HERE/$DOWNLOAD_URL/g" PCM/metadata.json
-#sed -i "s/INSTALL_SIZE_HERE/$INSTALL_SIZE/g" PCM/metadata.json
 
