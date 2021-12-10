@@ -27,27 +27,12 @@ jobs:
       - name: Create archive and metadata.json
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
       
-      - name: Store ZIP artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
-          path: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
-      
       - name: Upload zip as asset to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           asset_name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
-          overwrite: true
-          tag: ${{ steps.latest-release.outputs.tag }}
-          
-      - name: Upload metadata.json as asset to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ./PCM/metadata.json
-          asset_name: metadata.json
           overwrite: true
           tag: ${{ steps.latest-release.outputs.tag }}
       
@@ -57,5 +42,6 @@ jobs:
           workflow: Rebuild repository
           repo: Bouni/bouni-kicad-repository
           token: ${{ secrets.PERSONAL_TOKEN }}
+          inputs: '{ "DOWNLOAD_SHA256": "${{DOWNLOAD_SHA256}}", "DOWNLOAD_SIZE": "${{DOWNLOAD_SIZE}}", "DOWNLOAD_URL": "${{DOWNLOAD_URL}}", "INSTALL_SIZE": "${{INSTALL_SIZE}}" }'
           
           
