@@ -50,5 +50,12 @@ jobs:
           asset_name: metadata.json
           overwrite: true
           tag: ${{ steps.latest-release.outputs.tag }}
-            
+      
+      - name: Trigger custom kicad repo rebuild
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: Rebuild repository
+          repo: Bouni/bouni-kicad-repository
+          token: ${{ secrets.PERSONAL_TOKEN }}
+          token: ${{ secrets.PERSONAL_TOKEN }}
           
