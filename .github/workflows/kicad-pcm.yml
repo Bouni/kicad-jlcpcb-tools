@@ -26,11 +26,11 @@ jobs:
       
       - name: Create archive
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
-        env:
-          DOWNLOAD_SHA256: ""
-          DOWNLOAD_SIZE: 0
-          DOWNLOAD_URL: ""
-          INSTALL_SIZE: 0
+#         env:
+#           DOWNLOAD_SHA256: ""
+#           DOWNLOAD_SIZE: 0
+#           DOWNLOAD_URL: ""
+#           INSTALL_SIZE: 0
       
       - name: Upload zip as asset to release
         uses: svenstaro/upload-release-action@v2
