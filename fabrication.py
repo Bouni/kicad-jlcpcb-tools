@@ -14,10 +14,12 @@ from pcbnew import (
     ZONE_FILLER,
     B_Cu,
     B_Mask,
+    B_Paste,
     B_SilkS,
     Edge_Cuts,
     F_Cu,
     F_Mask,
+    F_Paste,
     F_SilkS,
     GetBoard,
     In1_Cu,
@@ -122,6 +124,7 @@ class Fabrication:
                 ("CuTop", F_Cu, "Top layer"),
                 ("SilkTop", F_SilkS, "Silk top"),
                 ("MaskTop", F_Mask, "Mask top"),
+                ("PasteTop", F_Paste, "Paste top"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
             ]
         elif layer_count == 2:
@@ -129,9 +132,11 @@ class Fabrication:
                 ("CuTop", F_Cu, "Top layer"),
                 ("SilkTop", F_SilkS, "Silk top"),
                 ("MaskTop", F_Mask, "Mask top"),
+                ("PasteTop", F_Paste, "Paste top"),
                 ("CuBottom", B_Cu, "Bottom layer"),
                 ("SilkBottom", B_SilkS, "Silk top"),
                 ("MaskBottom", B_Mask, "Mask bottom"),
+                ("PasteBottom", B_Paste, "Paste bottom"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
             ]
         elif layer_count == 4:
@@ -139,11 +144,13 @@ class Fabrication:
                 ("CuTop", F_Cu, "Top layer"),
                 ("SilkTop", F_SilkS, "Silk top"),
                 ("MaskTop", F_Mask, "Mask top"),
+                ("PasteTop", F_Paste, "Paste top"),
                 ("CuIn1", In1_Cu, "Inner layer 1"),
                 ("CuIn2", In2_Cu, "Inner layer 2"),
                 ("CuBottom", B_Cu, "Bottom layer"),
                 ("SilkBottom", B_SilkS, "Silk top"),
                 ("MaskBottom", B_Mask, "Mask bottom"),
+                ("PasteBottom", B_Paste, "Paste bottom"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
             ]
         elif layer_count == 6:
@@ -151,6 +158,7 @@ class Fabrication:
                 ("CuTop", F_Cu, "Top layer"),
                 ("SilkTop", F_SilkS, "Silk top"),
                 ("MaskTop", F_Mask, "Mask top"),
+                ("PasteTop", F_Paste, "Paste top"),
                 ("CuIn1", In1_Cu, "Inner layer 1"),
                 ("CuIn2", In2_Cu, "Inner layer 2"),
                 ("CuIn3", In3_Cu, "Inner layer 3"),
@@ -158,6 +166,7 @@ class Fabrication:
                 ("CuBottom", B_Cu, "Bottom layer"),
                 ("SilkBottom", B_SilkS, "Silk top"),
                 ("MaskBottom", B_Mask, "Mask bottom"),
+                ("PasteBottom", B_Paste, "Paste bottom"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
             ]
 
