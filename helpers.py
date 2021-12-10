@@ -29,17 +29,6 @@ def get_lcsc_value(fp):
     return ""
 
 
-def get_version_info():
-    """Get version info"""
-    path, filename = os.path.split(os.path.abspath(__file__))
-    fetch_head = os.path.join(path, ".git", "FETCH_HEAD")
-    if not os.path.isfile(fetch_head):
-        return "unknown"
-    with open(fetch_head) as f:
-        v = f.read()[:7]
-    return v
-
-
 def get_valid_footprints(board):
     """Get all footprints that have a vaild reference (drop all REF**)"""
     footprints = []
