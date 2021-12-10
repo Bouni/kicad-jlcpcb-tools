@@ -1,6 +1,6 @@
 name: autoblack
 # Found here: https://deepsource.io/blog/auto-code-formatting-python/
-on: [push, pull_request]
+on: [push]
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -11,9 +11,10 @@ jobs:
         run: pip install black
       - uses: wearerequired/lint-action@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           black: true
+          flake8: true
           auto_fix: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           commit_message: 'fixup: Format Python code with Black'
           git_name: github-actions[bot]
           git_email: github-actions[bot]@users.noreply.github.com
