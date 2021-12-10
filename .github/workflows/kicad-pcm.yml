@@ -57,5 +57,5 @@ jobs:
           workflow: Rebuild repository
           repo: Bouni/bouni-kicad-repository
           token: ${{ secrets.PERSONAL_TOKEN }}
-          token: ${{ secrets.PERSONAL_TOKEN }}
+          
           
