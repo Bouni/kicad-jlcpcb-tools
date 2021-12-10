@@ -24,8 +24,13 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v2
       
-      - name: Create archive and metadata.json
+      - name: Create archive
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
+        env:
+          DOWNLOAD_SHA256: ""
+          DOWNLOAD_SIZE: 0
+          DOWNLOAD_URL: ""
+          INSTALL_SIZE: 0
       
       - name: Upload zip as asset to release
         uses: svenstaro/upload-release-action@v2
@@ -42,6 +47,6 @@ jobs:
           workflow: Rebuild repository
           repo: Bouni/bouni-kicad-repository
           token: ${{ secrets.PERSONAL_TOKEN }}
-          inputs: '{ "DOWNLOAD_SHA256": "${{DOWNLOAD_SHA256}}", "DOWNLOAD_SIZE": "${{DOWNLOAD_SIZE}}", "DOWNLOAD_URL": "${{DOWNLOAD_URL}}", "INSTALL_SIZE": "${{INSTALL_SIZE}}" }'
+          inputs: '{ "DOWNLOAD_SHA256": "${{env.DOWNLOAD_SHA256}}", "DOWNLOAD_SIZE": "${{env.DOWNLOAD_SIZE}}", "DOWNLOAD_URL": "${{env.DOWNLOAD_URL}}", "INSTALL_SIZE": "${{env.INSTALL_SIZE}}" }'
           
           
