@@ -1,6 +1,6 @@
 name: autoblack
 # Found here: https://deepsource.io/blog/auto-code-formatting-python/
-on: [pull-request]
+on: [pull_request]
 jobs:
   lint:
     runs-on: ubuntu-latest
