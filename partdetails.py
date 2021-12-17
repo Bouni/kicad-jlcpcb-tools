@@ -30,20 +30,15 @@ class PartDetailsDialog(wx.Dialog):
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
         # ---------------------------------------------------------------------
-        # This panel is unused, but without it the acceleraors don't work (on MacOS at least)
-        self.panel = wx.Panel(parent=self, id=wx.ID_ANY)
-        self.panel.Fit()
-
-        quitid = wx.NewIdRef()
-        aTable = wx.AcceleratorTable(
-            [
-                (wx.ACCEL_CTRL, ord("W"), quitid),
-                (wx.ACCEL_CTRL, ord("Q"), quitid),
-                (wx.ACCEL_NORMAL, wx.WXK_ESCAPE, quitid),
-            ]
-        )
-        self.SetAcceleratorTable(aTable)
+        quitid = wx.NewId()
         self.Bind(wx.EVT_MENU, self.quit_dialog, id=quitid)
+
+        entries = [wx.AcceleratorEntry(), wx.AcceleratorEntry(), wx.AcceleratorEntry()]
+        entries[0].Set(wx.ACCEL_CTRL, ord("W"), quitid)
+        entries[1].Set(wx.ACCEL_CTRL, ord("Q"), quitid)
+        entries[2].Set(wx.ACCEL_SHIFT, wx.WXK_ESCAPE, quitid)
+        accel = wx.AcceleratorTable(entries)
+        self.SetAcceleratorTable(accel)
 
         # ---------------------------------------------------------------------
         # ----------------------- Properties List -----------------------------
