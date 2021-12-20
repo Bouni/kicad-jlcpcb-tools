@@ -244,7 +244,10 @@ class Library:
         """The actual worker thread that downloads and imports the CSV data."""
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
-        r = requests.get(self.CSV_URL, allow_redirects=True, stream=True)
+        headers = {
+			'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36',
+		}
+        r = requests.get(self.CSV_URL, allow_redirects=True, stream=True, headers=headers)
         if r.status_code != requests.codes.ok:
             wx.PostEvent(
                 self.parent,
