@@ -8,7 +8,7 @@ on:
   release:
     branches: [ main ]
     types:
-      - created
+      - published
   workflow_dispatch:
 jobs:
   create_archive:
