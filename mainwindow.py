@@ -399,6 +399,7 @@ class JLCBCBTools(wx.Dialog):
         self.init_library()
         self.init_fabrication()
         self.init_store()
+        wx.CallLater(1000, self.library.check_library)
 
     def quit_dialog(self, e):
         self.Destroy()
