@@ -212,7 +212,8 @@ class Fabrication:
         """Generate placement file (POS)."""
         posname = f"POS-{self.filename.split('.')[0]}.csv"
         self.corrections = self.parent.library.get_all_correction_data()
-        with open(os.path.join(self.assemblydir, posname), "w", newline="") as csvfile:
+
+        with open(os.path.join(self.assemblydir, posname), "w", newline="", encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
