@@ -11,6 +11,7 @@ from pcbnew import (
     PCB_PLOT_PARAMS,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
+    VECTOR2I,
     ZONE_FILLER,
     B_Cu,
     B_Mask,
@@ -22,6 +23,7 @@ from pcbnew import (
     F_Paste,
     F_SilkS,
     GetBoard,
+    GetBuildVersion,
     In1_Cu,
     In2_Cu,
     In3_Cu,
@@ -187,7 +189,10 @@ class Fabrication:
         drlwriter = EXCELLON_WRITER(self.board)
         mirror = False
         minimalHeader = False
-        offset = wxPoint(0, 0)
+        if "6.0.0" in GetBuildVersion():
+            offset = wxPoint(0, 0)
+        else:
+            offset = VECTOR2I(0, 0)
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
         drlwriter.SetFormat(False)
