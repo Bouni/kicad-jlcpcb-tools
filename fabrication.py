@@ -189,10 +189,10 @@ class Fabrication:
         drlwriter = EXCELLON_WRITER(self.board)
         mirror = False
         minimalHeader = False
-        if "6.0.0" in GetBuildVersion():
-            offset = wxPoint(0, 0)
-        else:
+        if "6.99" in GetBuildVersion():
             offset = VECTOR2I(0, 0)
+        else:
+            offset = wxPoint(0, 0)
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
         drlwriter.SetFormat(False)
