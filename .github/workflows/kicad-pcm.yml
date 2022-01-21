@@ -36,19 +36,6 @@ jobs:
           asset_name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           overwrite: true
           tag: ${{ steps.latest-release.outputs.tag }}
-
-# Potential fix for "No ref found for: refs/tags/..." -> https://stackoverflow.com/a/65698892
-
-  rebuild_repo:
-    needs: create_archive
-    runs-on: ubuntu-latest
-    steps:
-      - name: Get latest tag
-        uses: oprypin/find-latest-tag@v1
-        with:
-          repository:  Bouni/kicad-jlcpcb-tools
-          releases-only: true
-        id: latest-release
         
       - name: Trigger custom kicad repo rebuild
         uses: benc-uk/workflow-dispatch@v1
