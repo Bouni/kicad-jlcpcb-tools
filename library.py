@@ -14,7 +14,12 @@ from threading import Thread
 import requests
 import wx
 
-from .events import MessageEvent, ResetGaugeEvent, UpdateGaugeEvent
+from .events import (
+    MessageEvent,
+    PopulateFootprintListEvent,
+    ResetGaugeEvent,
+    UpdateGaugeEvent,
+)
 from .helpers import PLUGIN_PATH, natural_sort_collation
 
 
@@ -231,13 +236,14 @@ class Library:
             con.executemany(query, data)
             con.commit()
 
-    def get_stock(self, lcsc):
-        """Get the stock for a given lcsc number"""
+    def get_part_details(self, lcsc):
+        """Get the part details for a list of lcsc numbers."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
+                numbers = ",".join([f'"{n}"' for n in lcsc])
                 return cur.execute(
-                    f'SELECT Stock FROM parts where "LCSC Part" = "{lcsc}"'
-                ).fetchone()
+                    f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where "LCSC Part" IN ({numbers})'
+                ).fetchall()
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
@@ -297,9 +303,8 @@ class Library:
             con.commit()
         self.update_meta_data(filename, size, part_count, date, dt.now().isoformat())
         wx.PostEvent(self.parent, ResetGaugeEvent())
-        self.update_stock()
-        wx.PostEvent(self.parent, ResetGaugeEvent())
         end = time.time()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
         wx.PostEvent(
             self.parent,
             MessageEvent(
@@ -308,13 +313,3 @@ class Library:
                 style="info",
             ),
         )
-
-    def update_stock(self):
-        """Update the stock info in the project from the library"""
-        footprints = [fp for fp in self.parent.store.read_all() if fp[3]]
-        self.logger.info(f"Update stock values for {len(footprints)} footprints")
-        for n, fp in enumerate(footprints):
-            progress = n / len(footprints) * 100
-            if stock := self.get_stock(fp[3]):
-                self.parent.store.set_stock(fp[0], stock[0])
-                wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
