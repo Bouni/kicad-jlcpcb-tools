@@ -10,6 +10,7 @@ from pcbnew import GetBoard
 from .events import (
     EVT_ASSIGN_PART_EVENT,
     EVT_MESSAGE_EVENT,
+    EVT_POPULATE_FOOTPRINT_LIST_EVENT,
     EVT_RESET_GAUGE_EVENT,
     EVT_UPDATE_GAUGE_EVENT,
 )
@@ -399,6 +400,7 @@ class JLCBCBTools(wx.Dialog):
         self.Bind(EVT_UPDATE_GAUGE_EVENT, self.update_gauge)
         self.Bind(EVT_MESSAGE_EVENT, self.display_message)
         self.Bind(EVT_ASSIGN_PART_EVENT, self.assign_part)
+        self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
 
         self.enable_toolbar_buttons(False)
 
@@ -449,7 +451,7 @@ class JLCBCBTools(wx.Dialog):
         }
         wx.MessageBox(e.text, e.title, style=styles.get(e.style, wx.ICON_INFORMATION))
 
-    def populate_footprint_list(self):
+    def populate_footprint_list(self, e=None):
         """Populate/Refresh list of footprints."""
         self.footprint_list.DeleteAllItems()
         icons = {
