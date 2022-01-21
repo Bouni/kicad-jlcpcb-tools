@@ -41,8 +41,14 @@ class Store:
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database"""
-        if n > 6:
+        if n > 7:
             return
+        # The following two cases are just a temporary hack and will eventually be replaced by
+        # direct sorting via DataViewListCtrl rather than via SQL query
+        if n == 4:
+            return
+        if n > 4:
+            n = n - 1
         order_by = [
             "reference",
             "value",
