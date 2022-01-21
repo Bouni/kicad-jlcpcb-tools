@@ -62,9 +62,12 @@ class Fabrication:
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
-        # we need to devide by 10 to get 180 out of 1800 for example.
-        # This might be a bug in 5.99 / 6.0 RC
-        rotation = original / 10
+        if "6.99" in GetBuildVersion():
+            rotation = original.AsDegrees()
+        else:
+            # we need to devide by 10 to get 180 out of 1800 for example.
+            # This might be a bug in 5.99 / 6.0 RC
+            rotation = original / 10
         for regex, correction in self.corrections:
             if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
                 if footprint.GetLayer() == 0:
