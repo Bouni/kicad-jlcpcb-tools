@@ -38,7 +38,7 @@ class JLCBCBTools(wx.Dialog):
             id=wx.ID_ANY,
             title=f"JLCPCB Tools",
             pos=wx.DefaultPosition,
-            size=wx.Size(1200, 800),
+            size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
@@ -199,6 +199,13 @@ class JLCBCBTools(wx.Dialog):
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
+        self.lcsc = self.footprint_list.AppendTextColumn(
+            "Type",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=100,
+            align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        )
         self.stock = self.footprint_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
@@ -224,7 +231,7 @@ class JLCBCBTools(wx.Dialog):
             "",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
-            width=60,
+            width=1,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
@@ -459,18 +466,29 @@ class JLCBCBTools(wx.Dialog):
                 ),
             ),
         }
+        numbers = []
+        parts = []
         for part in self.store.read_all():
-            part[4] = str(part[4])
+            if part[3] and part[3] not in numbers:
+                numbers.append(part[3])
+            part.insert(4, "")
+            part[5] = str(part[5])
             # dont show the part if hide BOM is set
-            if self.hide_bom_parts and part[5]:
+            if self.hide_bom_parts and part[6]:
                 continue
             # dont show the part if hide POS is set
-            if self.hide_pos_parts and part[6]:
+            if self.hide_pos_parts and part[7]:
                 continue
             # decide which icon to use
-            part[5] = icons.get(part[5], icons.get(0))
             part[6] = icons.get(part[6], icons.get(0))
-            part.insert(7, "")
+            part[7] = icons.get(part[7], icons.get(0))
+            part.insert(8, "")
+            parts.append(part)
+        details = self.library.get_part_details(numbers)
+        for part in parts:
+            if detail := list(filter(lambda x: x[0] == part[3], details)):
+                part[4] = detail[0][2]
+                part[5] = detail[0][1]
             self.footprint_list.AppendItem(part)
 
     def OnSortFootprintList(self, e):
