@@ -19,5 +19,4 @@ class JLCPCBPlugin(ActionPlugin):
     def Run(self):
         dialog = JLCBCBTools(None)
         dialog.Center()
-        dialog.ShowModal()
-        dialog.Destroy()
+        dialog.Show()
