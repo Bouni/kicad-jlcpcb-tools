@@ -5,7 +5,7 @@ import os
 import requests
 import wx
 
-from .helpers import PLUGIN_PATH
+from .helpers import PLUGIN_PATH, loadBitmapScaled
 
 
 class RotationManagerDialog(wx.Dialog):
@@ -157,20 +157,23 @@ class RotationManagerDialog(wx.Dialog):
         self.delete_button.Bind(wx.EVT_BUTTON, self.delete_correction)
         self.update_button.Bind(wx.EVT_BUTTON, self.download_correction_data)
 
-        save_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-content-save-outline.png")
+        save_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-content-save-outline.png"),
+            parent.scale_factor,
         )
         self.save_button.SetBitmap(save_icon)
         self.save_button.SetBitmapMargins((2, 0))
 
-        delete_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-trash-can-outline.png")
+        delete_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-trash-can-outline.png"),
+            parent.scale_factor,
         )
         self.delete_button.SetBitmap(delete_icon)
         self.delete_button.SetBitmapMargins((2, 0))
 
-        update_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-cloud-download-outline.png")
+        update_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-cloud-download-outline.png"),
+            parent.scale_factor,
         )
         self.update_button.SetBitmap(update_icon)
         self.update_button.SetBitmapMargins((2, 0))
