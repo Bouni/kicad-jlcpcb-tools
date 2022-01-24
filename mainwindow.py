@@ -39,10 +39,12 @@ class JLCBCBTools(wx.Dialog):
             id=wx.ID_ANY,
             title=f"JLCPCB Tools",
             pos=wx.DefaultPosition,
-            size=wx.Size(1300, 800),
+            size=wx.GetApp().GetTopWindow().FromDIP(wx.Size(1300, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
+        self.window = wx.GetApp().GetTopWindow()
+        self.scale_factor = self.window.GetDPIScaleFactor()
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -72,7 +74,7 @@ class JLCBCBTools(wx.Dialog):
             wx.ID_ANY,
             "Generate fabrication files",
             wx.DefaultPosition,
-            (200, 38),
+            self.window.FromDIP(wx.Size(200, 38)),
             0,
         )
 
@@ -83,7 +85,7 @@ class JLCBCBTools(wx.Dialog):
             wx.Bitmap(
                 os.path.join(PLUGIN_PATH, "icons", "mdi-layers-triple-outline.png")
             ),
-            size=(24, 36),
+            size=self.window.FromDIP(wx.Size(24, 36)),
         )
         self.layer_selection = wx.Choice(
             self,
@@ -104,11 +106,21 @@ class JLCBCBTools(wx.Dialog):
         #     "library_desc",
         # )
         self.rotation_button = wx.Button(
-            self, wx.ID_ANY, "Manage rotations", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Manage rotations",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
 
         self.download_button = wx.Button(
-            self, wx.ID_ANY, "Update library", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Update library",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
 
         layer_sizer.Add(
@@ -163,7 +175,7 @@ class JLCBCBTools(wx.Dialog):
         # ----------------------- Footprint List ------------------------------
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(wx.Size(-1, 600))
+        table_sizer.SetMinSize(self.window.FromDIP(wx.Size(-1, 600)))
         self.footprint_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
@@ -171,60 +183,60 @@ class JLCBCBTools(wx.Dialog):
             wx.DefaultSize,
             style=wx.dataview.DV_MULTIPLE,
         )
-        self.footprint_list.SetMinSize(wx.Size(750, 400))
+        self.footprint_list.SetMinSize(self.window.FromDIP(wx.Size(750, 400)))
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.value = self.footprint_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=200,
+            width=self.scale_factor * 200,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=300,
+            width=self.scale_factor * 300,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.stock = self.footprint_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.bom = self.footprint_list.AppendIconTextColumn(
             "BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=self.scale_factor * 50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.pos = self.footprint_list.AppendIconTextColumn(
             "POS",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=self.scale_factor * 50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
@@ -250,34 +262,79 @@ class JLCBCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
         toolbar_sizer = wx.BoxSizer(wx.VERTICAL)
         self.select_part_button = wx.Button(
-            self, wx.ID_ANY, "Select part", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Select part",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.remove_part_button = wx.Button(
-            self, wx.ID_ANY, "Remove part", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Remove part",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.select_alike_button = wx.Button(
-            self, wx.ID_ANY, "Select alike", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Select alike",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.toggle_bom_pos_button = wx.Button(
-            self, wx.ID_ANY, "Toggle BOM/POS", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Toggle BOM/POS",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.toggle_bom_button = wx.Button(
-            self, wx.ID_ANY, "Toggle BOM", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Toggle BOM",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.toggle_pos_button = wx.Button(
-            self, wx.ID_ANY, "Toggle POS", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Toggle POS",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.part_details_button = wx.Button(
-            self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Show part details",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         # self.part_costs_button = wx.Button(
         #     self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (175, 38), 0
         # )
         self.hide_bom_button = wx.Button(
-            self, wx.ID_ANY, "Hide excluded BOM", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Hide excluded BOM",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.hide_pos_button = wx.Button(
-            self, wx.ID_ANY, "Hide excluded POS", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Hide excluded POS",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
@@ -370,18 +427,23 @@ class JLCBCBTools(wx.Dialog):
             wx.DefaultSize,
             wx.TE_MULTILINE | wx.TE_READONLY,
         )
-        self.logbox.SetMinSize(wx.Size(-1, 150))
+        self.logbox.SetMinSize(self.window.FromDIP(wx.Size(-1, 150)))
         self.gauge = wx.Gauge(
-            self, wx.ID_ANY, 100, wx.DefaultPosition, (100, -1), wx.GA_HORIZONTAL
+            self,
+            wx.ID_ANY,
+            100,
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(100, -1)),
+            wx.GA_HORIZONTAL,
         )
         self.gauge.SetValue(0)
-        self.gauge.SetMinSize(wx.Size(-1, 5))
+        self.gauge.SetMinSize(self.window.FromDIP(wx.Size(-1, 5)))
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        self.SetSizeHints(wx.Size(1000, -1), wx.DefaultSize)
+        self.SetSizeHints(self.window.FromDIP(wx.Size(1000, -1)), wx.DefaultSize)
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(top_button_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
@@ -410,6 +472,7 @@ class JLCBCBTools(wx.Dialog):
         self.init_store()
         if self.library.state == LibraryState.UPDATE_NEEDED:
             self.library.update()
+        self.logger.debug(self.scale_factor)
 
     def quit_dialog(self, e):
         self.Destroy()

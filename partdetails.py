@@ -17,7 +17,7 @@ class PartDetailsDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
-            size=wx.Size(1000, 800),
+            size=parent.window.FromDIP(wx.Size(1000, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.STAY_ON_TOP,
         )
 
@@ -53,13 +53,13 @@ class PartDetailsDialog(wx.Dialog):
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=200,
+            width=parent.scale_factor * 200,
             align=wx.ALIGN_LEFT,
         )
         self.value = self.data_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=300,
+            width=parent.scale_factor * 300,
             align=wx.ALIGN_LEFT,
         )
 
@@ -71,7 +71,7 @@ class PartDetailsDialog(wx.Dialog):
             wx.ID_ANY,
             wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "placeholder.png")),
             wx.DefaultPosition,
-            (200, 200),
+            parent.window.FromDIP(wx.Size(200, 200)),
             0,
         )
         self.openpdf_button = wx.Button(
