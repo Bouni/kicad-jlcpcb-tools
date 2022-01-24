@@ -7,6 +7,7 @@ import shlex
 import sqlite3
 import time
 from datetime import datetime as dt
+from enum import Enum
 from ntpath import join
 from pathlib import Path
 from threading import Thread
@@ -23,6 +24,12 @@ from .events import (
 from .helpers import PLUGIN_PATH, natural_sort_collation
 
 
+class LibraryState(Enum):
+    INITIALIZED = 0
+    UPDATE_NEEDED = 1
+    DOWNLOAD_RUNNING = 2
+
+
 class Library:
     """A storage class to get data from a sqlite database and write it back"""
 
@@ -35,7 +42,9 @@ class Library:
         self.order_dir = "ASC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "parts.db")
+        self.state = None
         self.setup()
+        self.check_library()
 
     def setup(self):
         """Check if folders and database exist, setup if not"""
@@ -48,7 +57,9 @@ class Library:
     def check_library(self):
         """Check if the database file exists, if not trigger update"""
         if not os.path.isfile(self.dbfile):
-            self.update()
+            self.state = LibraryState.UPDATE_NEEDED
+        else:
+            self.state = LibraryState.INITIALIZED
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database"""
@@ -251,6 +262,7 @@ class Library:
 
     def download(self):
         """The actual worker thread that downloads and imports the CSV data."""
+        self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
         headers = {
@@ -313,3 +325,4 @@ class Library:
                 style="info",
             ),
         )
+        self.state = LibraryState.INITIALIZED

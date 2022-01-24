@@ -21,7 +21,7 @@ from .helpers import (
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
-from .library import Library
+from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partselector import PartSelectorDialog
 from .rotations import RotationManagerDialog
@@ -408,7 +408,8 @@ class JLCBCBTools(wx.Dialog):
         self.init_library()
         self.init_fabrication()
         self.init_store()
-        wx.CallLater(1000, self.library.check_library)
+        if self.library.state == LibraryState.UPDATE_NEEDED:
+            self.library.update()
 
     def quit_dialog(self, e):
         self.Destroy()
@@ -421,7 +422,8 @@ class JLCBCBTools(wx.Dialog):
     def init_store(self):
         """Initialize the store of part assignments"""
         self.store = Store(self.project_path)
-        self.populate_footprint_list()
+        if self.library.state == LibraryState.INITIALIZED:
+            self.populate_footprint_list()
 
     def init_fabrication(self):
         """Initialize the fabrication"""
