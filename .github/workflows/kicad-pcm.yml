@@ -36,6 +36,9 @@ jobs:
           asset_name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           overwrite: true
           tag: ${{ steps.latest-release.outputs.tag }}
+          
+      - name: Checkout repo
+        uses: actions/checkout@v2
         
       - name: Trigger custom kicad repo rebuild
         uses: benc-uk/workflow-dispatch@v1
