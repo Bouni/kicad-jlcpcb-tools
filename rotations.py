@@ -16,7 +16,7 @@ class RotationManagerDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="Rotations Manager",
             pos=wx.DefaultPosition,
-            size=wx.Size(800, 800),
+            size=parent.window.FromDIP(wx.Size(800, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
@@ -42,8 +42,16 @@ class RotationManagerDialog(wx.Dialog):
         # ------------------------- Add/Edit inputs ---------------------------
         # ---------------------------------------------------------------------
 
-        regex_label = wx.StaticText(self, wx.ID_ANY, "Regex", size=(150, 15))
-        self.regex = wx.TextCtrl(self, wx.ID_ANY, "", wx.DefaultPosition, (200, 24))
+        regex_label = wx.StaticText(
+            self, wx.ID_ANY, "Regex", size=parent.window.FromDIP(wx.Size(150, 15))
+        )
+        self.regex = wx.TextCtrl(
+            self,
+            wx.ID_ANY,
+            "",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(200, 24)),
+        )
 
         sizer_left = wx.BoxSizer(wx.VERTICAL)
         sizer_left.Add(regex_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
@@ -54,9 +62,15 @@ class RotationManagerDialog(wx.Dialog):
             5,
         )
 
-        correction_label = wx.StaticText(self, wx.ID_ANY, "Correction", size=(150, 15))
+        correction_label = wx.StaticText(
+            self, wx.ID_ANY, "Correction", size=parent.window.FromDIP(wx.Size(150, 15))
+        )
         self.correction = wx.TextCtrl(
-            self, wx.ID_ANY, "", wx.DefaultPosition, (200, 24)
+            self,
+            wx.ID_ANY,
+            "",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(200, 24)),
         )
 
         sizer_right = wx.BoxSizer(wx.VERTICAL)
@@ -90,24 +104,24 @@ class RotationManagerDialog(wx.Dialog):
         regex = self.rotations_list.AppendTextColumn(
             "Regex",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=480,
+            width=parent.scale_factor * 480,
             align=wx.ALIGN_LEFT,
         )
         rotation = self.rotations_list.AppendTextColumn(
             "Correction",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=parent.scale_factor * 100,
             align=wx.ALIGN_LEFT,
         )
 
-        self.rotations_list.SetMinSize(wx.Size(600, 500))
+        self.rotations_list.SetMinSize(parent.window.FromDIP(wx.Size(600, 500)))
 
         self.rotations_list.Bind(
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.on_correction_selected
         )
 
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(wx.Size(-1, 400))
+        table_sizer.SetMinSize(parent.window.FromDIP(wx.Size(-1, 400)))
         table_sizer.Add(self.rotations_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -115,13 +129,28 @@ class RotationManagerDialog(wx.Dialog):
         # ---------------------------------------------------------------------
 
         self.save_button = wx.Button(
-            self, wx.ID_ANY, "Save", wx.DefaultPosition, (150, -1), 0
+            self,
+            wx.ID_ANY,
+            "Save",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
         )
         self.delete_button = wx.Button(
-            self, wx.ID_ANY, "Delete", wx.DefaultPosition, (150, -1), 0
+            self,
+            wx.ID_ANY,
+            "Delete",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
         )
         self.update_button = wx.Button(
-            self, wx.ID_ANY, "Update", wx.DefaultPosition, (150, -1), 0
+            self,
+            wx.ID_ANY,
+            "Update",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
         )
 
         self.save_button.Bind(wx.EVT_BUTTON, self.save_correction)
