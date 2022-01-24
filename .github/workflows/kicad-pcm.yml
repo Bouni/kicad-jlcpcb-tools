@@ -36,14 +36,12 @@ jobs:
           asset_name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           overwrite: true
           tag: ${{ steps.latest-release.outputs.tag }}
-          
-      - name: Checkout repo
-        uses: actions/checkout@v2
         
       - name: Trigger custom kicad repo rebuild
         uses: benc-uk/workflow-dispatch@v1
         with:
           workflow: Rebuild repository
+          ref: refs/heads/main
           repo: Bouni/bouni-kicad-repository
           token: ${{ secrets.PERSONAL_TOKEN }}
           inputs: '{ "VERSION": "${{env.VERSION}}", "DOWNLOAD_SHA256": "${{env.DOWNLOAD_SHA256}}", "DOWNLOAD_SIZE": "${{env.DOWNLOAD_SIZE}}", "DOWNLOAD_URL": "${{env.DOWNLOAD_URL}}", "INSTALL_SIZE": "${{env.INSTALL_SIZE}}" }'
