@@ -5,7 +5,7 @@ from sys import path
 import wx
 
 from .events import AssignPartEvent
-from .helpers import PLUGIN_PATH
+from .helpers import PLUGIN_PATH, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 
 
@@ -17,7 +17,7 @@ class PartSelectorDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="JLCPCB Library",
             pos=wx.DefaultPosition,
-            size=wx.Size(1300, 800),
+            size=parent.window.FromDIP(wx.Size(1300, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
@@ -43,93 +43,131 @@ class PartSelectorDialog(wx.Dialog):
         # --------------------------- Search bar ------------------------------
         # ---------------------------------------------------------------------
 
-        keyword_label = wx.StaticText(self, wx.ID_ANY, "Keyword", size=(150, 15))
+        keyword_label = wx.StaticText(
+            self, wx.ID_ANY, "Keyword", size=parent.window.FromDIP(wx.Size(150, 15))
+        )
         self.keyword = wx.TextCtrl(
             self,
             wx.ID_ANY,
             lcsc_selection,
             wx.DefaultPosition,
-            (200, 24),
+            parent.window.FromDIP(wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.keyword.SetHint("e.g. 10k 0603")
 
         manufacturer_label = wx.StaticText(
-            self, wx.ID_ANY, "Manufacturer", size=(150, 15)
+            self,
+            wx.ID_ANY,
+            "Manufacturer",
+            size=parent.window.FromDIP(wx.Size(150, 15)),
         )
         self.manufacturer = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            (200, 24),
+            parent.window.FromDIP(wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.manufacturer.SetHint("e.g. Vishay")
 
-        package_label = wx.StaticText(self, wx.ID_ANY, "Package", size=(150, 15))
+        package_label = wx.StaticText(
+            self, wx.ID_ANY, "Package", size=parent.window.FromDIP(wx.Size(150, 15))
+        )
         self.package = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            (200, 24),
+            parent.window.FromDIP(wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.package.SetHint("e.g. 0603")
 
-        category_label = wx.StaticText(self, wx.ID_ANY, "Category", size=(150, 15))
+        category_label = wx.StaticText(
+            self, wx.ID_ANY, "Category", size=parent.window.FromDIP(wx.Size(150, 15))
+        )
         self.category = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            (200, 24),
+            parent.window.FromDIP(wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.category.SetHint("e.g. Resistor")
 
-        part_no_label = wx.StaticText(self, wx.ID_ANY, "Part number", size=(150, 15))
+        part_no_label = wx.StaticText(
+            self, wx.ID_ANY, "Part number", size=parent.window.FromDIP(wx.Size(150, 15))
+        )
         self.part_no = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            (200, 24),
+            parent.window.FromDIP(wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.part_no.SetHint("e.g. DS2411")
 
         solder_joints_label = wx.StaticText(
-            self, wx.ID_ANY, "Solder joints", size=(150, 15)
+            self,
+            wx.ID_ANY,
+            "Solder joints",
+            size=parent.window.FromDIP(wx.Size(150, 15)),
         )
         self.solder_joints = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            (200, 24),
+            parent.window.FromDIP(wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.solder_joints.SetHint("e.g. 2")
 
         basic_label = wx.StaticText(
-            self, wx.ID_ANY, "Include basic parts", size=(150, 15)
+            self,
+            wx.ID_ANY,
+            "Include basic parts",
+            size=parent.window.FromDIP(wx.Size(150, 15)),
         )
         self.basic_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, "Basic", wx.DefaultPosition, (200, 24), 0
+            self,
+            wx.ID_ANY,
+            "Basic",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(200, 24)),
+            0,
         )
         extended_label = wx.StaticText(
-            self, wx.ID_ANY, "Include extended parts", size=(150, 15)
+            self,
+            wx.ID_ANY,
+            "Include extended parts",
+            size=parent.window.FromDIP(wx.Size(150, 15)),
         )
         self.extended_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, "Extended", wx.DefaultPosition, (200, 24), 0
+            self,
+            wx.ID_ANY,
+            "Extended",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(200, 24)),
+            0,
         )
         stock_label = wx.StaticText(
-            self, wx.ID_ANY, "Only show parts in stock", size=(150, 15)
+            self,
+            wx.ID_ANY,
+            "Only show parts in stock",
+            size=parent.window.FromDIP(wx.Size(150, 15)),
         )
         self.assert_stock_checkbox = wx.CheckBox(
-            self, wx.ID_ANY, "in Stock", wx.DefaultPosition, (200, 24), 0
+            self,
+            wx.ID_ANY,
+            "in Stock",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(200, 24)),
+            0,
         )
 
         self.basic_checkbox.SetValue(True)
@@ -140,7 +178,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             "Help",
             wx.DefaultPosition,
-            (100, -1),
+            parent.window.FromDIP(wx.Size(100, -1)),
             0,
         )
 
@@ -149,7 +187,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             "Search",
             wx.DefaultPosition,
-            (100, -1),
+            parent.window.FromDIP(wx.Size(100, -1)),
             0,
         )
 
@@ -241,14 +279,16 @@ class PartSelectorDialog(wx.Dialog):
             5,
         )
 
-        help_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-help-circle-outline.png")
+        help_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-help-circle-outline.png"),
+            parent.scale_factor,
         )
         help_button.SetBitmap(help_icon)
         help_button.SetBitmapMargins((2, 0))
 
-        select_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png")
+        select_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png"),
+            parent.scale_factor,
         )
         self.search_button.SetBitmap(select_icon)
         self.search_button.SetBitmapMargins((2, 0))
@@ -295,68 +335,68 @@ class PartSelectorDialog(wx.Dialog):
         reference = self.part_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=80,
+            width=parent.scale_factor * 80,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         number = self.part_list.AppendTextColumn(
             "MFR Number",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=140,
+            width=parent.scale_factor * 140,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         package = self.part_list.AppendTextColumn(
             "Package",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=parent.scale_factor * 100,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         joints = self.part_list.AppendTextColumn(
             "Joints",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=40,
+            width=parent.scale_factor * 40,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         type = self.part_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=80,
+            width=parent.scale_factor * 80,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         manufacturer = self.part_list.AppendTextColumn(
             "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=140,
+            width=parent.scale_factor * 140,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         decription = self.part_list.AppendTextColumn(
             "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=300,
+            width=parent.scale_factor * 300,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         price = self.part_list.AppendTextColumn(
             "Price",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=parent.scale_factor * 100,
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         stock = self.part_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=parent.scale_factor * 50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
 
-        self.part_list.SetMinSize(wx.Size(1050, 500))
+        self.part_list.SetMinSize(parent.window.FromDIP(wx.Size(1050, 500)))
 
         self.part_list.Bind(
             wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self.OnSortPartList
@@ -367,7 +407,7 @@ class PartSelectorDialog(wx.Dialog):
         )
 
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(wx.Size(-1, 400))
+        table_sizer.SetMinSize(parent.window.FromDIP(wx.Size(-1, 400)))
         table_sizer.Add(self.part_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -375,21 +415,34 @@ class PartSelectorDialog(wx.Dialog):
         # ---------------------------------------------------------------------
 
         self.select_part_button = wx.Button(
-            self, wx.ID_ANY, "Select part", wx.DefaultPosition, (150, -1), 0
+            self,
+            wx.ID_ANY,
+            "Select part",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
         )
         self.part_details_button = wx.Button(
-            self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (150, -1), 0
+            self,
+            wx.ID_ANY,
+            "Show part details",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
         )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
 
-        check_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-check.png"))
+        check_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-check.png"), parent.scale_factor
+        )
         self.select_part_button.SetBitmap(check_icon)
         self.select_part_button.SetBitmapMargins((2, 0))
 
-        details_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-text-box-search-outline.png")
+        details_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-text-box-search-outline.png"),
+            parent.scale_factor,
         )
         self.part_details_button.SetBitmap(details_icon)
         self.part_details_button.SetBitmapMargins((2, 0))
@@ -504,7 +557,9 @@ class PartSelectorDialog(wx.Dialog):
         part = self.part_list.GetTextValue(row, 0)
         if part != "":
             self.busy_cursor = wx.BusyCursor()
-            PartDetailsDialog(self, part).Show()
+            dialog = PartDetailsDialog(self.parent, part)
+            del self.busy_cursor
+            dialog.Show()
 
     def help(sefl, e):
         """Show message box with help instructions"""

@@ -6,7 +6,7 @@ import webbrowser
 import requests
 import wx
 
-from .helpers import PLUGIN_PATH
+from .helpers import PLUGIN_PATH, loadBitmapScaled
 
 
 class PartDetailsDialog(wx.Dialog):
@@ -17,7 +17,7 @@ class PartDetailsDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
-            size=wx.Size(1000, 800),
+            size=parent.window.FromDIP(wx.Size(1000, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.STAY_ON_TOP,
         )
 
@@ -53,13 +53,13 @@ class PartDetailsDialog(wx.Dialog):
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=200,
+            width=parent.scale_factor * 200,
             align=wx.ALIGN_LEFT,
         )
         self.value = self.data_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=300,
+            width=parent.scale_factor * 300,
             align=wx.ALIGN_LEFT,
         )
 
@@ -69,9 +69,12 @@ class PartDetailsDialog(wx.Dialog):
         self.image = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "placeholder.png")),
+            loadBitmapScaled(
+                os.path.join(PLUGIN_PATH, "icons", "placeholder.png"),
+                parent.scale_factor,
+            ),
             wx.DefaultPosition,
-            (200, 200),
+            parent.window.FromDIP(wx.Size(200, 200)),
             0,
         )
         self.openpdf_button = wx.Button(
@@ -85,8 +88,9 @@ class PartDetailsDialog(wx.Dialog):
 
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
 
-        pdf_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-file-document-outline.png")
+        pdf_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-file-document-outline.png"),
+            parent.scale_factor,
         )
         self.openpdf_button.SetBitmap(pdf_icon)
         self.openpdf_button.SetBitmapMargins((2, 0))
@@ -137,7 +141,6 @@ class PartDetailsDialog(wx.Dialog):
             headers=headers,
         )
         if r.status_code != requests.codes.ok:
-            del self.parent.busy_cursor
             wx.MessageBox(
                 "Failed to download part detail from JLCPCB's API",
                 "Error",
@@ -146,7 +149,6 @@ class PartDetailsDialog(wx.Dialog):
             self.EndModal()
         data = r.json()
         if not data.get("data"):
-            del self.parent.busy_cursor
             wx.MessageBox(
                 "Failed to download part detail from JLCPCB's API",
                 "Error",
@@ -220,6 +222,11 @@ class PartDetailsDialog(wx.Dialog):
                 ]
             )
         if picture := data.get("data", {}).get("componentImageUrl"):
-            self.image.SetBitmap(self.get_scaled_bitmap(picture, 200, 200))
+            self.image.SetBitmap(
+                self.get_scaled_bitmap(
+                    picture,
+                    200 * self.parent.scale_factor,
+                    200 * self.parent.scale_factor,
+                )
+            )
         self.pdfurl = data.get("data", {}).get("dataManualUrl")
-        del self.parent.busy_cursor
