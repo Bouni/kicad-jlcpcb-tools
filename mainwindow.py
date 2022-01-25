@@ -40,11 +40,11 @@ class JLCBCBTools(wx.Dialog):
             id=wx.ID_ANY,
             title=f"JLCPCB Tools",
             pos=wx.DefaultPosition,
-            size=wx.GetApp().GetTopWindow().FromDIP(wx.Size(1300, 800)),
+            size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
-
-        self.window = wx.GetApp().GetTopWindow()
+        self.window = wx.GetTopLevelParent(self)
+        self.SetSize(self.window.FromDIP(wx.Size(1300, 800)))
         self.scale_factor = self.window.GetDPIScaleFactor()
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
         self.hide_bom_parts = False
