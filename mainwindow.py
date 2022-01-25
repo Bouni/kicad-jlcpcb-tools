@@ -18,6 +18,7 @@ from .fabrication import Fabrication
 from .helpers import (
     PLUGIN_PATH,
     get_footprint_by_ref,
+    loadBitmapScaled,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
@@ -42,7 +43,9 @@ class JLCBCBTools(wx.Dialog):
             size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
-
+        self.window = wx.GetTopLevelParent(self)
+        self.SetSize(self.window.FromDIP(wx.Size(1300, 800)))
+        self.scale_factor = self.window.GetDPIScaleFactor()
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -72,7 +75,7 @@ class JLCBCBTools(wx.Dialog):
             wx.ID_ANY,
             "Generate fabrication files",
             wx.DefaultPosition,
-            (200, 38),
+            self.window.FromDIP(wx.Size(200, 38)),
             0,
         )
 
@@ -80,10 +83,11 @@ class JLCBCBTools(wx.Dialog):
         self.layer_icon = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            wx.Bitmap(
-                os.path.join(PLUGIN_PATH, "icons", "mdi-layers-triple-outline.png")
+            loadBitmapScaled(
+                os.path.join(PLUGIN_PATH, "icons", "mdi-layers-triple-outline.png"),
+                self.scale_factor,
             ),
-            size=(24, 36),
+            size=self.window.FromDIP(wx.Size(24, 36)),
         )
         self.layer_selection = wx.Choice(
             self,
@@ -104,11 +108,21 @@ class JLCBCBTools(wx.Dialog):
         #     "library_desc",
         # )
         self.rotation_button = wx.Button(
-            self, wx.ID_ANY, "Manage rotations", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Manage rotations",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
 
         self.download_button = wx.Button(
-            self, wx.ID_ANY, "Update library", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Update library",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
 
         layer_sizer.Add(
@@ -143,18 +157,23 @@ class JLCBCBTools(wx.Dialog):
         self.rotation_button.Bind(wx.EVT_BUTTON, self.manage_rotations)
         self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
 
-        fab_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "fabrication.png"))
+        fab_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "fabrication.png"),
+            self.scale_factor,
+        )
         self.generate_button.SetBitmap(fab_icon)
         self.generate_button.SetBitmapMargins((2, 0))
 
-        rotation_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-format-rotate-90.png")
+        rotation_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-format-rotate-90.png"),
+            self.scale_factor,
         )
         self.rotation_button.SetBitmap(rotation_icon)
         self.rotation_button.SetBitmapMargins((2, 0))
 
-        download_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-cloud-download-outline.png")
+        download_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-cloud-download-outline.png"),
+            self.scale_factor,
         )
         self.download_button.SetBitmap(download_icon)
         self.download_button.SetBitmapMargins((2, 0))
@@ -163,7 +182,7 @@ class JLCBCBTools(wx.Dialog):
         # ----------------------- Footprint List ------------------------------
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(wx.Size(-1, 600))
+        table_sizer.SetMinSize(self.window.FromDIP(wx.Size(-1, 600)))
         self.footprint_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
@@ -171,60 +190,60 @@ class JLCBCBTools(wx.Dialog):
             wx.DefaultSize,
             style=wx.dataview.DV_MULTIPLE,
         )
-        self.footprint_list.SetMinSize(wx.Size(750, 400))
+        self.footprint_list.SetMinSize(self.window.FromDIP(wx.Size(750, 400)))
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.value = self.footprint_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=200,
+            width=self.scale_factor * 200,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=300,
+            width=self.scale_factor * 300,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.stock = self.footprint_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=100,
+            width=self.scale_factor * 100,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.bom = self.footprint_list.AppendIconTextColumn(
             "BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=self.scale_factor * 50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.pos = self.footprint_list.AppendIconTextColumn(
             "POS",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=50,
+            width=self.scale_factor * 50,
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
@@ -250,34 +269,79 @@ class JLCBCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
         toolbar_sizer = wx.BoxSizer(wx.VERTICAL)
         self.select_part_button = wx.Button(
-            self, wx.ID_ANY, "Select part", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Select part",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.remove_part_button = wx.Button(
-            self, wx.ID_ANY, "Remove part", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Remove part",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.select_alike_button = wx.Button(
-            self, wx.ID_ANY, "Select alike", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Select alike",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.toggle_bom_pos_button = wx.Button(
-            self, wx.ID_ANY, "Toggle BOM/POS", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Toggle BOM/POS",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.toggle_bom_button = wx.Button(
-            self, wx.ID_ANY, "Toggle BOM", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Toggle BOM",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.toggle_pos_button = wx.Button(
-            self, wx.ID_ANY, "Toggle POS", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Toggle POS",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.part_details_button = wx.Button(
-            self, wx.ID_ANY, "Show part details", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Show part details",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         # self.part_costs_button = wx.Button(
         #     self, wx.ID_ANY, "Calculate part costs", wx.DefaultPosition, (175, 38), 0
         # )
         self.hide_bom_button = wx.Button(
-            self, wx.ID_ANY, "Hide excluded BOM", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Hide excluded BOM",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
         self.hide_pos_button = wx.Button(
-            self, wx.ID_ANY, "Hide excluded POS", wx.DefaultPosition, (175, 38), 0
+            self,
+            wx.ID_ANY,
+            "Hide excluded POS",
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(175, 38)),
+            0,
         )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
@@ -302,42 +366,53 @@ class JLCBCBTools(wx.Dialog):
         toolbar_sizer.Add(self.hide_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_pos_button, 0, wx.ALL, 5)
 
-        select_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png")
+        # select_icon = wx.Bitmap(
+        #     os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png")
+        # )
+        select_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png"),
+            self.scale_factor,
         )
         self.select_part_button.SetBitmap(select_icon)
         self.select_part_button.SetBitmapMargins((2, 0))
 
-        remove_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-close-box-outline.png")
+        remove_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-close-box-outline.png"),
+            self.scale_factor,
         )
         self.remove_part_button.SetBitmap(remove_icon)
         self.remove_part_button.SetBitmapMargins((2, 0))
 
-        alike_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-checkbox-multiple-marked.png")
+        alike_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-checkbox-multiple-marked.png"),
+            self.scale_factor,
         )
         self.select_alike_button.SetBitmap(alike_icon)
         self.select_alike_button.SetBitmapMargins((2, 0))
 
-        bom_pos_icon = wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "bom-pos.png"))
+        bom_pos_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "bom-pos.png"), self.scale_factor
+        )
         self.toggle_bom_pos_button.SetBitmap(bom_pos_icon)
         self.toggle_bom_pos_button.SetBitmapMargins((2, 0))
 
-        bom_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-format-list-bulleted.png")
+        bom_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-format-list-bulleted.png"),
+            self.scale_factor,
         )
         self.toggle_bom_button.SetBitmap(bom_icon)
         self.toggle_bom_button.SetBitmapMargins((2, 0))
 
-        pos_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-crosshairs-gps.png")
+        pos_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-crosshairs-gps.png"),
+            self.scale_factor,
         )
         self.toggle_pos_button.SetBitmap(pos_icon)
         self.toggle_pos_button.SetBitmapMargins((2, 0))
 
-        details_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-text-box-search-outline.png")
+        details_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-text-box-search-outline.png"),
+            self.scale_factor,
         )
         self.part_details_button.SetBitmap(details_icon)
         self.part_details_button.SetBitmapMargins((2, 0))
@@ -346,11 +421,12 @@ class JLCBCBTools(wx.Dialog):
         # self.part_costs_button.SetBitmap(cost_icon)
         # self.part_costs_button.SetBitmapMargins((2, 0))
 
-        self.hide_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-eye-off-outline.png")
+        self.hide_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-eye-off-outline.png"),
+            self.scale_factor,
         )
-        self.show_icon = wx.Bitmap(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-eye-outline.png")
+        self.show_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-eye-outline.png"), self.scale_factor
         )
         self.hide_bom_button.SetBitmap(self.hide_icon)
         self.hide_bom_button.SetBitmapMargins((2, 0))
@@ -370,18 +446,23 @@ class JLCBCBTools(wx.Dialog):
             wx.DefaultSize,
             wx.TE_MULTILINE | wx.TE_READONLY,
         )
-        self.logbox.SetMinSize(wx.Size(-1, 150))
+        self.logbox.SetMinSize(self.window.FromDIP(wx.Size(-1, 150)))
         self.gauge = wx.Gauge(
-            self, wx.ID_ANY, 100, wx.DefaultPosition, (100, -1), wx.GA_HORIZONTAL
+            self,
+            wx.ID_ANY,
+            100,
+            wx.DefaultPosition,
+            self.window.FromDIP(wx.Size(100, -1)),
+            wx.GA_HORIZONTAL,
         )
         self.gauge.SetValue(0)
-        self.gauge.SetMinSize(wx.Size(-1, 5))
+        self.gauge.SetMinSize(self.window.FromDIP(wx.Size(-1, 5)))
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        self.SetSizeHints(wx.Size(1000, -1), wx.DefaultSize)
+        self.SetSizeHints(self.window.FromDIP(wx.Size(1000, -1)), wx.DefaultSize)
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(top_button_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
@@ -410,6 +491,7 @@ class JLCBCBTools(wx.Dialog):
         self.init_store()
         if self.library.state == LibraryState.UPDATE_NEEDED:
             self.library.update()
+        self.logger.debug(self.scale_factor)
 
     def quit_dialog(self, e):
         self.Destroy()
@@ -460,13 +542,19 @@ class JLCBCBTools(wx.Dialog):
             0: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-check-color.png"))
+                    loadBitmapScaled(
+                        os.path.join(PLUGIN_PATH, "icons", "mdi-check-color.png"),
+                        self.scale_factor,
+                    )
                 ),
             ),
             1: wx.dataview.DataViewIconText(
                 text="",
                 icon=wx.Icon(
-                    wx.Bitmap(os.path.join(PLUGIN_PATH, "icons", "mdi-close-color.png"))
+                    loadBitmapScaled(
+                        os.path.join(PLUGIN_PATH, "icons", "mdi-close-color.png"),
+                        self.scale_factor,
+                    )
                 ),
             ),
         }
@@ -635,7 +723,9 @@ class JLCBCBTools(wx.Dialog):
         part = self.footprint_list.GetTextValue(row, 3)
         if part != "":
             self.busy_cursor = wx.BusyCursor()
-            PartDetailsDialog(self, part).Show()
+            dialog = PartDetailsDialog(self, part)
+            del self.busy_cursor
+            dialog.Show()
 
     def update_library(self, e=None):
         """Update the library from the JLCPCB CSV file."""

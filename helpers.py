@@ -2,6 +2,8 @@ import logging
 import os
 import re
 
+import wx
+
 PLUGIN_PATH = os.path.split(os.path.abspath(__file__))[0]
 
 THT = 0
@@ -9,6 +11,14 @@ SMD = 1
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
+
+
+def loadBitmapScaled(path, scale=1.0):
+    """Load a scaled bitmap"""
+    bmp = wx.Bitmap(path)
+    w, h = bmp.GetSize()
+    img = bmp.ConvertToImage()
+    return wx.Bitmap(img.Scale(int(w * scale), int(h * scale)))
 
 
 def natural_sort_collation(a, b):
