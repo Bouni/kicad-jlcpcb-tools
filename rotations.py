@@ -172,6 +172,8 @@ class RotationManagerDialog(wx.Dialog):
         self.save_button.Bind(wx.EVT_BUTTON, self.save_correction)
         self.delete_button.Bind(wx.EVT_BUTTON, self.delete_correction)
         self.update_button.Bind(wx.EVT_BUTTON, self.download_correction_data)
+        self.import_button.Bind(wx.EVT_BUTTON, self.import_corrections)
+        self.export_button.Bind(wx.EVT_BUTTON, self.export_corrections)
 
         save_icon = loadBitmapScaled(
             os.path.join(PLUGIN_PATH, "icons", "mdi-content-save-outline.png"),
