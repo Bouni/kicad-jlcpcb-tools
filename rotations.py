@@ -152,18 +152,18 @@ class RotationManagerDialog(wx.Dialog):
             parent.window.FromDIP(wx.Size(150, -1)),
             0,
         )
-        self.export_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Export",
-            wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(150, -1)),
-            0,
-        )
         self.import_button = wx.Button(
             self,
             wx.ID_ANY,
             "Import",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
+        )
+        self.export_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Export",
             wx.DefaultPosition,
             parent.window.FromDIP(wx.Size(150, -1)),
             0,
@@ -194,19 +194,19 @@ class RotationManagerDialog(wx.Dialog):
         self.update_button.SetBitmap(update_icon)
         self.update_button.SetBitmapMargins((2, 0))
 
-        export_icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-database-export-outline.png"),
-            parent.scale_factor,
-        )
-        self.export_button.SetBitmap(export_icon)
-        self.export_button.SetBitmapMargins((2, 0))
-
         import_icon = loadBitmapScaled(
             os.path.join(PLUGIN_PATH, "icons", "mdi-database-import-outline.png"),
             parent.scale_factor,
         )
         self.import_button.SetBitmap(import_icon)
         self.import_button.SetBitmapMargins((2, 0))
+
+        export_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-database-export-outline.png"),
+            parent.scale_factor,
+        )
+        self.export_button.SetBitmap(export_icon)
+        self.export_button.SetBitmapMargins((2, 0))
 
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
