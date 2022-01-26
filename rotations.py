@@ -337,3 +337,11 @@ class RotationManagerDialog(wx.Dialog):
                             f"Correction '{row['regex']}' with correction value {row['correction']} is added to the database from local CSV."
                         )
             os.rename(csv_file, f"{csv_file}.backup")
+
+    def import_corrections(self):
+        """Import correctios from a CSV file."""
+        pass
+
+    def export_corrections(self):
+        """Export correctios to a CSV file."""
+        pass
