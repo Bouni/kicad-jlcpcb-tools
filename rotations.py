@@ -24,7 +24,7 @@ class RotationManagerDialog(wx.Dialog):
         self.parent = parent
         self.selection_regex = None
         self.selection_correction = None
-        self.import_lagacy_corrections()
+        self.import_legacy_corrections()
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -283,7 +283,7 @@ class RotationManagerDialog(wx.Dialog):
             self.logger.debug(e)
         self.populate_rotations_list()
 
-    def import_lagacy_corrections(self):
+    def import_legacy_corrections(self):
         """Check if corrections in CSV format are found and import them into the database."""
         csv_file = os.path.join(PLUGIN_PATH, "corrections", "cpl_rotations_db.csv")
         if os.path.isfile(csv_file):

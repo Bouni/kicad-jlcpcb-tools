@@ -140,3 +140,6 @@ cython_debug/
 jlcpcb
 corrections
 dev
+
+# vscode ignore
+.vscode/
