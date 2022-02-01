@@ -32,7 +32,7 @@ logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
-class JLCBCBTools(wx.Dialog):
+class JLCPCBTools(wx.Dialog):
     def __init__(self, parent):
         wx.Dialog.__init__(
             self,
@@ -347,9 +347,9 @@ class JLCBCBTools(wx.Dialog):
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.remove_part_button.Bind(wx.EVT_BUTTON, self.remove_part)
         self.select_alike_button.Bind(wx.EVT_BUTTON, self.select_alike)
-        self.toggle_bom_pos_button.Bind(wx.EVT_BUTTON, self.toogle_bom_pos)
-        self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toogle_bom)
-        self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toogle_pos)
+        self.toggle_bom_pos_button.Bind(wx.EVT_BUTTON, self.toggle_bom_pos)
+        self.toggle_bom_button.Bind(wx.EVT_BUTTON, self.toggle_bom)
+        self.toggle_pos_button.Bind(wx.EVT_BUTTON, self.toggle_pos)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
         # self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_costs)
         self.hide_bom_button.Bind(wx.EVT_BUTTON, self.OnBomHide)
@@ -565,10 +565,10 @@ class JLCBCBTools(wx.Dialog):
                 numbers.append(part[3])
             part.insert(4, "")
             part[5] = str(part[5])
-            # dont show the part if hide BOM is set
+            # don't show the part if hide BOM is set
             if self.hide_bom_parts and part[6]:
                 continue
-            # dont show the part if hide POS is set
+            # don't show the part if hide POS is set
             if self.hide_pos_parts and part[7]:
                 continue
             # decide which icon to use
@@ -649,7 +649,7 @@ class JLCBCBTools(wx.Dialog):
         ]:
             b.Enable(bool(state))
 
-    def toogle_bom_pos(self, e):
+    def toggle_bom_pos(self, e):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
         selected_rows = []
         for item in self.footprint_list.GetSelections():
@@ -665,7 +665,7 @@ class JLCBCBTools(wx.Dialog):
         for row in selected_rows:
             self.footprint_list.SelectRow(row)
 
-    def toogle_bom(self, e):
+    def toggle_bom(self, e):
         """Toggle the exclude from BOM attribute of a footprint."""
         selected_rows = []
         for item in self.footprint_list.GetSelections():
@@ -679,7 +679,7 @@ class JLCBCBTools(wx.Dialog):
         for row in selected_rows:
             self.footprint_list.SelectRow(row)
 
-    def toogle_pos(self, e):
+    def toggle_pos(self, e):
         selected_rows = []
         """Toggle the exclude from POS attribute of a footprint."""
         for item in self.footprint_list.GetSelections():

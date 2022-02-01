@@ -97,11 +97,11 @@ class Store:
         """Read all parts that should be included in the BOM."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                # Query all parts that are suposed to be in the BOM an have an lcsc number, group the references together
+                # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
                 subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
                 query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
                 a = [list(part) for part in cur.execute(query).fetchall()]
-                # Query all parts that are suposed to be in the BOM but have no lcsc number
+                # Query all parts that are supposed to be in the BOM but have no lcsc number
                 query = f"SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
                 b = [list(part) for part in cur.execute(query).fetchall()]
                 return a + b
@@ -111,7 +111,7 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
             with con as cur:
-                # Query all parts that are suposed to be in the POS
+                # Query all parts that are supposed to be in the POS
                 query = f"SELECT reference, value, footprint FROM part_info WHERE exclude_from_pos = '0' ORDER BY reference COLLATE naturalsort ASC"
                 return [list(part) for part in cur.execute(query).fetchall()]
 
@@ -233,7 +233,7 @@ class Store:
                         f"Part {part[0]} is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared."
                     )
                     self.update_part(part)
-        self.import_lagacy_assignments()
+        self.import_legacy_assignments()
         self.clean_database()
 
     def clean_database(self):
@@ -246,7 +246,7 @@ class Store:
                 )
                 cur.commit()
 
-    def import_lagacy_assignments(self):
+    def import_legacy_assignments(self):
         """Check if assignments of an old version are found and merge them into the database."""
         csv_file = os.path.join(self.project_path, "jlcpcb", "part_assignments.csv")
         if os.path.isfile(csv_file):

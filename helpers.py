@@ -32,7 +32,7 @@ def natural_sort_collation(a, b):
 
 
 def get_lcsc_value(fp):
-    """Get lcsc from all properties and allow vaious variants."""
+    """Get lcsc from all properties and allow various variants."""
     lcsc_keys = [key for key in fp.GetProperties().keys() if "lcsc" in key.lower()]
     if lcsc_keys:
         return fp.GetProperties().get(lcsc_keys.pop(0), "")
@@ -40,7 +40,7 @@ def get_lcsc_value(fp):
 
 
 def get_valid_footprints(board):
-    """Get all footprints that have a vaild reference (drop all REF**)"""
+    """Get all footprints that have a valid reference (drop all REF**)"""
     footprints = []
     for fp in board.GetFootprints():
         if re.match(r"\w+\d+", fp.GetReference()):
@@ -55,10 +55,10 @@ def get_footprint_keys(fp):
     except:
         package = ""
     try:
-        refrerence = int(re.search("\d+", fp.GetReference())[0])
+        reference = int(re.search("\d+", fp.GetReference())[0])
     except:
-        refrerence = 0
-    return (package, refrerence)
+        reference = 0
+    return (package, reference)
 
 
 def get_footprint_by_ref(board, ref):

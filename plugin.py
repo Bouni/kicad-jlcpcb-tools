@@ -2,7 +2,7 @@ import os
 
 from pcbnew import ActionPlugin
 
-from .mainwindow import JLCBCBTools
+from .mainwindow import JLCPCBTools
 
 
 class JLCPCBPlugin(ActionPlugin):
@@ -14,9 +14,9 @@ class JLCPCBPlugin(ActionPlugin):
         self.show_toolbar_button = True
         path, filename = os.path.split(os.path.abspath(__file__))
         self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
-        self.description = "Generate JLCPCB conform Gerber, Excellon, BOM and CPL files"
+        self.description = "Generate JLCPCB-compatible Gerber, Excellon, BOM and CPL files"
 
     def Run(self):
-        dialog = JLCBCBTools(None)
+        dialog = JLCPCBTools(None)
         dialog.Center()
         dialog.Show()
