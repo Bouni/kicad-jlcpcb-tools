@@ -56,7 +56,7 @@ class Library:
 
     def check_library(self):
         """Check if the database file exists, if not trigger update"""
-        if not os.path.isfile(self.dbfile):
+        if not os.path.isfile(self.dbfile) or os.path.getsize(self.dbfile) == 0:
             self.state = LibraryState.UPDATE_NEEDED
         else:
             self.state = LibraryState.INITIALIZED
