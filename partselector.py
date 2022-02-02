@@ -374,7 +374,7 @@ class PartSelectorDialog(wx.Dialog):
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        decription = self.part_list.AppendTextColumn(
+        description = self.part_list.AppendTextColumn(
             "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=parent.scale_factor * 300,
@@ -501,7 +501,7 @@ class PartSelectorDialog(wx.Dialog):
             b.Enable(bool(state))
 
     def search(self, e):
-        """Search the librery for parts that meet the search criteria."""
+        """Search the library for parts that meet the search criteria."""
         parameters = {
             "keyword": self.keyword.GetValue(),
             "manufacturer": self.manufacturer.GetValue(),
@@ -561,7 +561,7 @@ class PartSelectorDialog(wx.Dialog):
             del self.busy_cursor
             dialog.Show()
 
-    def help(sefl, e):
+    def help(self, e):
         """Show message box with help instructions"""
         title = "Help"
         text = """
@@ -570,7 +570,7 @@ class PartSelectorDialog(wx.Dialog):
         %QFP% wil match LQFP-64 as well as TQFP-32\n
         The keyword search box is automatically post- and prefixed with wildcard operators.
         The others are not by default.\n
-        The keyowrd search field is applied to "LCSC Part", "Description", "MFR.Part",
+        The keyword search field is applied to "LCSC Part", "Description", "MFR.Part",
         "Package" and "Manufacturer".\n
         Enter triggers the search the same way the search button does.\n
         The results are limited to 1000.

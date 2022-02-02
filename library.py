@@ -321,7 +321,7 @@ class Library:
             self.parent,
             MessageEvent(
                 title="Success",
-                text=f"Sucessfully downloaded and imported the JLCPCB database in {end-start:.2f} seconds!",
+                text=f"Successfully downloaded and imported the JLCPCB database in {end-start:.2f} seconds!",
                 style="info",
             ),
         )

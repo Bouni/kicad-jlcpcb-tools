@@ -23,7 +23,7 @@ Furthermore it lets you search the JLCPCB parts database and assign parts direct
 
 I try to keep it working with 6.99 nightly builds but there are massive API changes on the horizon and I'm not sure if I can keep up with them.
 
-**This is under a lot of developments, so concider this README out of date all the time 😏**
+**This is under a lot of developments, so consider this README out of date all the time 😏**
 
 If you find any sort of problems, please create an issue so that I can hopefully fix it!
 
@@ -75,16 +75,16 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ### Generate fabrication data
 
-Generate all neccessary assambly files for your board with a simple click.
+Generate all necessary assembly files for your board with a simple click.
 
-A new directory called `jlcpcb` is created, in there two seperate foldes are created, `gerber` and `assembly`.
+A new directory called `jlcpcb` is created, and in there, two separate folders are created, `gerber` and `assembly`.
 
-In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and ziped, ready for upload to JLCPCB.
+In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and zipped, ready for upload to JLCPCB.
 The zipfile is named `GERBER-<projectname>.zip`
 
 In the assembly folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
 
-Footprints are included into the BOM and CPL files accordning to their `exclude from BOM` and `exclude from CPL` attributes.
+Footprints are included into the BOM and CPL files according to their `exclude from BOM` and `exclude from CPL` attributes.
 
 ![The fabrication files](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/fabrication_files.png)
 
@@ -95,4 +95,4 @@ You can download Matthews file from GitHub as well als manage your own correctio
 
 ## Icons
 
-This plugin makes use of a lot of icons from the excelent [Material Design Icons](https://materialdesignicons.com/)
+This plugin makes use of a lot of icons from the excellent [Material Design Icons](https://materialdesignicons.com/)
