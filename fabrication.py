@@ -65,7 +65,7 @@ class Fabrication:
         if "6.99" in GetBuildVersion():
             rotation = original.AsDegrees()
         else:
-            # we need to devide by 10 to get 180 out of 1800 for example.
+            # we need to divide by 10 to get 180 out of 1800 for example.
             # This might be a bug in 5.99 / 6.0 RC
             rotation = original / 10
         for regex, correction in self.corrections:
