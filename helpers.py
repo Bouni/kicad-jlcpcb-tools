@@ -12,6 +12,11 @@ EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
 
+def HighResWxSize(window, size):
+    if hasattr(window, "FromDIP"):
+        return window.FromDIP(size)
+    else:
+        return size
 
 def loadBitmapScaled(path, scale=1.0):
     """Load a scaled bitmap"""
