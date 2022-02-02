@@ -488,10 +488,9 @@ class JLCPCBTools(wx.Dialog):
         self.init_logger()
         self.init_library()
         self.init_fabrication()
-        self.init_store()
         if self.library.state == LibraryState.UPDATE_NEEDED:
             self.library.update()
-        self.logger.debug(self.scale_factor)
+        self.init_store()
 
     def quit_dialog(self, e):
         self.Destroy()
