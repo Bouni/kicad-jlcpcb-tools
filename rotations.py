@@ -152,10 +152,28 @@ class RotationManagerDialog(wx.Dialog):
             parent.window.FromDIP(wx.Size(150, -1)),
             0,
         )
+        self.import_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Import",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
+        )
+        self.export_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Export",
+            wx.DefaultPosition,
+            parent.window.FromDIP(wx.Size(150, -1)),
+            0,
+        )
 
         self.save_button.Bind(wx.EVT_BUTTON, self.save_correction)
         self.delete_button.Bind(wx.EVT_BUTTON, self.delete_correction)
         self.update_button.Bind(wx.EVT_BUTTON, self.download_correction_data)
+        self.import_button.Bind(wx.EVT_BUTTON, self.import_corrections_dialog)
+        self.export_button.Bind(wx.EVT_BUTTON, self.export_corrections_dialog)
 
         save_icon = loadBitmapScaled(
             os.path.join(PLUGIN_PATH, "icons", "mdi-content-save-outline.png"),
@@ -178,10 +196,26 @@ class RotationManagerDialog(wx.Dialog):
         self.update_button.SetBitmap(update_icon)
         self.update_button.SetBitmapMargins((2, 0))
 
+        import_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-database-import-outline.png"),
+            parent.scale_factor,
+        )
+        self.import_button.SetBitmap(import_icon)
+        self.import_button.SetBitmapMargins((2, 0))
+
+        export_icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", "mdi-database-export-outline.png"),
+            parent.scale_factor,
+        )
+        self.export_button.SetBitmap(export_icon)
+        self.export_button.SetBitmapMargins((2, 0))
+
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.delete_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.update_button, 0, wx.ALL, 5)
+        tool_sizer.Add(self.import_button, 0, wx.ALL, 5)
+        tool_sizer.Add(self.export_button, 0, wx.ALL, 5)
         table_sizer.Add(tool_sizer, 3, wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -287,8 +321,46 @@ class RotationManagerDialog(wx.Dialog):
         """Check if corrections in CSV format are found and import them into the database."""
         csv_file = os.path.join(PLUGIN_PATH, "corrections", "cpl_rotations_db.csv")
         if os.path.isfile(csv_file):
-            with open(csv_file) as f:
+            self._import_corrections(csv_file)
+            os.rename(csv_file, f"{csv_file}.backup")
+
+    def import_corrections_dialog(self, e=None):
+        """Dialog to import correctios from a CSV file."""
+        with wx.FileDialog(
+            self,
+            "Import",
+            "",
+            "",
+            "CSV files (*.csv)|*.csv",
+            wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as importFileDialog:
+
+            if importFileDialog.ShowModal() == wx.ID_CANCEL:
+                return
+            path = importFileDialog.GetPath()
+            self._import_corrections(path)
+
+    def export_corrections_dialog(self, e=None):
+        """Dialog to export correctios to a CSV file."""
+        with wx.FileDialog(
+            self,
+            "Export",
+            "",
+            "",
+            "CSV files (*.csv)|*.csv",
+            wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as exportFileDialog:
+            if exportFileDialog.ShowModal() == wx.ID_CANCEL:
+                return
+            path = exportFileDialog.GetPath()
+            self._export_corrections(path)
+
+    def _import_corrections(self, path):
+        """corrections import logic"""
+        if os.path.isfile(path):
+            with open(path) as f:
                 csvreader = csv.DictReader(f, fieldnames=("regex", "correction"))
+                next(csvreader)
                 for row in csvreader:
                     if self.parent.library.get_correction_data(row["regex"]):
                         self.parent.library.update_correction_data(
@@ -304,4 +376,12 @@ class RotationManagerDialog(wx.Dialog):
                         self.logger.info(
                             f"Correction '{row['regex']}' with correction value {row['correction']} is added to the database from local CSV."
                         )
-            os.rename(csv_file, f"{csv_file}.backup")
+            self.populate_rotations_list()
+
+    def _export_corrections(self, path):
+        """corrections export logic"""
+        with open(path, "w", newline="") as f:
+            csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
+            csvwriter.writerow(["Footprint pattern", "Correction"])
+            for c in self.parent.library.get_all_correction_data():
+                csvwriter.writerow([c[0], c[1]])
