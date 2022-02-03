@@ -17,6 +17,7 @@ from .events import (
 from .fabrication import Fabrication
 from .helpers import (
     PLUGIN_PATH,
+    GetScaleFactor,
     HighResWxSize,
     get_footprint_by_ref,
     loadBitmapScaled,
@@ -46,7 +47,7 @@ class JLCPCBTools(wx.Dialog):
         )
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
-        self.scale_factor = self.window.GetDPIScaleFactor()
+        self.scale_factor = GetScaleFactor(self.window)
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -491,9 +492,12 @@ class JLCPCBTools(wx.Dialog):
         self.init_fabrication()
         if self.library.state == LibraryState.UPDATE_NEEDED:
             self.library.update()
+<<<<<<< HEAD
         self.init_store()
 
         
+=======
+>>>>>>> add another workaround for missing GetDPIScaleFactor in wxWidgets < 3.1.4
 
     def quit_dialog(self, e):
         self.Destroy()
