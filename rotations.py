@@ -16,7 +16,7 @@ class RotationManagerDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="Rotations Manager",
             pos=wx.DefaultPosition,
-            size=HighResWxSize(parent.window,wx.Size(800, 800)),
+            size=HighResWxSize(parent.window, wx.Size(800, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
@@ -43,14 +43,17 @@ class RotationManagerDialog(wx.Dialog):
         # ---------------------------------------------------------------------
 
         regex_label = wx.StaticText(
-            self, wx.ID_ANY, "Regex", size=HighResWxSize(parent.window,wx.Size(150, 15))
+            self,
+            wx.ID_ANY,
+            "Regex",
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.regex = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window,wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
         )
 
         sizer_left = wx.BoxSizer(wx.VERTICAL)
@@ -63,14 +66,17 @@ class RotationManagerDialog(wx.Dialog):
         )
 
         correction_label = wx.StaticText(
-            self, wx.ID_ANY, "Correction", size=HighResWxSize(parent.window,wx.Size(150, 15))
+            self,
+            wx.ID_ANY,
+            "Correction",
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.correction = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window,wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
         )
 
         sizer_right = wx.BoxSizer(wx.VERTICAL)
@@ -114,14 +120,14 @@ class RotationManagerDialog(wx.Dialog):
             align=wx.ALIGN_LEFT,
         )
 
-        self.rotations_list.SetMinSize(HighResWxSize(parent.window,wx.Size(600, 500)))
+        self.rotations_list.SetMinSize(HighResWxSize(parent.window, wx.Size(600, 500)))
 
         self.rotations_list.Bind(
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.on_correction_selected
         )
 
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(HighResWxSize(parent.window,wx.Size(-1, 400)))
+        table_sizer.SetMinSize(HighResWxSize(parent.window, wx.Size(-1, 400)))
         table_sizer.Add(self.rotations_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -133,7 +139,7 @@ class RotationManagerDialog(wx.Dialog):
             wx.ID_ANY,
             "Save",
             wx.DefaultPosition,
-            HighResWxSize(parent.window,wx.Size(150, -1)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
         self.delete_button = wx.Button(
@@ -141,7 +147,7 @@ class RotationManagerDialog(wx.Dialog):
             wx.ID_ANY,
             "Delete",
             wx.DefaultPosition,
-            HighResWxSize(parent.window,wx.Size(150, -1)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
         self.update_button = wx.Button(
@@ -149,7 +155,7 @@ class RotationManagerDialog(wx.Dialog):
             wx.ID_ANY,
             "Update",
             wx.DefaultPosition,
-            HighResWxSize(parent.window,wx.Size(150, -1)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
         self.import_button = wx.Button(
