@@ -200,7 +200,7 @@ class Fabrication:
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
         drlwriter.SetFormat(False)
         genDrl = True
-        genMap = False
+        genMap = True
         drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
         self.logger.info(f"Finished generating Excellon files")
 
