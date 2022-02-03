@@ -77,7 +77,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Generate fabrication files",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(200, 38)),
+            HighResWxSize(self.window, wx.Size(200, 38)),
             0,
         )
 
@@ -89,7 +89,7 @@ class JLCPCBTools(wx.Dialog):
                 os.path.join(PLUGIN_PATH, "icons", "mdi-layers-triple-outline.png"),
                 self.scale_factor,
             ),
-            size=HighResWxSize(self.window,wx.Size(24, 36)),
+            size=HighResWxSize(self.window, wx.Size(24, 36)),
         )
         self.layer_selection = wx.Choice(
             self,
@@ -114,7 +114,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Manage rotations",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
 
@@ -123,7 +123,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Update library",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
 
@@ -184,7 +184,7 @@ class JLCPCBTools(wx.Dialog):
         # ----------------------- Footprint List ------------------------------
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(HighResWxSize(self.window,wx.Size(-1, 600)))
+        table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
         self.footprint_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
@@ -192,7 +192,7 @@ class JLCPCBTools(wx.Dialog):
             wx.DefaultSize,
             style=wx.dataview.DV_MULTIPLE,
         )
-        self.footprint_list.SetMinSize(HighResWxSize(self.window,wx.Size(750, 400)))
+        self.footprint_list.SetMinSize(HighResWxSize(self.window, wx.Size(750, 400)))
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
@@ -275,7 +275,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Select part",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.remove_part_button = wx.Button(
@@ -283,7 +283,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Remove part",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.select_alike_button = wx.Button(
@@ -291,7 +291,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Select alike",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.toggle_bom_pos_button = wx.Button(
@@ -299,7 +299,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Toggle BOM/POS",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.toggle_bom_button = wx.Button(
@@ -307,7 +307,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Toggle BOM",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.toggle_pos_button = wx.Button(
@@ -315,7 +315,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Toggle POS",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.part_details_button = wx.Button(
@@ -323,7 +323,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Show part details",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         # self.part_costs_button = wx.Button(
@@ -334,7 +334,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Hide excluded BOM",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.hide_pos_button = wx.Button(
@@ -342,7 +342,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Hide excluded POS",
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
 
@@ -448,23 +448,23 @@ class JLCPCBTools(wx.Dialog):
             wx.DefaultSize,
             wx.TE_MULTILINE | wx.TE_READONLY,
         )
-        self.logbox.SetMinSize(HighResWxSize(self.window,wx.Size(-1, 150)))
+        self.logbox.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 150)))
         self.gauge = wx.Gauge(
             self,
             wx.ID_ANY,
             100,
             wx.DefaultPosition,
-            HighResWxSize(self.window,wx.Size(100, -1)),
+            HighResWxSize(self.window, wx.Size(100, -1)),
             wx.GA_HORIZONTAL,
         )
         self.gauge.SetValue(0)
-        self.gauge.SetMinSize(HighResWxSize(self.window,wx.Size(-1, 5)))
+        self.gauge.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 5)))
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        self.SetSizeHints(HighResWxSize(self.window,wx.Size(1000, -1)), wx.DefaultSize)
+        self.SetSizeHints(HighResWxSize(self.window, wx.Size(1000, -1)), wx.DefaultSize)
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(top_button_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
@@ -492,12 +492,7 @@ class JLCPCBTools(wx.Dialog):
         self.init_fabrication()
         if self.library.state == LibraryState.UPDATE_NEEDED:
             self.library.update()
-<<<<<<< HEAD
         self.init_store()
-
-        
-=======
->>>>>>> add another workaround for missing GetDPIScaleFactor in wxWidgets < 3.1.4
 
     def quit_dialog(self, e):
         self.Destroy()
