@@ -12,7 +12,15 @@ EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
 
+def GetScaleFactor(window):
+    """Workaround if wxWidgets Version does not support GetDPIScaleFactor"""
+    if hasattr(window, "GetDPIScaleFactor"):
+        return window.GetDPIScaleFactor()
+    else:
+        return 1.0
+
 def HighResWxSize(window, size):
+    """Workaround if wxWidgets Version does not support FromDIP"""
     if hasattr(window, "FromDIP"):
         return window.FromDIP(size)
     else:
