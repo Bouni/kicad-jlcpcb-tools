@@ -110,13 +110,13 @@ class RotationManagerDialog(wx.Dialog):
         regex = self.rotations_list.AppendTextColumn(
             "Regex",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=parent.scale_factor * 480,
+            width=int(parent.scale_factor * 480),
             align=wx.ALIGN_LEFT,
         )
         rotation = self.rotations_list.AppendTextColumn(
             "Correction",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=parent.scale_factor * 100,
+            width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
         )
 

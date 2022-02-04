@@ -53,13 +53,13 @@ class PartDetailsDialog(wx.Dialog):
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=parent.scale_factor * 200,
+            width=int(parent.scale_factor * 200),
             align=wx.ALIGN_LEFT,
         )
         self.value = self.data_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=parent.scale_factor * 300,
+            width=int(parent.scale_factor * 300),
             align=wx.ALIGN_LEFT,
         )
 
