@@ -196,56 +196,56 @@ class JLCPCBTools(wx.Dialog):
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.value = self.footprint_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 200,
+            width=int(self.scale_factor * 200),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 300,
+            width=int(self.scale_factor * 300),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.stock = self.footprint_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.bom = self.footprint_list.AppendIconTextColumn(
             "BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 50,
+            width=int(self.scale_factor * 50),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.pos = self.footprint_list.AppendIconTextColumn(
             "POS",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 50,
+            width=int(self.scale_factor * 50),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
