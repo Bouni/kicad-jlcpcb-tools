@@ -519,7 +519,7 @@ class JLCPCBTools(wx.Dialog):
 
     def update_gauge(self, e):
         """Update the gauge"""
-        self.gauge.SetValue(e.value)
+        self.gauge.SetValue(int(e.value))
 
     def assign_part(self, e):
         """Assign a selected LCSC number to a part"""
