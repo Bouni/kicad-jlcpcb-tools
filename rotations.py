@@ -163,7 +163,7 @@ class RotationManagerDialog(wx.Dialog):
             wx.ID_ANY,
             "Import",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(150, -1)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
         self.export_button = wx.Button(
@@ -171,7 +171,7 @@ class RotationManagerDialog(wx.Dialog):
             wx.ID_ANY,
             "Export",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(150, -1)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
 
