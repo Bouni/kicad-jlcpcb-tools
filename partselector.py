@@ -5,7 +5,7 @@ from sys import path
 import wx
 
 from .events import AssignPartEvent
-from .helpers import PLUGIN_PATH, loadBitmapScaled
+from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 
 
@@ -17,7 +17,7 @@ class PartSelectorDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="JLCPCB Library",
             pos=wx.DefaultPosition,
-            size=parent.window.FromDIP(wx.Size(1300, 800)),
+            size=HighResWxSize(parent.window, wx.Size(1300, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
@@ -44,14 +44,17 @@ class PartSelectorDialog(wx.Dialog):
         # ---------------------------------------------------------------------
 
         keyword_label = wx.StaticText(
-            self, wx.ID_ANY, "Keyword", size=parent.window.FromDIP(wx.Size(150, 15))
+            self,
+            wx.ID_ANY,
+            "Keyword",
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.keyword = wx.TextCtrl(
             self,
             wx.ID_ANY,
             lcsc_selection,
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.keyword.SetHint("e.g. 10k 0603")
@@ -60,53 +63,62 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Manufacturer",
-            size=parent.window.FromDIP(wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.manufacturer = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.manufacturer.SetHint("e.g. Vishay")
 
         package_label = wx.StaticText(
-            self, wx.ID_ANY, "Package", size=parent.window.FromDIP(wx.Size(150, 15))
+            self,
+            wx.ID_ANY,
+            "Package",
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.package = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.package.SetHint("e.g. 0603")
 
         category_label = wx.StaticText(
-            self, wx.ID_ANY, "Category", size=parent.window.FromDIP(wx.Size(150, 15))
+            self,
+            wx.ID_ANY,
+            "Category",
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.category = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.category.SetHint("e.g. Resistor")
 
         part_no_label = wx.StaticText(
-            self, wx.ID_ANY, "Part number", size=parent.window.FromDIP(wx.Size(150, 15))
+            self,
+            wx.ID_ANY,
+            "Part number",
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.part_no = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.part_no.SetHint("e.g. DS2411")
@@ -115,14 +127,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Solder joints",
-            size=parent.window.FromDIP(wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.solder_joints = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.solder_joints.SetHint("e.g. 2")
@@ -131,42 +143,42 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Include basic parts",
-            size=parent.window.FromDIP(wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.basic_checkbox = wx.CheckBox(
             self,
             wx.ID_ANY,
             "Basic",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
         )
         extended_label = wx.StaticText(
             self,
             wx.ID_ANY,
             "Include extended parts",
-            size=parent.window.FromDIP(wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.extended_checkbox = wx.CheckBox(
             self,
             wx.ID_ANY,
             "Extended",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
         )
         stock_label = wx.StaticText(
             self,
             wx.ID_ANY,
             "Only show parts in stock",
-            size=parent.window.FromDIP(wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
         self.assert_stock_checkbox = wx.CheckBox(
             self,
             wx.ID_ANY,
             "in Stock",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
         )
 
@@ -178,7 +190,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             "Help",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(100, -1)),
+            HighResWxSize(parent.window, wx.Size(100, -1)),
             0,
         )
 
@@ -187,7 +199,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             "Search",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(100, -1)),
+            HighResWxSize(parent.window, wx.Size(100, -1)),
             0,
         )
 
@@ -396,7 +408,7 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
 
-        self.part_list.SetMinSize(parent.window.FromDIP(wx.Size(1050, 500)))
+        self.part_list.SetMinSize(HighResWxSize(parent.window, wx.Size(1050, 500)))
 
         self.part_list.Bind(
             wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self.OnSortPartList
@@ -407,7 +419,7 @@ class PartSelectorDialog(wx.Dialog):
         )
 
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(parent.window.FromDIP(wx.Size(-1, 400)))
+        table_sizer.SetMinSize(HighResWxSize(parent.window, wx.Size(-1, 400)))
         table_sizer.Add(self.part_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -419,7 +431,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             "Select part",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(150, -1)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
         self.part_details_button = wx.Button(
@@ -427,7 +439,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             "Show part details",
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(150, -1)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
 
