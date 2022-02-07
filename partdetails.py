@@ -6,7 +6,7 @@ import webbrowser
 import requests
 import wx
 
-from .helpers import PLUGIN_PATH, loadBitmapScaled
+from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
 
 class PartDetailsDialog(wx.Dialog):
@@ -17,7 +17,7 @@ class PartDetailsDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
-            size=parent.window.FromDIP(wx.Size(1000, 800)),
+            size=HighResWxSize(parent.window, wx.Size(1000, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.STAY_ON_TOP,
         )
 
@@ -53,13 +53,13 @@ class PartDetailsDialog(wx.Dialog):
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=parent.scale_factor * 200,
+            width=int(parent.scale_factor * 200),
             align=wx.ALIGN_LEFT,
         )
         self.value = self.data_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=parent.scale_factor * 300,
+            width=int(parent.scale_factor * 300),
             align=wx.ALIGN_LEFT,
         )
 
@@ -74,7 +74,7 @@ class PartDetailsDialog(wx.Dialog):
                 parent.scale_factor,
             ),
             wx.DefaultPosition,
-            parent.window.FromDIP(wx.Size(200, 200)),
+            HighResWxSize(parent.window, wx.Size(200, 200)),
             0,
         )
         self.openpdf_button = wx.Button(
@@ -225,8 +225,8 @@ class PartDetailsDialog(wx.Dialog):
             self.image.SetBitmap(
                 self.get_scaled_bitmap(
                     picture,
-                    200 * self.parent.scale_factor,
-                    200 * self.parent.scale_factor,
+                    int(200 * self.parent.scale_factor),
+                    int(200 * self.parent.scale_factor),
                 )
             )
         self.pdfurl = data.get("data", {}).get("dataManualUrl")

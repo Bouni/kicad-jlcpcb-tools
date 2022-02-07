@@ -17,6 +17,8 @@ from .events import (
 from .fabrication import Fabrication
 from .helpers import (
     PLUGIN_PATH,
+    GetScaleFactor,
+    HighResWxSize,
     get_footprint_by_ref,
     loadBitmapScaled,
     toggle_exclude_from_bom,
@@ -44,8 +46,8 @@ class JLCPCBTools(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
         self.window = wx.GetTopLevelParent(self)
-        self.SetSize(self.window.FromDIP(wx.Size(1300, 800)))
-        self.scale_factor = self.window.GetDPIScaleFactor()
+        self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
+        self.scale_factor = GetScaleFactor(self.window)
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -75,7 +77,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Generate fabrication files",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(200, 38)),
+            HighResWxSize(self.window, wx.Size(200, 38)),
             0,
         )
 
@@ -87,7 +89,7 @@ class JLCPCBTools(wx.Dialog):
                 os.path.join(PLUGIN_PATH, "icons", "mdi-layers-triple-outline.png"),
                 self.scale_factor,
             ),
-            size=self.window.FromDIP(wx.Size(24, 36)),
+            size=HighResWxSize(self.window, wx.Size(24, 36)),
         )
         self.layer_selection = wx.Choice(
             self,
@@ -112,7 +114,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Manage rotations",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
 
@@ -121,7 +123,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Update library",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
 
@@ -182,7 +184,7 @@ class JLCPCBTools(wx.Dialog):
         # ----------------------- Footprint List ------------------------------
         # ---------------------------------------------------------------------
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(self.window.FromDIP(wx.Size(-1, 600)))
+        table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
         self.footprint_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
@@ -190,60 +192,60 @@ class JLCPCBTools(wx.Dialog):
             wx.DefaultSize,
             style=wx.dataview.DV_MULTIPLE,
         )
-        self.footprint_list.SetMinSize(self.window.FromDIP(wx.Size(750, 400)))
+        self.footprint_list.SetMinSize(HighResWxSize(self.window, wx.Size(750, 400)))
         self.reference = self.footprint_list.AppendTextColumn(
             "Reference",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.value = self.footprint_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 200,
+            width=int(self.scale_factor * 200),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 300,
+            width=int(self.scale_factor * 300),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.lcsc = self.footprint_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.stock = self.footprint_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 100,
+            width=int(self.scale_factor * 100),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.bom = self.footprint_list.AppendIconTextColumn(
             "BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 50,
+            width=int(self.scale_factor * 50),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.pos = self.footprint_list.AppendIconTextColumn(
             "POS",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=self.scale_factor * 50,
+            width=int(self.scale_factor * 50),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
@@ -273,7 +275,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Select part",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.remove_part_button = wx.Button(
@@ -281,7 +283,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Remove part",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.select_alike_button = wx.Button(
@@ -289,7 +291,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Select alike",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.toggle_bom_pos_button = wx.Button(
@@ -297,7 +299,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Toggle BOM/POS",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.toggle_bom_button = wx.Button(
@@ -305,7 +307,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Toggle BOM",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.toggle_pos_button = wx.Button(
@@ -313,7 +315,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Toggle POS",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.part_details_button = wx.Button(
@@ -321,7 +323,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Show part details",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         # self.part_costs_button = wx.Button(
@@ -332,7 +334,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Hide excluded BOM",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
         self.hide_pos_button = wx.Button(
@@ -340,7 +342,7 @@ class JLCPCBTools(wx.Dialog):
             wx.ID_ANY,
             "Hide excluded POS",
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(175, 38)),
+            HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
 
@@ -446,23 +448,23 @@ class JLCPCBTools(wx.Dialog):
             wx.DefaultSize,
             wx.TE_MULTILINE | wx.TE_READONLY,
         )
-        self.logbox.SetMinSize(self.window.FromDIP(wx.Size(-1, 150)))
+        self.logbox.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 150)))
         self.gauge = wx.Gauge(
             self,
             wx.ID_ANY,
             100,
             wx.DefaultPosition,
-            self.window.FromDIP(wx.Size(100, -1)),
+            HighResWxSize(self.window, wx.Size(100, -1)),
             wx.GA_HORIZONTAL,
         )
         self.gauge.SetValue(0)
-        self.gauge.SetMinSize(self.window.FromDIP(wx.Size(-1, 5)))
+        self.gauge.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 5)))
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        self.SetSizeHints(self.window.FromDIP(wx.Size(1000, -1)), wx.DefaultSize)
+        self.SetSizeHints(HighResWxSize(self.window, wx.Size(1000, -1)), wx.DefaultSize)
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(top_button_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
@@ -517,7 +519,7 @@ class JLCPCBTools(wx.Dialog):
 
     def update_gauge(self, e):
         """Update the gauge"""
-        self.gauge.SetValue(e.value)
+        self.gauge.SetValue(int(e.value))
 
     def assign_part(self, e):
         """Assign a selected LCSC number to a part"""
