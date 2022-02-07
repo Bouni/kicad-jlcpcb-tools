@@ -705,7 +705,16 @@ class JLCPCBTools(wx.Dialog):
 
     def select_alike(self, e):
         """Select all parts that have the same value and footprint."""
-        item = self.footprint_list.GetSelection()
+        num_sel = self.footprint_list.GetSelectedItemsCount() # could have selected more than 1 item (by mistake?)
+        if num_sel == 0:
+            return
+        elif num_sel == 1:
+            item = self.footprint_list.GetSelection()
+        else:
+            item = self.footprint_list.GetSelections()[0] # just pick the first one in the list
+            for extra in self.footprint_list.GetSelections()[1:]:
+                self.footprint_list.Unselect(extra) # unselect everything else as it could be a different value/footprint?
+        
         row = self.footprint_list.ItemToRow(item)
         ref = self.footprint_list.GetValue(row, 0)
         part = self.store.get_part(ref)
@@ -717,16 +726,16 @@ class JLCPCBTools(wx.Dialog):
 
     def get_part_details(self, e):
         """Fetch part details from LCSC and show them in a modal."""
-        item = self.footprint_list.GetSelection()
-        row = self.footprint_list.ItemToRow(item)
-        if row == -1:
-            return
-        part = self.footprint_list.GetTextValue(row, 3)
-        if part != "":
-            self.busy_cursor = wx.BusyCursor()
-            dialog = PartDetailsDialog(self, part)
-            del self.busy_cursor
-            dialog.Show()
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            if row == -1:
+                return
+            part = self.footprint_list.GetTextValue(row, 3)
+            if part != "":
+                self.busy_cursor = wx.BusyCursor()
+                dialog = PartDetailsDialog(self, part)
+                del self.busy_cursor
+                dialog.Show()
 
     def update_library(self, e=None):
         """Update the library from the JLCPCB CSV file."""
