@@ -143,3 +143,6 @@ dev
 
 # vscode ignore
 .vscode/
+
+# OS cruft
+.DS_Store
