@@ -225,8 +225,8 @@ class PartDetailsDialog(wx.Dialog):
             self.image.SetBitmap(
                 self.get_scaled_bitmap(
                     picture,
-                    200 * self.parent.scale_factor,
-                    200 * self.parent.scale_factor,
+                    int(200 * self.parent.scale_factor),
+                    int(200 * self.parent.scale_factor),
                 )
             )
         self.pdfurl = data.get("data", {}).get("dataManualUrl")
