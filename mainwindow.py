@@ -705,7 +705,9 @@ class JLCPCBTools(wx.Dialog):
 
     def select_alike(self, e):
         """Select all parts that have the same value and footprint."""
-        num_sel = self.footprint_list.GetSelectedItemsCount() # could have selected more than 1 item (by mistake?)
+        num_sel = (
+            self.footprint_list.GetSelectedItemsCount()
+        )  # could have selected more than 1 item (by mistake?)
         if num_sel == 1:
             item = self.footprint_list.GetSelection()
         else:
