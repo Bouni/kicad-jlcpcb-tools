@@ -706,15 +706,11 @@ class JLCPCBTools(wx.Dialog):
     def select_alike(self, e):
         """Select all parts that have the same value and footprint."""
         num_sel = self.footprint_list.GetSelectedItemsCount() # could have selected more than 1 item (by mistake?)
-        if num_sel == 0:
-            return
-        elif num_sel == 1:
+        if num_sel == 1:
             item = self.footprint_list.GetSelection()
         else:
-            item = self.footprint_list.GetSelections()[0] # just pick the first one in the list
-            for extra in self.footprint_list.GetSelections()[1:]:
-                self.footprint_list.Unselect(extra) # unselect everything else as it could be a different value/footprint?
-        
+            self.logger.warning(f"Select only one component, please.")
+            return
         row = self.footprint_list.ItemToRow(item)
         ref = self.footprint_list.GetValue(row, 0)
         part = self.store.get_part(ref)
