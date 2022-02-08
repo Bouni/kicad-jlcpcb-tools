@@ -183,8 +183,8 @@ class Fabrication:
             pctl.SetLayer(layer_info[1])
             pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
             if pctl.PlotLayer() == False:
-                self.logger.error(f"Error ploting {layer_info[2]}")
-            self.logger.info(f"Successfully ploted {layer_info[2]}")
+                self.logger.error(f"Error plotting {layer_info[2]}")
+            self.logger.info(f"Successfully plotted {layer_info[2]}")
         pctl.ClosePlot()
 
     def generate_excellon(self):
