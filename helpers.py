@@ -13,6 +13,13 @@ EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
 
 
+def getVersion():
+    """READ Version from file"""
+    if not os.path.isfile(os.path.join(PLUGIN_PATH, "VERSION")):
+        return "unknown"
+    with open(os.path.join(PLUGIN_PATH, "VERSION")) as f:
+        return f.read()
+
 def GetScaleFactor(window):
     """Workaround if wxWidgets Version does not support GetDPIScaleFactor"""
     if hasattr(window, "GetDPIScaleFactor"):
