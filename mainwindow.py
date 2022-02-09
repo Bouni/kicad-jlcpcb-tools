@@ -23,7 +23,7 @@ from .helpers import (
     loadBitmapScaled,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
-    getVersion
+    getVersion,
 )
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog

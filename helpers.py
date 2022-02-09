@@ -20,6 +20,7 @@ def getVersion():
     with open(os.path.join(PLUGIN_PATH, "VERSION")) as f:
         return f.read()
 
+
 def GetScaleFactor(window):
     """Workaround if wxWidgets Version does not support GetDPIScaleFactor"""
     if hasattr(window, "GetDPIScaleFactor"):
