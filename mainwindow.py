@@ -53,6 +53,8 @@ class JLCPCBTools(wx.Dialog):
         self.hide_pos_parts = False
         self.manufacturers = []
         self.packages = []
+        self.library = None
+        self.store = None
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -492,7 +494,8 @@ class JLCPCBTools(wx.Dialog):
         self.init_fabrication()
         if self.library.state == LibraryState.UPDATE_NEEDED:
             self.library.update()
-        self.init_store()
+        else:
+            self.init_store()
 
     def quit_dialog(self, e):
         self.Destroy()
@@ -538,6 +541,8 @@ class JLCPCBTools(wx.Dialog):
 
     def populate_footprint_list(self, e=None):
         """Populate/Refresh list of footprints."""
+        if not self.store:
+            self.init_store()
         self.footprint_list.DeleteAllItems()
         icons = {
             0: wx.dataview.DataViewIconText(
