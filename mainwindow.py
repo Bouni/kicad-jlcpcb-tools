@@ -23,6 +23,7 @@ from .helpers import (
     loadBitmapScaled,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
+    getVersion
 )
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
@@ -40,7 +41,7 @@ class JLCPCBTools(wx.Dialog):
             self,
             parent,
             id=wx.ID_ANY,
-            title=f"JLCPCB Tools",
+            title=f"JLCPCB Tools [ {getVersion()} ]",
             pos=wx.DefaultPosition,
             size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
@@ -496,6 +497,7 @@ class JLCPCBTools(wx.Dialog):
             self.library.update()
         else:
             self.init_store()
+        self.logger.info(f"kicad-jlcpcb-tools version {getVersion()}")
 
     def quit_dialog(self, e):
         self.Destroy()
