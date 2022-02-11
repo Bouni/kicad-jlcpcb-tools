@@ -348,6 +348,22 @@ class JLCPCBTools(wx.Dialog):
             HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
+        self.copy_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Copy LCSC",
+            wx.DefaultPosition,
+            HighResWxSize(self.window, wx.Size(175, 38)),
+            0,
+        )
+        self.paste_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Paste LCSC",
+            wx.DefaultPosition,
+            HighResWxSize(self.window, wx.Size(175, 38)),
+            0,
+        )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.remove_part_button.Bind(wx.EVT_BUTTON, self.remove_part)
@@ -359,6 +375,8 @@ class JLCPCBTools(wx.Dialog):
         # self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_costs)
         self.hide_bom_button.Bind(wx.EVT_BUTTON, self.OnBomHide)
         self.hide_pos_button.Bind(wx.EVT_BUTTON, self.OnPosHide)
+        self.copy_button.Bind(wx.EVT_BUTTON, self.copy_part_lcsc)
+        self.paste_button.Bind(wx.EVT_BUTTON, self.paste_part_lcsc)
 
         toolbar_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.remove_part_button, 0, wx.ALL, 5)
@@ -370,6 +388,8 @@ class JLCPCBTools(wx.Dialog):
         # toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_pos_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.copy_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.paste_button, 0, wx.ALL, 5)
 
         # select_icon = wx.Bitmap(
         #     os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png")
@@ -777,6 +797,30 @@ class JLCPCBTools(wx.Dialog):
         self.fabrication.zip_gerber_excellon()
         self.fabrication.generate_pos()
         self.fabrication.generate_bom()
+    def copy_part_lcsc(self, e):
+        """Fetch part details from LCSC and show them in a modal."""
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            if row == -1:
+                return
+            part = self.footprint_list.GetTextValue(row, 3)
+            if part != "":
+                if wx.TheClipboard.Open():
+                    wx.TheClipboard.SetData(wx.TextDataObject(part))
+                    wx.TheClipboard.Close()
+
+    def paste_part_lcsc(self, e):
+        text_data = wx.TextDataObject()
+        if wx.TheClipboard.Open():
+            success = wx.TheClipboard.GetData(text_data)
+            wx.TheClipboard.Close()
+        if success:
+            lcsc = text_data.GetText()
+            for item in self.footprint_list.GetSelections():
+                row = self.footprint_list.ItemToRow(item)
+                reference = self.footprint_list.GetTextValue(row, 0)
+                self.store.set_lcsc(reference, lcsc)
+            self.populate_footprint_list()
 
     def init_logger(self):
         """Initialize logger to log into textbox"""
