@@ -5,6 +5,13 @@ import os
 import requests
 import wx
 
+from .events import (
+    MessageEvent,
+    PopulateFootprintListEvent,
+    ResetGaugeEvent,
+    UpdateGaugeEvent,
+)
+
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
 
@@ -270,6 +277,7 @@ class RotationManagerDialog(wx.Dialog):
             self.parent.library.insert_correction_data(regex, correction)
             self.selection_regex = None
         self.populate_rotations_list()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def delete_correction(self, e):
         """Delete a correction from the database."""
@@ -280,6 +288,7 @@ class RotationManagerDialog(wx.Dialog):
         regex = self.rotations_list.GetTextValue(row, 0)
         self.parent.library.delete_correction_data(regex)
         self.populate_rotations_list()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def on_correction_selected(self, e):
         """Enable the toolbar buttons when a selection was made."""
@@ -294,6 +303,7 @@ class RotationManagerDialog(wx.Dialog):
             self.regex.SetValue(self.selection_regex)
             self.correction.SetValue(self.selection_correction)
         else:
+            self.selection_regex = None
             self.enable_toolbar_buttons(False)
 
     def on_textfield_change(self, e):
@@ -322,6 +332,7 @@ class RotationManagerDialog(wx.Dialog):
         except Exception as e:
             self.logger.debug(e)
         self.populate_rotations_list()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def import_legacy_corrections(self):
         """Check if corrections in CSV format are found and import them into the database."""
@@ -383,6 +394,7 @@ class RotationManagerDialog(wx.Dialog):
                             f"Correction '{row['regex']}' with correction value {row['correction']} is added to the database from local CSV."
                         )
             self.populate_rotations_list()
+            wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def _export_corrections(self, path):
         """corrections export logic"""
