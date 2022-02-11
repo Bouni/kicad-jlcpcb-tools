@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 import sys
+import re
 
 import wx
 import wx.dataview
@@ -247,6 +248,13 @@ class JLCPCBTools(wx.Dialog):
         )
         self.pos = self.footprint_list.AppendIconTextColumn(
             "POS",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(self.scale_factor * 50),
+            align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        )
+        self.rot = self.footprint_list.AppendTextColumn(
+            "Rot Off",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(self.scale_factor * 50),
             align=wx.ALIGN_CENTER,
@@ -583,12 +591,20 @@ class JLCPCBTools(wx.Dialog):
             part[6] = icons.get(part[6], icons.get(0))
             part[7] = icons.get(part[7], icons.get(0))
             part.insert(8, "")
+            part.insert(9, "")
             parts.append(part)
         details = self.library.get_part_details(numbers)
+        corrections = self.library.get_all_correction_data()
+
         for part in parts:
             if detail := list(filter(lambda x: x[0] == part[3], details)):
                 part[4] = detail[0][2]
                 part[5] = detail[0][1]
+            for regex, correction in corrections:
+                if re.search(regex, str(part[2])):
+                    part[8] = correction
+                    continue
+
             self.footprint_list.AppendItem(part)
 
     def OnSortFootprintList(self, e):
