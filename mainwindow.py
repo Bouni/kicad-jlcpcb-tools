@@ -797,6 +797,7 @@ class JLCPCBTools(wx.Dialog):
         self.fabrication.zip_gerber_excellon()
         self.fabrication.generate_pos()
         self.fabrication.generate_bom()
+
     def copy_part_lcsc(self, e):
         """Fetch part details from LCSC and show them in a modal."""
         for item in self.footprint_list.GetSelections():
