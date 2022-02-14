@@ -277,6 +277,10 @@ class JLCPCBTools(wx.Dialog):
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
         )
 
+        self.footprint_list.Bind(
+            wx.dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown
+        )
+        
         # ---------------------------------------------------------------------
         # ----------------------- Vertical Toolbar ----------------------------
         # ---------------------------------------------------------------------
@@ -356,22 +360,6 @@ class JLCPCBTools(wx.Dialog):
             HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
-        self.copy_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Copy LCSC",
-            wx.DefaultPosition,
-            HighResWxSize(self.window, wx.Size(175, 38)),
-            0,
-        )
-        self.paste_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Paste LCSC",
-            wx.DefaultPosition,
-            HighResWxSize(self.window, wx.Size(175, 38)),
-            0,
-        )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.remove_part_button.Bind(wx.EVT_BUTTON, self.remove_part)
@@ -383,8 +371,6 @@ class JLCPCBTools(wx.Dialog):
         # self.part_costs_button.Bind(wx.EVT_BUTTON, self.calculate_costs)
         self.hide_bom_button.Bind(wx.EVT_BUTTON, self.OnBomHide)
         self.hide_pos_button.Bind(wx.EVT_BUTTON, self.OnPosHide)
-        self.copy_button.Bind(wx.EVT_BUTTON, self.copy_part_lcsc)
-        self.paste_button.Bind(wx.EVT_BUTTON, self.paste_part_lcsc)
 
         toolbar_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.remove_part_button, 0, wx.ALL, 5)
@@ -396,8 +382,6 @@ class JLCPCBTools(wx.Dialog):
         # toolbar_sizer.Add(self.part_costs_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_pos_button, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.copy_button, 0, wx.ALL, 5)
-        toolbar_sizer.Add(self.paste_button, 0, wx.ALL, 5)
 
         # select_icon = wx.Bitmap(
         #     os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png")
@@ -838,6 +822,19 @@ class JLCPCBTools(wx.Dialog):
                 reference = self.footprint_list.GetTextValue(row, 0)
                 self.store.set_lcsc(reference, lcsc)
             self.populate_footprint_list()
+
+    def OnRightDown(self, e):
+        conMenu = wx.Menu()
+        cpmi = wx.MenuItem(conMenu, wx.NewId(), 'Copy LCSC')
+        conMenu.Append(cpmi)
+        conMenu.Bind(wx.EVT_MENU, self.copy_part_lcsc, cpmi)
+
+        ptmi = wx.MenuItem(conMenu, wx.NewId(), 'Paste LCSC')
+        conMenu.Append(ptmi)
+        conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, ptmi)
+
+        self.footprint_list.PopupMenu( conMenu )
+        conMenu.Destroy() # destroy to avoid memory leak
 
     def init_logger(self):
         """Initialize logger to log into textbox"""
