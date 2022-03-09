@@ -87,9 +87,11 @@ def get_footprint_keys(fp):
 
 def get_footprint_by_ref(board, ref):
     """get a footprint from the list of footprints by its Reference."""
+    fps = []
     for fp in get_valid_footprints(board):
         if str(fp.GetReference()) == ref:
-            return fp
+            fps.append(fp)
+    return fps
 
 
 def get_bit(value, bit):
