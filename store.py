@@ -10,7 +10,6 @@ from pcbnew import GetBoard
 from .helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
-    get_footprint_by_ref,
     get_lcsc_value,
     get_valid_footprints,
     natural_sort_collation,
