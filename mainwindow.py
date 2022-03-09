@@ -280,7 +280,7 @@ class JLCPCBTools(wx.Dialog):
         self.footprint_list.Bind(
             wx.dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown
         )
-        
+
         # ---------------------------------------------------------------------
         # ----------------------- Vertical Toolbar ----------------------------
         # ---------------------------------------------------------------------
@@ -825,16 +825,16 @@ class JLCPCBTools(wx.Dialog):
 
     def OnRightDown(self, e):
         conMenu = wx.Menu()
-        cpmi = wx.MenuItem(conMenu, wx.NewId(), 'Copy LCSC')
+        cpmi = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
         conMenu.Append(cpmi)
         conMenu.Bind(wx.EVT_MENU, self.copy_part_lcsc, cpmi)
 
-        ptmi = wx.MenuItem(conMenu, wx.NewId(), 'Paste LCSC')
+        ptmi = wx.MenuItem(conMenu, wx.NewId(), "Paste LCSC")
         conMenu.Append(ptmi)
         conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, ptmi)
 
-        self.footprint_list.PopupMenu( conMenu )
-        conMenu.Destroy() # destroy to avoid memory leak
+        self.footprint_list.PopupMenu(conMenu)
+        conMenu.Destroy()  # destroy to avoid memory leak
 
     def init_logger(self):
         """Initialize logger to log into textbox"""
