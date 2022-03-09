@@ -229,18 +229,18 @@ class Fabrication:
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
             for part in self.parent.store.read_pos_parts():
-                fp = get_footprint_by_ref(self.board, part[0])
-                writer.writerow(
-                    [
-                        part[0],
-                        part[1],
-                        part[2],
-                        ToMM(fp.GetPosition().x),
-                        ToMM(fp.GetPosition().y) * -1,
-                        self.fix_rotation(fp),
-                        "top" if fp.GetLayer() == 0 else "bottom",
-                    ]
-                )
+                for fp in get_footprint_by_ref(self.board, part[0]):
+                    writer.writerow(
+                        [
+                            part[0],
+                            part[1],
+                            part[2],
+                            ToMM(fp.GetPosition().x),
+                            ToMM(fp.GetPosition().y) * -1,
+                            self.fix_rotation(fp),
+                            "top" if fp.GetLayer() == 0 else "bottom",
+                        ]
+                    )
         self.logger.info(f"Finished generating POS file")
 
     def generate_bom(self):

@@ -1,8 +1,8 @@
 import datetime
 import logging
 import os
-import sys
 import re
+import sys
 
 import wx
 import wx.dataview
@@ -21,10 +21,10 @@ from .helpers import (
     GetScaleFactor,
     HighResWxSize,
     get_footprint_by_ref,
+    getVersion,
     loadBitmapScaled,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
-    getVersion,
 )
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
@@ -684,7 +684,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)
+            fp = get_footprint_by_ref(GetBoard(), ref)[0]
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, bom)
@@ -700,7 +700,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)
+            fp = get_footprint_by_ref(GetBoard(), ref)[0]
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, bom)
         self.populate_footprint_list()
@@ -714,7 +714,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)
+            fp = get_footprint_by_ref(GetBoard(), ref)[0]
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, pos)
         self.populate_footprint_list()
@@ -726,7 +726,7 @@ class JLCPCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)
+            fp = get_footprint_by_ref(GetBoard(), ref)[0]
             self.store.set_lcsc(ref, "")
         self.populate_footprint_list()
 
