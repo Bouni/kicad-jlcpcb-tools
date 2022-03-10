@@ -242,21 +242,28 @@ class JLCPCBTools(wx.Dialog):
         self.bom = self.footprint_list.AppendIconTextColumn(
             "BOM",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(self.scale_factor * 50),
+            width=int(self.scale_factor * 40),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.pos = self.footprint_list.AppendIconTextColumn(
             "POS",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(self.scale_factor * 50),
+            width=int(self.scale_factor * 40),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.rot = self.footprint_list.AppendTextColumn(
             "Rot Off",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(self.scale_factor * 50),
+            width=int(self.scale_factor * 40),
+            align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        )
+        self.side = self.footprint_list.AppendTextColumn(
+            "Side",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(self.scale_factor * 40),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
@@ -581,6 +588,7 @@ class JLCPCBTools(wx.Dialog):
         numbers = []
         parts = []
         for part in self.store.read_all():
+            fp = get_footprint_by_ref(GetBoard(), part[0])[0]
             if part[3] and part[3] not in numbers:
                 numbers.append(part[3])
             part.insert(4, "")
@@ -595,7 +603,9 @@ class JLCPCBTools(wx.Dialog):
             part[6] = icons.get(part[6], icons.get(0))
             part[7] = icons.get(part[7], icons.get(0))
             part.insert(8, "")
-            part.insert(9, "")
+            side = "Top" if fp.GetLayer() == 0 else "Bot"
+            part.insert(9, side)
+            part.insert(10, "")
             parts.append(part)
         details = self.library.get_part_details(numbers)
         corrections = self.library.get_all_correction_data()
