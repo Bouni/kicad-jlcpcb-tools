@@ -778,7 +778,7 @@ class JLCPCBTools(wx.Dialog):
 
     def manage_rotations(self, e=None):
         """Manage rotation corrections."""
-        RotationManagerDialog(self).ShowModal()
+        RotationManagerDialog(self, "").ShowModal()
 
     def calculate_costs(self, e):
         """Hopefully we will be able to calculate the part costs in the future."""
@@ -833,6 +833,15 @@ class JLCPCBTools(wx.Dialog):
                 self.store.set_lcsc(reference, lcsc)
             self.populate_footprint_list()
 
+    def add_part_rot(self, e):
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            if row == -1:
+                return
+            footp = self.footprint_list.GetTextValue(row, 2)
+            if footp != "":
+                RotationManagerDialog(self, "^" + footp).ShowModal()
+
     def OnRightDown(self, e):
         conMenu = wx.Menu()
         cpmi = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
@@ -842,6 +851,10 @@ class JLCPCBTools(wx.Dialog):
         ptmi = wx.MenuItem(conMenu, wx.NewId(), "Paste LCSC")
         conMenu.Append(ptmi)
         conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, ptmi)
+
+        crmi = wx.MenuItem(conMenu, wx.NewId(), "Add Rotation")
+        conMenu.Append(crmi)
+        conMenu.Bind(wx.EVT_MENU, self.add_part_rot, crmi)
 
         self.footprint_list.PopupMenu(conMenu)
         conMenu.Destroy()  # destroy to avoid memory leak

@@ -16,7 +16,7 @@ from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
 
 class RotationManagerDialog(wx.Dialog):
-    def __init__(self, parent):
+    def __init__(self, parent, footprint):
         wx.Dialog.__init__(
             self,
             parent,
@@ -58,7 +58,7 @@ class RotationManagerDialog(wx.Dialog):
         self.regex = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            "",
+            footprint,
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
         )
