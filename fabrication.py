@@ -33,7 +33,7 @@ from pcbnew import (
     wxPoint,
 )
 
-from .helpers import PLUGIN_PATH, get_footprint_by_ref
+from .helpers import get_exclude_from_pos, get_footprint_by_ref
 
 
 class Fabrication:
@@ -230,6 +230,8 @@ class Fabrication:
             )
             for part in self.parent.store.read_pos_parts():
                 for fp in get_footprint_by_ref(self.board, part[0]):
+                    if get_exclude_from_pos(fp):
+                        continue
                     writer.writerow(
                         [
                             part[0],
