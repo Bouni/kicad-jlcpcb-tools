@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from sys import path
@@ -24,6 +25,8 @@ class PartSelectorDialog(wx.Dialog):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.parts = parts
+        self.settings = None
+        self.load_settings()
         lcsc_selection = self.get_existing_selection(parts)
 
         # ---------------------------------------------------------------------
@@ -182,8 +185,19 @@ class PartSelectorDialog(wx.Dialog):
             0,
         )
 
-        self.basic_checkbox.SetValue(True)
-        self.extended_checkbox.SetValue(True)
+        self.basic_checkbox.SetValue(
+            self.settings.get("partselector", {}).get("basic", True)
+        )
+        self.extended_checkbox.SetValue(
+            self.settings.get("partselector", {}).get("extended", True)
+        )
+        self.assert_stock_checkbox.SetValue(
+            self.settings.get("partselector", {}).get("stock", False)
+        )
+
+        self.basic_checkbox.Bind(wx.EVT_CHECKBOX, self.upadate_settings)
+        self.extended_checkbox.Bind(wx.EVT_CHECKBOX, self.upadate_settings)
+        self.assert_stock_checkbox.Bind(wx.EVT_CHECKBOX, self.upadate_settings)
 
         help_button = wx.Button(
             self,
@@ -478,6 +492,26 @@ class PartSelectorDialog(wx.Dialog):
         self.Layout()
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
+
+    def upadate_settings(self, state):
+        """Update the settings on change"""
+        self.settings["partselector"]["basic"] = self.basic_checkbox.GetValue()
+        self.settings["partselector"]["extended"] = self.extended_checkbox.GetValue()
+        self.settings["partselector"]["stock"] = self.assert_stock_checkbox.GetValue()
+        self.save_settings()
+
+    def load_settings(self):
+        """Load settings from settings.json"""
+        with open(os.path.join(PLUGIN_PATH, "settings.json")) as j:
+            self.logger.debug("Load settings")
+            self.settings = json.load(j)
+            self.logger.debug(self.settings)
+
+    def save_settings(self):
+        """Save settings to settings.json"""
+        self.logger.debug("Save settings")
+        with open(os.path.join(PLUGIN_PATH, "settings.json"), "w") as j:
+            json.dump(self.settings, j)
 
     @staticmethod
     def get_existing_selection(parts):
