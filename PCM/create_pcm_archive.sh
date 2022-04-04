@@ -17,6 +17,7 @@ echo "Copy files to destination"
 cp VERSION PCM/archive/plugins
 cp *.py PCM/archive/plugins
 cp *.png PCM/archive/plugins
+cp settings.json PCM/archive/plugins
 cp -r icons PCM/archive/plugins
 cp PCM/icon.png PCM/archive/resources
 cp PCM/metadata.template.json PCM/archive/metadata.json
