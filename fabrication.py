@@ -105,7 +105,7 @@ class Fabrication:
         # Gerber Options
         popt.SetUseGerberProtelExtensions(False)
         popt.SetCreateGerberJobFile(False)
-        popt.SetSubtractMaskFromSilk(False)
+        popt.SetSubtractMaskFromSilk(True)
 
         popt.SetUseGerberX2format(True)
         popt.SetIncludeGerberNetlistInfo(True)
@@ -114,7 +114,6 @@ class Fabrication:
         popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
 
         popt.SetPlotFrameRef(False)
-        popt.SetExcludeEdgeLayer(True)
 
         # delete all existing files in the output directory first
         for f in os.listdir(self.gerberdir):
