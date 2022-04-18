@@ -22,6 +22,7 @@ from pcbnew import (
     F_Mask,
     F_Paste,
     F_SilkS,
+    Cmts_User,
     GetBoard,
     GetBuildVersion,
     In1_Cu,
@@ -130,6 +131,7 @@ class Fabrication:
                 ("MaskTop", F_Mask, "Mask top"),
                 ("PasteTop", F_Paste, "Paste top"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
+                ("VScore", Cmts_User, "V score cut"),
             ]
         elif layer_count == 2:
             plot_plan = [
@@ -142,6 +144,7 @@ class Fabrication:
                 ("MaskBottom", B_Mask, "Mask bottom"),
                 ("PasteBottom", B_Paste, "Paste bottom"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
+                ("VScore", Cmts_User, "V score cut"),
             ]
         elif layer_count == 4:
             plot_plan = [
@@ -156,6 +159,7 @@ class Fabrication:
                 ("MaskBottom", B_Mask, "Mask bottom"),
                 ("PasteBottom", B_Paste, "Paste bottom"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
+                ("VScore", Cmts_User, "V score cut"),
             ]
         elif layer_count == 6:
             plot_plan = [
@@ -172,6 +176,7 @@ class Fabrication:
                 ("MaskBottom", B_Mask, "Mask bottom"),
                 ("PasteBottom", B_Paste, "Paste bottom"),
                 ("EdgeCuts", Edge_Cuts, "Edges"),
+                ("VScore", Cmts_User, "V score cut"),
             ]
 
         for layer_info in plot_plan:
