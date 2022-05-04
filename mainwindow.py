@@ -57,7 +57,8 @@ class JLCPCBTools(wx.Dialog):
         self.packages = []
         self.library = None
         self.store = None
-
+        self.Bind(wx.EVT_CLOSE, self.quit_dialog)
+        
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
         # ---------------------------------------------------------------------
@@ -519,6 +520,7 @@ class JLCPCBTools(wx.Dialog):
         self.logger.info(f"kicad-jlcpcb-tools version {getVersion()}")
 
     def quit_dialog(self, e):
+        """Destroy dialog on close"""
         self.Destroy()
         self.EndModal(0)
 
