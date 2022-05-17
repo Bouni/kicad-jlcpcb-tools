@@ -537,13 +537,21 @@ class JLCPCBTools(wx.Dialog):
         self.footprint_list.DeleteAllItems()
         if "6.99" in GetBuildVersion():
             icons = {
-                0: wx.dataview.DataViewIconText("", self._load_icon("mdi-check-color.png")),
-                1: wx.dataview.DataViewIconText("", self._load_icon("mdi-close-color.png")),
+                0: wx.dataview.DataViewIconText(
+                    "", self._load_icon("mdi-check-color.png")
+                ),
+                1: wx.dataview.DataViewIconText(
+                    "", self._load_icon("mdi-close-color.png")
+                ),
             }
         else:
             icons = {
-                0: wx.dataview.DataViewIconText("", wx.Icon(self._load_icon("mdi-check-color.png"))),
-                1: wx.dataview.DataViewIconText("", wx.Icon(self._load_icon("mdi-close-color.png"))),
+                0: wx.dataview.DataViewIconText(
+                    "", wx.Icon(self._load_icon("mdi-check-color.png"))
+                ),
+                1: wx.dataview.DataViewIconText(
+                    "", wx.Icon(self._load_icon("mdi-close-color.png"))
+                ),
             }
         numbers = []
         parts = []
