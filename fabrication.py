@@ -113,7 +113,7 @@ class Fabrication:
 
         popt.SetSubtractMaskFromSilk(True)
 
-        popt.SetPlotViaOnMaskLayer(True) # Do not tent vias
+        popt.SetPlotViaOnMaskLayer(True)  # Do not tent vias
 
         popt.SetUseGerberX2format(True)
 
