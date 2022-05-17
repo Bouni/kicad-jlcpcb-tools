@@ -17,12 +17,12 @@ from pcbnew import (
     B_Mask,
     B_Paste,
     B_SilkS,
+    Cmts_User,
     Edge_Cuts,
     F_Cu,
     F_Mask,
     F_Paste,
     F_SilkS,
-    Cmts_User,
     GetBoard,
     GetBuildVersion,
     In1_Cu,
@@ -89,6 +89,9 @@ class Fabrication:
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
         pctl = PLOT_CONTROLLER(self.board)
         popt = pctl.GetPlotOptions()
+
+        self.logger.error(dir(popt))
+
         # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
         popt.SetOutputDirectory(self.gerberdir)
 
@@ -105,11 +108,17 @@ class Fabrication:
 
         # Gerber Options
         popt.SetUseGerberProtelExtensions(False)
+
         popt.SetCreateGerberJobFile(False)
+
         popt.SetSubtractMaskFromSilk(True)
 
+        popt.SetPlotViaOnMaskLayer(True) # Do not tent vias
+
         popt.SetUseGerberX2format(True)
+
         popt.SetIncludeGerberNetlistInfo(True)
+
         popt.SetDisableGerberMacros(False)
 
         popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
