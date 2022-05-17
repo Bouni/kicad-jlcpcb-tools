@@ -305,18 +305,10 @@ class PartSelectorDialog(wx.Dialog):
             5,
         )
 
-        help_icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-help-circle-outline.png"),
-            parent.scale_factor,
-        )
-        help_button.SetBitmap(help_icon)
+        help_button.SetBitmap(self._load_icon("mdi-help-circle-outline.png"))
         help_button.SetBitmapMargins((2, 0))
 
-        select_icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-database-search-outline.png"),
-            parent.scale_factor,
-        )
-        self.search_button.SetBitmap(select_icon)
+        self.search_button.SetBitmap(self._load_icon("mdi-database-search-outline.png"))
         self.search_button.SetBitmapMargins((2, 0))
 
         search_sizer = wx.StaticBoxSizer(wx.HORIZONTAL, self, "Search")
@@ -460,17 +452,10 @@ class PartSelectorDialog(wx.Dialog):
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.part_details_button.Bind(wx.EVT_BUTTON, self.get_part_details)
 
-        check_icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-check.png"), parent.scale_factor
-        )
-        self.select_part_button.SetBitmap(check_icon)
+        self.select_part_button.SetBitmap(self._load_icon("mdi-check.png"))
         self.select_part_button.SetBitmapMargins((2, 0))
 
-        details_icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-text-box-search-outline.png"),
-            parent.scale_factor,
-        )
-        self.part_details_button.SetBitmap(details_icon)
+        self.part_details_button.SetBitmap(self._load_icon("mdi-text-box-search-outline.png"))
         self.part_details_button.SetBitmapMargins((2, 0))
 
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -622,3 +607,13 @@ class PartSelectorDialog(wx.Dialog):
         The results are limited to 1000.
         """
         wx.MessageBox(text, title, style=wx.ICON_INFORMATION)
+
+    def _load_icon(self, filename):
+        """Load an icon from a png file, handle wx difference between 6.0 and 6.99"""
+        icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", filename),
+            self.parent.scale_factor,
+        )
+        if "6.99" in self.parent.KicadBuildVersion:
+            icon = wx.BitmapBundle(icon)
+        return icon

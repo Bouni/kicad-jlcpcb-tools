@@ -88,11 +88,7 @@ class PartDetailsDialog(wx.Dialog):
 
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
 
-        pdf_icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", "mdi-file-document-outline.png"),
-            parent.scale_factor,
-        )
-        self.openpdf_button.SetBitmap(pdf_icon)
+        self.openpdf_button.SetBitmap(self._load_icon("mdi-file-document-outline.png"))
         self.openpdf_button.SetBitmapMargins((2, 0))
 
         # ---------------------------------------------------------------------
@@ -230,3 +226,13 @@ class PartDetailsDialog(wx.Dialog):
                 )
             )
         self.pdfurl = data.get("data", {}).get("dataManualUrl")
+
+    def _load_icon(self, filename):
+        """Load an icon from a png file, handle wx difference between 6.0 and 6.99"""
+        icon = loadBitmapScaled(
+            os.path.join(PLUGIN_PATH, "icons", filename),
+            self.parent.scale_factor,
+        )
+        if "6.99" in self.parent.KicadBuildVersion:
+            icon = wx.BitmapBundle(icon)
+        return icon
