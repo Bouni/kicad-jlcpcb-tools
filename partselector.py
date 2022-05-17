@@ -455,7 +455,9 @@ class PartSelectorDialog(wx.Dialog):
         self.select_part_button.SetBitmap(self._load_icon("mdi-check.png"))
         self.select_part_button.SetBitmapMargins((2, 0))
 
-        self.part_details_button.SetBitmap(self._load_icon("mdi-text-box-search-outline.png"))
+        self.part_details_button.SetBitmap(
+            self._load_icon("mdi-text-box-search-outline.png")
+        )
         self.part_details_button.SetBitmapMargins((2, 0))
 
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
