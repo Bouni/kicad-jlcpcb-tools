@@ -275,7 +275,7 @@ class Library:
                 return [
                     list(c)
                     for c in cur.execute(
-                        f"SELECT * FROM mapping ORDER BY regex ASC"
+                        f"SELECT * FROM mapping ORDER BY footprint ASC"
                     ).fetchall()
                 ]
 

@@ -30,7 +30,7 @@ from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partselector import PartSelectorDialog
 from .rotations import RotationManagerDialog
-from .mappings import PartMapperManagerDialog
+from .partmapper import PartMapperManagerDialog
 from .store import Store
 
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -502,6 +502,7 @@ class JLCPCBTools(wx.Dialog):
             self.library.update()
         else:
             self.init_store()
+        self.library.create_mapping_table()
         self.logger.info(f"kicad-jlcpcb-tools version {getVersion()}")
 
     def quit_dialog(self, e):
@@ -840,18 +841,19 @@ class JLCPCBTools(wx.Dialog):
             footp = self.footprint_list.GetTextValue(row, 2)
             partval = self.footprint_list.GetTextValue(row, 1)
             lcscpart = self.footprint_list.GetTextValue(row, 3)
-            if footp != "" and partval != "" and lcscpart != "":
-                if self.library.get_mapping_data(footp, partval):
-					self.library.update_mapping_data(
-						footp, partval, lcscpart
-					)
-
-				else:
-					self.library.insert_mapping_data(
-						 footp, partval, lcscpart
-					)
-
-
+            self.logger.info(f"Foot{footp}Part{partval}LCSC{lcscpart}")
+            if self.library.get_mapping_data(footp, partval):
+                self.library.update_mapping_data(
+                    footp, partval, lcscpart
+                )
+            else:
+                self.logger.info(f"insert")
+                self.library.insert_mapping_data(
+                     footp, partval, lcscpart
+                )
+            listOfTables = self.library.does_mapping_exist()
+            if listOfTables == []:
+                self.logger.info(f"broke")
     def OnRightDown(self, e):
         conMenu = wx.Menu()
         cpmi = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
@@ -869,7 +871,6 @@ class JLCPCBTools(wx.Dialog):
         cmmi = wx.MenuItem(conMenu, wx.NewId(), "Add Mapping")
         conMenu.Append(cmmi)
         conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, cmmi)
-
         self.footprint_list.PopupMenu(conMenu)
         conMenu.Destroy()  # destroy to avoid memory leak
 
