@@ -30,6 +30,7 @@ from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partselector import PartSelectorDialog
 from .rotations import RotationManagerDialog
+from .mappings import PartMapperManagerDialog
 from .store import Store
 
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -124,6 +125,15 @@ class JLCPCBTools(wx.Dialog):
             0,
         )
 
+        self.mapping_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Manage mappings",
+            wx.DefaultPosition,
+            HighResWxSize(self.window, wx.Size(175, 38)),
+            0,
+        )
+
         self.download_button = wx.Button(
             self,
             wx.ID_ANY,
@@ -155,6 +165,12 @@ class JLCPCBTools(wx.Dialog):
             5,
         )
         top_button_sizer.Add(
+            self.mapping_button,
+            0,
+            wx.ALL | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
+        top_button_sizer.Add(
             self.download_button,
             0,
             wx.ALL | wx.ALIGN_CENTER_VERTICAL,
@@ -163,6 +179,7 @@ class JLCPCBTools(wx.Dialog):
 
         self.generate_button.Bind(wx.EVT_BUTTON, self.generate_fabrication_data)
         self.rotation_button.Bind(wx.EVT_BUTTON, self.manage_rotations)
+        self.mapping_button.Bind(wx.EVT_BUTTON, self.manage_mappings)
         self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
 
         self.generate_button.SetBitmap(self._load_icon("fabrication.png"))
@@ -749,6 +766,10 @@ class JLCPCBTools(wx.Dialog):
         """Manage rotation corrections."""
         RotationManagerDialog(self, "").ShowModal()
 
+    def manage_mappings(self, e=None):
+        """Manage footprint mappings."""
+        PartMapperManagerDialog(self).ShowModal()
+
     def calculate_costs(self, e):
         """Hopefully we will be able to calculate the part costs in the future."""
         pass
@@ -811,6 +832,26 @@ class JLCPCBTools(wx.Dialog):
             if footp != "":
                 RotationManagerDialog(self, "^" + footp).ShowModal()
 
+    def add_foot_mapping(self, e):
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            if row == -1:
+                return
+            footp = self.footprint_list.GetTextValue(row, 2)
+            partval = self.footprint_list.GetTextValue(row, 1)
+            lcscpart = self.footprint_list.GetTextValue(row, 3)
+            if footp != "" and partval != "" and lcscpart != "":
+                if self.library.get_mapping_data(footp, partval):
+					self.library.update_mapping_data(
+						footp, partval, lcscpart
+					)
+
+				else:
+					self.library.insert_mapping_data(
+						 footp, partval, lcscpart
+					)
+
+
     def OnRightDown(self, e):
         conMenu = wx.Menu()
         cpmi = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
@@ -824,6 +865,10 @@ class JLCPCBTools(wx.Dialog):
         crmi = wx.MenuItem(conMenu, wx.NewId(), "Add Rotation")
         conMenu.Append(crmi)
         conMenu.Bind(wx.EVT_MENU, self.add_part_rot, crmi)
+
+        cmmi = wx.MenuItem(conMenu, wx.NewId(), "Add Mapping")
+        conMenu.Append(cmmi)
+        conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, cmmi)
 
         self.footprint_list.PopupMenu(conMenu)
         conMenu.Destroy()  # destroy to avoid memory leak
