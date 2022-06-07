@@ -113,17 +113,22 @@ class Library:
             q = " OR ".join(f'"{c}" LIKE "%{kw}%"' for c in keyword_columns)
             query_chunks.append(f"({q})")
 
-        if p := parameters["manufacturer"]:
+        if "manufacturer" in parameters and parameters["manufacturer"] != "":
+            p = parameters["manufacturer"]
             query_chunks.append(f'"Manufacturer" LIKE "{p}"')
-        if p := parameters["package"]:
+        if "package" in parameters and parameters["package"] != "":
+            p = parameters["package"]
             query_chunks.append(f'"Package" LIKE "{p}"')
-        if p := parameters["category"]:
+        if "category" in parameters and parameters["category"] != "":
+            p = parameters["category"]
             query_chunks.append(
                 f'("First Category" LIKE "{p}" OR "Second Category" LIKE "{p}")'
             )
-        if p := parameters["part_no"]:
+        if "part_no" in parameters and parameters["part_no"] != "":
+            p = parameters["part_no"]
             query_chunks.append(f'"MFR.Part" LIKE "{p}"')
-        if p := parameters["solder_joints"]:
+        if "solder_joints" in parameters and parameters["solder_joints"] != "":
+            p = parameters["solder_joints"]
             query_chunks.append(f'"Solder Joint" LIKE "{p}"')
 
         library_types = []
@@ -284,7 +289,8 @@ class Library:
         size = int(r.headers.get("Content-Length"))
         filename = r.headers.get("Content-Disposition").split("=")[1]
         date = "unknown"
-        if _date := re.search(r"(\d{4})(\d{2})(\d{2})", filename):
+        _date = re.search(r"(\d{4})(\d{2})(\d{2})", filename)
+        if _date:
             date = f"{_date.group(1)}-{_date.group(2)}-{_date.group(3)}"
         self.logger.debug(
             f"Download {filename} with a size of {(size / 1024 / 1024):.2f}MB"
