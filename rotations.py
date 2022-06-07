@@ -321,7 +321,7 @@ class RotationManagerDialog(wx.Dialog):
             os.rename(csv_file, f"{csv_file}.backup")
 
     def import_corrections_dialog(self, e=None):
-        """Dialog to import corrections from a CSV file."""
+        """Dialog to import correctios from a CSV file."""
         with wx.FileDialog(
             self,
             "Import",
