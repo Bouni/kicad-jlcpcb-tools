@@ -579,7 +579,8 @@ class JLCPCBTools(wx.Dialog):
         corrections = self.library.get_all_correction_data()
 
         for part in parts:
-            if detail := list(filter(lambda x: x[0] == part[3], details)):
+            detail = list(filter(lambda x: x[0] == part[3], details))
+            if detail:
                 part[4] = detail[0][2]
                 part[5] = detail[0][1]
             for regex, correction in corrections:

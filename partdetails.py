@@ -166,15 +166,17 @@ class PartDetailsDialog(wx.Dialog):
             "leastNumber": "Minimal Quantity",
             "leastNumberPrice": "Minimum price",
         }
-        if parttype := data.get("data", {}).get("componentLibraryType"):
-            if parttype == "base":
-                self.data_list.AppendItem(["Type", "Basic"])
-            elif parttype == "expand":
-                self.data_list.AppendItem(["Type", "Extended"])
+        parttype = data.get("data", {}).get("componentLibraryType")
+        if parttype and parttype == "base":
+            self.data_list.AppendItem(["Type", "Basic"])
+        elif parttype and parttype == "expand":
+            self.data_list.AppendItem(["Type", "Extended"])
         for k, v in parameters.items():
-            if val := data.get("data", {}).get(k):
+            val = data.get("data", {}).get(k)
+            if val:
                 self.data_list.AppendItem([v, str(val)])
-        if prices := data.get("data", {}).get("jlcPrices", []):
+        prices = data.get("data", {}).get("jlcPrices", [])
+        if prices:
             for price in prices:
                 start = price.get("startNumber")
                 end = price.get("endNumber")
@@ -192,7 +194,8 @@ class PartDetailsDialog(wx.Dialog):
                             str(price.get("productPrice")),
                         ]
                     )
-        if prices := data.get("data", {}).get("prices", []):
+        prices = data.get("data", {}).get("prices", [])
+        if prices:
             for price in prices:
                 start = price.get("startNumber")
                 end = price.get("endNumber")
@@ -217,7 +220,8 @@ class PartDetailsDialog(wx.Dialog):
                     str(attribute.get("attribute_value_name")),
                 ]
             )
-        if picture := data.get("data", {}).get("componentImageUrl"):
+        picture = data.get("data", {}).get("componentImageUrl")
+        if picture:
             self.image.SetBitmap(
                 self.get_scaled_bitmap(
                     picture,
