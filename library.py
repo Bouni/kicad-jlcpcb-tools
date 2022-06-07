@@ -224,6 +224,61 @@ class Library:
                     ).fetchall()
                 ]
 
+
+    def create_mapping_table(self):
+        """Create the mapping table."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"CREATE TABLE IF NOT EXISTS mapping ('footprint', 'value', 'LCSC')"
+                )
+                cur.commit()
+
+    def get_mapping_data(self, footprint, value):
+        """Get the mapping data by its regex."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                return cur.execute(
+                    f"SELECT * FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
+                ).fetchone()
+
+    def delete_mapping_data(self, footprint, value):
+        """Delete a mapping from the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(f"DELETE FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'")
+                cur.commit()
+
+    def update_mapping_data(self, footprint, value, LCSC):
+        """Update a mapping in the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"UPDATE mapping SET LCSC = '{LCSC}' WHERE footprint = '{footprint}' AND value = '{value}'"
+                )
+                cur.commit()
+
+    def insert_mapping_data(self, footprint, value, LCSC):
+        """Insert a mapping into the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                cur.execute(
+                    f"INSERT INTO mapping VALUES (?, ?, ?)",
+                    (footprint, value, LCSC),
+                )
+                cur.commit()
+
+    def get_all_mapping_data(self):
+        """get all mapping from the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                return [
+                    list(c)
+                    for c in cur.execute(
+                        f"SELECT * FROM mapping ORDER BY regex ASC"
+                    ).fetchall()
+                ]
+
     def update_meta_data(self, filename, size, partcount, date, last_update):
         """Update the meta data table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
@@ -301,6 +356,7 @@ class Library:
         self.delete_parts_table()
         self.create_parts_table(headers)
         self.create_rotation_table()
+        self.create_mapping_table()
         buffer = []
         part_count = 0
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
