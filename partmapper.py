@@ -28,7 +28,7 @@ class PartMapperManagerDialog(wx.Dialog):
 
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        #self.import_legacy_corrections()
+        # self.import_legacy_corrections()
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -119,7 +119,6 @@ class PartMapperManagerDialog(wx.Dialog):
         self.import_button.Bind(wx.EVT_BUTTON, self.import_mappings_dialog)
         self.export_button.Bind(wx.EVT_BUTTON, self.export_mappings_dialog)
 
-
         self.delete_button.SetBitmap(self._load_icon("mdi-trash-can-outline.png"))
         self.delete_button.SetBitmapMargins((2, 0))
 
@@ -147,6 +146,7 @@ class PartMapperManagerDialog(wx.Dialog):
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
         self.populate_mapping_list()
+
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)
@@ -163,8 +163,8 @@ class PartMapperManagerDialog(wx.Dialog):
         self.mapping_list.DeleteAllItems()
 
         if self.parent.library.get_all_mapping_data() is None:
-          self.logger.info(f"empty")
-          return
+            self.logger.info(f"empty")
+            return
 
         for mapping in self.parent.library.get_all_mapping_data():
             self.mapping_list.AppendItem([str(m) for m in mapping])
@@ -177,7 +177,7 @@ class PartMapperManagerDialog(wx.Dialog):
                 return
             footprint = self.mapping_list.GetTextValue(row, 0)
             value = self.mapping_list.GetTextValue(row, 1)
-            self.parent.library.delete_mapping_data(footprint,value)
+            self.parent.library.delete_mapping_data(footprint, value)
         self.populate_mapping_list()
 
     def on_mapping_selected(self, e):
@@ -225,10 +225,16 @@ class PartMapperManagerDialog(wx.Dialog):
                 csvreader = csv.DictReader(f, fieldnames=("footprint", "value", "lcsc"))
                 next(csvreader)
                 for row in csvreader:
-                    if self.parent.library.get_mapping_data(row["footprint"],row["value"]):
-                        self.parent.library.update_mapping_data(row["footprint"],row["value"],row["lcsc"] )
+                    if self.parent.library.get_mapping_data(
+                        row["footprint"], row["value"]
+                    ):
+                        self.parent.library.update_mapping_data(
+                            row["footprint"], row["value"], row["lcsc"]
+                        )
                     else:
-                        self.parent.library.insert_mapping_data( row["footprint"],row["value"],row["lcsc"])
+                        self.parent.library.insert_mapping_data(
+                            row["footprint"], row["value"], row["lcsc"]
+                        )
             self.populate_mapping_list()
 
     def _export_mappings(self, path):
@@ -248,4 +254,3 @@ class PartMapperManagerDialog(wx.Dialog):
         if "6.99" in self.parent.KicadBuildVersion:
             icon = wx.BitmapBundle(icon)
         return icon
-
