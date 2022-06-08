@@ -767,7 +767,7 @@ class JLCPCBTools(wx.Dialog):
                 self.busy_cursor = wx.BusyCursor()
                 dialog = PartDetailsDialog(self, part)
                 del self.busy_cursor
-                dialog.Show()
+                dialog.ShowModal()
 
     def update_library(self, e=None):
         """Update the library from the JLCPCB CSV file."""
