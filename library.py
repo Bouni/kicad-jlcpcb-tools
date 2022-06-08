@@ -267,6 +267,12 @@ class Library:
                     (footprint, value, LCSC),
                 )
                 cur.commit()
+    def insert_update_mapping_data(self, footprint, value, LCSC):
+        """Insert or update a mapping into the database."""
+        if get_mapping_data(footprint, value):
+            update_mapping_data(footprint, value, LCSC)
+        else:
+            insert_mapping_data(footprint, value, LCSC)
 
     def get_all_mapping_data(self):
         """get all mapping from the database."""

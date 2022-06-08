@@ -871,14 +871,9 @@ class JLCPCBTools(wx.Dialog):
             partval = self.footprint_list.GetTextValue(r, 1)
             lcscpart = self.footprint_list.GetTextValue(r, 3)
             if footp != "" and partval != "" and lcscpart != "":
-                if self.library.get_mapping_data(footp, partval):
-                    self.library.update_mapping_data(
-                        footp, partval, lcscpart
-                    )
-                else:
-                    self.library.insert_mapping_data(
-                         footp, partval, lcscpart
-                    )
+                self.library.insert_update_mapping_data(
+                        footp, partval, lcscpart )
+            self.logger.info(f"All mappings saved")
 
     def add_foot_mapping(self, e):
         for item in self.footprint_list.GetSelections():
@@ -889,14 +884,23 @@ class JLCPCBTools(wx.Dialog):
             partval = self.footprint_list.GetTextValue(row, 1)
             lcscpart = self.footprint_list.GetTextValue(row, 3)
             if footp != "" and partval != "" and lcscpart != "":
+                self.library.insert_update_mapping_data(
+                        footp, partval, lcscpart )
+
+    def search_foot_mapping(self, e):
+        for item in self.footprint_list.GetSelections():
+            row = self.footprint_list.ItemToRow(item)
+            if row == -1:
+                return
+            footp = self.footprint_list.GetTextValue(row, 2)
+            partval = self.footprint_list.GetTextValue(row, 1)
+            if footp != "" and partval != "":
                 if self.library.get_mapping_data(footp, partval):
-                    self.library.update_mapping_data(
-                        footp, partval, lcscpart
-                    )
-                else:
-                    self.library.insert_mapping_data(
-                         footp, partval, lcscpart
-                    )
+                    lcsc = self.library.get_mapping_data(footp, partval)
+                    reference = self.footprint_list.GetTextValue(row, 0)
+                    self.store.set_lcsc(reference, lcsc)
+        self.populate_footprint_list()
+        
     def OnRightDown(self, e):
         conMenu = wx.Menu()
         cpmi = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
@@ -911,9 +915,14 @@ class JLCPCBTools(wx.Dialog):
         conMenu.Append(crmi)
         conMenu.Bind(wx.EVT_MENU, self.add_part_rot, crmi)
 
-        cmmi = wx.MenuItem(conMenu, wx.NewId(), "Add Mapping")
-        conMenu.Append(cmmi)
-        conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, cmmi)
+        smmi = wx.MenuItem(conMenu, wx.NewId(), "Search Mappings")
+        conMenu.Append(smmi)
+        conMenu.Bind(wx.EVT_MENU, self.search_foot_mapping, smmi)
+
+        ammi = wx.MenuItem(conMenu, wx.NewId(), "Add Mapping")
+        conMenu.Append(ammi)
+        conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, ammi)
+
         self.footprint_list.PopupMenu(conMenu)
         conMenu.Destroy()  # destroy to avoid memory leak
 
