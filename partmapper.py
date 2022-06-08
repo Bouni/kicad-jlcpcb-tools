@@ -131,8 +131,8 @@ class PartMapperManagerDialog(wx.Dialog):
 
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.delete_button, 0, wx.ALL, 5)
-        #tool_sizer.Add(self.import_button, 0, wx.ALL, 5)
-        #tool_sizer.Add(self.export_button, 0, wx.ALL, 5)
+        tool_sizer.Add(self.import_button, 0, wx.ALL, 5)
+        tool_sizer.Add(self.export_button, 0, wx.ALL, 5)
         table_sizer.Add(tool_sizer, 3, wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
