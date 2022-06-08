@@ -54,13 +54,13 @@ class PartMapperManagerDialog(wx.Dialog):
             wx.ID_ANY,
             wx.DefaultPosition,
             wx.DefaultSize,
-            style=wx.dataview.DV_SINGLE,
+            style=wx.dataview.DV_MULTIPLE,
         )
 
         footprintcol = self.mapping_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 100),
+            width=int(parent.scale_factor * 150),
             align=wx.ALIGN_LEFT,
         )
         valuecol = self.mapping_list.AppendTextColumn(
@@ -171,15 +171,14 @@ class PartMapperManagerDialog(wx.Dialog):
 
     def delete_mapping(self, e):
         """Delete a mapping from the database."""
-        item = self.mapping_list.GetSelection()
-        row = self.mapping_list.ItemToRow(item)
-        if row == -1:
-            return
-        footprint = self.mapping_list.GetTextValue(row, 0)
-        value = self.mapping_list.GetTextValue(row, 1)
-        self.parent.library.delete_mapping_data(footprint,value)
+        for item in self.mapping_list.GetSelections():
+            row = self.mapping_list.ItemToRow(item)
+            if row == -1:
+                return
+            footprint = self.mapping_list.GetTextValue(row, 0)
+            value = self.mapping_list.GetTextValue(row, 1)
+            self.parent.library.delete_mapping_data(footprint,value)
         self.populate_mapping_list()
-        wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def on_mapping_selected(self, e):
         """Enable the toolbar buttons when a selection was made."""
