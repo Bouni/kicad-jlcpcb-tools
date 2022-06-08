@@ -116,8 +116,8 @@ class PartMapperManagerDialog(wx.Dialog):
         )
 
         self.delete_button.Bind(wx.EVT_BUTTON, self.delete_mapping)
-        #self.import_button.Bind(wx.EVT_BUTTON, self.import_mappings_dialog)
-        #self.export_button.Bind(wx.EVT_BUTTON, self.export_mappings_dialog)
+        self.import_button.Bind(wx.EVT_BUTTON, self.import_mappings_dialog)
+        self.export_button.Bind(wx.EVT_BUTTON, self.export_mappings_dialog)
 
 
         self.delete_button.SetBitmap(self._load_icon("mdi-trash-can-outline.png"))
@@ -186,6 +186,59 @@ class PartMapperManagerDialog(wx.Dialog):
             self.enable_toolbar_buttons(True)
         else:
             self.enable_toolbar_buttons(False)
+
+    def import_mappings_dialog(self, e=None):
+        """Dialog to import mappings from a CSV file."""
+        with wx.FileDialog(
+            self,
+            "Import Mapping CSV",
+            "",
+            "",
+            "CSV files (*.csv)|*.csv",
+            wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as importFileDialog:
+
+            if importFileDialog.ShowModal() == wx.ID_CANCEL:
+                return
+            path = importFileDialog.GetPath()
+            self._import_mappings(path)
+
+    def export_mappings_dialog(self, e=None):
+        """Dialog to export mappings to a CSV file."""
+        with wx.FileDialog(
+            self,
+            "Export Mapping CSV",
+            "",
+            "mapping",
+            "CSV files (*.csv)|*.csv",
+            wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as exportFileDialog:
+            if exportFileDialog.ShowModal() == wx.ID_CANCEL:
+                return
+            path = exportFileDialog.GetPath()
+            self._export_mappings(path)
+
+    def _import_mappings(self, path):
+        """mappings import logic"""
+        if os.path.isfile(path):
+            with open(path) as f:
+                csvreader = csv.DictReader(f, fieldnames=("footprint", "value", "lcsc"))
+                next(csvreader)
+                for row in csvreader:
+                    if self.parent.library.get_mapping_data(row["footprint"],row["value"]):
+                        self.parent.library.update_mapping_data(row["footprint"],row["value"],row["lcsc"] )
+                    else:
+                        self.parent.library.insert_mapping_data( row["footprint"],row["value"],row["lcsc"])
+            self.populate_mapping_list()
+
+    def _export_mappings(self, path):
+        """mappings export logic"""
+        with open(path, "w", newline="") as f:
+            csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
+            csvwriter.writerow(["Footprint", "Part Value", "LCSC Part"])
+            for m in self.parent.library.get_all_mapping_data():
+                csvwriter.writerow([m[0], m[1], m[2]])
+
     def _load_icon(self, filename):
         """Load an icon from a png file, handle wx difference between 6.0 and 6.99"""
         icon = loadBitmapScaled(
