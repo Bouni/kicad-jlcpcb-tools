@@ -592,7 +592,7 @@ class PartSelectorDialog(wx.Dialog):
             self.busy_cursor = wx.BusyCursor()
             dialog = PartDetailsDialog(self.parent, part)
             del self.busy_cursor
-            dialog.Show()
+            dialog.ShowModal()
 
     def help(self, e):
         """Show message box with help instructions"""
