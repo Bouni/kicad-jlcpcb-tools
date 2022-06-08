@@ -224,7 +224,6 @@ class Library:
                     ).fetchall()
                 ]
 
-
     def create_mapping_table(self):
         """Create the mapping table."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
@@ -246,7 +245,9 @@ class Library:
         """Delete a mapping from the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                cur.execute(f"DELETE FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'")
+                cur.execute(
+                    f"DELETE FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
+                )
                 cur.commit()
 
     def update_mapping_data(self, footprint, value, LCSC):
