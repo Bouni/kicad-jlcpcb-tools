@@ -29,22 +29,24 @@ If you find any sort of problems, please create an issue so that I can hopefully
 
 ## Installation 💾
 
+### KiCAD PCM
+
 Add my custom repo to *the Plugin and Content Manager*, the URL is `https://raw.githubusercontent.com/Bouni/bouni-kicad-repository/main/repository.json`
 
 ![image](https://user-images.githubusercontent.com/948965/147682006-9e1dd74a-79d3-492b-a108-15d284acf2b1.png)
 
 From there you can install the plugin via the GUI.
 
-**Alternatively:**
+### Git
 
 Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\users\<username>\Documents\kicad\6.0\scripting\plugins\` on linux that would be `/home/<username>/.local/share/kicad/6.0/scripting/plugins`.
 
-**:warning: Flatpak**
+### Flatpack :warning: 
 
 The Flatpak installation of KiCAD currently dows not ship with pip and requests installed. The later is required for the plugin to work.
 In order to get it working you can run the following 3 commands:
 
-1. `flatpak run --command=sh org.kicad.KiCad//beta`
+1. `flatpak run --command=sh org.kicad.KiCad`
 2. `python -m ensurepip --upgrade`
 3. `/var/data/python/bin/pip3 install requests`
 
