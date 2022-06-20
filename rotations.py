@@ -187,19 +187,49 @@ class RotationManagerDialog(wx.Dialog):
         self.import_button.Bind(wx.EVT_BUTTON, self.import_corrections_dialog)
         self.export_button.Bind(wx.EVT_BUTTON, self.export_corrections_dialog)
 
-        self.save_button.SetBitmap(self._load_icon("mdi-content-save-outline.png"))
+        self.save_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-content-save-outline.png",
+                self.parent.scale_factor,
+                self.parent.KicadBuildVersion,
+            )
+        )
         self.save_button.SetBitmapMargins((2, 0))
 
-        self.delete_button.SetBitmap(self._load_icon("mdi-trash-can-outline.png"))
+        self.delete_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-trash-can-outline.png",
+                self.parent.scale_factor,
+                self.parent.KicadBuildVersion,
+            )
+        )
         self.delete_button.SetBitmapMargins((2, 0))
 
-        self.update_button.SetBitmap(self._load_icon("mdi-cloud-download-outline.png"))
+        self.update_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-cloud-download-outline.png",
+                self.parent.scale_factor,
+                self.parent.KicadBuildVersion,
+            )
+        )
         self.update_button.SetBitmapMargins((2, 0))
 
-        self.import_button.SetBitmap(self._load_icon("mdi-database-import-outline.png"))
+        self.import_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-database-import-outline.png",
+                self.parent.scale_factor,
+                self.parent.KicadBuildVersion,
+            )
+        )
         self.import_button.SetBitmapMargins((2, 0))
 
-        self.export_button.SetBitmap(self._load_icon("mdi-database-export-outline.png"))
+        self.export_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-database-export-outline.png",
+                self.parent.scale_factor,
+                self.parent.KicadBuildVersion,
+            )
+        )
         self.export_button.SetBitmapMargins((2, 0))
 
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -382,13 +412,3 @@ class RotationManagerDialog(wx.Dialog):
             csvwriter.writerow(["Footprint pattern", "Correction"])
             for c in self.parent.library.get_all_correction_data():
                 csvwriter.writerow([c[0], c[1]])
-
-    def _load_icon(self, filename):
-        """Load an icon from a png file, handle wx difference between 6.0 and 6.99"""
-        icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", filename),
-            self.parent.scale_factor,
-        )
-        if "6.99" in self.parent.KicadBuildVersion:
-            icon = wx.BitmapBundle(icon)
-        return icon

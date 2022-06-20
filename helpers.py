@@ -37,12 +37,21 @@ def HighResWxSize(window, size):
         return size
 
 
-def loadBitmapScaled(path, scale=1.0):
-    """Load a scaled bitmap"""
-    bmp = wx.Bitmap(path)
-    w, h = bmp.GetSize()
-    img = bmp.ConvertToImage()
-    return wx.Bitmap(img.Scale(int(w * scale), int(h * scale)))
+def loadBitmapScaled(filename, scale=1.0, version="6.0.0"):
+    """Load a scaled bitmap, handle differences between Kicad versions"""
+    if filename:
+        path = os.path.join(PLUGIN_PATH, "icons", filename)
+        bmp = wx.Bitmap(path)
+        w, h = bmp.GetSize()
+        img = bmp.ConvertToImage()
+        bmp = wx.Bitmap(img.Scale(int(w * scale), int(h * scale)))
+    else:
+        bmp = wx.Bitmap()
+    version = re.search("\d\.\d+.\d+", version)
+    version = int(version.group(0).replace(".", ""))
+    if version > 605:
+        return wx.BitmapBundle(bmp)
+    return bmp
 
 
 def natural_sort_collation(a, b):
