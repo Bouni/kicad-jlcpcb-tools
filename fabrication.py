@@ -90,8 +90,6 @@ class Fabrication:
         pctl = PLOT_CONTROLLER(self.board)
         popt = pctl.GetPlotOptions()
 
-        self.logger.error(dir(popt))
-
         # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
         popt.SetOutputDirectory(self.gerberdir)
 
