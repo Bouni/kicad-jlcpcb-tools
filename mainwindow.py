@@ -28,9 +28,9 @@ from .helpers import (
 )
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
+from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
 from .rotations import RotationManagerDialog
-from .partmapper import PartMapperManagerDialog
 from .store import Store
 
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -92,10 +92,7 @@ class JLCPCBTools(wx.Dialog):
         self.layer_icon = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            loadBitmapScaled(
-                os.path.join(PLUGIN_PATH, "icons", "mdi-layers-triple-outline.png"),
-                self.scale_factor,
-            ),
+            loadBitmapScaled("mdi-layers-triple-outline.png", self.scale_factor),
             size=HighResWxSize(self.window, wx.Size(24, 36)),
         )
         self.layer_selection = wx.Choice(
@@ -182,14 +179,26 @@ class JLCPCBTools(wx.Dialog):
         self.mapping_button.Bind(wx.EVT_BUTTON, self.manage_mappings)
         self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
 
-        self.generate_button.SetBitmap(self._load_icon("fabrication.png"))
+        self.generate_button.SetBitmap(
+            loadBitmapScaled(
+                "fabrication.png", self.scale_factor, self.KicadBuildVersion
+            )
+        )
         self.generate_button.SetBitmapMargins((2, 0))
 
-        self.rotation_button.SetBitmap(self._load_icon("mdi-format-rotate-90.png"))
+        self.rotation_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-format-rotate-90.png", self.scale_factor, self.KicadBuildVersion
+            )
+        )
         self.rotation_button.SetBitmapMargins((2, 0))
 
         self.download_button.SetBitmap(
-            self._load_icon("mdi-cloud-download-outline.png")
+            loadBitmapScaled(
+                "mdi-cloud-download-outline.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
         )
         self.download_button.SetBitmapMargins((2, 0))
 
@@ -410,31 +419,65 @@ class JLCPCBTools(wx.Dialog):
         toolbar_sizer.Add(self.save_all_button, 0, wx.ALL, 5)
 
         self.select_part_button.SetBitmap(
-            self._load_icon("mdi-database-search-outline.png")
+            loadBitmapScaled(
+                "mdi-database-search-outline.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
         )
         self.select_part_button.SetBitmapMargins((2, 0))
 
-        self.remove_part_button.SetBitmap(self._load_icon("mdi-close-box-outline.png"))
+        self.remove_part_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-close-box-outline.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
+        )
         self.remove_part_button.SetBitmapMargins((2, 0))
 
         self.select_alike_button.SetBitmap(
-            self._load_icon("mdi-checkbox-multiple-marked.png")
+            loadBitmapScaled(
+                "mdi-checkbox-multiple-marked.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
         )
         self.select_alike_button.SetBitmapMargins((2, 0))
 
-        self.toggle_bom_pos_button.SetBitmap(self._load_icon("bom-pos.png"))
+        self.toggle_bom_pos_button.SetBitmap(
+            loadBitmapScaled(
+                "bom-pos.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
+        )
         self.toggle_bom_pos_button.SetBitmapMargins((2, 0))
 
         self.toggle_bom_button.SetBitmap(
-            self._load_icon("mdi-format-list-bulleted.png")
+            loadBitmapScaled(
+                "mdi-format-list-bulleted.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
         )
         self.toggle_bom_button.SetBitmapMargins((2, 0))
 
-        self.toggle_pos_button.SetBitmap(self._load_icon("mdi-crosshairs-gps.png"))
+        self.toggle_pos_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-crosshairs-gps.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
+        )
         self.toggle_pos_button.SetBitmapMargins((2, 0))
 
         self.part_details_button.SetBitmap(
-            self._load_icon("mdi-text-box-search-outline.png")
+            loadBitmapScaled(
+                "mdi-text-box-search-outline.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
         )
         self.part_details_button.SetBitmapMargins((2, 0))
 
@@ -448,9 +491,21 @@ class JLCPCBTools(wx.Dialog):
         # self.show_icon = loadBitmapScaled(
         #     os.path.join(PLUGIN_PATH, "icons", "mdi-eye-outline.png"), self.scale_factor
         # )
-        self.hide_bom_button.SetBitmap(self._load_icon("mdi-eye-off-outline.png"))
+        self.hide_bom_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-eye-off-outline.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
+        )
         self.hide_bom_button.SetBitmapMargins((2, 0))
-        self.hide_pos_button.SetBitmap(self._load_icon("mdi-eye-off-outline.png"))
+        self.hide_pos_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-eye-off-outline.png",
+                self.scale_factor,
+                self.KicadBuildVersion,
+            )
+        )
         self.hide_pos_button.SetBitmapMargins((2, 0))
 
         table_sizer.Add(toolbar_sizer, 1, wx.EXPAND, 5)
@@ -513,7 +568,6 @@ class JLCPCBTools(wx.Dialog):
         else:
             self.init_store()
         self.library.create_mapping_table()
-        self.logger.info(f"kicad-jlcpcb-tools version {getVersion()}")
 
     def quit_dialog(self, e):
         """Destroy dialog on close"""
@@ -563,24 +617,24 @@ class JLCPCBTools(wx.Dialog):
         if not self.store:
             self.init_store()
         self.footprint_list.DeleteAllItems()
-        if "6.99" in GetBuildVersion():
-            icons = {
-                0: wx.dataview.DataViewIconText(
-                    "", self._load_icon("mdi-check-color.png")
+        icons = {
+            0: wx.dataview.DataViewIconText(
+                "",
+                loadBitmapScaled(
+                    "",
+                    self.scale_factor,
+                    self.KicadBuildVersion,
                 ),
-                1: wx.dataview.DataViewIconText(
-                    "", self._load_icon("mdi-close-color.png")
+            ),
+            1: wx.dataview.DataViewIconText(
+                "",
+                loadBitmapScaled(
+                    "",
+                    self.scale_factor,
+                    self.KicadBuildVersion,
                 ),
-            }
-        else:
-            icons = {
-                0: wx.dataview.DataViewIconText(
-                    "", wx.Icon(self._load_icon("mdi-check-color.png"))
-                ),
-                1: wx.dataview.DataViewIconText(
-                    "", wx.Icon(self._load_icon("mdi-close-color.png"))
-                ),
-            }
+            ),
+        }
         numbers = []
         parts = []
         for part in self.store.read_all():
@@ -627,13 +681,37 @@ class JLCPCBTools(wx.Dialog):
         """Hide all parts from the list that have 'in BOM' set to No."""
         self.hide_bom_parts = not self.hide_bom_parts
         if self.hide_bom_parts:
-            self.hide_bom_button.SetBitmap(self._load_icon(wx.Bitmap()))
-            self.hide_bom_button.SetBitmap(self._load_icon(self.show_icon))
+            self.hide_bom_button.SetBitmap(
+                loadBitmapScaled(
+                    "",
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
+            self.hide_bom_button.SetBitmap(
+                loadBitmapScaled(
+                    self.show_icon,
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
             self.hide_bom_button.SetBitmapMargins((2, 0))
             self.hide_bom_button.SetLabel("Show excluded BOM")
         else:
-            self.hide_bom_button.SetBitmap(self._load_icon(wx.Bitmap()))
-            self.hide_bom_button.SetBitmap(self._load_icon(self.hide_icon))
+            self.hide_bom_button.SetBitmap(
+                loadBitmapScaled(
+                    "",
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
+            self.hide_bom_button.SetBitmap(
+                loadBitmapScaled(
+                    self.hide_icon,
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
             self.hide_bom_button.SetBitmapMargins((2, 0))
             self.hide_bom_button.SetLabel("Hide excluded BOM")
         self.populate_footprint_list()
@@ -642,13 +720,37 @@ class JLCPCBTools(wx.Dialog):
         """Hide all parts from the list that have 'in pos' set to No."""
         self.hide_pos_parts = not self.hide_pos_parts
         if self.hide_pos_parts:
-            self.hide_pos_button.SetBitmap(self._load_icon(wx.Bitmap()))
-            self.hide_pos_button.SetBitmap(self._load_icon(self.show_icon))
+            self.hide_pos_button.SetBitmap(
+                loadBitmapScaled(
+                    "",
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
+            self.hide_pos_button.SetBitmap(
+                loadBitmapScaled(
+                    self.show_icon,
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
             self.hide_pos_button.SetBitmapMargins((2, 0))
             self.hide_pos_button.SetLabel("Show excluded POS")
         else:
-            self.hide_pos_button.SetBitmap(self._load_icon(wx.Bitmap()))
-            self.hide_pos_button.SetBitmap(self._load_icon(self.hide_icon))
+            self.hide_pos_button.SetBitmap(
+                loadBitmapScaled(
+                    "",
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
+            self.hide_pos_button.SetBitmap(
+                loadBitmapScaled(
+                    self.hide_icon,
+                    self.scale_factor,
+                    self.KicadBuildVersion,
+                )
+            )
             self.hide_pos_button.SetBitmapMargins((2, 0))
             self.hide_pos_button.SetLabel("Hide excluded POS")
         self.populate_footprint_list()
@@ -927,16 +1029,6 @@ class JLCPCBTools(wx.Dialog):
         root.addHandler(handler1)
         root.addHandler(handler2)
         self.logger = logging.getLogger(__name__)
-
-    def _load_icon(self, filename):
-        """Load an icon from a png file, handle wx difference between 6.0 and 6.99"""
-        icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", filename),
-            self.scale_factor,
-        )
-        if "6.99" in self.KicadBuildVersion:
-            icon = wx.BitmapBundle(icon)
-        return icon
 
     def __del__(self):
         pass

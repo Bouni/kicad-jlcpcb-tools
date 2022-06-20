@@ -53,13 +53,13 @@ class PartDetailsDialog(wx.Dialog):
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 200),
+            width=int(self.parent.scale_factor * 200),
             align=wx.ALIGN_LEFT,
         )
         self.value = self.data_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 300),
+            width=int(self.parent.scale_factor * 300),
             align=wx.ALIGN_LEFT,
         )
 
@@ -70,8 +70,8 @@ class PartDetailsDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             loadBitmapScaled(
-                os.path.join(PLUGIN_PATH, "icons", "placeholder.png"),
-                parent.scale_factor,
+                "placeholder.png",
+                self.parent.scale_factor,
             ),
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 200)),
@@ -88,7 +88,13 @@ class PartDetailsDialog(wx.Dialog):
 
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
 
-        self.openpdf_button.SetBitmap(self._load_icon("mdi-file-document-outline.png"))
+        self.openpdf_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-file-document-outline.png",
+                self.parent.scale_factor,
+                self.parent.KicadBuildVersion,
+            )
+        )
         self.openpdf_button.SetBitmapMargins((2, 0))
 
         # ---------------------------------------------------------------------
@@ -230,13 +236,3 @@ class PartDetailsDialog(wx.Dialog):
                 )
             )
         self.pdfurl = data.get("data", {}).get("dataManualUrl")
-
-    def _load_icon(self, filename):
-        """Load an icon from a png file, handle wx difference between 6.0 and 6.99"""
-        icon = loadBitmapScaled(
-            os.path.join(PLUGIN_PATH, "icons", filename),
-            self.parent.scale_factor,
-        )
-        if "6.99" in self.parent.KicadBuildVersion:
-            icon = wx.BitmapBundle(icon)
-        return icon
