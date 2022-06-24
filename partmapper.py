@@ -123,7 +123,6 @@ class PartMapperManagerDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-trash-can-outline.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         self.delete_button.SetBitmapMargins((2, 0))
@@ -132,7 +131,6 @@ class PartMapperManagerDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-database-import-outline.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         self.import_button.SetBitmapMargins((2, 0))
@@ -141,7 +139,6 @@ class PartMapperManagerDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-database-export-outline.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         self.export_button.SetBitmapMargins((2, 0))
