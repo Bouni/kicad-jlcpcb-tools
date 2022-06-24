@@ -13,6 +13,12 @@ EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
 
 
+def getWxWidgetsVersion():
+    v = re.search(r"wxWidgets\s([\d\.]+)", wx.version())
+    v = int(v.group(1).replace(".", ""))
+    return v
+
+
 def getVersion():
     """READ Version from file"""
     if not os.path.isfile(os.path.join(PLUGIN_PATH, "VERSION")):
@@ -37,7 +43,7 @@ def HighResWxSize(window, size):
         return size
 
 
-def loadBitmapScaled(filename, scale=1.0, version="6.0.0"):
+def loadBitmapScaled(filename, scale=1.0, static=False):
     """Load a scaled bitmap, handle differences between Kicad versions"""
     if filename:
         path = os.path.join(PLUGIN_PATH, "icons", filename)
@@ -47,9 +53,7 @@ def loadBitmapScaled(filename, scale=1.0, version="6.0.0"):
         bmp = wx.Bitmap(img.Scale(int(w * scale), int(h * scale)))
     else:
         bmp = wx.Bitmap()
-    version = re.search("\d\.\d+.\d+", version)
-    version = int(version.group(0).replace(".", ""))
-    if version > 605:
+    if getWxWidgetsVersion() > 315 and not static:
         return wx.BitmapBundle(bmp)
     return bmp
 
