@@ -93,7 +93,9 @@ class JLCPCBTools(wx.Dialog):
         self.layer_icon = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            loadBitmapScaled("mdi-layers-triple-outline.png", self.scale_factor),
+            loadBitmapScaled(
+                "mdi-layers-triple-outline.png", self.scale_factor, static=True
+            ),
             size=HighResWxSize(self.window, wx.Size(24, 36)),
         )
         self.layer_selection = wx.Choice(
@@ -181,16 +183,12 @@ class JLCPCBTools(wx.Dialog):
         self.download_button.Bind(wx.EVT_BUTTON, self.update_library)
 
         self.generate_button.SetBitmap(
-            loadBitmapScaled(
-                "fabrication.png", self.scale_factor, self.KicadBuildVersion
-            )
+            loadBitmapScaled("fabrication.png", self.scale_factor)
         )
         self.generate_button.SetBitmapMargins((2, 0))
 
         self.rotation_button.SetBitmap(
-            loadBitmapScaled(
-                "mdi-format-rotate-90.png", self.scale_factor, self.KicadBuildVersion
-            )
+            loadBitmapScaled("mdi-format-rotate-90.png", self.scale_factor)
         )
         self.rotation_button.SetBitmapMargins((2, 0))
 
@@ -198,7 +196,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-cloud-download-outline.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.download_button.SetBitmapMargins((2, 0))
@@ -433,7 +430,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-database-search-outline.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.select_part_button.SetBitmapMargins((2, 0))
@@ -442,7 +438,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-close-box-outline.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.remove_part_button.SetBitmapMargins((2, 0))
@@ -451,7 +446,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-checkbox-multiple-marked.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.select_alike_button.SetBitmapMargins((2, 0))
@@ -460,7 +454,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "bom-pos.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.toggle_bom_pos_button.SetBitmapMargins((2, 0))
@@ -469,7 +462,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-format-list-bulleted.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.toggle_bom_button.SetBitmapMargins((2, 0))
@@ -478,7 +470,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-crosshairs-gps.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.toggle_pos_button.SetBitmapMargins((2, 0))
@@ -487,7 +478,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-text-box-search-outline.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.part_details_button.SetBitmapMargins((2, 0))
@@ -506,7 +496,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-eye-off-outline.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.hide_bom_button.SetBitmapMargins((2, 0))
@@ -514,7 +503,6 @@ class JLCPCBTools(wx.Dialog):
             loadBitmapScaled(
                 "mdi-eye-off-outline.png",
                 self.scale_factor,
-                self.KicadBuildVersion,
             )
         )
         self.hide_pos_button.SetBitmapMargins((2, 0))
@@ -634,7 +622,6 @@ class JLCPCBTools(wx.Dialog):
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 ),
             ),
             1: wx.dataview.DataViewIconText(
@@ -642,7 +629,6 @@ class JLCPCBTools(wx.Dialog):
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 ),
             ),
         }
@@ -696,14 +682,12 @@ class JLCPCBTools(wx.Dialog):
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_bom_button.SetBitmap(
                 loadBitmapScaled(
                     self.show_icon,
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_bom_button.SetBitmapMargins((2, 0))
@@ -713,14 +697,12 @@ class JLCPCBTools(wx.Dialog):
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_bom_button.SetBitmap(
                 loadBitmapScaled(
                     self.hide_icon,
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_bom_button.SetBitmapMargins((2, 0))
@@ -735,14 +717,12 @@ class JLCPCBTools(wx.Dialog):
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_pos_button.SetBitmap(
                 loadBitmapScaled(
                     self.show_icon,
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_pos_button.SetBitmapMargins((2, 0))
@@ -752,14 +732,12 @@ class JLCPCBTools(wx.Dialog):
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_pos_button.SetBitmap(
                 loadBitmapScaled(
                     self.hide_icon,
                     self.scale_factor,
-                    self.KicadBuildVersion,
                 )
             )
             self.hide_pos_button.SetBitmapMargins((2, 0))

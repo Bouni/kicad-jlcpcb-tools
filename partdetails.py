@@ -92,7 +92,6 @@ class PartDetailsDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-file-document-outline.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         self.openpdf_button.SetBitmapMargins((2, 0))

@@ -309,7 +309,6 @@ class PartSelectorDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-help-circle-outline.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         help_button.SetBitmapMargins((2, 0))
@@ -318,7 +317,6 @@ class PartSelectorDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-database-search-outline.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         self.search_button.SetBitmapMargins((2, 0))
@@ -468,7 +466,6 @@ class PartSelectorDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-check.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         self.select_part_button.SetBitmapMargins((2, 0))
@@ -477,7 +474,6 @@ class PartSelectorDialog(wx.Dialog):
             loadBitmapScaled(
                 "mdi-text-box-search-outline.png",
                 self.parent.scale_factor,
-                self.parent.KicadBuildVersion,
             )
         )
         self.part_details_button.SetBitmapMargins((2, 0))
