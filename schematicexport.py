@@ -12,9 +12,7 @@ class SchematicExport:
         self.parent = parent
 
     def load_schematic(self, paths):
-        self.logger.info(f"SchematicExport worked")
         for path in paths:
-            self.logger.info(f"{path}")
             self._update_schematic(path)
 
     def _update_schematic(self, path):
@@ -66,7 +64,7 @@ class SchematicExport:
             m = pinRx.search( inLine )
             if m:
                 if lastLcsc == "" and newLcsc != "" and lastLoc != "" and lastID != 0 :
-                    self.logger.info(f'found {newLcsc}')
+                    self.logger.info(f'added {newLcsc}')
                     #    (property "LCSC" "C192778" (id 6) (at 173.99 101.6 0)
                     newTxt = "    (property \"LCSC\" \"{}\" (id {}) (at {} 0)".format(newLcsc,(lastID+1),lastLoc)
                     newlines.append(newTxt)
