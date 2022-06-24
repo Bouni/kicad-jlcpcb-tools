@@ -32,6 +32,7 @@ from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
 from .rotations import RotationManagerDialog
+from .schematicexport import SchematicExport
 from .store import Store
 
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -391,6 +392,14 @@ class JLCPCBTools(wx.Dialog):
             HighResWxSize(self.window, wx.Size(175, 38)),
             0,
         )
+        self.export_schematic_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Export To Schematics",
+            wx.DefaultPosition,
+            HighResWxSize(self.window, wx.Size(175, 38)),
+            0,
+        )
 
         self.select_part_button.Bind(wx.EVT_BUTTON, self.select_part)
         self.remove_part_button.Bind(wx.EVT_BUTTON, self.remove_part)
@@ -403,6 +412,7 @@ class JLCPCBTools(wx.Dialog):
         self.hide_bom_button.Bind(wx.EVT_BUTTON, self.OnBomHide)
         self.hide_pos_button.Bind(wx.EVT_BUTTON, self.OnPosHide)
         self.save_all_button.Bind(wx.EVT_BUTTON, self.save_all_mappings)
+        self.export_schematic_button.Bind(wx.EVT_BUTTON, self.export_to_schematic)
 
         toolbar_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.remove_part_button, 0, wx.ALL, 5)
@@ -415,6 +425,7 @@ class JLCPCBTools(wx.Dialog):
         toolbar_sizer.Add(self.hide_bom_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.hide_pos_button, 0, wx.ALL, 5)
         toolbar_sizer.Add(self.save_all_button, 0, wx.ALL, 5)
+        toolbar_sizer.Add(self.export_schematic_button, 0, wx.ALL, 5)
 
         self.select_part_button.SetBitmap(
             loadBitmapScaled(
@@ -935,6 +946,23 @@ class JLCPCBTools(wx.Dialog):
                 else:
                     self.library.insert_mapping_data(footp, partval, lcscpart)
         self.logger.info(f"All mappings saved")
+
+    def export_to_schematic(self, e):
+        """Dialog to select schematics."""
+        with wx.FileDialog(
+            self,
+            "Select Schematics",
+            "",
+            "",
+            "KiCad V6 Schematics (*.kicad_sch)|*.kicad_sch",
+            wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
+        ) as openFileDialog:
+
+            if openFileDialog.ShowModal() == wx.ID_CANCEL:
+                return
+            paths = openFileDialog.GetPaths()
+            #self._export_schematic_data(paths)
+            SchematicExport(self).load_schematic(paths)
 
     def add_foot_mapping(self, e):
         for item in self.footprint_list.GetSelections():
