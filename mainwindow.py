@@ -982,7 +982,6 @@ class JLCPCBTools(wx.Dialog):
             if openFileDialog.ShowModal() == wx.ID_CANCEL:
                 return
             paths = openFileDialog.GetPaths()
-            #self._export_schematic_data(paths)
             SchematicExport(self).load_schematic(paths)
 
     def add_foot_mapping(self, e):
