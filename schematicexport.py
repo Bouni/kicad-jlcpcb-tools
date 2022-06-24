@@ -5,7 +5,8 @@ import wx
 
 class SchematicExport:
 
-    """A class to export files"""
+    """A class to export Schematic files"""
+    """This only works with KiCad V6 files, if the format changes, this will probably break"""
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
@@ -58,7 +59,7 @@ class SchematicExport:
                 if key == "Reference":
                     lastLoc = m.group(4)
                     for part in store_parts:
-                        if value == part[0]:
+                        if value != part[0]:
                             newLcsc = part[3]
                             break
             #if we hit the pin section without finding a LCSC property, add it
