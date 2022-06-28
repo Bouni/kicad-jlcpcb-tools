@@ -676,7 +676,7 @@ class JLCPCBTools(wx.Dialog):
             )
             self.hide_bom_button.SetBitmap(
                 loadBitmapScaled(
-                    self.show_icon,
+                    "mdi-eye-outline.png",
                     self.scale_factor,
                 )
             )
@@ -691,7 +691,7 @@ class JLCPCBTools(wx.Dialog):
             )
             self.hide_bom_button.SetBitmap(
                 loadBitmapScaled(
-                    self.hide_icon,
+                    "mdi-eye-off-outline.png",
                     self.scale_factor,
                 )
             )
@@ -711,7 +711,7 @@ class JLCPCBTools(wx.Dialog):
             )
             self.hide_pos_button.SetBitmap(
                 loadBitmapScaled(
-                    self.show_icon,
+                    "mdi-eye-outline.png",
                     self.scale_factor,
                 )
             )
@@ -726,7 +726,7 @@ class JLCPCBTools(wx.Dialog):
             )
             self.hide_pos_button.SetBitmap(
                 loadBitmapScaled(
-                    self.hide_icon,
+                    "mdi-eye-off-outline.png",
                     self.scale_factor,
                 )
             )
