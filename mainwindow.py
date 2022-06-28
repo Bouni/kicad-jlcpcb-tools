@@ -610,14 +610,14 @@ class JLCPCBTools(wx.Dialog):
             0: wx.dataview.DataViewIconText(
                 "",
                 loadIconScaled(
-                    "",
+                    "mdi-check-color.png",
                     self.scale_factor,
                 ),
             ),
             1: wx.dataview.DataViewIconText(
                 "",
                 loadIconScaled(
-                    "",
+                    "mdi-close-color.png",
                     self.scale_factor,
                 ),
             ),
