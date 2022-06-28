@@ -23,6 +23,7 @@ from .helpers import (
     get_footprint_by_ref,
     getVersion,
     loadBitmapScaled,
+    loadIconScaled,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
@@ -608,14 +609,14 @@ class JLCPCBTools(wx.Dialog):
         icons = {
             0: wx.dataview.DataViewIconText(
                 "",
-                loadBitmapScaled(
+                loadIconScaled(
                     "",
                     self.scale_factor,
                 ),
             ),
             1: wx.dataview.DataViewIconText(
                 "",
-                loadBitmapScaled(
+                loadIconScaled(
                     "",
                     self.scale_factor,
                 ),
