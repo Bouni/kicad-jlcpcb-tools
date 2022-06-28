@@ -58,6 +58,14 @@ def loadBitmapScaled(filename, scale=1.0, static=False):
     return bmp
 
 
+def loadIconScaled(filename, scale=1.0):
+    """Load a scaled icon, handle differences between Kicad versions"""
+    bmp = loadBitmapScaled(filename, scale=scale, static=False)
+    if getWxWidgetsVersion() > 315:
+        return bmp
+    return wx.Icon(bmp)
+
+
 def natural_sort_collation(a, b):
     """Natural sort collation for use in sqlite."""
     if a == b:
