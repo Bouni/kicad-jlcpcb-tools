@@ -72,6 +72,7 @@ class PartDetailsDialog(wx.Dialog):
             loadBitmapScaled(
                 "placeholder.png",
                 self.parent.scale_factor,
+                static=True
             ),
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 200)),
