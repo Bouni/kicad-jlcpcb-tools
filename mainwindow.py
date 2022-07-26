@@ -55,6 +55,8 @@ class JLCPCBTools(wx.Dialog):
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
         self.project_path = os.path.split(GetBoard().GetFileName())[0]
+        self.board_name = os.path.split(GetBoard().GetFileName())[1]
+        self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
         self.manufacturers = []
@@ -952,8 +954,8 @@ class JLCPCBTools(wx.Dialog):
         with wx.FileDialog(
             self,
             "Select Schematics",
-            "",
-            "",
+            self.project_path,
+            self.schematic_name,
             "KiCad V6 Schematics (*.kicad_sch)|*.kicad_sch",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
         ) as openFileDialog:
