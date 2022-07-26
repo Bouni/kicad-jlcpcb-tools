@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+
 import wx
 
 
@@ -47,11 +48,6 @@ class SchematicExport:
                 key = m.group(1)
                 value = m.group(2)
                 lastID = int(m.group(3))
-                # lastLoc = m.group(4)
-                # self.logger.info(key)
-                # self.logger.info(value)
-                # self.logger.info(lastID)
-                # self.logger.info(lastLoc)
 
                 # found a LCSC property, so update it if needed
                 if key == "LCSC":
@@ -70,7 +66,6 @@ class SchematicExport:
             if m:
                 if lastLcsc == "" and newLcsc != "" and lastLoc != "" and lastID != 0:
                     self.logger.info(f"added {newLcsc}")
-                    #    (property "LCSC" "C192778" (id 6) (at 173.99 101.6 0)
                     newTxt = '    (property "LCSC" "{}" (id {}) (at {} 0)'.format(
                         newLcsc, (lastID + 1), lastLoc
                     )
