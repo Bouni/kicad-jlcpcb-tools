@@ -43,13 +43,18 @@ class SettingsDialog(wx.Dialog):
         # ---------------------------------------------------------------------
 
         h_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        
-        self.tented_vias_setting = wx.StaticBitmap(self, wx.ID_ANY, loadBitmapScaled(
-                "mdi-toggle-switch-off-outline.png",
-                self.parent.scale_factor, True
+
+        self.tented_vias_setting = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled(
+                "mdi-toggle-switch-off-outline.png", self.parent.scale_factor, True
             ),
-                   pos=wx.DefaultPosition, size=(64,64), style=0,
-                   name="tented_vias")
+            pos=wx.DefaultPosition,
+            size=(64, 64),
+            style=0,
+            name="tented_vias",
+        )
 
         self.tented_vias_setting.Bind(wx.EVT_LEFT_DOWN, self.toggle)
 
@@ -57,22 +62,22 @@ class SettingsDialog(wx.Dialog):
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(h_sizer, 1, wx.ALL | wx.EXPAND, 5)
-       
+
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
-        
 
     def toggle(self, e):
         sender = e.GetEventObject()
         name = sender.GetName()
         self.state[name] = not self.state[name]
         bitmaps = ("mdi-toggle-switch-off-outline.png", "mdi-toggle-switch-outline.png")
-        sender.SetBitmap(loadBitmapScaled(
-                bitmaps[int(self.state[name])],
-                self.parent.scale_factor, True
-            ))
-    
+        sender.SetBitmap(
+            loadBitmapScaled(
+                bitmaps[int(self.state[name])], self.parent.scale_factor, True
+            )
+        )
+
     def quit_dialog(self, e):
         self.Destroy()
         self.EndModal(0)

@@ -935,7 +935,6 @@ class JLCPCBTools(wx.Dialog):
                     self.logger.info(f"Found {lcsc}")
         self.populate_footprint_list()
 
-
     def OnRightDown(self, e):
         conMenu = wx.Menu()
         cpmi = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
