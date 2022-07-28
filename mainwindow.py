@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 import os
 import re
@@ -14,6 +15,7 @@ from .events import (
     EVT_POPULATE_FOOTPRINT_LIST_EVENT,
     EVT_RESET_GAUGE_EVENT,
     EVT_UPDATE_GAUGE_EVENT,
+    EVT_UPDATE_SETTING,
 )
 from .fabrication import Fabrication
 from .helpers import (
@@ -63,6 +65,8 @@ class JLCPCBTools(wx.Dialog):
         self.packages = []
         self.library = None
         self.store = None
+        self.settings = None
+        self.load_settings()
         self.Bind(wx.EVT_CLOSE, self.quit_dialog)
 
         # ---------------------------------------------------------------------
@@ -559,6 +563,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_MESSAGE_EVENT, self.display_message)
         self.Bind(EVT_ASSIGN_PART_EVENT, self.assign_part)
         self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
+        self.Bind(EVT_UPDATE_SETTING, self.upadate_settings)
 
         self.enable_toolbar_buttons(False)
 
@@ -1031,6 +1036,21 @@ class JLCPCBTools(wx.Dialog):
                     self.store.set_lcsc(reference, lcsc)
                     self.logger.info(f"Found {lcsc}")
         self.populate_footprint_list()
+
+    def upadate_settings(self, e):
+        """Update the settings on change"""
+        self.settings[e.section][e.setting] = e.value
+        self.save_settings()
+
+    def load_settings(self):
+        """Load settings from settings.json"""
+        with open(os.path.join(PLUGIN_PATH, "settings.json")) as j:
+            self.settings = json.load(j)
+
+    def save_settings(self):
+        """Save settings to settings.json"""
+        with open(os.path.join(PLUGIN_PATH, "settings.json"), "w") as j:
+            json.dump(self.settings, j)
 
     def OnRightDown(self, e):
         conMenu = wx.Menu()
