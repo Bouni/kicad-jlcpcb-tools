@@ -153,7 +153,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
-            name="basic"
+            name="basic",
         )
         extended_label = wx.StaticText(
             self,
@@ -168,7 +168,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
-            name="extended"
+            name="extended",
         )
         stock_label = wx.StaticText(
             self,
@@ -183,7 +183,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
-            name="stock"
+            name="stock",
         )
 
         self.basic_checkbox.SetValue(
@@ -502,13 +502,13 @@ class PartSelectorDialog(wx.Dialog):
     def upadate_settings(self, event):
         """Update the settings on change"""
         wx.PostEvent(
-                self.parent,
-                UpdateSetting(
-                    section="partselector",
-                    setting=event.GetEventObject().GetName(),
-                    value=event.GetEventObject().GetValue(),
-                ),
-            )
+            self.parent,
+            UpdateSetting(
+                section="partselector",
+                setting=event.GetEventObject().GetName(),
+                value=event.GetEventObject().GetValue(),
+            ),
+        )
 
     @staticmethod
     def get_existing_selection(parts):
