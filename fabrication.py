@@ -231,7 +231,7 @@ class Fabrication:
         """Generate placement file (POS)."""
         posname = f"POS-{self.filename.split('.')[0]}.csv"
         self.corrections = self.parent.library.get_all_correction_data()
-
+        aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         with open(
             os.path.join(self.assemblydir, posname), "w", newline="", encoding="utf-8"
         ) as csvfile:
@@ -243,13 +243,14 @@ class Fabrication:
                 for fp in get_footprint_by_ref(self.board, part[0]):
                     if get_exclude_from_pos(fp):
                         continue
+                    position = fp.GetPosition() - aux_orgin
                     writer.writerow(
                         [
                             part[0],
                             part[1],
                             part[2],
-                            ToMM(fp.GetPosition().x),
-                            ToMM(fp.GetPosition().y) * -1,
+                            ToMM(position.x),
+                            ToMM(position.y) * -1,
                             self.fix_rotation(fp),
                             "top" if fp.GetLayer() == 0 else "bottom",
                         ]
