@@ -35,6 +35,7 @@ from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
 from .rotations import RotationManagerDialog
 from .schematicexport import SchematicExport
+from .settings import SettingsDialog
 from .store import Store
 
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -186,6 +187,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(wx.EVT_TOOL, self.manage_rotations, self.rotation_button)
         self.Bind(wx.EVT_TOOL, self.manage_mappings, self.mapping_button)
         self.Bind(wx.EVT_TOOL, self.update_library, self.download_button)
+        self.Bind(wx.EVT_TOOL, self.manage_settings, self.settings_button)
 
         # ---------------------------------------------------------------------
         # ------------------ Right side toolbar List --------------------------
@@ -478,7 +480,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_MESSAGE_EVENT, self.display_message)
         self.Bind(EVT_ASSIGN_PART_EVENT, self.assign_part)
         self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
-        self.Bind(EVT_UPDATE_SETTING, self.upadate_settings)
+        self.Bind(EVT_UPDATE_SETTING, self.update_settings)
 
         self.enable_toolbar_buttons(False)
 
@@ -797,6 +799,25 @@ class JLCPCBTools(wx.Dialog):
         """Manage footprint mappings."""
         PartMapperManagerDialog(self).ShowModal()
 
+    def manage_settings(self, e=None):
+        """Manage settings."""
+        SettingsDialog(self).ShowModal()
+
+    def update_settings(self, e):
+        """Update the settings on change"""
+        self.settings[e.section][e.setting] = e.value
+        self.save_settings()
+
+    def load_settings(self):
+        """Load settings from settings.json"""
+        with open(os.path.join(PLUGIN_PATH, "settings.json")) as j:
+            self.settings = json.load(j)
+
+    def save_settings(self):
+        """Save settings to settings.json"""
+        with open(os.path.join(PLUGIN_PATH, "settings.json"), "w") as j:
+            json.dump(self.settings, j)
+
     def calculate_costs(self, e):
         """Hopefully we will be able to calculate the part costs in the future."""
         pass
@@ -914,20 +935,6 @@ class JLCPCBTools(wx.Dialog):
                     self.logger.info(f"Found {lcsc}")
         self.populate_footprint_list()
 
-    def upadate_settings(self, e):
-        """Update the settings on change"""
-        self.settings[e.section][e.setting] = e.value
-        self.save_settings()
-
-    def load_settings(self):
-        """Load settings from settings.json"""
-        with open(os.path.join(PLUGIN_PATH, "settings.json")) as j:
-            self.settings = json.load(j)
-
-    def save_settings(self):
-        """Save settings to settings.json"""
-        with open(os.path.join(PLUGIN_PATH, "settings.json"), "w") as j:
-            json.dump(self.settings, j)
 
     def OnRightDown(self, e):
         conMenu = wx.Menu()
