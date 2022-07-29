@@ -113,6 +113,8 @@ class Fabrication:
 
         popt.SetPlotViaOnMaskLayer(True)  # Do not tent vias
 
+        popt.SetUseAuxOrigin(True)
+
         popt.SetUseGerberX2format(True)
 
         popt.SetIncludeGerberNetlistInfo(True)
