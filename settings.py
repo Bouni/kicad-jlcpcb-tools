@@ -23,7 +23,6 @@ class SettingsDialog(wx.Dialog):
 
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.state = {"tented_vias": False}
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -42,40 +41,50 @@ class SettingsDialog(wx.Dialog):
         # ------------------------- Change settings ---------------------------
         # ---------------------------------------------------------------------
 
-        h_sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        self.tented_vias_setting = wx.StaticBitmap(
+        self.tented_vias_setting = wx.CheckBox(
             self,
-            wx.ID_ANY,
-            loadBitmapScaled(
-                "mdi-toggle-switch-off-outline.png", self.parent.scale_factor, True
-            ),
+            id=wx.ID_ANY,
+            label="Do not tent vias",
             pos=wx.DefaultPosition,
-            size=(64, 64),
+            size=wx.DefaultSize,
             style=0,
             name="tented_vias",
         )
 
-        self.tented_vias_setting.Bind(wx.EVT_LEFT_DOWN, self.toggle)
+        self.tented_vias_setting.SetToolTip(
+            wx.ToolTip("Whether vias should be coverd by soldermask or not")
+        )
 
-        h_sizer.Add(self.tented_vias_setting)
+        self.tented_vias_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        layout = wx.BoxSizer(wx.VERTICAL)
-        layout.Add(h_sizer, 1, wx.ALL | wx.EXPAND, 5)
+        # ---------------------------------------------------------------------
+        # ---------------------- Main Layout Sizer ----------------------------
+        # ---------------------------------------------------------------------
+
+        layout = wx.GridSizer(10, 2, 0, 0)
+        layout.Add(self.tented_vias_setting, 0, wx.ALL | wx.EXPAND, 10)
 
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
 
-    def toggle(self, e):
-        sender = e.GetEventObject()
-        name = sender.GetName()
-        self.state[name] = not self.state[name]
-        bitmaps = ("mdi-toggle-switch-off-outline.png", "mdi-toggle-switch-outline.png")
-        sender.SetBitmap(
-            loadBitmapScaled(
-                bitmaps[int(self.state[name])], self.parent.scale_factor, True
-            )
+        self.load_settings()
+
+    def load_settings(self):
+        """Load settings and set checkboxes accordingly"""
+        self.tented_vias_setting.SetValue(
+            self.parent.settings.get("gerber", {}).get("tented_vias", True)
+        )
+
+    def update_settings(self, event):
+        """Update and persist a setting that was changed."""
+        wx.PostEvent(
+            self.parent,
+            UpdateSetting(
+                section="gerber",
+                setting=event.GetEventObject().GetName(),
+                value=event.GetEventObject().GetValue(),
+            ),
         )
 
     def quit_dialog(self, e):
