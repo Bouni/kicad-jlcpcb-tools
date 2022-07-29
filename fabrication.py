@@ -111,9 +111,11 @@ class Fabrication:
 
         popt.SetSubtractMaskFromSilk(True)
 
-        popt.SetPlotViaOnMaskLayer(False)  # Set this to True if you need untented vias
-
         popt.SetUseAuxOrigin(True)
+        # Tent vias or not
+        popt.SetPlotViaOnMaskLayer(
+            self.parent.settings.get("gerber", {}).get("tented_vias", True)
+        )  
 
         popt.SetUseGerberX2format(True)
 

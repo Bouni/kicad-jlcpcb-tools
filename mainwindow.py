@@ -805,6 +805,8 @@ class JLCPCBTools(wx.Dialog):
 
     def update_settings(self, e):
         """Update the settings on change"""
+        if not e.section in self.settings:
+            self.settings[e.section] = {}
         self.settings[e.section][e.setting] = e.value
         self.save_settings()
 
