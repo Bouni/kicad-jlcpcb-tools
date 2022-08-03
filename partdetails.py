@@ -139,20 +139,12 @@ class PartDetailsDialog(wx.Dialog):
             headers=headers,
         )
         if r.status_code != requests.codes.ok:
-            wx.MessageBox(
-                "Failed to download part detail from JLCPCB's API",
-                "Error",
-                style=wx.ICON_ERROR,
-            )
-            self.EndModal()
+            self.report_part_data_fetch_error("no JSON data returned")
+
         data = r.json()
         if not data.get("data"):
-            wx.MessageBox(
-                "Failed to download part detail from JLCPCB's API",
-                "Error",
-                style=wx.ICON_ERROR,
-            )
-            self.EndModal()
+            self.report_part_data_fetch_error("no JSON data returned")
+
         parameters = {
             "componentCode": "Component code",
             "firstTypeNameEn": "Primary category",
@@ -232,3 +224,12 @@ class PartDetailsDialog(wx.Dialog):
                 )
             )
         self.pdfurl = data.get("data", {}).get("dataManualUrl")
+
+    def report_part_data_fetch_error(self, reason):
+        wx.MessageBox(
+            f'Failed to download part detail from the JLCPCB API ({reason})\r\n'
+            f'We looked for a part named:\r\n{self.part}\r\n[hint: did you fill in the LCSC field correctly?]',
+            "Error",
+            style=wx.ICON_ERROR,
+        )
+        self.EndModal(-1)
