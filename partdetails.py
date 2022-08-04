@@ -139,11 +139,11 @@ class PartDetailsDialog(wx.Dialog):
             headers=headers,
         )
         if r.status_code != requests.codes.ok:
-            self.report_part_data_fetch_error("no JSON data returned")
+            self.report_part_data_fetch_error("non-OK HTTP response status")
 
         data = r.json()
         if not data.get("data"):
-            self.report_part_data_fetch_error("no JSON data returned")
+            self.report_part_data_fetch_error("returned JSON data does not have expected 'data' attribute")
 
         parameters = {
             "componentCode": "Component code",
