@@ -851,17 +851,53 @@ class JLCPCBTools(wx.Dialog):
                 self.footprint_list.SelectRow(r)
 
     def get_part_details(self, e):
-        """Fetch part details from LCSC and show them in a modal."""
+        """Fetch part details from LCSC and show them one after another each in a modal."""
+        parts = self.get_selected_part_id_from_gui()
+        if not parts:
+            return
+
+        for part in parts:
+            self.show_part_details_dialog(part)
+
+    def get_column_by_name(self, column_title_to_find):
+        """Lookup a column in our main footprint table by matching its title"""
+        for col in self.footprint_list.Columns:
+            if col.Title == column_title_to_find:
+                return col
+        return None
+
+    def get_column_position_by_name(self, column_title_to_find):
+        """Lookup the index of a column in our main footprint table by matching its title"""
+        col = self.get_column_by_name(column_title_to_find)
+        if not col:
+            return -1
+        return self.footprint_list.GetColumnPosition(col)
+
+    def get_selected_part_id_from_gui(self):
+        """Get a list of LCSC part#s currently selected"""
+        lcsc_ids_selected = []
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
-                return
-            part = self.footprint_list.GetTextValue(row, 3)
-            if part != "":
-                self.busy_cursor = wx.BusyCursor()
-                dialog = PartDetailsDialog(self, part)
-                del self.busy_cursor
-                dialog.ShowModal()
+                continue
+
+            lcsc_id = self.get_row_item_in_column(row, "LCSC")
+            lcsc_ids_selected.append(lcsc_id)
+
+        return lcsc_ids_selected
+
+    def get_row_item_in_column(self, row, column_title):
+        return self.footprint_list.GetTextValue(row, self.get_column_position_by_name(column_title))
+
+    def show_part_details_dialog(self, part):
+        wx.BeginBusyCursor()
+        try:
+            self.logger.info(f"Opening PartDetailsDialog window for part with value: '{part} (this should be "
+                             f"an LCSC identifier)'")
+            dialog = PartDetailsDialog(self, part)
+            dialog.ShowModal()
+        finally:
+            wx.EndBusyCursor()
 
     def update_library(self, e=None):
         """Update the library from the JLCPCB CSV file."""
