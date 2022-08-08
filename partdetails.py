@@ -143,7 +143,9 @@ class PartDetailsDialog(wx.Dialog):
 
         data = r.json()
         if not data.get("data"):
-            self.report_part_data_fetch_error("returned JSON data does not have expected 'data' attribute")
+            self.report_part_data_fetch_error(
+                "returned JSON data does not have expected 'data' attribute"
+            )
 
         parameters = {
             "componentCode": "Component code",
@@ -227,8 +229,8 @@ class PartDetailsDialog(wx.Dialog):
 
     def report_part_data_fetch_error(self, reason):
         wx.MessageBox(
-            f'Failed to download part detail from the JLCPCB API ({reason})\r\n'
-            f'We looked for a part named:\r\n{self.part}\r\n[hint: did you fill in the LCSC field correctly?]',
+            f"Failed to download part detail from the JLCPCB API ({reason})\r\n"
+            f"We looked for a part named:\r\n{self.part}\r\n[hint: did you fill in the LCSC field correctly?]",
             "Error",
             style=wx.ICON_ERROR,
         )
