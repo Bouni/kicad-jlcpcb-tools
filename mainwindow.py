@@ -887,13 +887,15 @@ class JLCPCBTools(wx.Dialog):
         return lcsc_ids_selected
 
     def get_row_item_in_column(self, row, column_title):
-        return self.footprint_list.GetTextValue(row, self.get_column_position_by_name(column_title))
+        return self.footprint_list.GetTextValue(
+            row, self.get_column_position_by_name(column_title)
+        )
 
     def show_part_details_dialog(self, part):
         wx.BeginBusyCursor()
         try:
-            self.logger.info(f"Opening PartDetailsDialog window for part with value: '{part} (this should be "
-                             f"an LCSC identifier)'")
+            # self.logger.info(f"Opening PartDetailsDialog window for part with value: '{part} (this should be "
+            #                 f"an LCSC identifier)'")
             dialog = PartDetailsDialog(self, part)
             dialog.ShowModal()
         finally:
