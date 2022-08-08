@@ -244,7 +244,7 @@ class JLCPCBTools(wx.Dialog):
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        self.lcsc = self.footprint_list.AppendTextColumn(
+        self.type_column = self.footprint_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(self.scale_factor * 100),
