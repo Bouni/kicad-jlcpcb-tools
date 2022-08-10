@@ -58,7 +58,7 @@ class SchematicExport:
                 if key == "Reference":
                     lastLoc = m.group(4)
                     for part in store_parts:
-                        if value != part[0]:
+                        if value == part[0]:
                             newLcsc = part[3]
                             break
             # if we hit the pin section without finding a LCSC property, add it
