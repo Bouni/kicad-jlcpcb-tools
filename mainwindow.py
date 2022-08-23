@@ -209,7 +209,7 @@ class JLCPCBTools(wx.Dialog):
                 self.scale_factor,
             ),
             "Assign a LCSC number to a footprint",
-            )
+        )
 
         self.remove_part_button = self.right_toolbar.AddTool(
             ID_REMOVE_PART,
@@ -608,11 +608,11 @@ class JLCPCBTools(wx.Dialog):
         )
         self.right_toolbar.SetToolNormalBitmap(
             ID_HIDE_BOM,
-                loadBitmapScaled(
+            loadBitmapScaled(
                 state[int(self.hide_bom_parts)][0],
-                    self.scale_factor,
+                self.scale_factor,
             ),
-                )
+        )
         self.hide_bom_button.SetLabel(state[int(self.hide_bom_parts)][1])
         self.populate_footprint_list()
 
@@ -625,11 +625,11 @@ class JLCPCBTools(wx.Dialog):
         )
         self.right_toolbar.SetToolNormalBitmap(
             ID_HIDE_POS,
-                loadBitmapScaled(
+            loadBitmapScaled(
                 state[int(self.hide_pos_parts)][0],
-                    self.scale_factor,
+                self.scale_factor,
             ),
-                )
+        )
         self.hide_pos_button.SetLabel(state[int(self.hide_pos_parts)][1])
         self.populate_footprint_list()
 
