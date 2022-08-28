@@ -54,6 +54,8 @@ See [issue #94](https://github.com/Bouni/kicad-jlcpcb-tools/issues/94) for more 
 
 ## Usage 🥳
 
+To access the plugin choose `Tools->External Plugins->JLCPCB Tools` from the _PCB Editor_ menus
+
 Checkout this screencast, it shows quickly how to use this plugin:
 
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
