@@ -108,7 +108,7 @@ class PartSelectorDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(200, 24)),
             wx.TE_PROCESS_ENTER,
         )
-        self.category.SetHint("e.g. Resistor")
+        self.category.SetHint("e.g. Resistors")
 
         part_no_label = wx.StaticText(
             self,
