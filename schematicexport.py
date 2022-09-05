@@ -50,7 +50,7 @@ class SchematicExport:
         for line in lines:
             inLine = line.rstrip()
             outLine = inLine
-            if "(symbol (lib_id" in inLine: #skip library section
+            if "(symbol (lib_id" in inLine:  # skip library section
                 partSection = True
             m = propRx.search(inLine)
             if m and partSection:
@@ -63,7 +63,9 @@ class SchematicExport:
                     lastLcsc = value
                     if lastLcsc != newLcsc and newLcsc != "":
                         self.logger.info(f"Updating {newLcsc} on {lastRef}")
-                        outLine = outLine.replace("\"" + lastLcsc + "\"", "\"" + newLcsc + "\"")
+                        outLine = outLine.replace(
+                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
+                        )
                         lastLcsc = newLcsc
 
                 if key == "Reference":
