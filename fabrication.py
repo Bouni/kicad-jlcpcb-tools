@@ -220,7 +220,7 @@ class Fabrication:
         with ZipFile(os.path.join(self.gerberdir, zipname), "w") as zipfile:
             for folderName, subfolders, filenames in os.walk(self.gerberdir):
                 for filename in filenames:
-                    if not filename.endswith(("gbr", "drl", "pdf")):
+                    if not filename.endswith(("gbr", "drl", "pdf", "zip")):
                         continue
                     filePath = os.path.join(folderName, filename)
                     zipfile.write(filePath, os.path.basename(filePath))
