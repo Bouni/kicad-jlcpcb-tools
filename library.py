@@ -389,3 +389,11 @@ class Library:
             ),
         )
         self.state = LibraryState.INITIALIZED
+
+    @property
+    def categories(self):
+        """The primary categories in the database."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                res = cur.execute('SELECT DISTINCT "First Category" FROM parts ORDER BY UPPER("First Category")').fetchall()
+                return [c[0] for c in res]
