@@ -142,6 +142,21 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.solder_joints.SetHint("e.g. 2")
 
+        subcategory_label = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Subcategory",
+            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+        )
+        self.subcategory = wx.ComboBox(
+            self,
+            wx.ID_ANY,
+            "",
+            wx.DefaultPosition,
+            HighResWxSize(parent.window, wx.Size(200, 24)),
+        )
+        self.subcategory.SetHint("e.g. Variable Resistors")
+
         basic_label = wx.StaticText(
             self,
             wx.ID_ANY,
@@ -268,37 +283,46 @@ class PartSelectorDialog(wx.Dialog):
         )
 
         search_sizer_three = wx.BoxSizer(wx.VERTICAL)
-        search_sizer_three.Add(basic_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_three.Add(subcategory_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         search_sizer_three.Add(
-            self.basic_checkbox,
-            0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
-            5,
-        )
-        search_sizer_three.Add(extended_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        search_sizer_three.Add(
-            self.extended_checkbox,
-            0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
-            5,
-        )
-        search_sizer_three.Add(stock_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        search_sizer_three.Add(
-            self.assert_stock_checkbox,
+            self.subcategory,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
             5,
         )
 
         search_sizer_four = wx.BoxSizer(wx.VERTICAL)
+        search_sizer_four.Add(basic_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         search_sizer_four.Add(
+            self.basic_checkbox,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
+        search_sizer_four.Add(extended_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_four.Add(
+            self.extended_checkbox,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
+        search_sizer_four.Add(stock_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_four.Add(
+            self.assert_stock_checkbox,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
+
+        search_sizer_five = wx.BoxSizer(wx.VERTICAL)
+        search_sizer_five.Add(
             help_button,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
             5,
         )
-        search_sizer_four.AddSpacer(80)
-        search_sizer_four.Add(
+        search_sizer_five.AddSpacer(80)
+        search_sizer_five.Add(
             self.search_button,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
@@ -326,11 +350,13 @@ class PartSelectorDialog(wx.Dialog):
         search_sizer.Add(search_sizer_two, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_three, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_four, 0, wx.RIGHT, 20)
+        search_sizer.Add(search_sizer_five, 0, wx.RIGHT, 20)
         # search_sizer.Add(help_button, 0, wx.RIGHT, 20)
 
         self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.manufacturer.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.package.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.category.Bind(wx.EVT_COMBOBOX, self.update_subcategories)
         self.category.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.part_no.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.solder_joints.Bind(wx.EVT_TEXT_ENTER, self.search)
@@ -558,6 +584,7 @@ class PartSelectorDialog(wx.Dialog):
             "manufacturer": self.manufacturer.GetValue(),
             "package": self.package.GetValue(),
             "category": self.category.GetValue(),
+            "subcategory": self.subcategory.GetValue(),
             "part_no": self.part_no.GetValue(),
             "solder_joints": self.solder_joints.GetValue(),
             "basic": self.basic_checkbox.GetValue(),
@@ -566,6 +593,12 @@ class PartSelectorDialog(wx.Dialog):
         }
         result = self.parent.library.search(parameters)
         self.populate_part_list(result)
+
+    def update_subcategories(self, e):
+        """Update the possible subcategory selection."""
+        subcategories = self.parent.library.get_subcategories(self.category.GetValue())
+        self.subcategory.Clear()
+        self.subcategory.AppendItems(subcategories)
 
     def populate_part_list(self, parts):
         """Populate the list with the result of the search."""
