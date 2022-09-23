@@ -122,7 +122,12 @@ class Library:
         if "category" in parameters and parameters["category"] != "":
             p = parameters["category"]
             query_chunks.append(
-                f'("First Category" LIKE "{p}" OR "Second Category" LIKE "{p}")'
+                f'"First Category" LIKE "{p}"'
+            )
+        if "subcategory" in parameters and parameters["subcategory"] != "":
+            p = parameters["subcategory"]
+            query_chunks.append(
+                f'"Second Category" LIKE "{p}"'
             )
         if "part_no" in parameters and parameters["part_no"] != "":
             p = parameters["part_no"]
@@ -396,4 +401,12 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 res = cur.execute('SELECT DISTINCT "First Category" FROM parts ORDER BY UPPER("First Category")').fetchall()
+                return [c[0] for c in res]
+
+    def get_subcategories(self, category):
+        """Get the subcategories associated with the given category."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with con as cur:
+                res = cur.execute(f'SELECT DISTINCT "Second Category", "First Category" FROM parts WHERE "First Category" LIKE "{category}" ORDER BY UPPER("Second Category")').fetchall()
+                self.logger.info(res)
                 return [c[0] for c in res]
