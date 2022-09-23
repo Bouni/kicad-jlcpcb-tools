@@ -100,13 +100,13 @@ class PartSelectorDialog(wx.Dialog):
             "Category",
             size=HighResWxSize(parent.window, wx.Size(150, 15)),
         )
-        self.category = wx.TextCtrl(
+        self.category = wx.ComboBox(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
-            wx.TE_PROCESS_ENTER,
+            choices=parent.library.categories
         )
         self.category.SetHint("e.g. Resistors")
 
