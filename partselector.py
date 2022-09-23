@@ -357,6 +357,7 @@ class PartSelectorDialog(wx.Dialog):
         self.manufacturer.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.package.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.category.Bind(wx.EVT_COMBOBOX, self.update_subcategories)
+        self.category.Bind(wx.EVT_TEXT, self.update_subcategories)
         self.category.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.part_no.Bind(wx.EVT_TEXT_ENTER, self.search)
         self.solder_joints.Bind(wx.EVT_TEXT_ENTER, self.search)
@@ -596,9 +597,10 @@ class PartSelectorDialog(wx.Dialog):
 
     def update_subcategories(self, e):
         """Update the possible subcategory selection."""
-        subcategories = self.parent.library.get_subcategories(self.category.GetValue())
         self.subcategory.Clear()
-        self.subcategory.AppendItems(subcategories)
+        if self.category.GetSelection() != wx.NOT_FOUND:
+            subcategories = self.parent.library.get_subcategories(self.category.GetValue())
+            self.subcategory.AppendItems(subcategories)
 
     def populate_part_list(self, parts):
         """Populate the list with the result of the search."""
