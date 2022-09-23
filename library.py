@@ -43,6 +43,7 @@ class Library:
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "parts.db")
         self.state = None
+        self.category_map = {}
         self.setup()
         self.check_library()
 
@@ -397,16 +398,20 @@ class Library:
 
     @property
     def categories(self):
-        """The primary categories in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                res = cur.execute('SELECT DISTINCT "First Category" FROM parts ORDER BY UPPER("First Category")').fetchall()
-                return [c[0] for c in res]
+        """The primary categories in the database.
+        
+        Caching the relatively small set of category and subcategory maps
+        gives a noticeable speed improvement over repeatedly reading the
+        information from the on-disk database.
+        """
+        if self.category_map == {}:
+            # Populate the cache.
+            with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+                with con as cur:
+                    for row in cur.execute(f'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'):
+                        self.category_map.setdefault(row[0],[]).append(row[1])
+        return list(self.category_map.keys())
 
     def get_subcategories(self, category):
         """Get the subcategories associated with the given category."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                res = cur.execute(f'SELECT DISTINCT "Second Category", "First Category" FROM parts WHERE "First Category" LIKE "{category}" ORDER BY UPPER("Second Category")').fetchall()
-                self.logger.info(res)
-                return [c[0] for c in res]
+        return self.category_map[category]
