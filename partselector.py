@@ -106,7 +106,7 @@ class PartSelectorDialog(wx.Dialog):
             "",
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
-            choices=parent.library.categories
+            choices=parent.library.categories,
         )
         self.category.SetHint("e.g. Resistors")
 
@@ -283,7 +283,9 @@ class PartSelectorDialog(wx.Dialog):
         )
 
         search_sizer_three = wx.BoxSizer(wx.VERTICAL)
-        search_sizer_three.Add(subcategory_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_three.Add(
+            subcategory_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
         search_sizer_three.Add(
             self.subcategory,
             0,
@@ -599,7 +601,9 @@ class PartSelectorDialog(wx.Dialog):
         """Update the possible subcategory selection."""
         self.subcategory.Clear()
         if self.category.GetSelection() != wx.NOT_FOUND:
-            subcategories = self.parent.library.get_subcategories(self.category.GetValue())
+            subcategories = self.parent.library.get_subcategories(
+                self.category.GetValue()
+            )
             self.subcategory.AppendItems(subcategories)
 
     def populate_part_list(self, parts):

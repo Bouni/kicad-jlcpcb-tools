@@ -122,14 +122,10 @@ class Library:
             query_chunks.append(f'"Package" LIKE "{p}"')
         if "category" in parameters and parameters["category"] != "":
             p = parameters["category"]
-            query_chunks.append(
-                f'"First Category" LIKE "{p}"'
-            )
+            query_chunks.append(f'"First Category" LIKE "{p}"')
         if "subcategory" in parameters and parameters["subcategory"] != "":
             p = parameters["subcategory"]
-            query_chunks.append(
-                f'"Second Category" LIKE "{p}"'
-            )
+            query_chunks.append(f'"Second Category" LIKE "{p}"')
         if "part_no" in parameters and parameters["part_no"] != "":
             p = parameters["part_no"]
             query_chunks.append(f'"MFR.Part" LIKE "{p}"')
@@ -399,7 +395,7 @@ class Library:
     @property
     def categories(self):
         """The primary categories in the database.
-        
+
         Caching the relatively small set of category and subcategory maps
         gives a noticeable speed improvement over repeatedly reading the
         information from the on-disk database.
@@ -408,8 +404,10 @@ class Library:
             # Populate the cache.
             with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
                 with con as cur:
-                    for row in cur.execute(f'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'):
-                        self.category_map.setdefault(row[0],[]).append(row[1])
+                    for row in cur.execute(
+                        f'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
+                    ):
+                        self.category_map.setdefault(row[0], []).append(row[1])
         return list(self.category_map.keys())
 
     def get_subcategories(self, category):
