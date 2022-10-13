@@ -959,7 +959,9 @@ class JLCPCBTools(wx.Dialog):
             success = wx.TheClipboard.GetData(text_data)
             wx.TheClipboard.Close()
         if success:
-            lcsc = text_data.GetText()
+            lcsc = self.sanitize_lcsc(text_data.GetText())
+            if lcsc == "":
+                return
             for item in self.footprint_list.GetSelections():
                 row = self.footprint_list.ItemToRow(item)
                 reference = self.footprint_list.GetTextValue(row, 0)
@@ -1031,6 +1033,12 @@ class JLCPCBTools(wx.Dialog):
                     self.store.set_lcsc(reference, lcsc)
                     self.logger.info(f"Found {lcsc}")
         self.populate_footprint_list()
+
+    def sanitize_lcsc(self, lcsc_PN):
+        m = re.search('C\\d+', lcsc_PN, re.IGNORECASE)
+        if m:
+            return m.group(0)
+        return ""
 
     def OnRightDown(self, e):
         conMenu = wx.Menu()
