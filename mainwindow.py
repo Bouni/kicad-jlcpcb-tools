@@ -923,8 +923,12 @@ class JLCPCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             reference = self.footprint_list.GetTextValue(row, 0)
+            value = self.footprint_list.GetTextValue(row, 1)
             lcsc = self.footprint_list.GetTextValue(row, 3)
-            selection[reference] = lcsc
+            if lcsc != "":
+                selection[reference] = lcsc
+            else:
+                selection[reference] = value
         PartSelectorDialog(self, selection).ShowModal()
 
     def generate_fabrication_data(self, e):
