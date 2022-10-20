@@ -69,6 +69,9 @@ class Fabrication:
             # we need to divide by 10 to get 180 out of 1800 for example.
             # This might be a bug in 5.99 / 6.0 RC
             rotation = original / 10
+        if footprint.GetLayer() != 0:
+            # bottom angles need to be mirrored on Y-axis
+            rotation = (180 - rotation) % 360
         for regex, correction in self.corrections:
             if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
                 if footprint.GetLayer() == 0:
