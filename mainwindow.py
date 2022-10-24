@@ -1035,7 +1035,7 @@ class JLCPCBTools(wx.Dialog):
         self.populate_footprint_list()
 
     def sanitize_lcsc(self, lcsc_PN):
-        m = re.search('C\\d+', lcsc_PN, re.IGNORECASE)
+        m = re.search("C\\d+", lcsc_PN, re.IGNORECASE)
         if m:
             return m.group(0)
         return ""
