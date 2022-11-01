@@ -979,7 +979,7 @@ class JLCPCBTools(wx.Dialog):
                 return
             footp = self.footprint_list.GetTextValue(row, 2)
             if footp != "":
-                RotationManagerDialog(self, "^" + footp).ShowModal()
+                RotationManagerDialog(self, "^" + re.escape(footp)).ShowModal()
 
     def save_all_mappings(self, e):
         for r in range(self.footprint_list.GetItemCount()):
