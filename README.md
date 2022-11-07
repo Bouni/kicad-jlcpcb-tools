@@ -81,14 +81,14 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 Generate all necessary assembly files for your board with a simple click.
 
-A new directory called `jlcpcb` is created, and in there, two separate folders are created, `gerber` and `assembly`.
+A new directory called `jlcpcb` is created, and in there, two separate folders are created, `gerber` and `production_files`.
 
-In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and zipped, ready for upload to JLCPCB.
+In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and zipped into the `production_files` folder, ready for upload to JLCPCB.
 The zipfile is named `GERBER-<projectname>.zip`
 
-In the assembly folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
+Also in the `production_files` folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
 
-Footprints are included into the BOM and CPL files according to their `exclude from BOM` and `exclude from CPL` attributes.
+Footprints are included into the BOM and CPL files according to their `exclude from BOM` and `exclude from POS` attributes.
 
 ![The fabrication files](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/fabrication_files.png)
 
