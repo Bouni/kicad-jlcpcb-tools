@@ -229,13 +229,13 @@ class Fabrication:
                     zipfile.write(filePath, os.path.basename(filePath))
         self.logger.info(f"Finished generating ZIP file")
 
-    def generate_pos(self):
-        """Generate placement file (POS)."""
-        posname = f"POS-{self.filename.split('.')[0]}.csv"
+    def generate_cpl(self):
+        """Generate placement file (CPL)."""
+        cplname = f"CPL-{self.filename.split('.')[0]}.csv"
         self.corrections = self.parent.library.get_all_correction_data()
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         with open(
-            os.path.join(self.assemblydir, posname), "w", newline="", encoding="utf-8"
+            os.path.join(self.assemblydir, cplname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
@@ -257,7 +257,7 @@ class Fabrication:
                             "top" if fp.GetLayer() == 0 else "bottom",
                         ]
                     )
-        self.logger.info(f"Finished generating POS file")
+        self.logger.info(f"Finished generating CPL file")
 
     def generate_bom(self):
         """Generate BOM file."""

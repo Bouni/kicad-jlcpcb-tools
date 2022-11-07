@@ -942,7 +942,7 @@ class JLCPCBTools(wx.Dialog):
         self.fabrication.generate_geber(layer_count)
         self.fabrication.generate_excellon()
         self.fabrication.zip_gerber_excellon()
-        self.fabrication.generate_pos()
+        self.fabrication.generate_cpl()
         self.fabrication.generate_bom()
 
     def copy_part_lcsc(self, e):
