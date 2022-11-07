@@ -235,7 +235,7 @@ class Fabrication:
         self.corrections = self.parent.library.get_all_correction_data()
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         with open(
-            os.path.join(self.outputdir, cplname), "w", newline="", encoding="utf-8"
+             os.path.join(self.outputdir, cplname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
