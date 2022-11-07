@@ -48,8 +48,8 @@ class Fabrication:
 
     def create_folders(self):
         """Create output folders if they not already exist."""
-        self.assemblydir = os.path.join(self.path, "jlcpcb", "assembly")
-        Path(self.assemblydir).mkdir(parents=True, exist_ok=True)
+        self.outputdir = os.path.join(self.path, "jlcpcb", "production_files")
+        Path(self.outputdir).mkdir(parents=True, exist_ok=True)
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
 
@@ -220,7 +220,7 @@ class Fabrication:
     def zip_gerber_excellon(self):
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
         zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
-        with ZipFile(os.path.join(self.gerberdir, zipname), "w") as zipfile:
+        with ZipFile(os.path.join(self.outputdir, zipname), "w") as zipfile:
             for folderName, subfolders, filenames in os.walk(self.gerberdir):
                 for filename in filenames:
                     if not filename.endswith(("gbr", "drl", "pdf")):
@@ -235,7 +235,7 @@ class Fabrication:
         self.corrections = self.parent.library.get_all_correction_data()
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         with open(
-            os.path.join(self.assemblydir, cplname), "w", newline="", encoding="utf-8"
+            os.path.join(self.outputdir, cplname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
@@ -263,7 +263,7 @@ class Fabrication:
         """Generate BOM file."""
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
         with open(
-            os.path.join(self.assemblydir, bomname), "w", newline="", encoding="utf-8"
+            os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
