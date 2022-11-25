@@ -77,10 +77,18 @@ def natural_sort_collation(a, b):
 
 
 def get_lcsc_value(fp):
-    """Get lcsc from all properties and allow various variants."""
-    lcsc_keys = [key for key in fp.GetProperties().keys() if "lcsc" in key.lower()]
+    """Get lcsc number (C123456 for example) from all properties and allow various variants and also validate the value."""
+    tokens = ["lcsc", "jlc"]
+    lcsc_keys = [
+        key
+        for key in fp.GetProperties().keys()
+        if any(t in key.lower() for t in tokens)
+    ]
     if lcsc_keys:
-        return fp.GetProperties().get(lcsc_keys.pop(0), "")
+        for match in lcsc_keys:
+            value = fp.GetProperties().get(match)
+            if re.match(r"C\d+", value):
+                return value
     return ""
 
 
