@@ -219,12 +219,11 @@ class Library:
         """get all corrections from the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
-                return [
-                    list(c)
-                    for c in cur.execute(
-                        f"SELECT * FROM rotation ORDER BY regex ASC"
-                    ).fetchall()
-                ]
+                try:
+                    result = cur.execute(f"SELECT * FROM rotation ORDER BY regex ASC").fetchall()
+                    return [list(c) for c in result]
+                except sqlite3.OperationalError:
+                    return []
 
     def create_mapping_table(self):
         """Create the mapping table."""
@@ -315,9 +314,16 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 numbers = ",".join([f'"{n}"' for n in lcsc])
-                return cur.execute(
-                    f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where "LCSC Part" IN ({numbers})'
-                ).fetchall()
+
+                try:
+                    return cur.execute(
+                        f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where "LCSC Part" IN ({numbers})'
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    # parts tabble doesn't exist. can indicate our database is corrupt or we weren't able
+                    # to populate from the URL.
+                    # act like we returned nothing then.
+                    return []
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
@@ -343,6 +349,14 @@ class Library:
                     style="error",
                 ),
             )
+
+            # TODO: probably should indicate some kind of error state here
+            # for now let's try and get the app to just continue.
+            self.state = LibraryState.INITIALIZED
+
+            # god have mercy on our souls:
+            self.create_tables(["placeholder_invalid_column_fix_errors"])
+
             return
         size = int(r.headers.get("Content-Length"))
         filename = r.headers.get("Content-Disposition").split("=")[1]
@@ -355,11 +369,7 @@ class Library:
         )
         csv_reader = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
         headers = next(csv_reader)
-        self.create_meta_table()
-        self.delete_parts_table()
-        self.create_parts_table(headers)
-        self.create_rotation_table()
-        self.create_mapping_table()
+        self.create_tables(headers)
         buffer = []
         part_count = 0
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
@@ -391,6 +401,13 @@ class Library:
             ),
         )
         self.state = LibraryState.INITIALIZED
+
+    def create_tables(self, headers):
+        self.create_meta_table()
+        self.delete_parts_table()
+        self.create_parts_table(headers)
+        self.create_rotation_table()
+        self.create_mapping_table()
 
     @property
     def categories(self):
