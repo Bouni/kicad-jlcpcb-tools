@@ -23,7 +23,6 @@ from pcbnew import (  # pylint: disable=import-error
     F_Mask,
     F_Paste,
     F_SilkS,
-    GetBoard,
     Refresh,
     ToMM,
 )
@@ -42,10 +41,10 @@ from .helpers import get_exclude_from_pos, get_footprint_by_ref
 class Fabrication:
     """Contains all functionality to generate the JLCPCB production files."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, board):
         self.parent = parent
         self.logger = logging.getLogger(__name__)
-        self.board = GetBoard()
+        self.board = board
         self.corrections = []
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()

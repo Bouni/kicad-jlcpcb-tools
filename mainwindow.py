@@ -67,10 +67,17 @@ ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
 
-class JLCPCBTools(wx.Dialog):
-    """Main Windows class for this plugin."""
+class BoardProvider:
+    """wrap Kicad's GetBoard() function, can be overridden by testing/dev code if needed."""
 
-    def __init__(self, parent):
+    def get_board(self):
+        """Retrieve the board implementation."""
+        return GetBoard()
+
+class JLCPCBTools(wx.Dialog):
+    """JLCPCBTools main dialog."""
+
+    def __init__(self, parent, board_provider=BoardProvider()):
         while not wx.GetApp():
             time.sleep(1)
         wx.Dialog.__init__(
@@ -82,12 +89,14 @@ class JLCPCBTools(wx.Dialog):
             size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
+        self.board_provider = board_provider
         self.KicadBuildVersion = GetBuildVersion()
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
-        self.project_path = os.path.split(GetBoard().GetFileName())[0]
-        self.board_name = os.path.split(GetBoard().GetFileName())[1]
+        board = self.get_board()
+        self.project_path = os.path.split(board.GetFileName())[0]
+        self.board_name = os.path.split(board.GetFileName())[1]
         self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -518,13 +527,13 @@ class JLCPCBTools(wx.Dialog):
 
     def init_store(self):
         """Initialize the store of part assignments."""
-        self.store = Store(self, self.project_path)
+        self.store = Store(self, self.project_path, self.get_board())
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
 
     def init_fabrication(self):
         """Initialize the fabrication."""
-        self.fabrication = Fabrication(self)
+        self.fabrication = Fabrication(self, self.get_board())
 
     def reset_gauge(self, *_):
         """Initialize the gauge."""
@@ -575,7 +584,7 @@ class JLCPCBTools(wx.Dialog):
         numbers = []
         parts = []
         for part in self.store.read_all():
-            fp = get_footprint_by_ref(GetBoard(), part[0])[0]
+            fp = get_footprint_by_ref(self.get_board(), part[0])[0]
             if part[3] and part[3] not in numbers:
                 numbers.append(part[3])
             part.insert(4, "")
@@ -698,6 +707,10 @@ class JLCPCBTools(wx.Dialog):
             self.footprint_list.GetSelectedItemsCount() > 0
         )
 
+    def get_board(self):
+        """Retrieve the board implementation."""
+        return self.board_provider.get_board()
+
     def enable_all_buttons(self, state):
         """Control state of all the buttons."""
         self.enable_top_buttons(state)
@@ -730,7 +743,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)[0]
+            fp = get_footprint_by_ref(self.get_board(), ref)[0]
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, bom)
@@ -749,7 +762,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)[0]
+            fp = get_footprint_by_ref(self.get_board(), ref)[0]
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, bom)
             self.footprint_list.SetValue(
@@ -763,7 +776,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)[0]
+            fp = get_footprint_by_ref(self.get_board(), ref)[0]
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, pos)
             self.footprint_list.SetValue(
