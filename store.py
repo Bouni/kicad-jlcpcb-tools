@@ -19,9 +19,10 @@ from .helpers import (
 class Store:
     """A storage class to get data from a sqlite database and write it back"""
 
-    def __init__(self, project_path):
+    def __init__(self, project_path, board):
         self.logger = logging.getLogger(__name__)
         self.project_path = project_path
+        self.board = board
         self.datadir = os.path.join(self.project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
         self.order_by = "reference"
@@ -191,8 +192,7 @@ class Store:
 
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
-        board = GetBoard()
-        for fp in get_valid_footprints(board):
+        for fp in get_valid_footprints(self.board):
             part = [
                 fp.GetReference(),
                 fp.GetValue(),
@@ -237,7 +237,7 @@ class Store:
 
     def clean_database(self):
         """Delete all parts from the database that are no longer present on the board."""
-        refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(GetBoard())]
+        refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(self.board)]
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 cur.execute(
