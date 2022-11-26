@@ -33,6 +33,7 @@ class LibraryState(Enum):
 class Library:
     """A storage class to get data from a sqlite database and write it back"""
 
+    # no longer works
     CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
 
     def __init__(self, parent):
@@ -339,7 +340,8 @@ class Library:
                 self.parent,
                 MessageEvent(
                     title="Download Error",
-                    text=f"Failed to download the JLCPCB database CSV, error code {r.status_code}",
+                    text=f"Failed to download the JLCPCB database CSV, error code {r.status_code}\n"+"URL was:\n"
+                                                                                                     "'{self.CSV_URL}'",
                     style="error",
                 ),
             )
