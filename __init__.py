@@ -17,6 +17,8 @@ from .plugin import JLCPCBPlugin
 # LOGGER = logging.getLogger()
 
 # try:
-JLCPCBPlugin().register()
+if __name__ != '__main__':
+    JLCPCBPlugin().register()
+
 # except Exception as e:
 # LOGGER.debug(repr(e))
