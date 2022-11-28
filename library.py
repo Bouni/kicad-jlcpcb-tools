@@ -220,7 +220,9 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             with con as cur:
                 try:
-                    result = cur.execute(f"SELECT * FROM rotation ORDER BY regex ASC").fetchall()
+                    result = cur.execute(
+                        f"SELECT * FROM rotation ORDER BY regex ASC"
+                    ).fetchall()
                     return [list(c) for c in result]
                 except sqlite3.OperationalError:
                     return []
