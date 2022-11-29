@@ -340,9 +340,7 @@ class Library:
         # Download the zipped parts database
         fallback_url = "https://jlc.bouni.de/parts.zip"
         with open(os.path.join(self.datadir, "parts.zip"), "wb") as f:
-            r = requests.get(
-            fallback_url, allow_redirects=True, stream=True
-            )
+            r = requests.get(fallback_url, allow_redirects=True, stream=True)
             if r.status_code != requests.codes.ok:
                 wx.PostEvent(
                     self.parent,
@@ -357,7 +355,7 @@ class Library:
                 self.state = LibraryState.INITIALIZED
                 self.create_tables(["placeholder_invalid_column_fix_errors"])
                 return
-        
+
             size = int(r.headers.get("Content-Length"))
             self.logger.debug(
                 f"Download parts db with a size of {(size / 1024 / 1024):.2f}MB"
@@ -369,9 +367,9 @@ class Library:
         # delete existing parts.db
         os.unlink(self.dbfile)
         # unzip downloaded parts.zip
-        with zipfile.ZipFile(os.path.join(self.datadir, "parts.zip"), 'r') as z:
+        with zipfile.ZipFile(os.path.join(self.datadir, "parts.zip"), "r") as z:
             z.extractall(self.datadir)
-        
+
         wx.PostEvent(self.parent, ResetGaugeEvent())
         end = time.time()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
