@@ -11,6 +11,7 @@ from enum import Enum
 from ntpath import join
 from pathlib import Path
 from threading import Thread
+import zipfile 
 
 import requests
 import wx
