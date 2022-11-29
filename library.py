@@ -337,63 +337,41 @@ class Library:
         self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
-        headers = {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36",
-        }
-        r = requests.get(
-            self.CSV_URL, allow_redirects=True, stream=True, headers=headers
-        )
-        if r.status_code != requests.codes.ok:
-            wx.PostEvent(
-                self.parent,
-                MessageEvent(
-                    title="Download Error",
-                    text=f"Failed to download the JLCPCB database CSV, error code {r.status_code}\n"
-                    + "URL was:\n"
-                    "'{self.CSV_URL}'",
-                    style="error",
-                ),
+        # Download the zipped parts database
+        fallback_url = "https://jlc.bouni.de/parts.zip"
+        with open(os.path.join(self.datadir, "parts.zip"), "wb") as f:
+            r = requests.get(
+            fallback_url, allow_redirects=True, stream=True
             )
-
-            # TODO: probably should indicate some kind of error state here
-            # for now let's try and get the app to just continue.
-            self.state = LibraryState.INITIALIZED
-
-            # god have mercy on our souls:
-            self.create_tables(["placeholder_invalid_column_fix_errors"])
-
-            return
-        size = int(r.headers.get("Content-Length"))
-        filename = r.headers.get("Content-Disposition").split("=")[1]
-        date = "unknown"
-        _date = re.search(r"(\d{4})(\d{2})(\d{2})", filename)
-        if _date:
-            date = f"{_date.group(1)}-{_date.group(2)}-{_date.group(3)}"
-        self.logger.debug(
-            f"Download {filename} with a size of {(size / 1024 / 1024):.2f}MB"
-        )
-        csv_reader = csv.reader(map(lambda x: x.decode("gbk"), r.raw))
-        headers = next(csv_reader)
-        self.create_tables(headers)
-        buffer = []
-        part_count = 0
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            cols = ",".join(["?"] * len(headers))
-            query = f"INSERT INTO parts VALUES ({cols})"
-
-            for count, row in enumerate(csv_reader):
-                row.pop()
-                buffer.append(row)
-                if count % 1000 == 0:
-                    progress = r.raw.tell() / size * 100
-                    wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
-                    con.executemany(query, buffer)
-                    buffer = []
-                part_count = count
-            if buffer:
-                con.executemany(query, buffer)
-            con.commit()
-        self.update_meta_data(filename, size, part_count, date, dt.now().isoformat())
+            if r.status_code != requests.codes.ok:
+                wx.PostEvent(
+                    self.parent,
+                    MessageEvent(
+                        title="Download Error",
+                        text=f"Failed to download the JLCPCB database, error code {r.status_code}\n"
+                        + "URL was:\n"
+                        f"'{fallback_url}'",
+                        style="error",
+                    ),
+                )
+                self.state = LibraryState.INITIALIZED
+                self.create_tables(["placeholder_invalid_column_fix_errors"])
+                return
+        
+            size = int(r.headers.get("Content-Length"))
+            self.logger.debug(
+                f"Download parts db with a size of {(size / 1024 / 1024):.2f}MB"
+            )
+            for data in r.iter_content(chunk_size=4096):
+                f.write(data)
+                progress = f.tell() / size * 100
+                wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
+        # delete existing parts.db
+        os.unlink(self.dbfile)
+        # unzip downloaded parts.zip
+        with zipfile.ZipFile(os.path.join(self.datadir, "parts.zip"), 'r') as z:
+            z.extractall(self.datadir)
+        
         wx.PostEvent(self.parent, ResetGaugeEvent())
         end = time.time()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
