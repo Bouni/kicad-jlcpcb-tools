@@ -341,48 +341,77 @@ class Library:
         # Download the zipped parts database
         fallback_url = "https://jlc.bouni.de/parts.zip"
         with open(os.path.join(self.datadir, "parts.zip"), "wb") as f:
-            r = requests.get(fallback_url, allow_redirects=True, stream=True)
-            if r.status_code != requests.codes.ok:
+            try:
+                r = requests.get(fallback_url, allow_redirects=True, stream=True)
+                if r.status_code != requests.codes.ok:
+                    wx.PostEvent(
+                        self.parent,
+                        MessageEvent(
+                            title="Download Error",
+                            text=f"Failed to download the JLCPCB database, error code {r.status_code}\n"
+                            + "URL was:\n"
+                            f"'{fallback_url}'",
+                            style="error",
+                        ),
+                    )
+                    self.state = LibraryState.INITIALIZED
+                    self.create_tables(["placeholder_invalid_column_fix_errors"])
+                    return
+
+                size = int(r.headers.get("Content-Length"))
+                self.logger.debug(
+                    f"Download parts db with a size of {(size / 1024 / 1024):.2f}MB"
+                )
+                for data in r.iter_content(chunk_size=4096):
+                    f.write(data)
+                    progress = f.tell() / size * 100
+                    wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
+            except Exception as e:
                 wx.PostEvent(
                     self.parent,
                     MessageEvent(
                         title="Download Error",
-                        text=f"Failed to download the JLCPCB database, error code {r.status_code}\n"
-                        + "URL was:\n"
-                        f"'{fallback_url}'",
-                        style="error",
+                        text=f"Failed to download the JLCPCB database, {e}",
+                        style="error"
                     ),
                 )
                 self.state = LibraryState.INITIALIZED
                 self.create_tables(["placeholder_invalid_column_fix_errors"])
                 return
-
-            size = int(r.headers.get("Content-Length"))
-            self.logger.debug(
-                f"Download parts db with a size of {(size / 1024 / 1024):.2f}MB"
-            )
-            for data in r.iter_content(chunk_size=4096):
-                f.write(data)
-                progress = f.tell() / size * 100
-                wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
-        # delete existing parts.db
-        os.unlink(self.dbfile)
+        # rename existing parts.db
+        if os.path.exists(self.dbfile):
+            os.rename(self.dbfile, f"{self.dbfile}.bak")
         # unzip downloaded parts.zip
         with zipfile.ZipFile(os.path.join(self.datadir, "parts.zip"), "r") as z:
             z.extractall(self.datadir)
-
-        wx.PostEvent(self.parent, ResetGaugeEvent())
-        end = time.time()
-        wx.PostEvent(self.parent, PopulateFootprintListEvent())
-        wx.PostEvent(
-            self.parent,
-            MessageEvent(
-                title="Success",
-                text=f"Successfully downloaded and imported the JLCPCB database in {end-start:.2f} seconds!",
-                style="info",
-            ),
-        )
-        self.state = LibraryState.INITIALIZED
+        # check if dbfile was successfully extracted
+        if not os.path.exists(self.dbfile):
+            if os.path.exists(f"{self.dbfile}.bak"):
+                os.rename(f"{self.dbfile}.bak", self.dbfile)
+                wx.PostEvent(
+                    self.parent,
+                    MessageEvent(
+                        title="Download Error",
+                        text=f"Failed to download the JLCPCB database, db was not extracted from zip",
+                        style="error"
+                    ),
+                )
+                self.state = LibraryState.INITIALIZED
+                self.create_tables(["placeholder_invalid_column_fix_errors"])
+                return
+        else:
+            wx.PostEvent(self.parent, ResetGaugeEvent())
+            end = time.time()
+            wx.PostEvent(self.parent, PopulateFootprintListEvent())
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Success",
+                    text=f"Successfully downloaded and imported the JLCPCB database in {end-start:.2f} seconds!",
+                    style="info",
+                ),
+            )
+            self.state = LibraryState.INITIALIZED
 
     def create_tables(self, headers):
         self.create_meta_table()
