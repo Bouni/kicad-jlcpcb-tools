@@ -372,7 +372,7 @@ class Library:
                     MessageEvent(
                         title="Download Error",
                         text=f"Failed to download the JLCPCB database, {e}",
-                        style="error"
+                        style="error",
                     ),
                 )
                 self.state = LibraryState.INITIALIZED
@@ -393,7 +393,7 @@ class Library:
                     MessageEvent(
                         title="Download Error",
                         text=f"Failed to download the JLCPCB database, db was not extracted from zip",
-                        style="error"
+                        style="error",
                     ),
                 )
                 self.state = LibraryState.INITIALIZED
