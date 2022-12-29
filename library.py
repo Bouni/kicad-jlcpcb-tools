@@ -380,7 +380,7 @@ class Library:
                 return
         # rename existing parts.db
         if os.path.exists(self.dbfile):
-            os.rename(self.dbfile, f"{self.dbfile}.bak")
+            os.rename(self.dbfile, f"{self.dbfile}-{dt.now().strftime('%Y-%m-%d-%H-%M-%S')}.bak")
         # unzip downloaded parts.zip
         with zipfile.ZipFile(os.path.join(self.datadir, "parts.zip"), "r") as z:
             z.extractall(self.datadir)
