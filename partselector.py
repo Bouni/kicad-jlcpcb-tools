@@ -5,7 +5,7 @@ from sys import path
 
 import wx
 
-from .events import AssignPartEvent
+from .events import AssignPartsEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 
@@ -627,15 +627,14 @@ class PartSelectorDialog(wx.Dialog):
             return
         selection = self.part_list.GetTextValue(row, 0)
         stock = self.part_list.GetTextValue(row, 8)
-        for reference in self.parts.keys():
-            wx.PostEvent(
-                self.parent,
-                AssignPartEvent(
-                    lcsc=selection,
-                    stock=stock,
-                    reference=reference,
-                ),
-            )
+        wx.PostEvent(
+            self.parent,
+            AssignPartsEvent(
+                lcsc=selection,
+                stock=stock,
+                references=self.parts.keys(),
+            ),
+        )
         self.EndModal(wx.ID_OK)
 
     def get_part_details(self, e):

@@ -9,7 +9,7 @@ import wx.dataview
 from pcbnew import GetBoard, GetBuildVersion
 
 from .events import (
-    EVT_ASSIGN_PART_EVENT,
+    EVT_ASSIGN_PARTS_EVENT,
     EVT_MESSAGE_EVENT,
     EVT_POPULATE_FOOTPRINT_LIST_EVENT,
     EVT_RESET_GAUGE_EVENT,
@@ -557,7 +557,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_RESET_GAUGE_EVENT, self.reset_gauge)
         self.Bind(EVT_UPDATE_GAUGE_EVENT, self.update_gauge)
         self.Bind(EVT_MESSAGE_EVENT, self.display_message)
-        self.Bind(EVT_ASSIGN_PART_EVENT, self.assign_part)
+        self.Bind(EVT_ASSIGN_PARTS_EVENT, self.assign_parts)
         self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
 
         self.enable_toolbar_buttons(False)
@@ -599,10 +599,11 @@ class JLCPCBTools(wx.Dialog):
         """Update the gauge"""
         self.gauge.SetValue(int(e.value))
 
-    def assign_part(self, e):
-        """Assign a selected LCSC number to a part"""
-        self.store.set_lcsc(e.reference, e.lcsc)
-        self.store.set_stock(e.reference, e.stock)
+    def assign_parts(self, e):
+        """Assign a selected LCSC number to parts"""
+        for reference in e.references:
+            self.store.set_lcsc(reference, e.lcsc)
+            self.store.set_stock(reference, e.stock)
         self.populate_footprint_list()
 
     def display_message(self, e):

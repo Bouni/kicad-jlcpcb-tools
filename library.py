@@ -378,7 +378,7 @@ class Library:
                 self.state = LibraryState.INITIALIZED
                 self.create_tables(["placeholder_invalid_column_fix_errors"])
                 return
-        # rename existing parts.db
+        # rename existing parts.db to parts.db.bak, delete already existing bak file if neccesary
         if os.path.exists(self.dbfile):
             os.rename(
                 self.dbfile,
