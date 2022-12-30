@@ -96,7 +96,7 @@ class Fabrication:
             self.logger.info(
                 f"Fixed rotation of {footprint.GetReference()} ({footprint.GetValue()} / {footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
             )
-        return correction
+        return rotation
 
     def generate_geber(self, layer_count=None):
         """Generating Gerber files"""
