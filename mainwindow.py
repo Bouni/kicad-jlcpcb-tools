@@ -660,16 +660,23 @@ class JLCPCBTools(wx.Dialog):
             parts.append(part)
         details = self.library.get_part_details(numbers)
         corrections = self.library.get_all_correction_data()
-
+        # find rotation correction values
         for part in parts:
             detail = list(filter(lambda x: x[0] == part[3], details))
             if detail:
                 part[4] = detail[0][2]
                 part[5] = detail[0][1]
+            # First check if the part name mathes
             for regex, correction in corrections:
-                if re.search(regex, str(part[2])):
+                if re.search(regex, str(part[1])):
                     part[8] = correction
-                    continue
+                    break
+            # If there was no match for the part name, check if the package matches
+            if part[8] == "":
+                for regex, correction in corrections:
+                    if re.search(regex, str(part[2])):
+                        part[8] = correction
+                        break
 
             self.footprint_list.AppendItem(part)
 

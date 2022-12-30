@@ -73,20 +73,30 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
+        # First check if the value aka part name matches
+        for regex, correction in self.corrections:
+            if re.search(regex, str(footprint.GetValue())):
+                return self.rotate(footprint, rotation, correction)
+        # Then if the package matches
         for regex, correction in self.corrections:
             if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
-                if footprint.GetLayer() == 0:
-                    rotation = (rotation + int(correction)) % 360
-                    self.logger.info(
-                        f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees"
-                    )
-                else:
-                    rotation = (rotation - int(correction)) % 360
-                    self.logger.info(
-                        f"Fixed rotation of {footprint.GetReference()} ({footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
-                    )
-                continue
+                return self.rotate(footprint, rotation, correction)
+        # If no correction matches, return the original rotation
         return rotation
+
+    def rotate(self, footprint, rotation, correction):
+        """Calculate the actual correction"""
+        if footprint.GetLayer() == 0:
+            rotation = (rotation + int(correction)) % 360
+            self.logger.info(
+                f"Fixed rotation of {footprint.GetReference()} ({footprint.GetValue()} / {footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees"
+            )
+        else:
+            rotation = (rotation - int(correction)) % 360
+            self.logger.info(
+                f"Fixed rotation of {footprint.GetReference()} ({footprint.GetValue()} / {footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
+            )
+        return correction
 
     def generate_geber(self, layer_count=None):
         """Generating Gerber files"""
