@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 import requests
 from pcbnew import (
+    DRILL_MARKS_NO_DRILL_SHAPE,
     EXCELLON_WRITER,
     PCB_PLOT_PARAMS,
     PLOT_CONTROLLER,
@@ -124,7 +125,10 @@ class Fabrication:
 
         popt.SetDisableGerberMacros(False)
 
-        popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
+        if "6.99" in GetBuildVersion():
+            popt.SetDrillMarksType(DRILL_MARKS_NO_DRILL_SHAPE)
+        else:
+            popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
 
         popt.SetPlotFrameRef(False)
 
