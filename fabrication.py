@@ -136,6 +136,7 @@ class Fabrication:
 
         if "6.99" in GetBuildVersion():
             from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE
+
             popt.SetDrillMarksType(DRILL_MARKS_NO_DRILL_SHAPE)
         else:
             popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
