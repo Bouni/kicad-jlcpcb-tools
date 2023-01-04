@@ -24,7 +24,7 @@ def getVersion():
     if not os.path.isfile(os.path.join(PLUGIN_PATH, "VERSION")):
         return "unknown"
     with open(os.path.join(PLUGIN_PATH, "VERSION")) as f:
-        return f.read()
+        return f.read().strip()
 
 
 def GetScaleFactor(window):
