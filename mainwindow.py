@@ -16,7 +16,7 @@ from .events import (
     EVT_POPULATE_FOOTPRINT_LIST_EVENT,
     EVT_RESET_GAUGE_EVENT,
     EVT_UPDATE_GAUGE_EVENT,
-    EVT_UPDATE_SETTING
+    EVT_UPDATE_SETTING,
 )
 from .fabrication import Fabrication
 from .helpers import (
@@ -61,6 +61,7 @@ ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
+
 
 
 class JLCPCBTools(wx.Dialog):
@@ -435,7 +436,7 @@ class JLCPCBTools(wx.Dialog):
         )
 
         table_sizer.Add(self.right_toolbar, 1, wx.EXPAND, 5)
-       
+
         # ---------------------------------------------------------------------
         # --------------------- Bottom Logbox and Gauge -----------------------
         # ---------------------------------------------------------------------
@@ -458,7 +459,6 @@ class JLCPCBTools(wx.Dialog):
         )
         self.gauge.SetValue(0)
         self.gauge.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 5)))
-
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
@@ -485,7 +485,6 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_ASSIGN_PARTS_EVENT, self.assign_parts)
         self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
         self.Bind(EVT_UPDATE_SETTING, self.update_settings)
-
 
         self.enable_toolbar_buttons(False)
 
