@@ -5,7 +5,7 @@ from sys import path
 
 import wx
 
-from .events import AssignPartsEvent
+from .events import AssignPartsEvent, UpdateSetting
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 
@@ -25,8 +25,6 @@ class PartSelectorDialog(wx.Dialog):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.parts = parts
-        self.settings = None
-        self.load_settings()
         lcsc_selection = self.get_existing_selection(parts)
 
         # ---------------------------------------------------------------------
@@ -170,6 +168,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
+            name="basic",
         )
         extended_label = wx.StaticText(
             self,
@@ -184,6 +183,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
+            name="extended",
         )
         stock_label = wx.StaticText(
             self,
@@ -198,16 +198,17 @@ class PartSelectorDialog(wx.Dialog):
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
             0,
+            name="stock",
         )
 
         self.basic_checkbox.SetValue(
-            self.settings.get("partselector", {}).get("basic", True)
+            self.parent.settings.get("partselector", {}).get("basic", True)
         )
         self.extended_checkbox.SetValue(
-            self.settings.get("partselector", {}).get("extended", True)
+            self.parent.settings.get("partselector", {}).get("extended", True)
         )
         self.assert_stock_checkbox.SetValue(
-            self.settings.get("partselector", {}).get("stock", False)
+            self.parent.settings.get("partselector", {}).get("stock", False)
         )
 
         self.basic_checkbox.Bind(wx.EVT_CHECKBOX, self.upadate_settings)
@@ -527,25 +528,16 @@ class PartSelectorDialog(wx.Dialog):
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
 
-    def upadate_settings(self, state):
+    def upadate_settings(self, event):
         """Update the settings on change"""
-        self.settings["partselector"]["basic"] = self.basic_checkbox.GetValue()
-        self.settings["partselector"]["extended"] = self.extended_checkbox.GetValue()
-        self.settings["partselector"]["stock"] = self.assert_stock_checkbox.GetValue()
-        self.save_settings()
-
-    def load_settings(self):
-        """Load settings from settings.json"""
-        with open(os.path.join(PLUGIN_PATH, "settings.json")) as j:
-            self.logger.debug("Load settings")
-            self.settings = json.load(j)
-            self.logger.debug(self.settings)
-
-    def save_settings(self):
-        """Save settings to settings.json"""
-        self.logger.debug("Save settings")
-        with open(os.path.join(PLUGIN_PATH, "settings.json"), "w") as j:
-            json.dump(self.settings, j)
+        wx.PostEvent(
+            self.parent,
+            UpdateSetting(
+                section="partselector",
+                setting=event.GetEventObject().GetName(),
+                value=event.GetEventObject().GetValue(),
+            ),
+        )
 
     @staticmethod
     def get_existing_selection(parts):
