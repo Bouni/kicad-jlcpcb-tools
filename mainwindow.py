@@ -64,6 +64,7 @@ ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
 
 
+
 class JLCPCBTools(wx.Dialog):
     def __init__(self, parent):
         wx.Dialog.__init__(
@@ -436,6 +437,10 @@ class JLCPCBTools(wx.Dialog):
         )
 
         table_sizer.Add(self.right_toolbar, 1, wx.EXPAND, 5)
+<<<<<<< HEAD
+=======
+
+>>>>>>> 4090cb3 (fixup: Format Python code with Black)
         # ---------------------------------------------------------------------
         # --------------------- Bottom Logbox and Gauge -----------------------
         # ---------------------------------------------------------------------
@@ -458,7 +463,6 @@ class JLCPCBTools(wx.Dialog):
         )
         self.gauge.SetValue(0)
         self.gauge.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 5)))
-
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
