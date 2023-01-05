@@ -436,7 +436,6 @@ class JLCPCBTools(wx.Dialog):
         )
 
         table_sizer.Add(self.right_toolbar, 1, wx.EXPAND, 5)
-
         # ---------------------------------------------------------------------
         # --------------------- Bottom Logbox and Gauge -----------------------
         # ---------------------------------------------------------------------
@@ -459,6 +458,7 @@ class JLCPCBTools(wx.Dialog):
         )
         self.gauge.SetValue(0)
         self.gauge.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 5)))
+
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
