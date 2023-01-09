@@ -38,8 +38,9 @@ from .store import Store
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE= wx.NewIdRef()
+ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
+
 
 class JLCPCBTools(wx.Dialog):
     def __init__(self, parent):
@@ -1070,11 +1071,15 @@ class JLCPCBTools(wx.Dialog):
         conMenu.Append(paste_lcsc)
         conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
-        rotation_by_package = wx.MenuItem(conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE, "Add Rotation by package")
+        rotation_by_package = wx.MenuItem(
+            conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE, "Add Rotation by package"
+        )
         conMenu.Append(rotation_by_package)
         conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_package)
 
-        rotation_by_name = wx.MenuItem(conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name")
+        rotation_by_name = wx.MenuItem(
+            conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name"
+        )
         conMenu.Append(rotation_by_name)
         conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_name)
 
