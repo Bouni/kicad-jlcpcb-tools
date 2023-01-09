@@ -38,6 +38,8 @@ from .store import Store
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
+ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE= wx.NewIdRef()
+ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
 class JLCPCBTools(wx.Dialog):
     def __init__(self, parent):
@@ -981,14 +983,18 @@ class JLCPCBTools(wx.Dialog):
             self.populate_footprint_list()
 
     def add_part_rot(self, e):
-        self.logger.debug(e.GetId())
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
                 return
-            footp = self.footprint_list.GetTextValue(row, 2)
-            if footp != "":
-                RotationManagerDialog(self, "^" + re.escape(footp)).ShowModal()
+            if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
+                package = self.footprint_list.GetTextValue(row, 2)
+                if package != "":
+                    RotationManagerDialog(self, "^" + re.escape(package)).ShowModal()
+            elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
+                name = self.footprint_list.GetTextValue(row, 1)
+                if name != "":
+                    RotationManagerDialog(self, re.escape(name)).ShowModal()
 
     def save_all_mappings(self, e):
         for r in range(self.footprint_list.GetItemCount()):
@@ -1064,11 +1070,11 @@ class JLCPCBTools(wx.Dialog):
         conMenu.Append(paste_lcsc)
         conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
-        rotation_by_package = wx.MenuItem(conMenu, wx.NewId(), "Add Rotation by package")
+        rotation_by_package = wx.MenuItem(conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE, "Add Rotation by package")
         conMenu.Append(rotation_by_package)
         conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_package)
 
-        rotation_by_name = wx.MenuItem(conMenu, wx.NewId(), "Add Rotation by name")
+        rotation_by_name = wx.MenuItem(conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name")
         conMenu.Append(rotation_by_name)
         conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_name)
 
