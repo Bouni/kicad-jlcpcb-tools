@@ -61,7 +61,7 @@ class SettingsDialog(wx.Dialog):
             loadBitmapScaled("tented.png", self.parent.scale_factor, static=True),
             wx.DefaultPosition,
             wx.DefaultSize,
-            0
+            0,
         )
 
         self.tented_vias_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
@@ -76,7 +76,7 @@ class SettingsDialog(wx.Dialog):
 
         layout = wx.GridSizer(10, 2, 0, 0)
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        
+
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -88,15 +88,21 @@ class SettingsDialog(wx.Dialog):
         if tented:
             self.tented_vias_setting.SetValue(tented)
             self.tented_vias_setting.SetLabel("Tented vias")
-            self.tented_vias_image.SetBitmap(loadBitmapScaled("tented.png", self.parent.scale_factor, static=True))
+            self.tented_vias_image.SetBitmap(
+                loadBitmapScaled("tented.png", self.parent.scale_factor, static=True)
+            )
         else:
             self.tented_vias_setting.SetValue(tented)
             self.tented_vias_setting.SetLabel("Untented vias")
-            self.tented_vias_image.SetBitmap(loadBitmapScaled("untented.png", self.parent.scale_factor, static=True))
+            self.tented_vias_image.SetBitmap(
+                loadBitmapScaled("untented.png", self.parent.scale_factor, static=True)
+            )
 
     def load_settings(self):
         """Load settings and set checkboxes accordingly"""
-        self.update_tented_vias(self.parent.settings.get("gerber", {}).get("tented_vias", True))
+        self.update_tented_vias(
+            self.parent.settings.get("gerber", {}).get("tented_vias", True)
+        )
 
     def update_settings(self, event):
         """Update and persist a setting that was changed."""
