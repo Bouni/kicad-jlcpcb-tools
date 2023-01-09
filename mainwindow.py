@@ -201,7 +201,7 @@ class JLCPCBTools(wx.Dialog):
             self,
             wx.ID_ANY,
             wx.DefaultPosition,
-            wx.Size(124, -1),
+            wx.Size(128, -1),
             wx.TB_VERTICAL | wx.TB_TEXT | wx.TB_NODIVIDER,
         )
 
@@ -217,7 +217,7 @@ class JLCPCBTools(wx.Dialog):
 
         self.remove_part_button = self.right_toolbar.AddTool(
             ID_REMOVE_PART,
-            "Remove LCSC numbe",
+            "Remove LCSC number",
             loadBitmapScaled(
                 "mdi-close-box-outline.png",
                 self.scale_factor,
