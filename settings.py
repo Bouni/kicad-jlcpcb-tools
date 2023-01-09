@@ -76,7 +76,6 @@ class SettingsDialog(wx.Dialog):
 
         layout = wx.GridSizer(10, 2, 0, 0)
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
-
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
