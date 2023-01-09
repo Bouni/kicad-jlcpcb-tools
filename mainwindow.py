@@ -981,6 +981,7 @@ class JLCPCBTools(wx.Dialog):
             self.populate_footprint_list()
 
     def add_part_rot(self, e):
+        self.logger.debug(e.GetId())
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -1053,26 +1054,32 @@ class JLCPCBTools(wx.Dialog):
         return ""
 
     def OnRightDown(self, e):
+        """Right click context menu for action on parts table."""
         conMenu = wx.Menu()
-        cpmi = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
-        conMenu.Append(cpmi)
-        conMenu.Bind(wx.EVT_MENU, self.copy_part_lcsc, cpmi)
+        copy_lcsc = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
+        conMenu.Append(copy_lcsc)
+        conMenu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
 
-        ptmi = wx.MenuItem(conMenu, wx.NewId(), "Paste LCSC")
-        conMenu.Append(ptmi)
-        conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, ptmi)
+        paste_lcsc = wx.MenuItem(conMenu, wx.NewId(), "Paste LCSC")
+        conMenu.Append(paste_lcsc)
+        conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
-        crmi = wx.MenuItem(conMenu, wx.NewId(), "Add Rotation")
-        conMenu.Append(crmi)
-        conMenu.Bind(wx.EVT_MENU, self.add_part_rot, crmi)
+        rotation_by_package = wx.MenuItem(conMenu, wx.NewId(), "Add Rotation by package")
+        conMenu.Append(rotation_by_package)
+        conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_package)
 
-        smmi = wx.MenuItem(conMenu, wx.NewId(), "Find LCSC from Mappings")
-        conMenu.Append(smmi)
-        conMenu.Bind(wx.EVT_MENU, self.search_foot_mapping, smmi)
+        rotation_by_name = wx.MenuItem(conMenu, wx.NewId(), "Add Rotation by name")
+        conMenu.Append(rotation_by_name)
+        conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_name)
 
-        cmmi = wx.MenuItem(conMenu, wx.NewId(), "Add Footprint Mapping")
-        conMenu.Append(cmmi)
-        conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, cmmi)
+        find_mapping = wx.MenuItem(conMenu, wx.NewId(), "Find LCSC from Mappings")
+        conMenu.Append(find_mapping)
+        conMenu.Bind(wx.EVT_MENU, self.search_foot_mapping, find_mapping)
+
+        add_mapping = wx.MenuItem(conMenu, wx.NewId(), "Add Footprint Mapping")
+        conMenu.Append(add_mapping)
+        conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, add_mapping)
+
         self.footprint_list.PopupMenu(conMenu)
         conMenu.Destroy()  # destroy to avoid memory leak
 
