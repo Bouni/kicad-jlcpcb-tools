@@ -1062,11 +1062,11 @@ class JLCPCBTools(wx.Dialog):
     def OnRightDown(self, e):
         """Right click context menu for action on parts table."""
         conMenu = wx.Menu()
-        copy_lcsc = wx.MenuItem(conMenu, wx.NewId(), "Copy LCSC")
+        copy_lcsc = wx.MenuItem(conMenu, wx.NewIdRef(), "Copy LCSC")
         conMenu.Append(copy_lcsc)
         conMenu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
 
-        paste_lcsc = wx.MenuItem(conMenu, wx.NewId(), "Paste LCSC")
+        paste_lcsc = wx.MenuItem(conMenu, wx.NewIdRef(), "Paste LCSC")
         conMenu.Append(paste_lcsc)
         conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
@@ -1078,11 +1078,11 @@ class JLCPCBTools(wx.Dialog):
         conMenu.Append(rotation_by_name)
         conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_name)
 
-        find_mapping = wx.MenuItem(conMenu, wx.NewId(), "Find LCSC from Mappings")
+        find_mapping = wx.MenuItem(conMenu, wx.NewIdRef(), "Find LCSC from Mappings")
         conMenu.Append(find_mapping)
         conMenu.Bind(wx.EVT_MENU, self.search_foot_mapping, find_mapping)
 
-        add_mapping = wx.MenuItem(conMenu, wx.NewId(), "Add Footprint Mapping")
+        add_mapping = wx.MenuItem(conMenu, wx.NewIdRef(), "Add Footprint Mapping")
         conMenu.Append(add_mapping)
         conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, add_mapping)
 
