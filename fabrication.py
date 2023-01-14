@@ -34,7 +34,7 @@ from pcbnew import (
     wxPoint,
 )
 
-from .helpers import get_exclude_from_pos, get_footprint_by_ref
+from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd
 
 
 class Fabrication:
@@ -96,6 +96,13 @@ class Fabrication:
                 f"Fixed rotation of {footprint.GetReference()} ({footprint.GetValue()} / {footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
             )
         return rotation
+
+    def get_position(self, footprint):
+        """Calculate position based on center of bounding box"""
+        if get_smd(footprint):
+            return footprint.GetPosition()
+        bbox = footprint.GetBoundingBox(False,False)
+        return bbox.GetCenter()
 
     def generate_geber(self, layer_count=None):
         """Generating Gerber files"""
@@ -260,7 +267,7 @@ class Fabrication:
                 for fp in get_footprint_by_ref(self.board, part[0]):
                     if get_exclude_from_pos(fp):
                         continue
-                    position = fp.GetPosition() - aux_orgin
+                    position = self.get_position(fp) - aux_orgin
                     writer.writerow(
                         [
                             part[0],
