@@ -12,6 +12,7 @@ EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
 
+
 def is_nightly(version: str) -> bool:
     """Check if version is a Nightly build"""
     return any(v in version for v in ("6.99", "7.0"))
