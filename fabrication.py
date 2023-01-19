@@ -34,8 +34,7 @@ from pcbnew import (
     wxPoint,
 )
 
-from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd
-
+from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd, is_nightly
 
 class Fabrication:
     def __init__(self, parent):
@@ -63,7 +62,7 @@ class Fabrication:
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
-        if "6.99" in GetBuildVersion():
+        if is_nightly(GetBuildVersion()):
             rotation = original.AsDegrees()
         else:
             # we need to divide by 10 to get 180 out of 1800 for example.
@@ -141,7 +140,7 @@ class Fabrication:
 
         popt.SetDisableGerberMacros(False)
 
-        if "6.99" in GetBuildVersion():
+        if is_nightly(GetBuildVersion()):
             from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE
 
             popt.SetDrillMarksType(DRILL_MARKS_NO_DRILL_SHAPE)
