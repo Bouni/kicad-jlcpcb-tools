@@ -437,10 +437,6 @@ class JLCPCBTools(wx.Dialog):
         )
 
         table_sizer.Add(self.right_toolbar, 1, wx.EXPAND, 5)
-<<<<<<< HEAD
-=======
-
->>>>>>> 4090cb3 (fixup: Format Python code with Black)
         # ---------------------------------------------------------------------
         # --------------------- Bottom Logbox and Gauge -----------------------
         # ---------------------------------------------------------------------
