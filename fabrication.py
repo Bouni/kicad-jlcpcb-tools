@@ -36,6 +36,7 @@ from pcbnew import (
 
 from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd, is_nightly
 
+
 class Fabrication:
     def __init__(self, parent):
         self.parent = parent
@@ -100,7 +101,7 @@ class Fabrication:
         """Calculate position based on center of bounding box"""
         if get_smd(footprint):
             return footprint.GetPosition()
-        bbox = footprint.GetBoundingBox(False,False)
+        bbox = footprint.GetBoundingBox(False, False)
         return bbox.GetCenter()
 
     def generate_geber(self, layer_count=None):
