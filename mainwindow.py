@@ -615,34 +615,32 @@ class JLCPCBTools(wx.Dialog):
         """Hide all parts from the list that have 'in BOM' set to No."""
         self.hide_bom_parts = not self.hide_bom_parts
         if self.hide_bom_parts:
-            self.hide_bom_button.SetBitmap(
+            self.hide_bom_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
                 )
             )
-            self.hide_bom_button.SetBitmap(
+            self.hide_bom_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "mdi-eye-outline.png",
                     self.scale_factor,
                 )
             )
-            self.hide_bom_button.SetBitmapMargins((2, 0))
             self.hide_bom_button.SetLabel("Show excluded BOM")
         else:
-            self.hide_bom_button.SetBitmap(
+            self.hide_bom_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
                 )
             )
-            self.hide_bom_button.SetBitmap(
+            self.hide_bom_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "mdi-eye-off-outline.png",
                     self.scale_factor,
                 )
             )
-            self.hide_bom_button.SetBitmapMargins((2, 0))
             self.hide_bom_button.SetLabel("Hide excluded BOM")
         self.populate_footprint_list()
 
@@ -650,34 +648,32 @@ class JLCPCBTools(wx.Dialog):
         """Hide all parts from the list that have 'in pos' set to No."""
         self.hide_pos_parts = not self.hide_pos_parts
         if self.hide_pos_parts:
-            self.hide_pos_button.SetBitmap(
+            self.hide_pos_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
                 )
             )
-            self.hide_pos_button.SetBitmap(
+            self.hide_pos_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "mdi-eye-outline.png",
                     self.scale_factor,
                 )
             )
-            self.hide_pos_button.SetBitmapMargins((2, 0))
             self.hide_pos_button.SetLabel("Show excluded POS")
         else:
-            self.hide_pos_button.SetBitmap(
+            self.hide_pos_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "",
                     self.scale_factor,
                 )
             )
-            self.hide_pos_button.SetBitmap(
+            self.hide_pos_button.SetNormalBitmap(
                 loadBitmapScaled(
                     "mdi-eye-off-outline.png",
                     self.scale_factor,
                 )
             )
-            self.hide_pos_button.SetBitmapMargins((2, 0))
             self.hide_pos_button.SetLabel("Hide excluded POS")
         self.populate_footprint_list()
 
