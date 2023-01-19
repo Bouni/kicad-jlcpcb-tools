@@ -63,8 +63,6 @@ ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
 
-
-
 class JLCPCBTools(wx.Dialog):
     def __init__(self, parent):
         wx.Dialog.__init__(
