@@ -1,0 +1,17 @@
+---
+name: Check PR with black
+on:  # yamllint disable-line rule:truthy
+  push:
+  pull_request:
+jobs:
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+      - name: Install black
+        run: pip install black
+      - name: Run black
+        run: black --check --verbose $(git ls-files '*.py')
