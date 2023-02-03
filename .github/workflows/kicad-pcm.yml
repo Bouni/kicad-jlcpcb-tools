@@ -1,12 +1,11 @@
+---
 # This is a workflow to generate the zip file and metadata.json for KiCAD PCM
-
-# 
 # https://gitlab.com/kicad/addons/metadata/-/merge_requests/14
 
 name: KiCAD PCM packaging
-on:
+on:  # yamllint disable-line rule:truthy
   release:
-    branches: [ main ]
+    branches: [main]
     types:
       - published
   workflow_dispatch:
@@ -18,16 +17,16 @@ jobs:
       - name: Get latest tag
         uses: oprypin/find-latest-tag@v1
         with:
-          repository:  Bouni/kicad-jlcpcb-tools
+          repository: Bouni/kicad-jlcpcb-tools
           releases-only: true
         id: latest-release
-        
+
       - name: Checkout repo
         uses: actions/checkout@v2
-      
+
       - name: Create archive
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
-      
+
       - name: Upload zip as asset to release
         uses: svenstaro/upload-release-action@v2
         with:
@@ -36,7 +35,7 @@ jobs:
           asset_name: KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
           overwrite: true
           tag: ${{ steps.latest-release.outputs.tag }}
-        
+
       - name: Trigger custom kicad repo rebuild
         uses: benc-uk/workflow-dispatch@v1
         with:
@@ -45,5 +44,3 @@ jobs:
           repo: Bouni/bouni-kicad-repository
           token: ${{ secrets.PERSONAL_TOKEN }}
           inputs: '{ "VERSION": "${{env.VERSION}}", "DOWNLOAD_SHA256": "${{env.DOWNLOAD_SHA256}}", "DOWNLOAD_SIZE": "${{env.DOWNLOAD_SIZE}}", "DOWNLOAD_URL": "${{env.DOWNLOAD_URL}}", "INSTALL_SIZE": "${{env.INSTALL_SIZE}}" }'
-          
-          
