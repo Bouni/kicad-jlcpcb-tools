@@ -355,7 +355,6 @@ class RotationManagerDialog(wx.Dialog):
             "CSV files (*.csv)|*.csv",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as importFileDialog:
-
             if importFileDialog.ShowModal() == wx.ID_CANCEL:
                 return
             path = importFileDialog.GetPath()
