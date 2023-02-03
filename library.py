@@ -43,7 +43,8 @@ class Library:
         self.order_by = "LCSC Part"
         self.order_dir = "ASC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
-        self.dbfile = os.path.join(self.datadir, "parts.db")
+        self.partsdb_file = os.path.join(self.datadir, "parts.db")
+        self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
         self.state = None
         self.category_map = {}
         self.setup()
@@ -58,11 +59,14 @@ class Library:
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
 
     def check_library(self):
-        """Check if the database file exists, if not trigger update"""
-        if not os.path.isfile(self.dbfile) or os.path.getsize(self.dbfile) == 0:
+        """Check if the database files exists, if not trigger update / create database"""
+        if not os.path.isfile(self.partsdb_file) or os.path.getsize(self.partsdb_file) == 0:
             self.state = LibraryState.UPDATE_NEEDED
         else:
             self.state = LibraryState.INITIALIZED
+        if not os.path.isfile(self.rotationsdb_file) or os.path.getsize(self.rotationsdb_file) == 0:
+            self.create_rotation_table()
+            self.migrate_rotations()
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database"""
@@ -153,21 +157,21 @@ class Library:
         query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
         query += " LIMIT 1000"
 
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
             with con as cur:
                 return cur.execute(query).fetchall()
 
     def delete_parts_table(self):
         """Delete the parts table."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(f"DROP TABLE IF EXISTS parts")
                 cur.commit()
 
     def create_meta_table(self):
         """Create the meta table."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"CREATE TABLE IF NOT EXISTS meta ('filename', 'size', 'partcount', 'date', 'last_update')"
@@ -175,8 +179,9 @@ class Library:
                 cur.commit()
 
     def create_rotation_table(self):
+        self.logger.debug("Create SQLite table for rotations")
         """Create the rotation table."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"CREATE TABLE IF NOT EXISTS rotation ('regex', 'correction')"
@@ -185,7 +190,7 @@ class Library:
 
     def get_correction_data(self, regex):
         """Get the correction data by its regex."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 return cur.execute(
                     f"SELECT * FROM rotation WHERE regex = '{regex}'"
@@ -193,14 +198,14 @@ class Library:
 
     def delete_correction_data(self, regex):
         """Delete a correction from the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 cur.execute(f"DELETE FROM rotation WHERE regex = '{regex}'")
                 cur.commit()
 
     def update_correction_data(self, regex, rotation):
         """Update a correction in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"UPDATE rotation SET correction = '{rotation}' WHERE regex = '{regex}'"
@@ -209,7 +214,7 @@ class Library:
 
     def insert_correction_data(self, regex, rotation):
         """Insert a correction into the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"INSERT INTO rotation VALUES (?, ?)",
@@ -219,7 +224,7 @@ class Library:
 
     def get_all_correction_data(self):
         """get all corrections from the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 try:
                     result = cur.execute(
@@ -231,7 +236,7 @@ class Library:
 
     def create_mapping_table(self):
         """Create the mapping table."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"CREATE TABLE IF NOT EXISTS mapping ('footprint', 'value', 'LCSC')"
@@ -240,7 +245,7 @@ class Library:
 
     def get_mapping_data(self, footprint, value):
         """Get the mapping data by its regex."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 return cur.execute(
                     f"SELECT * FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
@@ -248,7 +253,7 @@ class Library:
 
     def delete_mapping_data(self, footprint, value):
         """Delete a mapping from the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"DELETE FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
@@ -257,7 +262,7 @@ class Library:
 
     def update_mapping_data(self, footprint, value, LCSC):
         """Update a mapping in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"UPDATE mapping SET LCSC = '{LCSC}' WHERE footprint = '{footprint}' AND value = '{value}'"
@@ -266,7 +271,7 @@ class Library:
 
     def insert_mapping_data(self, footprint, value, LCSC):
         """Insert a mapping into the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"INSERT INTO mapping VALUES (?, ?, ?)",
@@ -276,7 +281,7 @@ class Library:
 
     def get_all_mapping_data(self):
         """get all mapping from the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 return [
                     list(c)
@@ -287,7 +292,7 @@ class Library:
 
     def update_meta_data(self, filename, size, partcount, date, last_update):
         """Update the meta data table."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(f"DELETE from meta")
                 cur.commit()
@@ -299,7 +304,7 @@ class Library:
 
     def create_parts_table(self, columns):
         """Create the parts table."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cols = ",".join([f" '{c}'" for c in columns])
                 cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
@@ -307,7 +312,7 @@ class Library:
 
     def insert_parts(self, data, cols):
         """Insert many parts at once."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             cols = ",".join(["?"] * cols)
             query = f"INSERT INTO parts VALUES ({cols})"
             con.executemany(query, data)
@@ -315,7 +320,7 @@ class Library:
 
     def get_part_details(self, lcsc):
         """Get the part details for a list of lcsc numbers."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 numbers = ",".join([f'"{n}"' for n in lcsc])
 
@@ -379,17 +384,17 @@ class Library:
                 self.create_tables(["placeholder_invalid_column_fix_errors"])
                 return
         # rename existing parts.db to parts.db.bak, delete already existing bak file if neccesary
-        if os.path.exists(self.dbfile):
-            if os.path.exists(f"{self.dbfile}.bak"):
-                os.remove(f"{self.dbfile}.bak")
-            os.rename(self.dbfile, f"{self.dbfile}.bak")
+        if os.path.exists(self.partsdb_file):
+            if os.path.exists(f"{self.partsdb_file}.bak"):
+                os.remove(f"{self.partsdb_file}.bak")
+            os.rename(self.partsdb_file, f"{self.partsdb_file}.bak")
         # unzip downloaded parts.zip
         with zipfile.ZipFile(os.path.join(self.datadir, "parts.zip"), "r") as z:
             z.extractall(self.datadir)
-        # check if dbfile was successfully extracted
-        if not os.path.exists(self.dbfile):
-            if os.path.exists(f"{self.dbfile}.bak"):
-                os.rename(f"{self.dbfile}.bak", self.dbfile)
+        # check if partsdb_file was successfully extracted
+        if not os.path.exists(self.partsdb_file):
+            if os.path.exists(f"{self.partsdb_file}.bak"):
+                os.rename(f"{self.partsdb_file}.bak", self.partsdb_file)
                 wx.PostEvent(
                     self.parent,
                     MessageEvent(
@@ -432,7 +437,7 @@ class Library:
         """
         if self.category_map == {}:
             # Populate the cache.
-            with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
                 with con as cur:
                     for row in cur.execute(
                         f'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
@@ -443,3 +448,27 @@ class Library:
     def get_subcategories(self, category):
         """Get the subcategories associated with the given category."""
         return self.category_map[category]
+
+
+    def migrate_rotations(self):
+        """Migrate existing rotations from parts db to rotations db."""
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as pdb, contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as rdb:
+            with pdb as pcur, rdb as rcur:
+                try:
+                    result = pcur.execute(
+                        f"SELECT * FROM rotation ORDER BY regex ASC"
+                    ).fetchall()
+                    if not result:
+                        return
+                    for r in result:
+                        rcur.execute(
+                            f"INSERT INTO rotation VALUES (?, ?)",
+                            (r[0], r[1]),
+                        )
+                        rcur.commit()
+                    self.logger.debug(f"Migrated {len(result)} rotations to sepetrate database.")
+                    pcur.execute(f"DROP TABLE IF EXISTS rotation")
+                    pcur.commit()
+                    self.logger.debug(f"Droped rotations table from parts database.")
+                except sqlite3.OperationalError:
+                    return
