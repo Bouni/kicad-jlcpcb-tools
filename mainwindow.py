@@ -957,7 +957,6 @@ class JLCPCBTools(wx.Dialog):
             "KiCad V6 Schematics (*.kicad_sch)|*.kicad_sch",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
         ) as openFileDialog:
-
             if openFileDialog.ShowModal() == wx.ID_CANCEL:
                 return
             paths = openFileDialog.GetPaths()
