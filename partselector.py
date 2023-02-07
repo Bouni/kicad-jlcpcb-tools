@@ -1,12 +1,9 @@
-import json
 import logging
-import os
-from sys import path
 
 import wx
 
 from .events import AssignPartsEvent, UpdateSetting
-from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 
 
@@ -390,63 +387,63 @@ class PartSelectorDialog(wx.Dialog):
             style=wx.dataview.DV_SINGLE,
         )
 
-        reference = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 80),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        number = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "MFR Number",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 140),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        package = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "Package",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        joints = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "Joints",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 40),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        type = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 80),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        manufacturer = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 140),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        description = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 300),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        price = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "Price",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        stock = self.part_list.AppendTextColumn(
+        self.part_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 50),
