@@ -3,8 +3,6 @@ import os
 import os.path
 import re
 
-import wx
-
 
 class SchematicExport:
 
