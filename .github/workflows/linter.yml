@@ -15,7 +15,7 @@ jobs:
         run: pip install black
       - name: Run black
         run: black --check --verbose $(git ls-files '*.py')
- ruff:
+  ruff:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
