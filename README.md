@@ -100,3 +100,17 @@ You can download Matthews file from GitHub as well als manage your own correctio
 ## Icons
 
 This plugin makes use of a lot of icons from the excellent [Material Design Icons](https://materialdesignicons.com/)
+
+## Development
+
+1. fork repo
+2. git clone forked repo
+3. install pre-commit `pip install pre-commit`
+4. create feature branch `git switch -c my-awesome-feature`
+5. make your changes
+6. commit your changes `git commit -m "Awesome new feature"`
+7. push to GitHub `git push`
+8. Create PR
+
+Make sure you make use of pre-commit-hooks in order to format everything nicely with `black`
+In the near future I'll add ruff / pylint and possibly other pre-commit-hooks that enforce nice and clean code style.
