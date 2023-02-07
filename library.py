@@ -45,6 +45,7 @@ class Library:
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.partsdb_file = os.path.join(self.datadir, "parts.db")
         self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
+        self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
         self.state = None
         self.category_map = {}
         self.setup()
@@ -60,13 +61,25 @@ class Library:
 
     def check_library(self):
         """Check if the database files exists, if not trigger update / create database"""
-        if not os.path.isfile(self.partsdb_file) or os.path.getsize(self.partsdb_file) == 0:
+        if (
+            not os.path.isfile(self.partsdb_file)
+            or os.path.getsize(self.partsdb_file) == 0
+        ):
             self.state = LibraryState.UPDATE_NEEDED
         else:
             self.state = LibraryState.INITIALIZED
-        if not os.path.isfile(self.rotationsdb_file) or os.path.getsize(self.rotationsdb_file) == 0:
+        if (
+            not os.path.isfile(self.rotationsdb_file)
+            or os.path.getsize(self.rotationsdb_file) == 0
+        ):
             self.create_rotation_table()
             self.migrate_rotations()
+        if (
+            not os.path.isfile(self.mappingsdb_file)
+            or os.path.getsize(self.mappingsdb_file) == 0
+        ):
+            self.create_mapping_table()
+            self.migrate_mappings()
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database"""
@@ -236,7 +249,7 @@ class Library:
 
     def create_mapping_table(self):
         """Create the mapping table."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+        with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"CREATE TABLE IF NOT EXISTS mapping ('footprint', 'value', 'LCSC')"
@@ -245,7 +258,7 @@ class Library:
 
     def get_mapping_data(self, footprint, value):
         """Get the mapping data by its regex."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+        with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 return cur.execute(
                     f"SELECT * FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
@@ -253,7 +266,7 @@ class Library:
 
     def delete_mapping_data(self, footprint, value):
         """Delete a mapping from the database."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+        with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"DELETE FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
@@ -262,7 +275,7 @@ class Library:
 
     def update_mapping_data(self, footprint, value, LCSC):
         """Update a mapping in the database."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+        with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"UPDATE mapping SET LCSC = '{LCSC}' WHERE footprint = '{footprint}' AND value = '{value}'"
@@ -271,7 +284,7 @@ class Library:
 
     def insert_mapping_data(self, footprint, value, LCSC):
         """Insert a mapping into the database."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+        with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 cur.execute(
                     f"INSERT INTO mapping VALUES (?, ?, ?)",
@@ -281,7 +294,7 @@ class Library:
 
     def get_all_mapping_data(self):
         """get all mapping from the database."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+        with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 return [
                     list(c)
@@ -449,10 +462,11 @@ class Library:
         """Get the subcategories associated with the given category."""
         return self.category_map[category]
 
-
     def migrate_rotations(self):
         """Migrate existing rotations from parts db to rotations db."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as pdb, contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as rdb:
+        with contextlib.closing(
+            sqlite3.connect(self.partsdb_file)
+        ) as pdb, contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as rdb:
             with pdb as pcur, rdb as rcur:
                 try:
                     result = pcur.execute(
@@ -466,9 +480,38 @@ class Library:
                             (r[0], r[1]),
                         )
                         rcur.commit()
-                    self.logger.debug(f"Migrated {len(result)} rotations to sepetrate database.")
+                    self.logger.debug(
+                        f"Migrated {len(result)} rotations to sepetrate database."
+                    )
                     pcur.execute(f"DROP TABLE IF EXISTS rotation")
                     pcur.commit()
                     self.logger.debug(f"Droped rotations table from parts database.")
+                except sqlite3.OperationalError:
+                    return
+
+    def migrate_mappings(self):
+        """Migrate existing mappings from parts db to mappings db."""
+        with contextlib.closing(
+            sqlite3.connect(self.partsdb_file)
+        ) as pdb, contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as mdb:
+            with pdb as pcur, mdb as mcur:
+                try:
+                    result = pcur.execute(
+                        f"SELECT * FROM mapping ORDER BY footprint ASC"
+                    ).fetchall()
+                    if not result:
+                        return
+                    for r in result:
+                        mcur.execute(
+                            f"INSERT INTO mapping VALUES (?, ?)",
+                            (r[0], r[1]),
+                        )
+                        mcur.commit()
+                    self.logger.debug(
+                        f"Migrated {len(result)} mappings to sepetrate database."
+                    )
+                    pcur.execute(f"DROP TABLE IF EXISTS mapping")
+                    pcur.commit()
+                    self.logger.debug(f"Droped mappings table from parts database.")
                 except sqlite3.OperationalError:
                     return
