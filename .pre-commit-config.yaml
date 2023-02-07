@@ -5,10 +5,10 @@ repos:
     hooks:
       - id: black
         files: ^((luxtronik|pylint|scripts|tests)/.+)?[^/]+\.py$
-# - repo: https://github.com/charliermarsh/ruff-pre-commit
-#   rev: v0.0.235
-#   hooks:
-#     - id: ruff
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.0.235
+    hooks:
+      - id: ruff
 # - repo: https://github.com/asottile/pyupgrade
 #   rev: v3.3.1
 #   hooks:
