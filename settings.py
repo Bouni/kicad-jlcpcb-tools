@@ -1,12 +1,9 @@
-import json
 import logging
-import os
-from sys import path
 
 import wx
 
 from .events import UpdateSetting
-from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+from .helpers import HighResWxSize, loadBitmapScaled
 
 
 class SettingsDialog(wx.Dialog):
