@@ -28,7 +28,7 @@ jobs:
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
 
       - name: Upload zip as asset to release
-        uses: svenstaro/upload-release-action@v3
+        uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ./PCM/KiCAD-PCM-${{ steps.latest-release.outputs.tag }}.zip
