@@ -2,16 +2,9 @@ import csv
 import logging
 import os
 
-import requests
 import wx
 
-from .events import (
-    MessageEvent,
-    PopulateFootprintListEvent,
-    ResetGaugeEvent,
-    UpdateGaugeEvent,
-)
-from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+from .helpers import HighResWxSize, loadBitmapScaled
 
 
 class PartMapperManagerDialog(wx.Dialog):
@@ -57,19 +50,19 @@ class PartMapperManagerDialog(wx.Dialog):
             style=wx.dataview.DV_MULTIPLE,
         )
 
-        footprintcol = self.mapping_list.AppendTextColumn(
+        self.mapping_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 150),
             align=wx.ALIGN_LEFT,
         )
-        valuecol = self.mapping_list.AppendTextColumn(
+        self.mapping_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
         )
-        partnumbercol = self.mapping_list.AppendTextColumn(
+        self.mapping_list.AppendTextColumn(
             "LCSC Part",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
@@ -178,7 +171,7 @@ class PartMapperManagerDialog(wx.Dialog):
         self.mapping_list.DeleteAllItems()
 
         if self.parent.library.get_all_mapping_data() is None:
-            self.logger.info(f"empty")
+            self.logger.info("empty")
             return
 
         for mapping in self.parent.library.get_all_mapping_data():
