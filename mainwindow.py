@@ -1,5 +1,4 @@
 import json
-import datetime
 import logging
 import os
 import re
@@ -413,7 +412,7 @@ class JLCPCBTools(wx.Dialog):
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
-        dummy = self.footprint_list.AppendTextColumn(
+        self.footprint_list.AppendTextColumn(
             "",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
@@ -755,7 +754,7 @@ class JLCPCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)[0]
+            get_footprint_by_ref(GetBoard(), ref)[0]
             self.store.set_lcsc(ref, "")
         self.populate_footprint_list()
 
@@ -767,7 +766,7 @@ class JLCPCBTools(wx.Dialog):
         if num_sel == 1:
             item = self.footprint_list.GetSelection()
         else:
-            self.logger.warning(f"Select only one component, please.")
+            self.logger.warning("Select only one component, please.")
             return
         row = self.footprint_list.ItemToRow(item)
         ref = self.footprint_list.GetValue(row, 0)
@@ -847,7 +846,7 @@ class JLCPCBTools(wx.Dialog):
 
     def update_settings(self, e):
         """Update the settings on change"""
-        if not e.section in self.settings:
+        if e.section not in self.settings:
             self.settings[e.section] = {}
         self.settings[e.section][e.setting] = e.value
         self.save_settings()
@@ -945,7 +944,7 @@ class JLCPCBTools(wx.Dialog):
                     self.library.update_mapping_data(footp, partval, lcscpart)
                 else:
                     self.library.insert_mapping_data(footp, partval, lcscpart)
-        self.logger.info(f"All mappings saved")
+        self.logger.info("All mappings saved")
 
     def export_to_schematic(self, e):
         """Dialog to select schematics."""
