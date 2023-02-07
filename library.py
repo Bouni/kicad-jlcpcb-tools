@@ -1,14 +1,10 @@
 import contextlib
-import csv
 import logging
 import os
-import re
 import shlex
 import sqlite3
 import time
-from datetime import datetime as dt
 from enum import Enum
-from ntpath import join
 from pathlib import Path
 from threading import Thread
 import zipfile
@@ -161,7 +157,7 @@ class Library:
             query_chunks.append(f'"Library Type" IN ({",".join(library_types)})')
 
         if parameters["stock"]:
-            query_chunks.append(f'"Stock" > "0"')
+            query_chunks.append('"Stock" > "0"')
 
         if not query_chunks:
             return []
@@ -179,7 +175,7 @@ class Library:
         """Delete the parts table."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
-                cur.execute(f"DROP TABLE IF EXISTS parts")
+                cur.execute("DROP TABLE IF EXISTS parts")
                 cur.commit()
 
     def create_meta_table(self):
@@ -187,7 +183,7 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
                 cur.execute(
-                    f"CREATE TABLE IF NOT EXISTS meta ('filename', 'size', 'partcount', 'date', 'last_update')"
+                    "CREATE TABLE IF NOT EXISTS meta ('filename', 'size', 'partcount', 'date', 'last_update')"
                 )
                 cur.commit()
 
@@ -197,7 +193,7 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 cur.execute(
-                    f"CREATE TABLE IF NOT EXISTS rotation ('regex', 'correction')"
+                    "CREATE TABLE IF NOT EXISTS rotation ('regex', 'correction')"
                 )
                 cur.commit()
 
@@ -230,7 +226,7 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 cur.execute(
-                    f"INSERT INTO rotation VALUES (?, ?)",
+                    "INSERT INTO rotation VALUES (?, ?)",
                     (regex, rotation),
                 )
                 cur.commit()
@@ -241,7 +237,7 @@ class Library:
             with con as cur:
                 try:
                     result = cur.execute(
-                        f"SELECT * FROM rotation ORDER BY regex ASC"
+                        "SELECT * FROM rotation ORDER BY regex ASC"
                     ).fetchall()
                     return [list(c) for c in result]
                 except sqlite3.OperationalError:
@@ -252,7 +248,7 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 cur.execute(
-                    f"CREATE TABLE IF NOT EXISTS mapping ('footprint', 'value', 'LCSC')"
+                    "CREATE TABLE IF NOT EXISTS mapping ('footprint', 'value', 'LCSC')"
                 )
                 cur.commit()
 
@@ -287,7 +283,7 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 cur.execute(
-                    f"INSERT INTO mapping VALUES (?, ?, ?)",
+                    "INSERT INTO mapping VALUES (?, ?, ?)",
                     (footprint, value, LCSC),
                 )
                 cur.commit()
@@ -299,7 +295,7 @@ class Library:
                 return [
                     list(c)
                     for c in cur.execute(
-                        f"SELECT * FROM mapping ORDER BY footprint ASC"
+                        "SELECT * FROM mapping ORDER BY footprint ASC"
                     ).fetchall()
                 ]
 
@@ -307,10 +303,10 @@ class Library:
         """Update the meta data table."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             with con as cur:
-                cur.execute(f"DELETE from meta")
+                cur.execute("DELETE from meta")
                 cur.commit()
                 cur.execute(
-                    f"INSERT INTO meta VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO meta VALUES (?, ?, ?, ?, ?)",
                     (filename, size, partcount, date, last_update),
                 )
                 cur.commit()
@@ -412,7 +408,7 @@ class Library:
                     self.parent,
                     MessageEvent(
                         title="Download Error",
-                        text=f"Failed to download the JLCPCB database, db was not extracted from zip",
+                        text="Failed to download the JLCPCB database, db was not extracted from zip",
                         style="error",
                     ),
                 )
@@ -453,7 +449,7 @@ class Library:
             with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
                 with con as cur:
                     for row in cur.execute(
-                        f'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
+                        'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
                     ):
                         self.category_map.setdefault(row[0], []).append(row[1])
         return list(self.category_map.keys())
@@ -470,22 +466,22 @@ class Library:
             with pdb as pcur, rdb as rcur:
                 try:
                     result = pcur.execute(
-                        f"SELECT * FROM rotation ORDER BY regex ASC"
+                        "SELECT * FROM rotation ORDER BY regex ASC"
                     ).fetchall()
                     if not result:
                         return
                     for r in result:
                         rcur.execute(
-                            f"INSERT INTO rotation VALUES (?, ?)",
+                            "INSERT INTO rotation VALUES (?, ?)",
                             (r[0], r[1]),
                         )
                         rcur.commit()
                     self.logger.debug(
                         f"Migrated {len(result)} rotations to sepetrate database."
                     )
-                    pcur.execute(f"DROP TABLE IF EXISTS rotation")
+                    pcur.execute("DROP TABLE IF EXISTS rotation")
                     pcur.commit()
-                    self.logger.debug(f"Droped rotations table from parts database.")
+                    self.logger.debug("Droped rotations table from parts database.")
                 except sqlite3.OperationalError:
                     return
 
@@ -497,21 +493,21 @@ class Library:
             with pdb as pcur, mdb as mcur:
                 try:
                     result = pcur.execute(
-                        f"SELECT * FROM mapping ORDER BY footprint ASC"
+                        "SELECT * FROM mapping ORDER BY footprint ASC"
                     ).fetchall()
                     if not result:
                         return
                     for r in result:
                         mcur.execute(
-                            f"INSERT INTO mapping VALUES (?, ?)",
+                            "INSERT INTO mapping VALUES (?, ?)",
                             (r[0], r[1]),
                         )
                         mcur.commit()
                     self.logger.debug(
                         f"Migrated {len(result)} mappings to sepetrate database."
                     )
-                    pcur.execute(f"DROP TABLE IF EXISTS mapping")
+                    pcur.execute("DROP TABLE IF EXISTS mapping")
                     pcur.commit()
-                    self.logger.debug(f"Droped mappings table from parts database.")
+                    self.logger.debug("Droped mappings table from parts database.")
                 except sqlite3.OperationalError:
                     return
