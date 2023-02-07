@@ -6,10 +6,7 @@ import requests
 import wx
 
 from .events import (
-    MessageEvent,
     PopulateFootprintListEvent,
-    ResetGaugeEvent,
-    UpdateGaugeEvent,
 )
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
@@ -113,13 +110,13 @@ class RotationManagerDialog(wx.Dialog):
             style=wx.dataview.DV_SINGLE,
         )
 
-        regex = self.rotations_list.AppendTextColumn(
+        self.rotations_list.AppendTextColumn(
             "Regex",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 480),
             align=wx.ALIGN_LEFT,
         )
-        rotation = self.rotations_list.AppendTextColumn(
+        self.rotations_list.AppendTextColumn(
             "Correction",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
@@ -274,7 +271,7 @@ class RotationManagerDialog(wx.Dialog):
         if regex == self.selection_regex:
             self.parent.library.update_correction_data(regex, correction)
             self.selection_regex = None
-        elif self.selection_regex == None:
+        elif self.selection_regex is None:
             self.parent.library.insert_correction_data(regex, correction)
         else:
             self.parent.library.delete_correction_data(self.selection_regex)
@@ -333,8 +330,8 @@ class RotationManagerDialog(wx.Dialog):
                     self.logger.info(
                         f"Correction '{row[0]}' exists already in database with correction value {row[1]}. Leaving this one out."
                     )
-        except Exception as e:
-            self.logger.debug(e)
+        except Exception as err:
+            self.logger.debug(err)
         self.populate_rotations_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
