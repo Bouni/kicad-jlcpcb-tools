@@ -137,7 +137,7 @@ class Fabrication:
 
         # Tented vias or not, selcted by user in settings
         popt.SetPlotViaOnMaskLayer(
-            self.parent.settings.get("gerber", {}).get("tented_vias", True)
+            not self.parent.settings.get("gerber", {}).get("tented_vias", True)
         )
 
         popt.SetUseGerberX2format(True)
