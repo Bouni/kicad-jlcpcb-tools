@@ -1,5 +1,5 @@
 ---
-name: Check PR with black
+name: Lint and format everything
 on:  # yamllint disable-line rule:truthy
   push:
   pull_request:
@@ -15,3 +15,14 @@ jobs:
         run: pip install black
       - name: Run black
         run: black --check --verbose $(git ls-files '*.py')
+ ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff
+        run: ruff $(git ls-files '*.py')
