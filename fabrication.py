@@ -5,13 +5,11 @@ import re
 from pathlib import Path
 from zipfile import ZipFile
 
-import requests
 from pcbnew import (
     EXCELLON_WRITER,
     PCB_PLOT_PARAMS,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
-    VECTOR2I,
     ZONE_FILLER,
     B_Cu,
     B_Mask,
@@ -31,7 +29,6 @@ from pcbnew import (
     In4_Cu,
     Refresh,
     ToMM,
-    wxPoint,
 )
 
 from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd, is_nightly
@@ -225,7 +222,7 @@ class Fabrication:
                 popt.SetSkipPlotNPTH_Pads(False)
             pctl.SetLayer(layer_info[1])
             pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
-            if pctl.PlotLayer() == False:
+            if pctl.PlotLayer() is False:
                 self.logger.error(f"Error plotting {layer_info[2]}")
             self.logger.info(f"Successfully plotted {layer_info[2]}")
         pctl.ClosePlot()
@@ -242,7 +239,7 @@ class Fabrication:
         genDrl = True
         genMap = True
         drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
-        self.logger.info(f"Finished generating Excellon files")
+        self.logger.info("Finished generating Excellon files")
 
     def zip_gerber_excellon(self):
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
@@ -254,7 +251,7 @@ class Fabrication:
                         continue
                     filePath = os.path.join(folderName, filename)
                     zipfile.write(filePath, os.path.basename(filePath))
-        self.logger.info(f"Finished generating ZIP file")
+        self.logger.info("Finished generating ZIP file")
 
     def generate_cpl(self):
         """Generate placement file (CPL)."""
@@ -284,7 +281,7 @@ class Fabrication:
                             "top" if fp.GetLayer() == 0 else "bottom",
                         ]
                     )
-        self.logger.info(f"Finished generating CPL file")
+        self.logger.info("Finished generating CPL file")
 
     def generate_bom(self):
         """Generate BOM file."""
@@ -296,4 +293,4 @@ class Fabrication:
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             for part in self.parent.store.read_bom_parts():
                 writer.writerow(part)
-        self.logger.info(f"Finished generating BOM file")
+        self.logger.info("Finished generating BOM file")
