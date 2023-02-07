@@ -1,12 +1,11 @@
 import io
 import logging
-import os
 import webbrowser
 
 import requests
 import wx
 
-from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+from .helpers import HighResWxSize, loadBitmapScaled
 
 
 class PartDetailsDialog(wx.Dialog):
