@@ -12,14 +12,29 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11' 
-      
+          python-version: '3.11'
+
       - name: Install black
         run: pip install black
       - name: Run black
         run: black --check --verbose $(git ls-files '*.py')
-        
+
+      - name: Install isort
+        run: pip install isort
+      - name: Run isort
+        run: isort $(git ls-files '*.py')
+
       - name: Install ruff
         run: pip install ruff
       - name: Run ruff
         run: ruff $(git ls-files '*.py')
+
+      - name: Install yamllint
+        run: pip install --user yamllint
+      - name: Run yamllint
+        run: yamllint .
+
+      - name: Install pylint
+        run: pip install pylint
+      - name: Run pylint
+        run: pylint $(git ls-files '*.py')
