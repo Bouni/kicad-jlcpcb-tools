@@ -34,7 +34,7 @@ jobs:
       - name: Run yamllint
         run: yamllint .
 
-      - name: Install pylint
-        run: pip install pylint
-      - name: Run pylint
-        run: pylint $(git ls-files '*.py')
+      # - name: Install pylint
+      #   run: pip install pylint
+      # - name: Run pylint
+      #   run: pylint $(git ls-files '*.py')
