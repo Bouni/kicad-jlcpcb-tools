@@ -17,12 +17,12 @@ repos:
     rev: v1.28.0
     hooks:
       - id: yamllint
-# - repo: https://github.com/asottile/pyupgrade
-#   rev: v3.3.1
-#   hooks:
-#     - id: pyupgrade
-#       args: [--py310-plus]
-#       stages: [manual]
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.3.1
+    hooks:
+      - id: pyupgrade
+        args: [--py310-plus]
+        stages: [manual]
 # - repo: https://github.com/PyCQA/autoflake
 #   rev: v2.0.0
 #   hooks:
@@ -44,15 +44,7 @@ repos:
 #         - flake8-noqa==1.3.0
 #         - mccabe==0.7.0
 #       stages: [manual]
-# - repo: https://github.com/PyCQA/bandit
-#   rev: 1.7.4
-#   hooks:
-#     - id: bandit
-#       args:
-#         - --quiet
-#         - --format=custom
-#         - --configfile=tests/bandit.yaml
-#       files: ^(luxtronik)/.+\.py$
+
 
 # - repo: https://github.com/pre-commit/pre-commit-hooks
 #   rev: v4.4.0
@@ -66,10 +58,7 @@ repos:
 #         - --branch=dev
 #         - --branch=main
 #         - --branch=rc
-# - repo: https://github.com/adrienverge/yamllint.git
-#   rev: v1.28.0
-#   hooks:
-#     - id: yamllint
+
 # - repo: https://github.com/pre-commit/mirrors-prettier
 #   rev: v2.7.1
 #   hooks:
