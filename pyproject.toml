@@ -3,3 +3,28 @@ profile = "black"
 
 [tool.ruff]
 ignore = ["E501", "E722"]
+
+[tool.pylint]
+max-line-length = 120
+extension-pkg-whitelist = "wx"
+
+[tool.pylint."MESSAGES CONTROL"]
+disable = [
+    "format",
+    "wrong-import-order",
+    "too-few-public-methods",
+    "too-many-ancestors",
+    "too-many-arguments",
+    "too-many-branches",
+    "too-many-instance-attributes",
+    "too-many-lines",
+    "too-many-locals",
+    "too-many-public-methods",
+    "too-many-return-statements",
+    "too-many-statements",
+    "too-many-boolean-expressions",
+    "invalid-name",
+]
+
+[tool.pylint.FORMAT]
+expected-line-ending-format = "LF"

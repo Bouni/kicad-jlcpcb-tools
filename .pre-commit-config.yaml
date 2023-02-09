@@ -5,10 +5,18 @@ repos:
     hooks:
       - id: black
         files: ^((luxtronik|pylint|scripts|tests)/.+)?[^/]+\.py$
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.0.235
     hooks:
       - id: ruff
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.28.0
+    hooks:
+      - id: yamllint
 # - repo: https://github.com/asottile/pyupgrade
 #   rev: v3.3.1
 #   hooks:
@@ -45,10 +53,7 @@ repos:
 #         - --format=custom
 #         - --configfile=tests/bandit.yaml
 #       files: ^(luxtronik)/.+\.py$
-# - repo: https://github.com/PyCQA/isort
-#   rev: 5.11.4
-#   hooks:
-#     - id: isort
+
 # - repo: https://github.com/pre-commit/pre-commit-hooks
 #   rev: v4.4.0
 #   hooks:
