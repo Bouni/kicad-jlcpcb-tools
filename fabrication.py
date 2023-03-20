@@ -60,9 +60,10 @@ class Fabrication:
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
-        if is_nightly(GetBuildVersion()):
+        # `.AsDegrees()` added in KiCAD 6.99
+        try:
             rotation = original.AsDegrees()
-        else:
+        except AttributeError:
             # we need to divide by 10 to get 180 out of 1800 for example.
             # This might be a bug in 5.99 / 6.0 RC
             rotation = original / 10
