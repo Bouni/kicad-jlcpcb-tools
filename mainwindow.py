@@ -64,7 +64,8 @@ ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
 class JLCPCBTools(wx.Dialog):
     def __init__(self, parent):
-        self.app = wx.PySimpleApp()
+        if sys.platform != "darwin":
+            self.app = wx.App()
         wx.Dialog.__init__(
             self,
             parent,
