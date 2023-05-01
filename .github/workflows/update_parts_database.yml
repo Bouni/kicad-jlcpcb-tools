@@ -56,7 +56,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v1
         with:
-      artifact_name: parts_db_zip_files
+          artifact_name: parts_db_zip_files
       # delete-artifact
       - name: Clean
         uses: geekyeggo/delete-artifact@v2
