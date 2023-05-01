@@ -29,6 +29,8 @@ jobs:
           7z x cache.zip
           rm -rf cache.z*
 
+          ls -lah
+
           python3 jlcparts_db_convert.py
 
       - uses: actions/upload-artifact@v3
