@@ -46,15 +46,19 @@ jobs:
     needs: build_and_update
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Checkout # Required for GH-pages deployment
-        uses: actions/checkout@v2
-      - name: "Download DB zips"
-        uses: actions/download-artifact@v2
+      # - name: Checkout # Required for GH-pages deployment
+      #   uses: actions/checkout@v2
+      # - name: "Download DB zips"
+      #   uses: actions/download-artifact@v2
+      #   with:
+      #     name: parts_db_zip_files
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1
+        with:
+      artifact_name: parts_db_zip_files
+      # delete-artifact
+      - name: Clean
+        uses: geekyeggo/delete-artifact@v2
         with:
           name: parts_db_zip_files
-      - name: Deploy to GH Pages
-        uses: JamesIves/github-pages-deploy-action@4.1.0
-        with:
-          branch: gh-pages
-          folder: data
-          single-commit: true
