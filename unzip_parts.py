@@ -1,5 +1,9 @@
 #!/bin/env python3
 
+import os
+from pathlib import Path
+from zipfile import ZipFile
+
 
 def unzip_parts():
     # unzip (needs to go into download function finally)
