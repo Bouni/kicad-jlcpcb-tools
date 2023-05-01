@@ -166,4 +166,4 @@ with open("parts.db.zip", "rb") as z:
 
 # remove the large zip file und uncompressed db after splitting
 os.unlink("parts.db.zip")
-os.unlink()
+os.unlink(partsdb)

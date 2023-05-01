@@ -1,0 +1,55 @@
+name: "Update parts database"
+on:
+  push:
+  pull_request:
+  schedule: # 2 hours after jlcparts updates their database
+    - cron: "0 5 * * *"
+jobs:
+  build_and_update:
+    name: "Update component database and frontend"
+    runs-on: ubuntu-20.04
+    environment: github-pages
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 python3-pip wget zip unzip p7zip-full
+      - name: Update database
+        run: |
+          set -x
+
+          wget -q https://yaqwsx.github.io/jlcparts/data/cache.zip
+          for seq in $(seq 1 9); do
+            wget -q https://yaqwsx.github.io/jlcparts/data/cache.z0$seq || true
+          done
+
+          7z x cache.zip
+          rm -rf cache.z*
+
+          python3 jlcparts_db_convert.py
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: parts_db_zip_files
+          path: db_build/parts.db.zip.*
+  deploy:
+    name: "Deploy"
+    runs-on: ubuntu-20.04
+    needs: build_and_update
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout # Required for GH-pages deployment
+        uses: actions/checkout@v2
+      - name: "Download DB zips"
+        uses: actions/download-artifact@v2
+        with:
+          name: parts_db_zip_files
+      - name: Deploy to GH Pages
+        uses: JamesIves/github-pages-deploy-action@4.1.0
+        with:
+          branch: gh-pages
+          folder: data
+          single-commit: true
