@@ -142,3 +142,28 @@ conn.close()
 # compress the result
 with ZipFile("parts.db.zip", "w", zipfile.ZIP_DEFLATED) as zf:
     zf.write(partsdb)
+
+# split the archive on byte level so we stay below githubs 100M limit
+
+# Set the size of each split file (in bytes)
+split_size = 80000000  # 80 MB
+
+# Open the zip file for byte-reading
+with open("parts.db.zip", "rb") as z:
+    # Read the file data in chunks
+    chunk = z.read(split_size)
+    chunk_num = 1
+
+    while chunk:
+        split_file_name = f"parts.db.zip.{chunk_num:03}"
+        with open(split_file_name, "wb") as split_file:
+            # Write the chunk to the new split file
+            split_file.write(chunk)
+
+        # Read the next chunk of data from the file
+        chunk = z.read(split_size)
+        chunk_num += 1
+
+# remove the large zip file und uncompressed db after splitting
+os.unlink("parts.db.zip")
+os.unlink()
