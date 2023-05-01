@@ -22,11 +22,11 @@ class SchematicExport:
 
     def load_schematic(self, paths):
         if is_nightly(GetBuildVersion()):
-            self.logger.info(f"Kicad 7+...")
+            self.logger.info("Kicad 7+...")
             for path in paths:
                 self._update_schematic7(path)
         else:
-            self.logger.info(f"Kicad 6...")
+            self.logger.info("Kicad 6...")
             for path in paths:
                 self._update_schematic(path)
 
