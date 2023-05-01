@@ -125,7 +125,7 @@ for c in comps:
         c[7],  # Description
         c[8],  # Datasheet
         price_str,  # Price
-        int(c[9]),  # Stock
+        str(c[9]),  # Stock
     )
     rows.append(row)
 
