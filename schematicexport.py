@@ -9,6 +9,7 @@ from pcbnew import (
 
 from .helpers import is_nightly
 
+
 class SchematicExport:
 
     """A class to export Schematic files"""
