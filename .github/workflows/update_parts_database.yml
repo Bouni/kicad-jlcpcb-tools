@@ -33,7 +33,7 @@ jobs:
           rm -rf cache.z*
 
           ls -lah
-
+          cd ..
           python3 jlcparts_db_convert.py
 
       - uses: actions/upload-artifact@v3
