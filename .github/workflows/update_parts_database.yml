@@ -44,6 +44,10 @@ jobs:
     name: "Deploy"
     runs-on: ubuntu-20.04
     needs: build_and_update
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     if: github.ref == 'refs/heads/main'
     steps:
       # - name: Checkout # Required for GH-pages deployment
