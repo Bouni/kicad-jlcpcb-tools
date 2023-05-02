@@ -35,11 +35,14 @@ jobs:
           ls -lah
           cd ..
           python3 jlcparts_db_convert.py
+          touch index.html
 
       - uses: actions/upload-artifact@v3
         with:
           name: parts_db_zip_files
-          path: db_build/parts.db.zip.*
+          path: |
+            db_build/parts.db.zip.*
+            index.html
   deploy:
     name: "Deploy"
     runs-on: ubuntu-20.04
