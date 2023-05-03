@@ -35,21 +35,14 @@ jobs:
 
           ls -lah
           cd ..
+          # creates the converted database in 80M split-zip files in folder db_build
           python3 jlcparts_db_convert.py
-          touch index.html
-
-          tar \
-          --dereference --hard-dereference \
-          -cvf "$RUNNER_TEMP/artifact.tar" \
-          db_build/parts.db.zip.* index.html
 
       - name: Upload pages artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-pages-artifact@v1
         with:
           name: github-pages
-          path: ${{ runner.temp }}/artifact.tar
-          retention-days: ${{ inputs.retention-days }}
-          if-no-files-found: error
+          path: db_build
   deploy:
     name: "Deploy"
     runs-on: ubuntu-20.04
