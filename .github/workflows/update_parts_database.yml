@@ -67,7 +67,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v2
       # delete-artifact
-      # - name: Clean
-      #   uses: geekyeggo/delete-artifact@v2
-      #   with:
-      #     name: parts_db_zip_files
+      - name: Clean
+        uses: geekyeggo/delete-artifact@v2
+        with:
+          name: github-pages
