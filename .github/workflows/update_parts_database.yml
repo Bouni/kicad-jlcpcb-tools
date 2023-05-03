@@ -1,8 +1,9 @@
+---
 name: "Update parts database"
 on:
   push:
   pull_request:
-  schedule: # 2 hours after jlcparts updates their database
+  schedule:  # 2 hours after jlcparts updates their database
     - cron: "0 5 * * *"
 jobs:
   build_and_update:
@@ -36,12 +37,12 @@ jobs:
           cd ..
           python3 jlcparts_db_convert.py
           touch index.html
-          
+
           gtar \
           --dereference --hard-dereference \
           -cvf "$RUNNER_TEMP/artifact.tar" \
           db_build/parts.db.zip.* index.html
-            
+
       - name: Upload pages artifact
         uses: actions/upload-artifact@v3
         with:
