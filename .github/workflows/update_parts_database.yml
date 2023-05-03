@@ -1,8 +1,9 @@
+---
 name: "Update parts database"
 on:
   push:
   pull_request:
-  schedule: # 2 hours after jlcparts updates their database
+  schedule:  # 2 hours after jlcparts updates their database
     - cron: "0 5 * * *"
 jobs:
   build_and_update:
@@ -34,15 +35,19 @@ jobs:
 
           ls -lah
           cd ..
+          # creates the converted database in 80M split-zip files in folder db_build
           python3 jlcparts_db_convert.py
-          touch index.html
+          # remove the source db, as we don't wnat to package that one
+          rm db_build/cache.sqlite3
+          # some info output for sanity check
+          ls -lah db_build
+          du -cslh db_build
 
-      - uses: actions/upload-artifact@v3
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v1
         with:
-          name: parts_db_zip_files
-          path: |
-            db_build/parts.db.zip.*
-            index.html
+          name: github-pages
+          path: db_build
   deploy:
     name: "Deploy"
     runs-on: ubuntu-20.04
@@ -51,21 +56,17 @@ jobs:
       contents: read
       pages: write
       id-token: write
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     if: github.ref == 'refs/heads/main'
     steps:
-      # - name: Checkout # Required for GH-pages deployment
-      #   uses: actions/checkout@v2
-      # - name: "Download DB zips"
-      #   uses: actions/download-artifact@v2
-      #   with:
-      #     name: parts_db_zip_files
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v1
-        with:
-          artifact_name: parts_db_zip_files
+        uses: actions/deploy-pages@v2
       # delete-artifact
       - name: Clean
         uses: geekyeggo/delete-artifact@v2
         with:
-          name: parts_db_zip_files
+          name: github-pages
