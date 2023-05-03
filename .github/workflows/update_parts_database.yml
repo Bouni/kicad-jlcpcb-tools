@@ -37,6 +37,11 @@ jobs:
           cd ..
           # creates the converted database in 80M split-zip files in folder db_build
           python3 jlcparts_db_convert.py
+          # remove the source db, as we don't wnat to package that one
+          rm db_build/cache.sqlite3
+          # some info output for sanity check
+          ls -lah db_build
+          df -cslh db_build
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v1
@@ -57,12 +62,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     if: github.ref == 'refs/heads/main'
     steps:
-      # - name: Checkout # Required for GH-pages deployment
-      #   uses: actions/checkout@v2
-      # - name: "Download DB zips"
-      #   uses: actions/download-artifact@v2
-      #   with:
-      #     name: parts_db_zip_files
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v2
