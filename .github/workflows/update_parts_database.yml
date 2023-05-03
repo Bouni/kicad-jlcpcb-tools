@@ -36,13 +36,19 @@ jobs:
           cd ..
           python3 jlcparts_db_convert.py
           touch index.html
-
-      - uses: actions/upload-artifact@v3
+          
+          gtar \
+          --dereference --hard-dereference \
+          -cvf "$RUNNER_TEMP/artifact.tar" \
+          db_build/parts.db.zip.* index.html
+            
+      - name: Upload pages artifact
+        uses: actions/upload-artifact@v3
         with:
-          name: parts_db_zip_files
-          path: |
-            db_build/parts.db.zip.*
-            index.html
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
   deploy:
     name: "Deploy"
     runs-on: ubuntu-20.04
@@ -51,6 +57,10 @@ jobs:
       contents: read
       pages: write
       id-token: write
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     if: github.ref == 'refs/heads/main'
     steps:
       # - name: Checkout # Required for GH-pages deployment
@@ -61,11 +71,9 @@ jobs:
       #     name: parts_db_zip_files
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v1
-        with:
-          artifact_name: parts_db_zip_files
+        uses: actions/deploy-pages@v2
       # delete-artifact
-      - name: Clean
-        uses: geekyeggo/delete-artifact@v2
-        with:
-          name: parts_db_zip_files
+      # - name: Clean
+      #   uses: geekyeggo/delete-artifact@v2
+      #   with:
+      #     name: parts_db_zip_files
