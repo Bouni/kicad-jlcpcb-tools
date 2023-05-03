@@ -41,7 +41,7 @@ jobs:
           rm db_build/cache.sqlite3
           # some info output for sanity check
           ls -lah db_build
-          df -cslh db_build
+          du -cslh db_build
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v1
