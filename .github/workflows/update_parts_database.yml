@@ -38,7 +38,7 @@ jobs:
           python3 jlcparts_db_convert.py
           touch index.html
 
-          gtar \
+          tar \
           --dereference --hard-dereference \
           -cvf "$RUNNER_TEMP/artifact.tar" \
           db_build/parts.db.zip.* index.html
