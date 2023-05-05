@@ -166,7 +166,7 @@ with open("parts.db.zip", "rb") as z:
 
     # create a helper file for the downloader which indicates the number of chunk files
     with open("chunk_num.txt", "w") as f:
-        f.write(chunk_num-1)
+        f.write(str(chunk_num - 1))
 
 # remove the large zip file und uncompressed db after splitting
 os.unlink("parts.db.zip")
