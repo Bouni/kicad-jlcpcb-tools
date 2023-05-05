@@ -37,7 +37,7 @@ jobs:
           cd ..
           # creates the converted database in 80M split-zip files in folder db_build
           python3 jlcparts_db_convert.py
-          # remove the source db, as we don't wnat to package that one
+          # remove the source db, as we don't want to package that one
           rm db_build/cache.sqlite3
           # some info output for sanity check
           ls -lah db_build
