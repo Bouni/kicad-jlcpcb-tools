@@ -379,7 +379,7 @@ class Library:
                 f"Parts db is split into {r.text} parts. Proceeding to download..."
             )
             cnt = int(r.text)
-            self.logger.debug(f"Removing any spurios old zip part files...")
+            self.logger.debug("Removing any spurios old zip part files...")
             for p in glob(str(Path(self.datadir) / (chunk_file_stub + "*"))):
                 self.logger.debug(f"Removing {p}.")
                 os.unlink(p)
@@ -444,7 +444,7 @@ class Library:
                 os.remove(f"{self.partsdb_file}.bak")
             os.rename(self.partsdb_file, f"{self.partsdb_file}.bak")
         # unzip downloaded parts.zip
-        self.logger.debug(f"Combining and extracting zip part files...")
+        self.logger.debug("Combining and extracting zip part files...")
         try:
             unzip_parts(self.datadir)
         except Exception as e:
