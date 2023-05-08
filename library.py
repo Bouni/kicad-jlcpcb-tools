@@ -7,7 +7,8 @@ import time
 from enum import Enum
 from pathlib import Path
 from threading import Thread
-import zipfile
+from .unzip_parts import unzip_parts
+from glob import glob
 
 import requests
 import wx
@@ -348,58 +349,116 @@ class Library:
         Thread(target=self.download).start()
 
     def download(self):
-        """The actual worker thread that downloads and imports the CSV data."""
+        """The actual worker thread that downloads and imports the parts data."""
         self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
         # Download the zipped parts database
-        fallback_url = "https://jlc.bouni.de/parts.zip"
-        with open(os.path.join(self.datadir, "parts.zip"), "wb") as f:
-            try:
-                r = requests.get(fallback_url, allow_redirects=True, stream=True)
-                if r.status_code != requests.codes.ok:
-                    wx.PostEvent(
-                        self.parent,
-                        MessageEvent(
-                            title="Download Error",
-                            text=f"Failed to download the JLCPCB database, error code {r.status_code}\n"
-                            + "URL was:\n"
-                            f"'{fallback_url}'",
-                            style="error",
-                        ),
-                    )
-                    self.state = LibraryState.INITIALIZED
-                    self.create_tables(["placeholder_invalid_column_fix_errors"])
-                    return
-
-                size = int(r.headers.get("Content-Length"))
-                self.logger.debug(
-                    f"Download parts db with a size of {(size / 1024 / 1024):.2f}MB"
-                )
-                for data in r.iter_content(chunk_size=4096):
-                    f.write(data)
-                    progress = f.tell() / size * 100
-                    wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
-            except Exception as e:
+        url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
+        cnt_file = "chunk_num.txt"
+        cnt = 0
+        chunk_file_stub = "parts.db.zip."
+        try:
+            r = requests.get(url_stub + cnt_file, allow_redirects=True, stream=True)
+            if r.status_code != requests.codes.ok:
                 wx.PostEvent(
                     self.parent,
                     MessageEvent(
-                        title="Download Error",
-                        text=f"Failed to download the JLCPCB database, {e}",
+                        title="HTTP GET Error",
+                        text=f"Failed to fetch count of database parts, error code {r.status_code}\n"
+                        + "URL was:\n"
+                        f"'{url_stub + cnt_file}'",
                         style="error",
                     ),
                 )
                 self.state = LibraryState.INITIALIZED
                 self.create_tables(["placeholder_invalid_column_fix_errors"])
                 return
+
+            self.logger.debug(
+                f"Parts db is split into {r.text} parts. Proceeding to download..."
+            )
+            cnt = int(r.text)
+            self.logger.debug("Removing any spurios old zip part files...")
+            for p in glob(str(Path(self.datadir) / (chunk_file_stub + "*"))):
+                self.logger.debug(f"Removing {p}.")
+                os.unlink(p)
+        except Exception as e:
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Download Error",
+                    text=f"Failed to download the JLCPCB database, {e}",
+                    style="error",
+                ),
+            )
+            self.state = LibraryState.INITIALIZED
+            self.create_tables(["placeholder_invalid_column_fix_errors"])
+            return
+
+        for i in range(cnt):
+            chunk_file = chunk_file_stub + f"{i+1:03}"
+            with open(os.path.join(self.datadir, chunk_file), "wb") as f:
+                try:
+                    r = requests.get(
+                        url_stub + chunk_file, allow_redirects=True, stream=True
+                    )
+                    if r.status_code != requests.codes.ok:
+                        wx.PostEvent(
+                            self.parent,
+                            MessageEvent(
+                                title="Download Error",
+                                text=f"Failed to download the JLCPCB database, error code {r.status_code}\n"
+                                + "URL was:\n"
+                                f"'{url_stub + chunk_file}'",
+                                style="error",
+                            ),
+                        )
+                        self.state = LibraryState.INITIALIZED
+                        self.create_tables(["placeholder_invalid_column_fix_errors"])
+                        return
+
+                    size = int(r.headers.get("Content-Length"))
+                    self.logger.debug(
+                        f"Download parts db chunk {i+1} with a size of {(size / 1024 / 1024):.2f}MB"
+                    )
+                    for data in r.iter_content(chunk_size=4096):
+                        f.write(data)
+                        progress = f.tell() / size * 100
+                        wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
+                except Exception as e:
+                    wx.PostEvent(
+                        self.parent,
+                        MessageEvent(
+                            title="Download Error",
+                            text=f"Failed to download the JLCPCB database, {e}",
+                            style="error",
+                        ),
+                    )
+                    self.state = LibraryState.INITIALIZED
+                    self.create_tables(["placeholder_invalid_column_fix_errors"])
+                    return
         # rename existing parts.db to parts.db.bak, delete already existing bak file if neccesary
         if os.path.exists(self.partsdb_file):
             if os.path.exists(f"{self.partsdb_file}.bak"):
                 os.remove(f"{self.partsdb_file}.bak")
             os.rename(self.partsdb_file, f"{self.partsdb_file}.bak")
         # unzip downloaded parts.zip
-        with zipfile.ZipFile(os.path.join(self.datadir, "parts.zip"), "r") as z:
-            z.extractall(self.datadir)
+        self.logger.debug("Combining and extracting zip part files...")
+        try:
+            unzip_parts(self.datadir)
+        except Exception as e:
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Extract Error",
+                    text=f"Failed to combine and extract the JLCPCB database, {e}",
+                    style="error",
+                ),
+            )
+            self.state = LibraryState.INITIALIZED
+            self.create_tables(["placeholder_invalid_column_fix_errors"])
+            return
         # check if partsdb_file was successfully extracted
         if not os.path.exists(self.partsdb_file):
             if os.path.exists(f"{self.partsdb_file}.bak"):
