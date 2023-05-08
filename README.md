@@ -8,6 +8,10 @@
 
 ***
 
+[![Update parts database](https://github.com/Bouni/kicad-jlcpcb-tools/actions/workflows/update_parts_database.yml/badge.svg)](https://github.com/Bouni/kicad-jlcpcb-tools/actions/workflows/update_parts_database.yml)
+
+***
+
 Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 
 - Gerber files
