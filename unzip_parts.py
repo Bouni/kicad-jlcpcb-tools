@@ -22,6 +22,7 @@ def unzip_parts(path):
             split_path = os.path.join(path, split_file_name)
             # Open the split file
             with open(split_path, "rb") as split_file:
+
                 # Read the file data
                 file_data = split_file.read()
 
