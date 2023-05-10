@@ -1,8 +1,6 @@
 ---
 name: "Update parts database"
 on:
-  push:
-  pull_request:
   schedule:  # 2 hours after jlcparts updates their database
     - cron: "0 5 * * *"
 jobs:
