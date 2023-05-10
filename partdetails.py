@@ -215,8 +215,10 @@ class PartDetailsDialog(wx.Dialog):
                     str(attribute.get("attribute_value_name")),
                 ]
             )
-        picture = data.get("data", {}).get("componentImageUrl")
+        picture = data.get("data", {}).get("minImage")
         if picture:
+            # get the full resolution image instead of the thumbnail
+            picture = picture.replace("96x96","900x900") 
             self.image.SetBitmap(
                 self.get_scaled_bitmap(
                     picture,
