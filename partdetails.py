@@ -218,7 +218,7 @@ class PartDetailsDialog(wx.Dialog):
         picture = data.get("data", {}).get("minImage")
         if picture:
             # get the full resolution image instead of the thumbnail
-            picture = picture.replace("96x96","900x900") 
+            picture = picture.replace("96x96", "900x900")
             self.image.SetBitmap(
                 self.get_scaled_bitmap(
                     picture,
