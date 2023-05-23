@@ -507,7 +507,7 @@ class JLCPCBTools(wx.Dialog):
 
     def init_store(self):
         """Initialize the store of part assignments"""
-        self.store = Store(self.project_path)
+        self.store = Store(self, self.project_path)
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
 
