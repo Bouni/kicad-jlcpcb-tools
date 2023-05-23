@@ -19,8 +19,9 @@ from .helpers import (
 class Store:
     """A storage class to get data from a sqlite database and write it back"""
 
-    def __init__(self, project_path):
+    def __init__(self, parent, project_path):
         self.logger = logging.getLogger(__name__)
+        self.parent = parent
         self.project_path = project_path
         self.datadir = os.path.join(self.project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
@@ -219,12 +220,20 @@ class Store:
                             f"Part {part[0]} is already in the database but without lcsc value, so the value supplied from the board will be set."
                         )
                         self.update_part(part)
-                    # if part in the database, has a lcsc value, update except lcsc
+                    # if part in the database, has a lcsc value
                     elif dbpart and dbpart[3] and part[3]:
-                        self.logger.debug(
-                            f"Part {part[0]} is already in the database and has a lcsc value, the value supplied from the board will be ignored."
-                        )
-                        part.pop(3)
+                        # update lcsc value as well if setting is accordingly
+                        if not self.parent.settings.get("general", {}).get(
+                            "lcsc_priority", True
+                        ):
+                            self.logger.debug(
+                                f"Part {part[0]} is already in the database and has a lcsc value, the value supplied from the board will be ignored."
+                            )
+                            part.pop(3)
+                        else:
+                            self.logger.debug(
+                                f"Part {part[0]} is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database."
+                            )
                         self.update_part(part)
                 else:
                     # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
