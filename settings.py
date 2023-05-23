@@ -47,7 +47,7 @@ class SettingsDialog(wx.Dialog):
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
-            name="tented_vias",
+            name="gerber_tented_vias",
         )
 
         self.tented_vias_setting.SetToolTip(
@@ -78,7 +78,7 @@ class SettingsDialog(wx.Dialog):
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
-            name="fill_zones",
+            name="gerber_fill_zones",
         )
 
         self.fill_zones_setting.SetToolTip(
@@ -100,6 +100,39 @@ class SettingsDialog(wx.Dialog):
         fill_zones_sizer.Add(self.fill_zones_image, 10, wx.ALL | wx.EXPAND, 5)
         fill_zones_sizer.Add(self.fill_zones_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### LCSC priority #####
+
+        self.lcsc_priority_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="LCSC number priority",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_lcsc_priority",
+        )
+
+        self.lcsc_priority_setting.SetToolTip(
+            wx.ToolTip(
+                "Whether LCSC number from schematic should overrule those in the database"
+            )
+        )
+
+        self.lcsc_priority_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.lcsc_priority_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        lcsc_priority_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        lcsc_priority_sizer.Add(self.lcsc_priority_image, 10, wx.ALL | wx.EXPAND, 5)
+        lcsc_priority_sizer.Add(self.lcsc_priority_setting, 100, wx.ALL | wx.EXPAND, 5)
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -107,6 +140,7 @@ class SettingsDialog(wx.Dialog):
         layout = wx.GridSizer(10, 2, 0, 0)
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -147,6 +181,27 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_lcsc_priority(self, priority):
+        """Update settings dialog according to the settings."""
+        if priority:
+            self.lcsc_priority_setting.SetValue(priority)
+            self.lcsc_priority_setting.SetLabel(
+                "LCSC numbers from schematic have priority"
+            )
+            self.lcsc_priority_image.SetBitmap(
+                loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True)
+            )
+        else:
+            self.lcsc_priority_setting.SetValue(priority)
+            self.lcsc_priority_setting.SetLabel(
+                "LCSC numbers from database have priority"
+            )
+            self.lcsc_priority_image.SetBitmap(
+                loadBitmapScaled(
+                    "database-outline.png", self.parent.scale_factor, static=True
+                )
+            )
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly"""
         self.update_tented_vias(
@@ -155,17 +210,22 @@ class SettingsDialog(wx.Dialog):
         self.update_fill_zones(
             self.parent.settings.get("gerber", {}).get("fill_zones", True)
         )
+        self.update_lcsc_priority(
+            self.parent.settings.get("general", {}).get("lcsc_priority", True)
+        )
 
     def update_settings(self, event):
         """Update and persist a setting that was changed."""
-        upd = getattr(self, f"update_{event.GetEventObject().GetName()}")
-        upd(event.GetEventObject().GetValue())
+        section, name = event.GetEventObject().GetName().split("_", 1)
+        value = event.GetEventObject().GetValue()
+        getattr(self, f"update_{name}")(value)
+
         wx.PostEvent(
             self.parent,
             UpdateSetting(
-                section="gerber",
-                setting=event.GetEventObject().GetName(),
-                value=event.GetEventObject().GetValue(),
+                section=section,
+                setting=name,
+                value=value,
             ),
         )
 
