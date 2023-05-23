@@ -1,1 +1,1 @@
-{"partselector": {"basic": true, "extended": true, "stock": false}, "gerber": {"tented_vias": true}}
+{"partselector": {"basic": true, "extended": true, "stock": false}, "gerber": {"tented_vias": true, "fill_zones": true}}
