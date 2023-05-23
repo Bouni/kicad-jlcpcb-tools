@@ -130,13 +130,17 @@ class SettingsDialog(wx.Dialog):
             self.fill_zones_setting.SetValue(fill)
             self.fill_zones_setting.SetLabel("Fill zones")
             self.fill_zones_image.SetBitmap(
-                loadBitmapScaled("fill-zones.png", self.parent.scale_factor, static=True)
+                loadBitmapScaled(
+                    "fill-zones.png", self.parent.scale_factor, static=True
+                )
             )
         else:
             self.fill_zones_setting.SetValue(fill)
             self.fill_zones_setting.SetLabel("Don't fill zones")
             self.fill_zones_image.SetBitmap(
-                loadBitmapScaled("unfill-zones.png", self.parent.scale_factor, static=True)
+                loadBitmapScaled(
+                    "unfill-zones.png", self.parent.scale_factor, static=True
+                )
             )
 
     def load_settings(self):
@@ -147,7 +151,6 @@ class SettingsDialog(wx.Dialog):
         self.update_fill_zones(
             self.parent.settings.get("gerber", {}).get("fill_zones", True)
         )
-
 
     def update_settings(self, event):
         """Update and persist a setting that was changed."""
