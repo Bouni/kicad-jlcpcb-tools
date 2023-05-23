@@ -38,6 +38,8 @@ class SettingsDialog(wx.Dialog):
         # ------------------------- Change settings ---------------------------
         # ---------------------------------------------------------------------
 
+        ##### Tented vias #####
+
         self.tented_vias_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
@@ -66,6 +68,8 @@ class SettingsDialog(wx.Dialog):
         tented_vias_sizer = wx.BoxSizer(wx.HORIZONTAL)
         tented_vias_sizer.Add(self.tented_vias_image, 10, wx.ALL | wx.EXPAND, 5)
         tented_vias_sizer.Add(self.tented_vias_setting, 100, wx.ALL | wx.EXPAND, 5)
+
+        ##### Fill zones #####
 
         self.fill_zones_setting = wx.CheckBox(
             self,
