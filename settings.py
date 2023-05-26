@@ -131,6 +131,37 @@ class SettingsDialog(wx.Dialog):
         plot_values_sizer.Add(self.plot_values_image, 10, wx.ALL | wx.EXPAND, 5)
         plot_values_sizer.Add(self.plot_values_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Plot references #####
+
+        self.plot_references_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Plot references",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_plot_references",
+        )
+
+        self.plot_references_setting.SetToolTip(
+            wx.ToolTip("Whether value should be plotted on gerber generation")
+        )
+
+        self.plot_references_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("plot_refs.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.plot_references_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        plot_references_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        plot_references_sizer.Add(self.plot_references_image, 10, wx.ALL | wx.EXPAND, 5)
+        plot_references_sizer.Add(self.plot_references_setting, 100, wx.ALL | wx.EXPAND, 5)
+
         ##### LCSC priority #####
 
         self.lcsc_priority_setting = wx.CheckBox(
@@ -172,6 +203,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
@@ -232,6 +264,25 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_plot_references(self, plot_references):
+        """Update settings dialog according to the settings."""
+        if plot_references:
+            self.plot_references_setting.SetValue(plot_references)
+            self.plot_references_setting.SetLabel("Plot references on silkscreen")
+            self.plot_references_image.SetBitmap(
+                loadBitmapScaled(
+                    "plot_refs.png", self.parent.scale_factor, static=True
+                )
+            )
+        else:
+            self.plot_references_setting.SetValue(plot_references)
+            self.plot_references_setting.SetLabel("Don't plot references on silkscreen")
+            self.plot_references_image.SetBitmap(
+                loadBitmapScaled(
+                    "no_refs.png", self.parent.scale_factor, static=True
+                )
+            )
+
     def update_lcsc_priority(self, priority):
         """Update settings dialog according to the settings."""
         if priority:
@@ -263,6 +314,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_plot_values(
             self.parent.settings.get("gerber", {}).get("plot_values", True)
+        )
+        self.update_plot_references(
+            self.parent.settings.get("gerber", {}).get("plot_references", True)
         )
         self.update_lcsc_priority(
             self.parent.settings.get("general", {}).get("lcsc_priority", True)

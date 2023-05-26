@@ -118,7 +118,7 @@ class Fabrication:
 
         # General Options
         popt.SetPlotValue(self.parent.settings.get("gerber", {}).get("plot_values", True))
-        popt.SetPlotReference(True)
+        popt.SetPlotReference(self.parent.settings.get("gerber", {}).get("plot_references", True))
         popt.SetPlotInvisibleText(False)
 
         popt.SetSketchPadsOnFabLayers(False)
