@@ -117,7 +117,7 @@ class Fabrication:
         popt.SetFormat(1)
 
         # General Options
-        popt.SetPlotValue(True)
+        popt.SetPlotValue(self.parent.settings.get("gerber", {}).get("plot_values", True))
         popt.SetPlotReference(True)
         popt.SetPlotInvisibleText(False)
 
