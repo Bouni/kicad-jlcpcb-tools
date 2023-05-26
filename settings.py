@@ -160,7 +160,9 @@ class SettingsDialog(wx.Dialog):
 
         plot_references_sizer = wx.BoxSizer(wx.HORIZONTAL)
         plot_references_sizer.Add(self.plot_references_image, 10, wx.ALL | wx.EXPAND, 5)
-        plot_references_sizer.Add(self.plot_references_setting, 100, wx.ALL | wx.EXPAND, 5)
+        plot_references_sizer.Add(
+            self.plot_references_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
 
         ##### LCSC priority #####
 
@@ -259,9 +261,7 @@ class SettingsDialog(wx.Dialog):
             self.plot_values_setting.SetValue(plot_values)
             self.plot_values_setting.SetLabel("Don't plot values on silkscreen")
             self.plot_values_image.SetBitmap(
-                loadBitmapScaled(
-                    "no_values.png", self.parent.scale_factor, static=True
-                )
+                loadBitmapScaled("no_values.png", self.parent.scale_factor, static=True)
             )
 
     def update_plot_references(self, plot_references):
@@ -270,17 +270,13 @@ class SettingsDialog(wx.Dialog):
             self.plot_references_setting.SetValue(plot_references)
             self.plot_references_setting.SetLabel("Plot references on silkscreen")
             self.plot_references_image.SetBitmap(
-                loadBitmapScaled(
-                    "plot_refs.png", self.parent.scale_factor, static=True
-                )
+                loadBitmapScaled("plot_refs.png", self.parent.scale_factor, static=True)
             )
         else:
             self.plot_references_setting.SetValue(plot_references)
             self.plot_references_setting.SetLabel("Don't plot references on silkscreen")
             self.plot_references_image.SetBitmap(
-                loadBitmapScaled(
-                    "no_refs.png", self.parent.scale_factor, static=True
-                )
+                loadBitmapScaled("no_refs.png", self.parent.scale_factor, static=True)
             )
 
     def update_lcsc_priority(self, priority):
