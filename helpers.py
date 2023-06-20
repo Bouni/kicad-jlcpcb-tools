@@ -2,6 +2,7 @@ import os
 import re
 
 import wx
+import wx.dataview
 
 PLUGIN_PATH = os.path.split(os.path.abspath(__file__))[0]
 
@@ -68,6 +69,25 @@ def loadIconScaled(filename, scale=1.0):
     if getWxWidgetsVersion() > 315:
         return bmp
     return wx.Icon(bmp)
+
+
+def GetListIcon(value, scale_factor):
+    if value == 0:
+        return wx.dataview.DataViewIconText(
+            "",
+            loadIconScaled(
+                "mdi-check-color.png",
+                scale_factor,
+            ),
+        )
+    else:
+        return wx.dataview.DataViewIconText(
+            "",
+            loadIconScaled(
+                "mdi-close-color.png",
+                scale_factor,
+            ),
+        )
 
 
 def natural_sort_collation(a, b):

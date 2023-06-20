@@ -26,9 +26,11 @@ from .helpers import (
     getVersion,
     loadBitmapScaled,
     loadIconScaled,
+    GetListIcon,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
+from .const import Column
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
@@ -719,9 +721,12 @@ class JLCPCBTools(wx.Dialog):
             pos = toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, bom)
             self.store.set_pos(ref, pos)
-        self.populate_footprint_list()
-        for row in selected_rows:
-            self.footprint_list.SelectRow(row)
+            self.footprint_list.SetValue(
+                GetListIcon(bom, self.scale_factor), row, Column.BOM
+            )
+            self.footprint_list.SetValue(
+                GetListIcon(pos, self.scale_factor), row, Column.POS
+            )
 
     def toggle_bom(self, e):
         """Toggle the exclude from BOM attribute of a footprint."""
@@ -733,9 +738,9 @@ class JLCPCBTools(wx.Dialog):
             fp = get_footprint_by_ref(GetBoard(), ref)[0]
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, bom)
-        self.populate_footprint_list()
-        for row in selected_rows:
-            self.footprint_list.SelectRow(row)
+            self.footprint_list.SetValue(
+                GetListIcon(bom, self.scale_factor), row, Column.BOM
+            )
 
     def toggle_pos(self, e):
         selected_rows = []
@@ -747,9 +752,9 @@ class JLCPCBTools(wx.Dialog):
             fp = get_footprint_by_ref(GetBoard(), ref)[0]
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, pos)
-        self.populate_footprint_list()
-        for row in selected_rows:
-            self.footprint_list.SelectRow(row)
+            self.footprint_list.SetValue(
+                GetListIcon(pos, self.scale_factor), row, Column.POS
+            )
 
     def remove_part(self, e):
         """Remove an assigned a LCSC Part number to a footprint."""
