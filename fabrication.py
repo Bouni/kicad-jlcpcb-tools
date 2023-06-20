@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZipFile, ZIP_DEFLATED
 
 from pcbnew import (
     EXCELLON_WRITER,
@@ -250,7 +250,12 @@ class Fabrication:
     def zip_gerber_excellon(self):
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
         zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
-        with ZipFile(os.path.join(self.outputdir, zipname), "w") as zipfile:
+        with ZipFile(
+            os.path.join(self.outputdir, zipname),
+            "w",
+            compression=ZIP_DEFLATED,
+            compresslevel=9,
+        ) as zipfile:
             for folderName, subfolders, filenames in os.walk(self.gerberdir):
                 for filename in filenames:
                     if not filename.endswith(("gbr", "drl", "pdf")):
