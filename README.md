@@ -29,9 +29,7 @@ Furthermore it lets you search the JLCPCB parts database and assign parts direct
 
 ## Warning 🔥
 
-**This plugin is not yet very well tested and only works for KiCAD 6.0!**
-
-I try to keep it working with 6.99 nightly builds but there are massive API changes on the horizon and I'm not sure if I can keep up with them.
+I try to keep it working with 7.99 nightly builds but there are massive API changes on the horizon and I'm not sure if I can keep up with them.
 
 **This is under a lot of developments, so consider this README out of date all the time 😏**
 
