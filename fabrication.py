@@ -23,10 +23,6 @@ from pcbnew import (
     F_SilkS,
     GetBoard,
     GetBuildVersion,
-    In1_Cu,
-    In2_Cu,
-    In3_Cu,
-    In4_Cu,
     Refresh,
     ToMM,
 )
@@ -166,60 +162,39 @@ class Fabrication:
         if not layer_count:
             layer_count = self.board.GetCopperLayerCount()
 
+        plot_plan_top = [
+            ("CuTop", F_Cu, "Top layer"),
+            ("SilkTop", F_SilkS, "Silk top"),
+            ("MaskTop", F_Mask, "Mask top"),
+            ("PasteTop", F_Paste, "Paste top"),
+        ]
+        plot_plan_bottom = [
+            ("CuBottom", B_Cu, "Bottom layer"),
+            ("SilkBottom", B_SilkS, "Silk top"),
+            ("MaskBottom", B_Mask, "Mask bottom"),
+            ("PasteBottom", B_Paste, "Paste bottom"),
+            ("EdgeCuts", Edge_Cuts, "Edges"),
+            ("VScore", Cmts_User, "V score cut"),
+        ]
+
+        plot_plan = []
+
+        # Single sided PCB
         if layer_count == 1:
-            plot_plan = [
-                ("CuTop", F_Cu, "Top layer"),
-                ("SilkTop", F_SilkS, "Silk top"),
-                ("MaskTop", F_Mask, "Mask top"),
-                ("PasteTop", F_Paste, "Paste top"),
-                ("EdgeCuts", Edge_Cuts, "Edges"),
-                ("VScore", Cmts_User, "V score cut"),
-            ]
+            plot_plan = plot_plan_top + plot_plan_bottom[-2:]
+        # Double sided PCB
         elif layer_count == 2:
-            plot_plan = [
-                ("CuTop", F_Cu, "Top layer"),
-                ("SilkTop", F_SilkS, "Silk top"),
-                ("MaskTop", F_Mask, "Mask top"),
-                ("PasteTop", F_Paste, "Paste top"),
-                ("CuBottom", B_Cu, "Bottom layer"),
-                ("SilkBottom", B_SilkS, "Silk top"),
-                ("MaskBottom", B_Mask, "Mask bottom"),
-                ("PasteBottom", B_Paste, "Paste bottom"),
-                ("EdgeCuts", Edge_Cuts, "Edges"),
-                ("VScore", Cmts_User, "V score cut"),
-            ]
-        elif layer_count == 4:
-            plot_plan = [
-                ("CuTop", F_Cu, "Top layer"),
-                ("SilkTop", F_SilkS, "Silk top"),
-                ("MaskTop", F_Mask, "Mask top"),
-                ("PasteTop", F_Paste, "Paste top"),
-                ("CuIn1", In1_Cu, "Inner layer 1"),
-                ("CuIn2", In2_Cu, "Inner layer 2"),
-                ("CuBottom", B_Cu, "Bottom layer"),
-                ("SilkBottom", B_SilkS, "Silk top"),
-                ("MaskBottom", B_Mask, "Mask bottom"),
-                ("PasteBottom", B_Paste, "Paste bottom"),
-                ("EdgeCuts", Edge_Cuts, "Edges"),
-                ("VScore", Cmts_User, "V score cut"),
-            ]
-        elif layer_count == 6:
-            plot_plan = [
-                ("CuTop", F_Cu, "Top layer"),
-                ("SilkTop", F_SilkS, "Silk top"),
-                ("MaskTop", F_Mask, "Mask top"),
-                ("PasteTop", F_Paste, "Paste top"),
-                ("CuIn1", In1_Cu, "Inner layer 1"),
-                ("CuIn2", In2_Cu, "Inner layer 2"),
-                ("CuIn3", In3_Cu, "Inner layer 3"),
-                ("CuIn4", In4_Cu, "Inner layer 4"),
-                ("CuBottom", B_Cu, "Bottom layer"),
-                ("SilkBottom", B_SilkS, "Silk top"),
-                ("MaskBottom", B_Mask, "Mask bottom"),
-                ("PasteBottom", B_Paste, "Paste bottom"),
-                ("EdgeCuts", Edge_Cuts, "Edges"),
-                ("VScore", Cmts_User, "V score cut"),
-            ]
+            plot_plan = plot_plan_top + plot_plan_bottom
+        # Everything with inner layers
+        else:
+            plot_plan = (
+                plot_plan_top
+                + [
+                    (f"CuIn{layer}", layer, f"Inner layer {layer}")
+                    for layer in range(1, layer_count - 1)
+                ]
+                + plot_plan_bottom
+            )
 
         for layer_info in plot_plan:
             if layer_info[1] <= B_Cu:

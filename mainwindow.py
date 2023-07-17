@@ -131,26 +131,30 @@ class JLCPCBTools(wx.Dialog):
         self.layer_selection = adv.BitmapComboBox(
             self.upper_toolbar, ID_LAYERS, style=wx.CB_READONLY
         )
-        self.layer_selection.Append(
+
+        layer_options = [
             "Auto",
-            loadBitmapScaled("mdi-layers-triple-outline.png", self.scale_factor, True),
-        )
-        self.layer_selection.Append(
             "1 Layer",
-            loadBitmapScaled("mdi-layers-triple-outline.png", self.scale_factor, True),
-        )
-        self.layer_selection.Append(
-            "2 Layers",
-            loadBitmapScaled("mdi-layers-triple-outline.png", self.scale_factor, True),
-        )
-        self.layer_selection.Append(
-            "4 Layers",
-            loadBitmapScaled("mdi-layers-triple-outline.png", self.scale_factor, True),
-        )
-        self.layer_selection.Append(
-            "6 Layers",
-            loadBitmapScaled("mdi-layers-triple-outline.png", self.scale_factor, True),
-        )
+            "2 Layer",
+            "4 Layer",
+            "6 Layer",
+            "8 Layer",
+            "10 Layer",
+            "12 Layer",
+            "14 Layer",
+            "16 Layer",
+            "18 Layer",
+            "20 Layer",
+        ]
+
+        for option in layer_options:
+            self.layer_selection.Append(
+                option,
+                loadBitmapScaled(
+                    "mdi-layers-triple-outline.png", self.scale_factor, True
+                ),
+            )
+
         self.layer_selection.SetSelection(0)
 
         self.upper_toolbar.AddControl(self.layer_selection)
@@ -890,8 +894,9 @@ class JLCPCBTools(wx.Dialog):
         """Generate fabrication data."""
         self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
-        if layer_selection != 0:
-            layer_count = int(self.layer_selection.GetString(layer_selection)[:1])
+        number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
+        if number:
+            layer_count = int(number.group(0))
         else:
             layer_count = None
         self.fabrication.generate_geber(layer_count)
