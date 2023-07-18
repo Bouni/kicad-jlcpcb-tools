@@ -4,37 +4,68 @@ on:  # yamllint disable-line rule:truthy
   push:
   pull_request:
 jobs:
-  lint:
+  markdownlint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      - name: Set up Python
+      - name: Setup NodeJS
+        uses: actions/setup-node@v3
+      - name: Install markdownlint
+        run: npm install -g markdownlint-cli
+      - name: Run markdownlint
+        run: markdownlint "**/*.md"
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
-
-      - name: Install black
-        run: pip install black
-      - name: Run black
-        run: black --check --verbose $(git ls-files '*.py')
-
-      - name: Install isort
-        run: pip install isort
-      - name: Run isort
-        run: isort $(git ls-files '*.py')
-
-      - name: Install ruff
-        run: pip install ruff
-      - name: Run ruff
-        run: ruff $(git ls-files '*.py')
-
+          python-version: "3.11"
       - name: Install yamllint
         run: pip install --user yamllint
       - name: Run yamllint
         run: yamllint .
-
-      # - name: Install pylint
-      #   run: pip install pylint
-      # - name: Run pylint
-      #   run: pylint $(git ls-files '*.py')
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install black
+        run: pip install black
+      - name: Run black
+        run: black --diff --check --verbose $(git ls-files '*.py')
+  # pylint:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v3
+  #     - name: Set up Python ${{ matrix.python-version }}
+  #       uses: actions/setup-python@v4
+  #       with:
+  #         python-version: "3.11"
+  #     - name: Install pytest
+  #       run: pip install pytest
+  #     - name: Install pylint
+  #       run: pip install pylint
+  #     - name: Run pylint
+  #       run: pylint $(git ls-files '*.py')
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff
+        run: ruff $(git ls-files '*.py')
