@@ -49,7 +49,7 @@ From there you can install the plugin via the GUI.
 
 Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\users\<username>\Documents\kicad\6.0\scripting\plugins\` on linux that would be `/home/<username>/.local/share/kicad/6.0/scripting/plugins`.
 
-### Flatpack :warning: 
+### Flatpack :warning
 
 The Flatpak installation of KiCAD currently dows not ship with pip and requests installed. The later is required for the plugin to work.
 In order to get it working you can run the following 3 commands:
@@ -62,7 +62,7 @@ See [issue #94](https://github.com/Bouni/kicad-jlcpcb-tools/issues/94) for more 
 
 ## Usage 🥳
 
-To access the plugin choose `Tools->External Plugins->JLCPCB Tools` from the _PCB Editor_ menus
+To access the plugin choose `Tools->External Plugins->JLCPCB Tools` from the *PCB Editor* menus
 
 Checkout this screencast, it shows quickly how to use this plugin:
 
@@ -113,7 +113,7 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 
 1. fork repo
 2. git clone forked repo
-3. install pre-commit `pip install pre-commit` 
+3. install pre-commit `pip install pre-commit`
 4. setup pre-commit `pre-commit install`
 5. create feature branch `git switch -c my-awesome-feature`
 6. make your changes
