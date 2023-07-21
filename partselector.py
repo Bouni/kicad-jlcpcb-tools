@@ -638,9 +638,9 @@ class PartSelectorDialog(wx.Dialog):
             return
         part = self.part_list.GetTextValue(row, 0)
         if part != "":
-            self.busy_cursor = wx.BusyCursor()
+            busy_cursor = wx.BusyCursor()
             dialog = PartDetailsDialog(self.parent, part)
-            del self.busy_cursor
+            del busy_cursor
             dialog.ShowModal()
 
     def help(self, *_):
