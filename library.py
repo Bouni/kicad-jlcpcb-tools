@@ -25,6 +25,7 @@ from .unzip_parts import unzip_parts
 
 
 class LibraryState(Enum):
+    """The various states of the library."""
     INITIALIZED = 0
     UPDATE_NEEDED = 1
     DOWNLOAD_RUNNING = 2
