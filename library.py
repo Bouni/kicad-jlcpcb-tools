@@ -362,7 +362,7 @@ class Library:
         cnt = 0
         chunk_file_stub = "parts.db.zip."
         try:
-            r = requests.get(url_stub + cnt_file, allow_redirects=True, stream=True)
+            r = requests.get(url_stub + cnt_file, allow_redirects=True, stream=True, timeout=300)
             if r.status_code != requests.codes.ok:
                 wx.PostEvent(
                     self.parent,
