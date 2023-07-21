@@ -1,3 +1,5 @@
+"""This module contains the part details modal dialog."""
+
 import io
 import logging
 import webbrowser
@@ -9,6 +11,8 @@ from .helpers import HighResWxSize, loadBitmapScaled
 
 
 class PartDetailsDialog(wx.Dialog):
+    """The part details dialog class."""
+
     def __init__(self, parent, part):
         wx.Dialog.__init__(
             self,
@@ -229,6 +233,7 @@ class PartDetailsDialog(wx.Dialog):
         self.pdfurl = data.get("data", {}).get("dataManualUrl")
 
     def report_part_data_fetch_error(self, reason):
+        """Spawn a message box with an erro message if the fetch fails."""
         wx.MessageBox(
             f"Failed to download part detail from the JLCPCB API ({reason})\r\n"
             f"We looked for a part named:\r\n{self.part}\r\n[hint: did you fill in the LCSC field correctly?]",
