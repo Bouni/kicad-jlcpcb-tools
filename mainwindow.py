@@ -92,9 +92,9 @@ class JLCPCBTools(wx.Dialog):
         self.hide_pos_parts = False
         self.manufacturers = []
         self.packages = []
-        self.library = None
-        self.store = None
-        self.settings = None
+        self.library: Library
+        self.store: Store
+        self.settings = {}
         self.load_settings()
         self.Bind(wx.EVT_CLOSE, self.quit_dialog)
 
