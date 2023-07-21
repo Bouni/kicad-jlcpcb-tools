@@ -136,7 +136,7 @@ def get_footprint_keys(fp):
     except:
         package = ""
     try:
-        reference = int(re.search("\d+", fp.GetReference())[0])
+        reference = int(re.search(r"\d+", fp.GetReference())[0])
     except:
         reference = 0
     return (package, reference)
