@@ -1,3 +1,5 @@
+"""This module handle the JLCPCB parts database."""
+
 import contextlib
 import logging
 import os
