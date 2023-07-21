@@ -3,8 +3,8 @@
 import os
 import re
 
-import wx
-import wx.dataview
+import wx  # pylint: disable=import-error
+import wx.dataview  # pylint: disable=import-error
 
 PLUGIN_PATH = os.path.split(os.path.abspath(__file__))[0]
 
