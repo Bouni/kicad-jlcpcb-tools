@@ -598,9 +598,11 @@ class JLCPCBTools(wx.Dialog):
         # find rotation correction values
         for part in parts:
             detail = list(
-                filter(lambda x: x[0] == part[3], details)
-            )  # pylint: disable=cell-var-from-loop
-            # TODO: Figure out how to fix this properly
+                filter(
+                    lambda x, lcsc=part[3]: x[0] == lcsc,
+                    details,
+                )
+            )
             if detail:
                 part[4] = detail[0][2]
                 part[5] = detail[0][1]
