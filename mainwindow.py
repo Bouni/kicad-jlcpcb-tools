@@ -774,7 +774,6 @@ class JLCPCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             ref = self.footprint_list.GetTextValue(row, 0)
-            get_footprint_by_ref(GetBoard(), ref)[0]
             self.store.set_lcsc(ref, "")
         self.populate_footprint_list()
 
