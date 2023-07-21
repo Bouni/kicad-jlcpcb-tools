@@ -546,8 +546,7 @@ class PartSelectorDialog(wx.Dialog):
         s = set(val for val in parts.values())
         if len(s) != 1:
             return ""
-        else:
-            return list(s)[0]
+        return list(s)[0]
 
     def quit_dialog(self, *_):
         """Close this window."""
