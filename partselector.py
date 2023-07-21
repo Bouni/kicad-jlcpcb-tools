@@ -558,7 +558,7 @@ class PartSelectorDialog(wx.Dialog):
         self.parent.library.set_order_by(e.GetColumn())
         self.search(None)
 
-    def OnPartSelected(self, e):
+    def OnPartSelected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
         if self.part_list.GetSelectedItemsCount() > 0:
             self.enable_toolbar_buttons(True)
@@ -573,7 +573,7 @@ class PartSelectorDialog(wx.Dialog):
         ]:
             b.Enable(bool(state))
 
-    def search(self, e):
+    def search(self, *_):
         """Search the library for parts that meet the search criteria."""
         parameters = {
             "keyword": self.keyword.GetValue(),
@@ -590,7 +590,7 @@ class PartSelectorDialog(wx.Dialog):
         result = self.parent.library.search(parameters)
         self.populate_part_list(result)
 
-    def update_subcategories(self, e):
+    def update_subcategories(self, *_):
         """Update the possible subcategory selection."""
         self.subcategory.Clear()
         if self.category.GetSelection() != wx.NOT_FOUND:
@@ -612,7 +612,7 @@ class PartSelectorDialog(wx.Dialog):
         for p in parts:
             self.part_list.AppendItem([str(c) for c in p])
 
-    def select_part(self, e):
+    def select_part(self, *_):
         """Save the selected part number and close the modal."""
         item = self.part_list.GetSelection()
         row = self.part_list.ItemToRow(item)
@@ -630,7 +630,7 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.EndModal(wx.ID_OK)
 
-    def get_part_details(self, e):
+    def get_part_details(self, *_):
         """Fetch part details from LCSC and show them in a modal."""
         item = self.part_list.GetSelection()
         row = self.part_list.ItemToRow(item)
@@ -643,7 +643,7 @@ class PartSelectorDialog(wx.Dialog):
             del self.busy_cursor
             dialog.ShowModal()
 
-    def help(self, e):
+    def help(self, *_):
         """Show message box with help instructions"""
         title = "Help"
         text = """
