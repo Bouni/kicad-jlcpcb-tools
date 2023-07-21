@@ -430,7 +430,7 @@ class Library:
                         f.write(data)
                         progress = f.tell() / size * 100
                         wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
-                except Exception as e:
+                except Exception as e:  # pylint: disable= broad-exception-caught
                     wx.PostEvent(
                         self.parent,
                         MessageEvent(
