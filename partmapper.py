@@ -1,3 +1,5 @@
+"""This module contains the part mapper."""
+
 import csv
 import logging
 import os
@@ -8,6 +10,8 @@ from .helpers import HighResWxSize, loadBitmapScaled
 
 
 class PartMapperManagerDialog(wx.Dialog):
+    """Dialog for managing part mappings."""
+
     def __init__(self, parent):
         wx.Dialog.__init__(
             self,
@@ -155,7 +159,8 @@ class PartMapperManagerDialog(wx.Dialog):
         self.enable_toolbar_buttons(False)
         self.populate_mapping_list()
 
-    def quit_dialog(self, e):
+    def quit_dialog(self, *_):
+        """Close this dialog."""
         self.Destroy()
         self.EndModal(0)
 
