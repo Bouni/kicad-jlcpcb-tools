@@ -39,16 +39,14 @@ def GetScaleFactor(window):
     """Workaround if wxWidgets Version does not support GetDPIScaleFactor"""
     if hasattr(window, "GetDPIScaleFactor"):
         return window.GetDPIScaleFactor()
-    else:
-        return 1.0
+    return 1.0
 
 
 def HighResWxSize(window, size):
     """Workaround if wxWidgets Version does not support FromDIP"""
     if hasattr(window, "FromDIP"):
         return window.FromDIP(size)
-    else:
-        return size
+    return size
 
 
 def loadBitmapScaled(filename, scale=1.0, static=False):
