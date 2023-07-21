@@ -379,7 +379,8 @@ class Library:
                 return
 
             self.logger.debug(
-                f"Parts db is split into {r.text} parts. Proceeding to download..."
+                "Parts db is split into %s parts. Proceeding to download...",
+                r.text
             )
             cnt = int(r.text)
             self.logger.debug("Removing any spurios old zip part files...")
