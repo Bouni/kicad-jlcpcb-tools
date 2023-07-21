@@ -26,6 +26,7 @@ from .unzip_parts import unzip_parts
 
 class LibraryState(Enum):
     """The various states of the library."""
+
     INITIALIZED = 0
     UPDATE_NEEDED = 1
     DOWNLOAD_RUNNING = 2
@@ -547,7 +548,7 @@ class Library:
                         )
                         rcur.commit()
                     self.logger.debug(
-                        f"Migrated {len(result)} rotations to sepetrate database."
+                        "Migrated %d rotations to sepetrate database.", len(result)
                     )
                     pcur.execute("DROP TABLE IF EXISTS rotation")
                     pcur.commit()
@@ -574,7 +575,7 @@ class Library:
                         )
                         mcur.commit()
                     self.logger.debug(
-                        f"Migrated {len(result)} mappings to sepetrate database."
+                        "Migrated %d mappings to sepetrate database.", len(result)
                     )
                     pcur.execute("DROP TABLE IF EXISTS mapping")
                     pcur.commit()
