@@ -73,6 +73,7 @@ def loadIconScaled(filename, scale=1.0):
 
 
 def GetListIcon(value, scale_factor):
+    """Get check or cross icon depending on passed value."""
     if value == 0:
         return wx.dataview.DataViewIconText(
             "",
