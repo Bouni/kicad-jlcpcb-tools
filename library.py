@@ -405,7 +405,7 @@ class Library:
             with open(os.path.join(self.datadir, chunk_file), "wb") as f:
                 try:
                     r = requests.get(
-                        url_stub + chunk_file, allow_redirects=True, stream=True
+                        url_stub + chunk_file, allow_redirects=True, stream=True, timeout=300
                     )
                     if r.status_code != requests.codes.ok:
                         wx.PostEvent(
