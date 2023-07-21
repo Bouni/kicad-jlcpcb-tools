@@ -6,11 +6,12 @@ import os
 import re
 import sys
 
-import wx
-import wx.adv as adv
-import wx.dataview
-from pcbnew import GetBoard, GetBuildVersion
+import wx  # pylint: disable=import-error
+import wx.dataview  # pylint: disable=import-error
+from pcbnew import GetBoard, GetBuildVersion  # pylint: disable=import-error
+from wx import adv  # pylint: disable=import-error
 
+from .const import Column
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
     EVT_MESSAGE_EVENT,
@@ -22,17 +23,16 @@ from .events import (
 from .fabrication import Fabrication
 from .helpers import (
     PLUGIN_PATH,
+    GetListIcon,
     GetScaleFactor,
     HighResWxSize,
     get_footprint_by_ref,
     getVersion,
     loadBitmapScaled,
     loadIconScaled,
-    GetListIcon,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
-from .const import Column
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
