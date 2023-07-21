@@ -5,10 +5,9 @@ import shlex
 import sqlite3
 import time
 from enum import Enum
+from glob import glob
 from pathlib import Path
 from threading import Thread
-from .unzip_parts import unzip_parts
-from glob import glob
 
 import requests
 import wx
@@ -20,6 +19,7 @@ from .events import (
     UpdateGaugeEvent,
 )
 from .helpers import PLUGIN_PATH, natural_sort_collation
+from .unzip_parts import unzip_parts
 
 
 class LibraryState(Enum):
