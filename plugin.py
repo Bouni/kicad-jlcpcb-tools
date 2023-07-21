@@ -2,7 +2,7 @@
 
 import os
 
-from pcbnew import ActionPlugin
+from pcbnew import ActionPlugin  # pylint: disable=import-error
 
 from .mainwindow import JLCPCBTools
 
