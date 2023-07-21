@@ -11,6 +11,8 @@ class JLCPCBPlugin(ActionPlugin):
     """JLCPCBPlugin instance of ActionPlugin"""
 
     def defaults(self):
+        """define defaults"""
+        # pylint: disable=attribute-defined-outside-init
         self.name = "JLCPCB Tools"
         self.category = "Fabrication data generation"
         self.description = (
