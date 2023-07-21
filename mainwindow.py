@@ -506,7 +506,7 @@ class JLCPCBTools(wx.Dialog):
             self.init_store()
         self.library.create_mapping_table()
 
-    def quit_dialog(self, e):
+    def quit_dialog(self, *_):
         """Destroy dialog on close"""
         self.Destroy()
         self.EndModal(0)
@@ -525,7 +525,7 @@ class JLCPCBTools(wx.Dialog):
         """Initialize the fabrication"""
         self.fabrication = Fabrication(self)
 
-    def reset_gauge(self, e):
+    def reset_gauge(self, *_):
         """Initialize the gauge."""
         self.gauge.SetRange(100)
         self.gauge.SetValue(0)
@@ -620,7 +620,7 @@ class JLCPCBTools(wx.Dialog):
         self.store.set_order_by(e.GetColumn())
         self.populate_footprint_list()
 
-    def OnBomHide(self, e):
+    def OnBomHide(self, *_):
         """Hide all parts from the list that have 'in BOM' set to No."""
         self.hide_bom_parts = not self.hide_bom_parts
         if self.hide_bom_parts:
@@ -653,7 +653,7 @@ class JLCPCBTools(wx.Dialog):
             self.hide_bom_button.SetLabel("Hide excluded BOM")
         self.populate_footprint_list()
 
-    def OnPosHide(self, e):
+    def OnPosHide(self, *_):
         """Hide all parts from the list that have 'in pos' set to No."""
         self.hide_pos_parts = not self.hide_pos_parts
         if self.hide_pos_parts:
@@ -686,7 +686,7 @@ class JLCPCBTools(wx.Dialog):
             self.hide_pos_button.SetLabel("Hide excluded POS")
         self.populate_footprint_list()
 
-    def OnFootprintSelected(self, e):
+    def OnFootprintSelected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
         self.enable_toolbar_buttons(self.footprint_list.GetSelectedItemsCount() > 0)
 
@@ -717,7 +717,7 @@ class JLCPCBTools(wx.Dialog):
         ):
             self.right_toolbar.EnableTool(button, state)
 
-    def toggle_bom_pos(self, e):
+    def toggle_bom_pos(self, *_):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
         selected_rows = []
         for item in self.footprint_list.GetSelections():
@@ -736,7 +736,7 @@ class JLCPCBTools(wx.Dialog):
                 GetListIcon(pos, self.scale_factor), row, Column.POS
             )
 
-    def toggle_bom(self, e):
+    def toggle_bom(self, *_):
         """Toggle the exclude from BOM attribute of a footprint."""
         selected_rows = []
         for item in self.footprint_list.GetSelections():
@@ -750,7 +750,7 @@ class JLCPCBTools(wx.Dialog):
                 GetListIcon(bom, self.scale_factor), row, Column.BOM
             )
 
-    def toggle_pos(self, e):
+    def toggle_pos(self, *_):
         selected_rows = []
         """Toggle the exclude from POS attribute of a footprint."""
         for item in self.footprint_list.GetSelections():
@@ -764,7 +764,7 @@ class JLCPCBTools(wx.Dialog):
                 GetListIcon(pos, self.scale_factor), row, Column.POS
             )
 
-    def remove_part(self, e):
+    def remove_part(self, *_):
         """Remove an assigned a LCSC Part number to a footprint."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
@@ -773,7 +773,7 @@ class JLCPCBTools(wx.Dialog):
             self.store.set_lcsc(ref, "")
         self.populate_footprint_list()
 
-    def select_alike(self, e):
+    def select_alike(self, *_):
         """Select all parts that have the same value and footprint."""
         num_sel = (
             self.footprint_list.GetSelectedItemsCount()
@@ -792,7 +792,7 @@ class JLCPCBTools(wx.Dialog):
             if part[1] == value and part[2] == fp:
                 self.footprint_list.SelectRow(r)
 
-    def get_part_details(self, e):
+    def get_part_details(self, *_):
         """Fetch part details from LCSC and show them one after another each in a modal."""
         parts = self.get_selected_part_id_from_gui()
         if not parts:
@@ -876,11 +876,11 @@ class JLCPCBTools(wx.Dialog):
         with open(os.path.join(PLUGIN_PATH, "settings.json"), "w") as j:
             json.dump(self.settings, j)
 
-    def calculate_costs(self, e):
+    def calculate_costs(self, *_):
         """Hopefully we will be able to calculate the part costs in the future."""
         pass
 
-    def select_part(self, e):
+    def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
         selection = {}
         for item in self.footprint_list.GetSelections():
@@ -894,7 +894,7 @@ class JLCPCBTools(wx.Dialog):
                 selection[reference] = value
         PartSelectorDialog(self, selection).ShowModal()
 
-    def generate_fabrication_data(self, e):
+    def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
         self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
@@ -909,7 +909,7 @@ class JLCPCBTools(wx.Dialog):
         self.fabrication.generate_cpl()
         self.fabrication.generate_bom()
 
-    def copy_part_lcsc(self, e):
+    def copy_part_lcsc(self, *_):
         """Fetch part details from LCSC and show them in a modal."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
@@ -921,7 +921,7 @@ class JLCPCBTools(wx.Dialog):
                     wx.TheClipboard.SetData(wx.TextDataObject(part))
                     wx.TheClipboard.Close()
 
-    def paste_part_lcsc(self, e):
+    def paste_part_lcsc(self, *_):
         text_data = wx.TextDataObject()
         if wx.TheClipboard.Open():
             success = wx.TheClipboard.GetData(text_data)
@@ -936,7 +936,7 @@ class JLCPCBTools(wx.Dialog):
                 self.store.set_lcsc(reference, lcsc)
             self.populate_footprint_list()
 
-    def add_part_rot(self, e):
+    def add_part_rot(self, *_):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -950,7 +950,7 @@ class JLCPCBTools(wx.Dialog):
                 if name != "":
                     RotationManagerDialog(self, re.escape(name)).ShowModal()
 
-    def save_all_mappings(self, e):
+    def save_all_mappings(self, *_):
         for r in range(self.footprint_list.GetItemCount()):
             footp = self.footprint_list.GetTextValue(r, 2)
             partval = self.footprint_list.GetTextValue(r, 1)
@@ -962,7 +962,7 @@ class JLCPCBTools(wx.Dialog):
                     self.library.insert_mapping_data(footp, partval, lcscpart)
         self.logger.info("All mappings saved")
 
-    def export_to_schematic(self, e):
+    def export_to_schematic(self, *_):
         """Dialog to select schematics."""
         with wx.FileDialog(
             self,
@@ -977,7 +977,7 @@ class JLCPCBTools(wx.Dialog):
             paths = openFileDialog.GetPaths()
             SchematicExport(self).load_schematic(paths)
 
-    def add_foot_mapping(self, e):
+    def add_foot_mapping(self, *_):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -991,7 +991,7 @@ class JLCPCBTools(wx.Dialog):
                 else:
                     self.library.insert_mapping_data(footp, partval, lcscpart)
 
-    def search_foot_mapping(self, e):
+    def search_foot_mapping(self, *_):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -1012,7 +1012,7 @@ class JLCPCBTools(wx.Dialog):
             return m.group(0)
         return ""
 
-    def OnRightDown(self, e):
+    def OnRightDown(self, *_):
         """Right click context menu for action on parts table."""
         conMenu = wx.Menu()
         copy_lcsc = wx.MenuItem(conMenu, wx.NewIdRef(), "Copy LCSC")
