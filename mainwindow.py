@@ -550,7 +550,7 @@ class JLCPCBTools(wx.Dialog):
         }
         wx.MessageBox(e.text, e.title, style=styles.get(e.style, wx.ICON_INFORMATION))
 
-    def populate_footprint_list(self, e=None):
+    def populate_footprint_list(self, *_):
         """Populate/Refresh list of footprints."""
         if not self.store:
             self.init_store()
@@ -843,19 +843,19 @@ class JLCPCBTools(wx.Dialog):
         finally:
             wx.EndBusyCursor()
 
-    def update_library(self, e=None):
+    def update_library(self, *_):
         """Update the library from the JLCPCB CSV file."""
         self.library.update()
 
-    def manage_rotations(self, e=None):
+    def manage_rotations(self, *_):
         """Manage rotation corrections."""
         RotationManagerDialog(self, "").ShowModal()
 
-    def manage_mappings(self, e=None):
+    def manage_mappings(self, *_):
         """Manage footprint mappings."""
         PartMapperManagerDialog(self).ShowModal()
 
-    def manage_settings(self, e=None):
+    def manage_settings(self, *_):
         """Manage settings."""
         SettingsDialog(self).ShowModal()
 
@@ -936,7 +936,7 @@ class JLCPCBTools(wx.Dialog):
                 self.store.set_lcsc(reference, lcsc)
             self.populate_footprint_list()
 
-    def add_part_rot(self, *_):
+    def add_part_rot(self, e):
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
