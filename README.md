@@ -47,9 +47,32 @@ From there you can install the plugin via the GUI.
 
 ### Git
 
-Simply clone this repo into your scripting/plugins folder, on Windows thats `C:\users\<username>\Documents\kicad\6.0\scripting\plugins\` on linux that would be `/home/<username>/.local/share/kicad/6.0/scripting/plugins`.
+Simply clone this repo into your scripting/plugins folder.
 
-### Flatpack :warning
+**Windows**
+
+```sh
+cd C:\users\<username>\Documents\kicad\<version>\scripting\plugins\  # <username> is your username, <version> can be 6.0, 7.0, or 7.99 depending on the version you use
+git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
+```
+
+**Linux**
+
+```sh
+cd /home/<username>/.local/share/kicad/<version>/scripting/plugins  # <version> can be 6.0, 7.0, or 7.99 depending on the version you use
+git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
+```
+
+**Linux**
+
+```sh
+cd ~/Library/Preferences/kicad/scripting/plugins
+git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
+```
+
+You may need to create the scripting\plugins folder if it does not exist.
+
+### Flatpack :warning:
 
 The Flatpak installation of KiCAD currently dows not ship with pip and requests installed. The later is required for the plugin to work.
 In order to get it working you can run the following 3 commands:
