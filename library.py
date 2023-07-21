@@ -192,8 +192,8 @@ class Library:
                 cur.commit()
 
     def create_rotation_table(self):
-        self.logger.debug("Create SQLite table for rotations")
         """Create the rotation table."""
+        self.logger.debug("Create SQLite table for rotations")
         with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 cur.execute(
