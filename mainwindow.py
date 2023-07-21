@@ -1093,5 +1093,5 @@ class LogBoxHandler(logging.StreamHandler):
             msg = self.format(record)
             self.textctrl.WriteText(msg + "\n")
             self.flush()
-        except:
+        except:  # pylint: disable=bare-except
             pass
