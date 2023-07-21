@@ -4,7 +4,7 @@ import csv
 import logging
 import os
 
-import wx
+import wx  # pylint: disable=import-error
 
 from .helpers import HighResWxSize, loadBitmapScaled
 
