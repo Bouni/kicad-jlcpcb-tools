@@ -2,7 +2,7 @@
 
 import logging
 
-import wx
+import wx  # pylint: disable=import-error
 
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
