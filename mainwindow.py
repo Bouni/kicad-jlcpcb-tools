@@ -868,12 +868,14 @@ class JLCPCBTools(wx.Dialog):
 
     def load_settings(self):
         """Load settings from settings.json"""
-        with open(os.path.join(PLUGIN_PATH, "settings.json")) as j:
+        with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
 
     def save_settings(self):
         """Save settings to settings.json"""
-        with open(os.path.join(PLUGIN_PATH, "settings.json"), "w") as j:
+        with open(
+            os.path.join(PLUGIN_PATH, "settings.json"), "w", encoding="utf-8"
+        ) as j:
             json.dump(self.settings, j)
 
     def calculate_costs(self, *_):
