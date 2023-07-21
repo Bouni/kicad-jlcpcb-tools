@@ -126,7 +126,7 @@ class PartDetailsDialog(wx.Dialog):
 
     def get_scaled_bitmap(self, url, width, height):
         """Download a picture from a URL and convert it into a wx Bitmap"""
-        content = requests.get(url).content
+        content = requests.get(url, timeout=10).content
         io_bytes = io.BytesIO(content)
         image = wx.Image(io_bytes)
         image = image.Scale(width, height, wx.IMAGE_QUALITY_HIGH)
@@ -141,6 +141,7 @@ class PartDetailsDialog(wx.Dialog):
         r = requests.get(
             f"https://cart.jlcpcb.com/shoppingCart/smtGood/getComponentDetail?componentCode={self.part}",
             headers=headers,
+            timeout=10,
         )
         if r.status_code != requests.codes.ok:
             self.report_part_data_fetch_error("non-OK HTTP response status")
