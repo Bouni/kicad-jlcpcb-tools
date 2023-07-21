@@ -362,7 +362,9 @@ class Library:
         cnt = 0
         chunk_file_stub = "parts.db.zip."
         try:
-            r = requests.get(url_stub + cnt_file, allow_redirects=True, stream=True, timeout=300)
+            r = requests.get(
+                url_stub + cnt_file, allow_redirects=True, stream=True, timeout=300
+            )
             if r.status_code != requests.codes.ok:  # pylint: disable=no-member
                 wx.PostEvent(
                     self.parent,
@@ -379,15 +381,14 @@ class Library:
                 return
 
             self.logger.debug(
-                "Parts db is split into %s parts. Proceeding to download...",
-                r.text
+                "Parts db is split into %s parts. Proceeding to download...", r.text
             )
             cnt = int(r.text)
             self.logger.debug("Removing any spurios old zip part files...")
             for p in glob(str(Path(self.datadir) / (chunk_file_stub + "*"))):
                 self.logger.debug("Removing %s.", p)
                 os.unlink(p)
-        except Exception as e: # pylint: disable=broad-exception-caught
+        except Exception as e:  # pylint: disable=broad-exception-caught
             wx.PostEvent(
                 self.parent,
                 MessageEvent(
@@ -405,7 +406,10 @@ class Library:
             with open(os.path.join(self.datadir, chunk_file), "wb") as f:
                 try:
                     r = requests.get(
-                        url_stub + chunk_file, allow_redirects=True, stream=True, timeout=300
+                        url_stub + chunk_file,
+                        allow_redirects=True,
+                        stream=True,
+                        timeout=300,
                     )
                     if r.status_code != requests.codes.ok:  # pylint: disable=no-member
                         wx.PostEvent(
@@ -425,8 +429,8 @@ class Library:
                     size = int(r.headers.get("Content-Length"))
                     self.logger.debug(
                         "Download parts db chunk %d with a size of %.2fMB",
-                        i+1,
-                        size / 1024 / 1024
+                        i + 1,
+                        size / 1024 / 1024,
                     )
                     for data in r.iter_content(chunk_size=4096):
                         f.write(data)
@@ -453,7 +457,7 @@ class Library:
         self.logger.debug("Combining and extracting zip part files...")
         try:
             unzip_parts(self.datadir)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             wx.PostEvent(
                 self.parent,
                 MessageEvent(
@@ -495,6 +499,7 @@ class Library:
             self.state = LibraryState.INITIALIZED
 
     def create_tables(self, headers):
+        """Create all tables."""
         self.create_meta_table()
         self.delete_parts_table()
         self.create_parts_table(headers)
