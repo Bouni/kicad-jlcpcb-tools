@@ -134,11 +134,11 @@ def get_footprint_keys(fp):
     """get keys from footprint for sorting."""
     try:
         package = str(fp.GetFPID().GetLibItemName())
-    except:
+    except ValueError:
         package = ""
     try:
         reference = int(re.search(r"\d+", fp.GetReference())[0])
-    except:
+    except ValueError:
         reference = 0
     return (package, reference)
 
