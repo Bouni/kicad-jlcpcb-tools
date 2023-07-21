@@ -1,3 +1,5 @@
+"""This module contains the main window of the plugin."""
+
 import json
 import logging
 import os
@@ -65,6 +67,8 @@ ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
 
 class JLCPCBTools(wx.Dialog):
+    """Main Windows class for this plugin."""
+
     def __init__(self, parent):
         if sys.platform != "darwin":
             self.app = wx.App()
