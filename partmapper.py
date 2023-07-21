@@ -181,7 +181,7 @@ class PartMapperManagerDialog(wx.Dialog):
         for mapping in self.parent.library.get_all_mapping_data():
             self.mapping_list.AppendItem([str(m) for m in mapping])
 
-    def delete_mapping(self, e):
+    def delete_mapping(self, *_):
         """Delete a mapping from the database."""
         for item in self.mapping_list.GetSelections():
             row = self.mapping_list.ItemToRow(item)
@@ -192,14 +192,14 @@ class PartMapperManagerDialog(wx.Dialog):
             self.parent.library.delete_mapping_data(footprint, value)
         self.populate_mapping_list()
 
-    def on_mapping_selected(self, e):
+    def on_mapping_selected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
         if self.mapping_list.GetSelectedItemsCount() > 0:
             self.enable_toolbar_buttons(True)
         else:
             self.enable_toolbar_buttons(False)
 
-    def import_mappings_dialog(self, e=None):
+    def import_mappings_dialog(self, *_):
         """Dialog to import mappings from a CSV file."""
         with wx.FileDialog(
             self,
@@ -214,7 +214,7 @@ class PartMapperManagerDialog(wx.Dialog):
             path = importFileDialog.GetPath()
             self._import_mappings(path)
 
-    def export_mappings_dialog(self, e=None):
+    def export_mappings_dialog(self, *_):
         """Dialog to export mappings to a CSV file."""
         with wx.FileDialog(
             self,
