@@ -175,7 +175,7 @@ def toggle_bit(value, bit):
 def get_tht(footprint):
     """Get the THT property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     return bool(get_bit(val, THT))
 
@@ -183,7 +183,7 @@ def get_tht(footprint):
 def get_smd(footprint):
     """Get the SMD property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     return bool(get_bit(val, SMD))
 
@@ -191,7 +191,7 @@ def get_smd(footprint):
 def get_exclude_from_pos(footprint):
     """Get the 'exclude from POS' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     return bool(get_bit(val, EXCLUDE_FROM_POS))
 
@@ -199,7 +199,7 @@ def get_exclude_from_pos(footprint):
 def get_exclude_from_bom(footprint):
     """Get the 'exclude from BOM' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     return bool(get_bit(val, EXCLUDE_FROM_BOM))
 
@@ -207,7 +207,7 @@ def get_exclude_from_bom(footprint):
 def get_not_in_schematic(footprint):
     """Get the 'not in schematic' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     return bool(get_bit(val, NOT_IN_SCHEMATIC))
 
@@ -215,7 +215,7 @@ def get_not_in_schematic(footprint):
 def set_tht(footprint):
     """Set the THT property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     val = set_bit(val, THT)
     footprint.SetAttributes(val)
@@ -225,7 +225,7 @@ def set_tht(footprint):
 def set_smd(footprint):
     """Set the SMD property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     val = set_bit(val, SMD)
     footprint.SetAttributes(val)
@@ -235,7 +235,7 @@ def set_smd(footprint):
 def set_exclude_from_pos(footprint, v):
     """Set the 'exclude from POS' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     if v:
         val = set_bit(val, EXCLUDE_FROM_POS)
@@ -248,7 +248,7 @@ def set_exclude_from_pos(footprint, v):
 def set_exclude_from_bom(footprint, v):
     """Set the 'exclude from BOM' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     if v:
         val = set_bit(val, EXCLUDE_FROM_BOM)
@@ -261,7 +261,7 @@ def set_exclude_from_bom(footprint, v):
 def set_not_in_schematic(footprint, v):
     """Set the 'not in schematic' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     if v:
         val = set_bit(val, NOT_IN_SCHEMATIC)
@@ -274,7 +274,7 @@ def set_not_in_schematic(footprint, v):
 def toggle_tht(footprint):
     """Toggle the THT property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     val = toggle_bit(val, THT)
     footprint.SetAttributes(val)
@@ -284,7 +284,7 @@ def toggle_tht(footprint):
 def toggle_smd(footprint):
     """Toggle the SMD property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     val = toggle_bit(val, SMD)
     footprint.SetAttributes(val)
@@ -294,7 +294,7 @@ def toggle_smd(footprint):
 def toggle_exclude_from_pos(footprint):
     """Toggle the 'exclude from POS' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     val = toggle_bit(val, EXCLUDE_FROM_POS)
     footprint.SetAttributes(val)
@@ -304,7 +304,7 @@ def toggle_exclude_from_pos(footprint):
 def toggle_exclude_from_bom(footprint):
     """Toggle the 'exclude from BOM' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     val = toggle_bit(val, EXCLUDE_FROM_BOM)
     footprint.SetAttributes(val)
@@ -314,7 +314,7 @@ def toggle_exclude_from_bom(footprint):
 def toggle_not_in_schematic(footprint):
     """Toggle the 'not in schematic' property of a footprint."""
     if not footprint:
-        return
+        return None
     val = footprint.GetAttributes()
     val = toggle_bit(val, NOT_IN_SCHEMATIC)
     footprint.SetAttributes(val)
