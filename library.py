@@ -386,7 +386,7 @@ class Library:
             for p in glob(str(Path(self.datadir) / (chunk_file_stub + "*"))):
                 self.logger.debug(f"Removing {p}.")
                 os.unlink(p)
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             wx.PostEvent(
                 self.parent,
                 MessageEvent(
