@@ -363,7 +363,7 @@ class Library:
         chunk_file_stub = "parts.db.zip."
         try:
             r = requests.get(url_stub + cnt_file, allow_redirects=True, stream=True, timeout=300)
-            if r.status_code != requests.codes.ok:
+            if r.status_code != requests.codes.ok:  # pylint: disable=no-member
                 wx.PostEvent(
                     self.parent,
                     MessageEvent(
