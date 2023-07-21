@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Thread
 
 import requests
-import wx
+import wx  # pylint: disable=import-error
 
 from .events import (
     MessageEvent,
