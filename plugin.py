@@ -1,3 +1,5 @@
+"""This module contains the Action Plugin"""
+
 import os
 
 from pcbnew import ActionPlugin
@@ -6,6 +8,8 @@ from .mainwindow import JLCPCBTools
 
 
 class JLCPCBPlugin(ActionPlugin):
+    """JLCPCBPlugin instance of ActionPlugin"""
+
     def defaults(self):
         self.name = "JLCPCB Tools"
         self.category = "Fabrication data generation"
@@ -18,6 +22,7 @@ class JLCPCBPlugin(ActionPlugin):
         self._pcbnew_frame = None
 
     def Run(self):
+        """Overwrite Run"""
         dialog = JLCPCBTools(None)
         dialog.Center()
         dialog.Show()
