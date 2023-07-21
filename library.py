@@ -424,7 +424,9 @@ class Library:
 
                     size = int(r.headers.get("Content-Length"))
                     self.logger.debug(
-                        f"Download parts db chunk {i+1} with a size of {(size / 1024 / 1024):.2f}MB"
+                        "Download parts db chunk %d with a size of %.2fMB",
+                        i+1,
+                        size / 1024 / 1024
                     )
                     for data in r.iter_content(chunk_size=4096):
                         f.write(data)
