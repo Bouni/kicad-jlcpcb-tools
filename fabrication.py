@@ -1,11 +1,13 @@
+"""This module handles the generation of the Gerber files, the BOM and the POS file."""
+
 import csv
 import logging
 import os
 import re
 from pathlib import Path
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import ZIP_DEFLATED, ZipFile
 
-from pcbnew import (
+from pcbnew import (  # pylint: disable=import-error
     EXCELLON_WRITER,
     PCB_PLOT_PARAMS,
     PLOT_CONTROLLER,
@@ -22,15 +24,24 @@ from pcbnew import (
     F_Paste,
     F_SilkS,
     GetBoard,
-    GetBuildVersion,
     Refresh,
     ToMM,
 )
 
-from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd, is_nightly
+# Compatibility hack for V6 / V7 / V7.99
+try:
+    from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE  # pylint: disable=import-error
+
+    NO_DRILL_SHAPE = DRILL_MARKS_NO_DRILL_SHAPE
+except ImportError:
+    NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
+
+from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd
 
 
 class Fabrication:
+    """This class contains all functionality to generate the JLCPCB production files."""
+
     def __init__(self, parent):
         self.parent = parent
         self.logger = logging.getLogger(__name__)
@@ -83,12 +94,20 @@ class Fabrication:
         if footprint.GetLayer() == 0:
             rotation = (rotation + int(correction)) % 360
             self.logger.info(
-                f"Fixed rotation of {footprint.GetReference()} ({footprint.GetValue()} / {footprint.GetFPID().GetLibItemName()}) on Top Layer by {correction} degrees"
+                "Fixed rotation of %s (%s / %s) on Top Layer by %d degrees",
+                footprint.GetReference(),
+                footprint.GetValue(),
+                footprint.GetFPID().GetLibItemName(),
+                correction,
             )
         else:
             rotation = (rotation - int(correction)) % 360
             self.logger.info(
-                f"Fixed rotation of {footprint.GetReference()} ({footprint.GetValue()} / {footprint.GetFPID().GetLibItemName()}) on Bottom Layer by {correction} degrees"
+                "Fixed rotation of %s (%s / %s) on Bottom Layer by %d degrees",
+                footprint.GetReference(),
+                footprint.GetValue(),
+                footprint.GetFPID().GetLibItemName(),
+                correction,
             )
         return rotation
 
@@ -145,12 +164,7 @@ class Fabrication:
 
         popt.SetDisableGerberMacros(False)
 
-        if is_nightly(GetBuildVersion()):
-            from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE
-
-            popt.SetDrillMarksType(DRILL_MARKS_NO_DRILL_SHAPE)
-        else:
-            popt.SetDrillMarksType(PCB_PLOT_PARAMS.NO_DRILL_SHAPE)
+        popt.SetDrillMarksType(NO_DRILL_SHAPE)
 
         popt.SetPlotFrameRef(False)
 
@@ -204,8 +218,8 @@ class Fabrication:
             pctl.SetLayer(layer_info[1])
             pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
             if pctl.PlotLayer() is False:
-                self.logger.error(f"Error plotting {layer_info[2]}")
-            self.logger.info(f"Successfully plotted {layer_info[2]}")
+                self.logger.error("Error plotting %s", layer_info[2])
+            self.logger.info("Successfully plotted %s", layer_info[2])
         pctl.ClosePlot()
 
     def generate_excellon(self):
@@ -231,7 +245,7 @@ class Fabrication:
             compression=ZIP_DEFLATED,
             compresslevel=9,
         ) as zipfile:
-            for folderName, subfolders, filenames in os.walk(self.gerberdir):
+            for folderName, _, filenames in os.walk(self.gerberdir):
                 for filename in filenames:
                     if not filename.endswith(("gbr", "drl", "pdf")):
                         continue
