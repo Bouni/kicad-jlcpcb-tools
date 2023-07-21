@@ -1009,7 +1009,7 @@ class JLCPCBTools(wx.Dialog):
                     lcsc = self.library.get_mapping_data(footp, partval)[2]
                     reference = self.footprint_list.GetTextValue(row, 0)
                     self.store.set_lcsc(reference, lcsc)
-                    self.logger.info(f"Found {lcsc}")
+                    self.logger.info("Found %s", lcsc)
         self.populate_footprint_list()
 
     def sanitize_lcsc(self, lcsc_PN):
