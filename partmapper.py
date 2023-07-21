@@ -232,7 +232,7 @@ class PartMapperManagerDialog(wx.Dialog):
     def _import_mappings(self, path):
         """mappings import logic"""
         if os.path.isfile(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 csvreader = csv.DictReader(f, fieldnames=("footprint", "value", "lcsc"))
                 next(csvreader)
                 for row in csvreader:
@@ -250,7 +250,7 @@ class PartMapperManagerDialog(wx.Dialog):
 
     def _export_mappings(self, path):
         """mappings export logic"""
-        with open(path, "w", newline="") as f:
+        with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
             csvwriter.writerow(["Footprint", "Part Value", "LCSC Part"])
             for m in self.parent.library.get_all_mapping_data():
