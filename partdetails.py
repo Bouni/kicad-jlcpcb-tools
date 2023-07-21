@@ -4,8 +4,8 @@ import io
 import logging
 import webbrowser
 
-import requests
-import wx
+import requests  # pylint: diable=import-error
+import wx  # pylint: diable=import-error
 
 from .helpers import HighResWxSize, loadBitmapScaled
 
