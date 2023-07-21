@@ -1,3 +1,5 @@
+"""This module contains the part selector modal window."""
+
 import logging
 
 import wx
@@ -8,6 +10,8 @@ from .partdetails import PartDetailsDialog
 
 
 class PartSelectorDialog(wx.Dialog):
+    """The part selector window."""
+
     def __init__(self, parent, parts):
         wx.Dialog.__init__(
             self,
@@ -545,7 +549,8 @@ class PartSelectorDialog(wx.Dialog):
         else:
             return list(s)[0]
 
-    def quit_dialog(self, e):
+    def quit_dialog(self, *_):
+        """Close this window."""
         self.Destroy()
         self.EndModal(0)
 
