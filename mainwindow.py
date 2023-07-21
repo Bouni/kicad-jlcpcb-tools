@@ -880,7 +880,6 @@ class JLCPCBTools(wx.Dialog):
 
     def calculate_costs(self, *_):
         """Hopefully we will be able to calculate the part costs in the future."""
-        pass
 
     def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
