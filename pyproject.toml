@@ -10,6 +10,7 @@ extension-pkg-whitelist = "wx"
 
 [tool.pylint."MESSAGES CONTROL"]
 disable = [
+    "fixme",
     "format",
     "wrong-import-order",
     "too-few-public-methods",
