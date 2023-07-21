@@ -82,14 +82,13 @@ def GetListIcon(value, scale_factor):
                 scale_factor,
             ),
         )
-    else:
-        return wx.dataview.DataViewIconText(
-            "",
-            loadIconScaled(
-                "mdi-close-color.png",
-                scale_factor,
-            ),
-        )
+    return wx.dataview.DataViewIconText(
+        "",
+        loadIconScaled(
+            "mdi-close-color.png",
+            scale_factor,
+        ),
+    )
 
 
 def natural_sort_collation(a, b):
