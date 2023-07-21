@@ -143,7 +143,7 @@ class PartDetailsDialog(wx.Dialog):
             headers=headers,
             timeout=10,
         )
-        if r.status_code != requests.codes.ok:
+        if r.status_code != requests.codes.ok:  # pylint: disable=no-member
             self.report_part_data_fetch_error("non-OK HTTP response status")
 
         data = r.json()
