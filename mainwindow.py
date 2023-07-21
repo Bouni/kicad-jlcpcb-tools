@@ -751,8 +751,8 @@ class JLCPCBTools(wx.Dialog):
             )
 
     def toggle_pos(self, *_):
-        selected_rows = []
         """Toggle the exclude from POS attribute of a footprint."""
+        selected_rows = []
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
