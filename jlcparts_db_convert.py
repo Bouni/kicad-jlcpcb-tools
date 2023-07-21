@@ -19,8 +19,7 @@ import json
 import os
 import sqlite3
 import zipfile
-from datetime import date
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -92,7 +91,7 @@ conn.execute(
 
 # load the tables into memory
 res = conn_jp.execute("SELECT * FROM manufacturers")
-mans = {i: m for i, m in res.fetchall()}
+mans = dict(res.fetchall())
 
 res = conn_jp.execute("SELECT * FROM categories")
 cats = {i: (c, sc) for i, c, sc in res.fetchall()}
