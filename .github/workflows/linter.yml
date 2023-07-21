@@ -2,6 +2,8 @@
 name: Lint and format everything
 on:  # yamllint disable-line rule:truthy
   push:
+    branches:
+      - main
   pull_request:
 jobs:
   markdownlint:
