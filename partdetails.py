@@ -114,11 +114,12 @@ class PartDetailsDialog(wx.Dialog):
 
         self.get_part_data()
 
-    def quit_dialog(self, e):
+    def quit_dialog(self, *_):
+        """Close the dialog."""
         self.Destroy()
         self.EndModal(0)
 
-    def openpdf(self, e):
+    def openpdf(self, *_):
         """Open the linked datasheet PDF on button click."""
         self.logger.info("opening %s", str(self.pdfurl))
         webbrowser.open(self.pdfurl)
