@@ -31,7 +31,7 @@ def getVersion():
     """READ Version from file"""
     if not os.path.isfile(os.path.join(PLUGIN_PATH, "VERSION")):
         return "unknown"
-    with open(os.path.join(PLUGIN_PATH, "VERSION")) as f:
+    with open(os.path.join(PLUGIN_PATH, "VERSION"), encoding="utf-8") as f:
         return f.read().strip()
 
 
