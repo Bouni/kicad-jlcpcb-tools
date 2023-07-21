@@ -1,7 +1,11 @@
+"""Constants used througout the plugin."""
+
 from enum import IntEnum
 
 
 class Column(IntEnum):
+    """Column positions for main parts table."""
+
     REFERENCE = 0
     VALUE = 1
     FOOTPRINT = 2
