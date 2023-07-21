@@ -923,6 +923,7 @@ class JLCPCBTools(wx.Dialog):
                     wx.TheClipboard.Close()
 
     def paste_part_lcsc(self, *_):
+        """Paste a lcsc number from the clipboard to the current part."""
         text_data = wx.TextDataObject()
         if wx.TheClipboard.Open():
             success = wx.TheClipboard.GetData(text_data)
@@ -938,6 +939,7 @@ class JLCPCBTools(wx.Dialog):
             self.populate_footprint_list()
 
     def add_part_rot(self, e):
+        """Add part rotation for the current part."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -952,6 +954,7 @@ class JLCPCBTools(wx.Dialog):
                     RotationManagerDialog(self, re.escape(name)).ShowModal()
 
     def save_all_mappings(self, *_):
+        """Save all mappings."""
         for r in range(self.footprint_list.GetItemCount()):
             footp = self.footprint_list.GetTextValue(r, 2)
             partval = self.footprint_list.GetTextValue(r, 1)
@@ -979,6 +982,7 @@ class JLCPCBTools(wx.Dialog):
             SchematicExport(self).load_schematic(paths)
 
     def add_foot_mapping(self, *_):
+        """Add a footprint mapping."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -993,6 +997,7 @@ class JLCPCBTools(wx.Dialog):
                     self.library.insert_mapping_data(footp, partval, lcscpart)
 
     def search_foot_mapping(self, *_):
+        """Search for a footprint mapping."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -1008,6 +1013,7 @@ class JLCPCBTools(wx.Dialog):
         self.populate_footprint_list()
 
     def sanitize_lcsc(self, lcsc_PN):
+        """Sanitize a given LCSC number using a regex."""
         m = re.search("C\\d+", lcsc_PN, re.IGNORECASE)
         if m:
             return m.group(0)
@@ -1072,6 +1078,8 @@ class JLCPCBTools(wx.Dialog):
 
 
 class LogBoxHandler(logging.StreamHandler):
+    """Logging class for the logging textbox at th ebottom of the mainwindow."""
+
     def __init__(self, textctrl):
         logging.StreamHandler.__init__(self)
         self.textctrl = textctrl
