@@ -514,7 +514,7 @@ class Library:
         gives a noticeable speed improvement over repeatedly reading the
         information from the on-disk database.
         """
-        if self.category_map == {}:
+        if not self.category_map:
             # Populate the cache.
             with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
                 with con as cur:
