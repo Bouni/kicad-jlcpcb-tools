@@ -21,6 +21,7 @@ def is_nightly(version: str) -> bool:
 
 
 def getWxWidgetsVersion():
+    """Get wx widgets version"""
     v = re.search(r"wxWidgets\s([\d\.]+)", wx.version())
     v = int(v.group(1).replace(".", ""))
     return v
