@@ -385,7 +385,7 @@ class Library:
             cnt = int(r.text)
             self.logger.debug("Removing any spurios old zip part files...")
             for p in glob(str(Path(self.datadir) / (chunk_file_stub + "*"))):
-                self.logger.debug(f"Removing {p}.")
+                self.logger.debug("Removing %s.", p)
                 os.unlink(p)
         except Exception as e: # pylint: disable=broad-exception-caught
             wx.PostEvent(
