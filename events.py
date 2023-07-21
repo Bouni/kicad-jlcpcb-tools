@@ -1,4 +1,6 @@
-from wx.lib.newevent import NewEvent
+"""Events used througout the plugin."""
+
+from wx.lib.newevent import NewEvent  # pylint: disable=import-error
 
 ResetGaugeEvent, EVT_RESET_GAUGE_EVENT = NewEvent()
 UpdateGaugeEvent, EVT_UPDATE_GAUGE_EVENT = NewEvent()
