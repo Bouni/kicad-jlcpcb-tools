@@ -407,7 +407,7 @@ class Library:
                     r = requests.get(
                         url_stub + chunk_file, allow_redirects=True, stream=True, timeout=300
                     )
-                    if r.status_code != requests.codes.ok:
+                    if r.status_code != requests.codes.ok:  # pylint: disable=no-member
                         wx.PostEvent(
                             self.parent,
                             MessageEvent(
