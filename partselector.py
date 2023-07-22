@@ -1,5 +1,5 @@
 import logging
-
+import time
 import wx
 
 from .events import AssignPartsEvent, UpdateSetting
@@ -583,8 +583,10 @@ class PartSelectorDialog(wx.Dialog):
             "extended": self.extended_checkbox.GetValue(),
             "stock": self.assert_stock_checkbox.GetValue(),
         }
+        start = time.time()
         result = self.parent.library.search(parameters)
-        self.populate_part_list(result)
+        search_duration = time.time() - start
+        self.populate_part_list(result, search_duration)
 
     def update_subcategories(self, e):
         """Update the possible subcategory selection."""
@@ -595,16 +597,17 @@ class PartSelectorDialog(wx.Dialog):
             )
             self.subcategory.AppendItems(subcategories)
 
-    def populate_part_list(self, parts):
+    def populate_part_list(self, parts, search_duration):
         """Populate the list with the result of the search."""
+        search_duration_text = f'{search_duration:.2f}s' if search_duration > 1 else f'{search_duration * 1000.0:.0f}ms'
         self.part_list.DeleteAllItems()
         if parts is None:
             return
         count = len(parts)
         if count == 1000:
-            self.result_count.SetLabel(f"{count} Results (limited)")
+            self.result_count.SetLabel(f"{count} Results (limited) in {search_duration_text}")
         else:
-            self.result_count.SetLabel(f"{count} Results")
+            self.result_count.SetLabel(f"{count} Results in {search_duration_text}")
         for p in parts:
             self.part_list.AppendItem([str(c) for c in p])
 
