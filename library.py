@@ -354,7 +354,7 @@ class Library:
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
         # Download the zipped parts database
-        url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
+        url_stub = "https://chmorgan.github.io/jlcpcb-db/"
         cnt_file = "chunk_num.txt"
         cnt = 0
         chunk_file_stub = "parts.db.zip."
