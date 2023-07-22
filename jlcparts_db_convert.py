@@ -43,7 +43,7 @@ conn = sqlite3.connect(partsdb)
 # schema creation
 conn.execute(
     """
-    CREATE TABLE IF NOT EXISTS parts (
+    CREATE virtual TABLE IF NOT EXISTS parts using fts5 (
         'LCSC Part',
         'First Category',
         'Second Category',
@@ -57,13 +57,6 @@ conn.execute(
         'Price',
         'Stock'
     )
-    """
-)
-
-conn.execute(
-    """
-    CREATE UNIQUE INDEX parts_lcsc_part_index
-        ON parts ('LCSC Part')
     """
 )
 
