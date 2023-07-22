@@ -23,13 +23,14 @@ from zipfile import ZipFile
 import humanize
 
 
-class Jlcpcb:
+class Generate:
     """Base class for database generation."""
 
-    def __init__(self, output_db: Path ):
+    def __init__(self, output_db: Path, chunk_num: Path ):
         self.output_db = output_db
         self.jlcparts_db_name = "cache.sqlite3"
         self.compressed_output_db = f"{self.output_db}.zip"
+        self.chunk_num = chunk_num
 
 
     def remove_original(self):
@@ -45,65 +46,6 @@ class Jlcpcb:
 
         # connection to the plugin db we want to write
         self.conn = sqlite3.connect(self.output_db)
-
-    def create_tables(self):
-        """Create the tables in the output database."""
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS parts (
-                'LCSC Part',
-                'First Category',
-                'Second Category',
-                'MFR.Part',
-                'Package',
-                'Solder Joint',
-                'Manufacturer',
-                'Library Type',
-                'Description',
-                'Datasheet',
-                'Price',
-                'Stock'
-            )
-            """
-        )
-
-        self.conn.execute(
-            """
-            CREATE UNIQUE INDEX parts_lcsc_part_index
-                ON parts ('LCSC Part')
-            """
-        )
-
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS mapping (
-                'footprint',
-                'value',
-                'LCSC'
-            )
-            """
-        )
-
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS meta (
-                'filename',
-                'size',
-                'partcount',
-                'date',
-                'last_update'
-            )
-            """
-        )
-
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rotation (
-                'regex',
-                'correction'
-            )
-            """
-        )
 
     def load_tables(self):
         """Load the input data into the output database."""
@@ -216,7 +158,7 @@ class Jlcpcb:
                 chunk_num += 1
 
             # create a helper file for the downloader which indicates the number of chunk files
-            with open("chunk_num.txt", "w", encoding="utf-8") as f:
+            with open(self.chunk_num, "w", encoding="utf-8") as f:
                 f.write(str(chunk_num - 1))
     def display_stats(self):
         """Print out some stats."""
@@ -247,18 +189,159 @@ class Jlcpcb:
         self.display_stats()
         self.cleanup()
 
+class Jlcpcb(Generate):
+    """Sqlite parts database generator."""
 
-start = datetime.now()
+    def __init__(self, output_db: Path):
+        chunk_num = Path("chunk_num.txt")
+        super().__init__(output_db, chunk_num)
+
+    def create_tables(self):
+        """Create the tables in the output database."""
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS parts (
+                'LCSC Part',
+                'First Category',
+                'Second Category',
+                'MFR.Part',
+                'Package',
+                'Solder Joint',
+                'Manufacturer',
+                'Library Type',
+                'Description',
+                'Datasheet',
+                'Price',
+                'Stock'
+            )
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE UNIQUE INDEX parts_lcsc_part_index
+                ON parts ('LCSC Part')
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mapping (
+                'footprint',
+                'value',
+                'LCSC'
+            )
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                'filename',
+                'size',
+                'partcount',
+                'date',
+                'last_update'
+            )
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rotation (
+                'regex',
+                'correction'
+            )
+            """
+        )
+
+class JlcpcbFTS5(Generate):
+    """FTS5 specific database generation."""
+
+    def __init__(self, output_db: Path):
+        chunk_num = Path("chunk_num_fts5.txt")
+        super().__init__(output_db, chunk_num)
+
+    def create_tables(self):
+        """Create tables."""
+        self.conn.execute(
+            """
+            CREATE virtual TABLE IF NOT EXISTS parts using fts5 (
+                'LCSC Part',
+                'First Category',
+                'Second Category',
+                'MFR.Part',
+                'Package',
+                'Solder Joint',
+                'Manufacturer',
+                'Library Type',
+                'Description',
+                'Datasheet',
+                'Price',
+                'Stock'
+            )
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mapping (
+                'footprint',
+                'value',
+                'LCSC'
+            )
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                'filename',
+                'size',
+                'partcount',
+                'date',
+                'last_update'
+            )
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rotation (
+                'regex',
+                'correction'
+            )
+            """
+        )
+
+
 
 output_directory = "db_build"
 os.chdir(output_directory)
 
+
+# sqlite database
+start = datetime.now()
 output_name = "parts.db"
 partsdb = Path(output_name)
 
 print(f"Generating {output_name} in {output_directory} directory")
-
 generator = Jlcpcb(partsdb)
+generator.build()
+
+end = datetime.now()
+deltatime = end - start
+print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
+
+
+
+# sqlite fts5 database
+start = datetime.now()
+output_name = "parts-fts5.db"
+partsdb = Path(output_name)
+
+print(f"Generating {output_name} in {output_directory} directory")
+generator = JlcpcbFTS5(partsdb)
 generator.build()
 
 end = datetime.now()
