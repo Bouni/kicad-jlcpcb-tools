@@ -30,6 +30,9 @@ class PartSelectorDialog(wx.Dialog):
         self.parts = parts
         lcsc_selection = self.get_existing_selection(parts)
 
+        self.search_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.search)
+
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
         # ---------------------------------------------------------------------
@@ -227,15 +230,6 @@ class PartSelectorDialog(wx.Dialog):
             0,
         )
 
-        self.search_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Search",
-            wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(100, -1)),
-            0,
-        )
-
         search_sizer_one = wx.BoxSizer(wx.VERTICAL)
         search_sizer_one.Add(keyword_label, 0, wx.ALL, 5)
         search_sizer_one.Add(
@@ -321,13 +315,6 @@ class PartSelectorDialog(wx.Dialog):
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
-        search_sizer_five.AddSpacer(80)
-        search_sizer_five.Add(
-            self.search_button,
-            0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM,
-            5,
-        )
 
         help_button.SetBitmap(
             loadBitmapScaled(
@@ -337,14 +324,6 @@ class PartSelectorDialog(wx.Dialog):
         )
         help_button.SetBitmapMargins((2, 0))
 
-        self.search_button.SetBitmap(
-            loadBitmapScaled(
-                "mdi-database-search-outline.png",
-                self.parent.scale_factor,
-            )
-        )
-        self.search_button.SetBitmapMargins((2, 0))
-
         search_sizer = wx.StaticBoxSizer(wx.HORIZONTAL, self, "Search")
         search_sizer.Add(search_sizer_one, 0, wx.RIGHT, 20)
         search_sizer.Add(search_sizer_two, 0, wx.RIGHT, 20)
@@ -353,15 +332,13 @@ class PartSelectorDialog(wx.Dialog):
         search_sizer.Add(search_sizer_five, 0, wx.RIGHT, 20)
         # search_sizer.Add(help_button, 0, wx.RIGHT, 20)
 
-        self.keyword.Bind(wx.EVT_TEXT_ENTER, self.search)
-        self.manufacturer.Bind(wx.EVT_TEXT_ENTER, self.search)
-        self.package.Bind(wx.EVT_TEXT_ENTER, self.search)
+        self.keyword.Bind(wx.EVT_TEXT, self.search_dwell)
+        self.manufacturer.Bind(wx.EVT_TEXT, self.search_dwell)
+        self.package.Bind(wx.EVT_TEXT, self.search_dwell)
         self.category.Bind(wx.EVT_COMBOBOX, self.update_subcategories)
         self.category.Bind(wx.EVT_TEXT, self.update_subcategories)
-        self.category.Bind(wx.EVT_TEXT_ENTER, self.search)
-        self.part_no.Bind(wx.EVT_TEXT_ENTER, self.search)
-        self.solder_joints.Bind(wx.EVT_TEXT_ENTER, self.search)
-        self.search_button.Bind(wx.EVT_BUTTON, self.search)
+        self.part_no.Bind(wx.EVT_TEXT, self.search_dwell)
+        self.solder_joints.Bind(wx.EVT_TEXT, self.search_dwell)
         help_button.Bind(wx.EVT_BUTTON, self.help)
 
         # ---------------------------------------------------------------------
@@ -525,6 +502,9 @@ class PartSelectorDialog(wx.Dialog):
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
 
+        # initiate the initial search now that the window has been constructed
+        self.search(None)
+
     def update_settings(self, event):
         """Update the settings on change."""
         wx.PostEvent(
@@ -535,6 +515,9 @@ class PartSelectorDialog(wx.Dialog):
                 value=event.GetEventObject().GetValue(),
             ),
         )
+
+        # initiate a search now that settings have changed
+        self.search(None)
 
     @staticmethod
     def get_existing_selection(parts):
@@ -569,6 +552,14 @@ class PartSelectorDialog(wx.Dialog):
         ]:
             b.Enable(bool(state))
 
+    def search_dwell(self, *_):
+        """Initiate a search once the timeout expires.
+
+        Used to avoid continous searches
+        when input fields are still being changed by the user.
+        """
+        self.search_timer.StartOnce(750)
+
     def search(self, *_):
         """Search the library for parts that meet the search criteria."""
         parameters = {
@@ -596,6 +587,9 @@ class PartSelectorDialog(wx.Dialog):
                 self.category.GetValue()
             )
             self.subcategory.AppendItems(subcategories)
+
+        # search now that categories might have changed
+        self.search(None)
 
     def populate_part_list(self, parts, search_duration):
         """Populate the list with the result of the search."""
@@ -674,7 +668,7 @@ class PartSelectorDialog(wx.Dialog):
         The others are not by default.\n
         The keyword search field is applied to "LCSC Part", "Description", "MFR.Part",
         "Package" and "Manufacturer".\n
-        Enter triggers the search the same way the search button does.\n
+        Searching occurs as input fields are changed.\n
         The results are limited to 1000.
         """
         wx.MessageBox(text, title, style=wx.ICON_INFORMATION)
