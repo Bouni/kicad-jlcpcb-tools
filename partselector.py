@@ -212,9 +212,9 @@ class PartSelectorDialog(wx.Dialog):
             self.parent.settings.get("partselector", {}).get("stock", False)
         )
 
-        self.basic_checkbox.Bind(wx.EVT_CHECKBOX, self.upadate_settings)
-        self.extended_checkbox.Bind(wx.EVT_CHECKBOX, self.upadate_settings)
-        self.assert_stock_checkbox.Bind(wx.EVT_CHECKBOX, self.upadate_settings)
+        self.basic_checkbox.Bind(wx.EVT_CHECKBOX, self.update_settings)
+        self.extended_checkbox.Bind(wx.EVT_CHECKBOX, self.update_settings)
+        self.assert_stock_checkbox.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
         help_button = wx.Button(
             self,
@@ -529,7 +529,7 @@ class PartSelectorDialog(wx.Dialog):
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
 
-    def upadate_settings(self, event):
+    def update_settings(self, event):
         """Update the settings on change"""
         wx.PostEvent(
             self.parent,
