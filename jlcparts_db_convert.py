@@ -91,19 +91,24 @@ conn.execute(
 )
 
 # load the tables into memory
+print("Reading manufacturers")
 res = conn_jp.execute("SELECT * FROM manufacturers")
 mans = {i: m for i, m in res.fetchall()}
 
+print("Reading categories")
 res = conn_jp.execute("SELECT * FROM categories")
 cats = {i: (c, sc) for i, c, sc in res.fetchall()}
 
+print("Reading components")
 res = conn_jp.execute("SELECT * FROM components")
 comps = res.fetchall()
 
+print("Done reading")
 conn_jp.close()
 
 # now extract the data from the jlcparts db and fill
 # it into the plugin database
+print("Building parts rows to insert")
 rows = []
 for c in comps:
     price = json.loads(c[10])
@@ -129,6 +134,7 @@ for c in comps:
     )
     rows.append(row)
 
+print("Inserting into parts table")
 conn.executemany("INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
 conn.commit()
 db_size = os.stat(partsdb).st_size
@@ -140,6 +146,7 @@ conn.commit()
 conn.close()
 
 # compress the result
+print("Compressing parts.db")
 with ZipFile("parts.db.zip", "w", zipfile.ZIP_DEFLATED) as zf:
     zf.write(partsdb)
 
@@ -149,6 +156,7 @@ with ZipFile("parts.db.zip", "w", zipfile.ZIP_DEFLATED) as zf:
 split_size = 80000000  # 80 MB
 
 # Open the zip file for byte-reading
+print("Chunking parts.db.zip")
 with open("parts.db.zip", "rb") as z:
     # Read the file data in chunks
     chunk = z.read(split_size)
