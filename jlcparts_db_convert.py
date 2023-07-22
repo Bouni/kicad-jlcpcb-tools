@@ -42,7 +42,7 @@ conn = sqlite3.connect(partsdb)
 # schema creation
 conn.execute(
     """
-    CREATE TABLE IF NOT EXISTS parts ( 
+    CREATE virtual TABLE IF NOT EXISTS parts using fts5 (
         'LCSC Part',
         'First Category',
         'Second Category',
