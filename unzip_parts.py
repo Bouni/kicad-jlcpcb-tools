@@ -9,12 +9,12 @@ def unzip_parts(path):
     """Unzip and merge split zip file."""
     # unzip (needs to go into download function finally)
     # Set the name of the original file
-    db_zip_file = os.path.join(path, "parts.db.zip")
+    db_zip_file = os.path.join(path, "parts-fts5.db.zip")
 
     # Open the original file for writing
     with open(db_zip_file, "wb") as db:
         # Get a list of the split files in the split directory
-        split_files = [f for f in os.listdir(path) if f.startswith("parts.db.zip.")]
+        split_files = [f for f in os.listdir(path) if f.startswith("parts-fts5.db.zip.")]
 
         # Sort the split files by their index
         split_files.sort(key=lambda f: int(f.split(".")[-1]))

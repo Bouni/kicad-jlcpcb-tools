@@ -44,7 +44,7 @@ class Library:
         self.order_by = "LCSC Part"
         self.order_dir = "ASC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
-        self.partsdb_file = os.path.join(self.datadir, "parts.db")
+        self.partsdb_file = os.path.join(self.datadir, "parts-fts5.db")
         self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
         self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
         self.state = None
@@ -366,9 +366,9 @@ class Library:
         wx.PostEvent(self.parent, ResetGaugeEvent())
         # Download the zipped parts database
         url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
-        cnt_file = "chunk_num.txt"
+        cnt_file = "chunk_num_fts5.txt"
         cnt = 0
-        chunk_file_stub = "parts.db.zip."
+        chunk_file_stub = "parts-fts5.db.zip."
         try:
             r = requests.get(
                 url_stub + cnt_file, allow_redirects=True, stream=True, timeout=300
@@ -456,7 +456,7 @@ class Library:
                     self.state = LibraryState.INITIALIZED
                     self.create_tables(["placeholder_invalid_column_fix_errors"])
                     return
-        # rename existing parts.db to parts.db.bak, delete already existing bak file if neccesary
+        # rename existing parts-fts5.db to parts-fts5.db.bak, delete already existing bak file if neccesary
         if os.path.exists(self.partsdb_file):
             if os.path.exists(f"{self.partsdb_file}.bak"):
                 os.remove(f"{self.partsdb_file}.bak")
