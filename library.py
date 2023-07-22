@@ -113,11 +113,6 @@ class Library:
         s = ",".join(f'"{c}"' for c in columns)
         query = f"SELECT {s} FROM parts WHERE "
 
-        try:
-            keywords = shlex.split(parameters["keyword"])
-        except ValueError as e:
-            self.logger.error("Can't split keyword: %s", str(e))
-
         keyword_columns = [
             "LCSC Part",
             "Description",
@@ -125,29 +120,32 @@ class Library:
             "Package",
             "Manufacturer",
         ]
+        match_chunks = []
         query_chunks = []
-        for kw in keywords:
-            q = " OR ".join(f'"{c}" LIKE "%{kw}%"' for c in keyword_columns)
-            query_chunks.append(f"({q})")
+
+        if parameters["keyword"] != "":
+            keywords = parameters["keyword"].split(" ")
+            keywords_entry = " AND ".join(f'"{w}"' for w in keywords)
+            match_chunks.append(f'{keywords_entry}')
 
         if "manufacturer" in parameters and parameters["manufacturer"] != "":
             p = parameters["manufacturer"]
-            query_chunks.append(f'"Manufacturer" LIKE "{p}"')
+            match_chunks.append(f'"Manufacturer":"{p}"')
         if "package" in parameters and parameters["package"] != "":
             p = parameters["package"]
-            query_chunks.append(f'"Package" LIKE "{p}"')
+            match_chunks.append(f'"Package":"{p}"')
         if "category" in parameters and parameters["category"] != "":
             p = parameters["category"]
-            query_chunks.append(f'"First Category" LIKE "{p}"')
+            match_chunks.append(f'"First Category":"{p}"')
         if "subcategory" in parameters and parameters["subcategory"] != "":
             p = parameters["subcategory"]
-            query_chunks.append(f'"Second Category" LIKE "{p}"')
+            match_chunks.append(f'"Second Category":"{p}"')
         if "part_no" in parameters and parameters["part_no"] != "":
             p = parameters["part_no"]
-            query_chunks.append(f'"MFR.Part" LIKE "{p}"')
+            match_chunks.append(f'"MFR.Part":"{p}"')
         if "solder_joints" in parameters and parameters["solder_joints"] != "":
             p = parameters["solder_joints"]
-            query_chunks.append(f'"Solder Joint" LIKE "{p}"')
+            match_chunks.append(f'"Solder Joint":"{p}"')
 
         library_types = []
         if parameters["basic"]:
@@ -160,10 +158,19 @@ class Library:
         if parameters["stock"]:
             query_chunks.append('"Stock" > "0"')
 
-        if not query_chunks:
+        if not match_chunks and not query_chunks:
             return []
 
-        query += " AND ".join(query_chunks)
+        if match_chunks:
+            query += "parts MATCH '"
+            query += " AND ".join(match_chunks)
+            query += "'"
+
+        if query_chunks:
+            if match_chunks:
+                query += " AND "
+            query += " AND ".join(query_chunks)
+
         query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
         query += " LIMIT 1000"
 
