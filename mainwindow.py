@@ -495,7 +495,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
         self.Bind(EVT_UPDATE_SETTING, self.update_settings)
 
-        self.enable_toolbar_buttons(False)
+        self.enable_part_specific_toolbar_buttons(False)
 
         self.init_logger()
         self.init_library()
@@ -693,20 +693,22 @@ class JLCPCBTools(wx.Dialog):
 
     def OnFootprintSelected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
-        self.enable_toolbar_buttons(self.footprint_list.GetSelectedItemsCount() > 0)
+        self.enable_part_specific_toolbar_buttons(
+            self.footprint_list.GetSelectedItemsCount() > 0
+        )
 
     def enable_all_buttons(self, state):
         """Control state of all the buttons"""
         self.enable_top_buttons(state)
-        self.enable_toolbar_buttons(state)
+        self.enable_part_specific_toolbar_buttons(state)
 
     def enable_top_buttons(self, state):
         """Control the state of all the buttons in the top section"""
         for button in (ID_GENERATE, ID_DOWNLOAD, ID_LAYERS):
             self.upper_toolbar.EnableTool(button, state)
 
-    def enable_toolbar_buttons(self, state):
-        """Control the state of all the buttons in toolbar on the right side"""
+    def enable_part_specific_toolbar_buttons(self, state):
+        """Control the state of all the buttons that relate to parts in toolbar on the right side"""
         for button in (
             ID_SELECT_PART,
             ID_REMOVE_PART,
@@ -717,8 +719,6 @@ class JLCPCBTools(wx.Dialog):
             ID_PART_DETAILS,
             ID_HIDE_BOM,
             ID_HIDE_POS,
-            ID_SAVE_MAPPINGS,
-            ID_EXPORT_TO_SCHEMATIC,
         ):
             self.right_toolbar.EnableTool(button, state)
 
