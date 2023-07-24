@@ -543,7 +543,7 @@ class PartSelectorDialog(wx.Dialog):
     @staticmethod
     def get_existing_selection(parts):
         """Check if exactly one LCSC part number is amongst the selected parts."""
-        s = set(val for val in parts.values())
+        s = set(parts.values())
         if len(s) != 1:
             return ""
         return list(s)[0]
