@@ -50,7 +50,7 @@ class SchematicExport:
 
         lines = []
         newlines = []
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             lines = f.readlines()
 
         if os.path.exists(path + "_old"):
@@ -104,7 +104,7 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
 
-        f = open(path, "w")
+        f = open(path, "w", encoding="utf-8")
         for line in newlines:
             f.write(line + "\n")
         f.close()
@@ -129,7 +129,7 @@ class SchematicExport:
 
         lines = []
         newlines = []
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             lines = f.readlines()
 
         if os.path.exists(path + "_old"):
@@ -181,7 +181,7 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
 
-        f = open(path, "w")
+        f = open(path, "w", encoding="utf-8")
         for line in newlines:
             f.write(line + "\n")
         f.close()
