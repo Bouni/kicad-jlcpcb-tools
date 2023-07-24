@@ -1,3 +1,5 @@
+"""This module contains the data storge for a project."""
+
 import contextlib
 import csv
 import logging
