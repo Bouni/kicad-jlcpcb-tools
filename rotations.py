@@ -4,8 +4,8 @@ import csv
 import logging
 import os
 
-import requests
-import wx
+import requests  # pylint: disable=import-error
+import wx  # pylint: disable=import-error
 
 from .events import (
     PopulateFootprintListEvent,
