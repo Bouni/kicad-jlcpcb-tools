@@ -7,7 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from pcbnew import GetBoard
+from pcbnew import GetBoard  # pylint: disable=import-error
 
 from .helpers import (
     get_exclude_from_bom,
