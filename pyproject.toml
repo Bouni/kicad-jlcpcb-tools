@@ -2,7 +2,19 @@
 profile = "black"
 
 [tool.ruff]
-ignore = ["E501", "E722"]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "C",  # flake8-comprehensions
+    "B",  # flake8-bugbear
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "E722",  # Do not use bare except, specify exception instead
+    "C901",  # too complex
+]
 
 [tool.pylint]
 max-line-length = 120
