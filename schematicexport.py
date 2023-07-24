@@ -1,3 +1,4 @@
+"""Module for exporting LCSC data to schematic."""
 import logging
 import os
 import os.path
@@ -21,6 +22,7 @@ class SchematicExport:
         self.parent = parent
 
     def load_schematic(self, paths):
+        """Load schematic file"""
         if is_nightly(GetBuildVersion()):
             self.logger.info("Kicad 7+...")
             for path in paths:
