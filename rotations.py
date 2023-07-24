@@ -382,7 +382,7 @@ class RotationManagerDialog(wx.Dialog):
     def _import_corrections(self, path):
         """corrections import logic"""
         if os.path.isfile(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 csvreader = csv.DictReader(f, fieldnames=("regex", "correction"))
                 next(csvreader)
                 for row in csvreader:
@@ -409,7 +409,7 @@ class RotationManagerDialog(wx.Dialog):
 
     def _export_corrections(self, path):
         """corrections export logic"""
-        with open(path, "w", newline="") as f:
+        with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
             csvwriter.writerow(["Footprint pattern", "Correction"])
             for c in self.parent.library.get_all_correction_data():
