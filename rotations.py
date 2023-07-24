@@ -250,7 +250,7 @@ class RotationManagerDialog(wx.Dialog):
         self.enable_toolbar_buttons(False)
         self.populate_rotations_list()
 
-    def quit_dialog(self, e):
+    def quit_dialog(self, *_):
         """Close this dialog."""
         self.Destroy()
         self.EndModal(0)
@@ -269,7 +269,7 @@ class RotationManagerDialog(wx.Dialog):
         for corrections in self.parent.library.get_all_correction_data():
             self.rotations_list.AppendItem([str(c) for c in corrections])
 
-    def save_correction(self, e):
+    def save_correction(self, *_):
         """Add/Update a correction in the database."""
         regex = self.regex.GetValue()
         correction = self.correction.GetValue()
@@ -285,7 +285,7 @@ class RotationManagerDialog(wx.Dialog):
         self.populate_rotations_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
-    def delete_correction(self, e):
+    def delete_correction(self, *_):
         """Delete a correction from the database."""
         item = self.rotations_list.GetSelection()
         row = self.rotations_list.ItemToRow(item)
@@ -296,7 +296,7 @@ class RotationManagerDialog(wx.Dialog):
         self.populate_rotations_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
-    def on_correction_selected(self, e):
+    def on_correction_selected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
         if self.rotations_list.GetSelectedItemsCount() > 0:
             self.enable_toolbar_buttons(True)
@@ -312,14 +312,14 @@ class RotationManagerDialog(wx.Dialog):
             self.selection_regex = None
             self.enable_toolbar_buttons(False)
 
-    def on_textfield_change(self, e):
+    def on_textfield_change(self, *_):
         """Check if the Add button should be activated."""
         if self.regex.GetValue() and self.correction.GetValue():
             self.enable_toolbar_buttons(True)
         else:
             self.enable_toolbar_buttons(False)
 
-    def download_correction_data(self, e):
+    def download_correction_data(self, *_):
         """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo"""
         self.parent.library.create_rotation_table()
         try:
@@ -347,7 +347,7 @@ class RotationManagerDialog(wx.Dialog):
             self._import_corrections(csv_file)
             os.rename(csv_file, f"{csv_file}.backup")
 
-    def import_corrections_dialog(self, e=None):
+    def import_corrections_dialog(self, *_):
         """Dialog to import correctios from a CSV file."""
         with wx.FileDialog(
             self,
@@ -362,7 +362,7 @@ class RotationManagerDialog(wx.Dialog):
             path = importFileDialog.GetPath()
             self._import_corrections(path)
 
-    def export_corrections_dialog(self, e=None):
+    def export_corrections_dialog(self, *_):
         """Dialog to export correctios to a CSV file."""
         with wx.FileDialog(
             self,
