@@ -13,7 +13,7 @@ class SchematicExport:
 
     """A class to export Schematic files"""
 
-    """This only works with KiCad V6/V7 files, if the format changes, this will probably break"""
+    # This only works with KiCad V6/V7 files, if the format changes, this will probably break
 
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
@@ -32,9 +32,9 @@ class SchematicExport:
 
     def _update_schematic(self, path):
         """This only works with KiCad V6 files"""
-        self.logger.info(f"Reading {path}...")
-        """Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it"""
-        """keep track of property ids and Reference property location to use with new LCSC property"""
+        self.logger.info("Reading %s...", path)
+        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
+        # keep track of property ids and Reference property location to use with new LCSC property
         propRx = re.compile(
             '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(id\\s(\\d+)\\)\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
         )
@@ -112,9 +112,9 @@ class SchematicExport:
 
     def _update_schematic7(self, path):
         """This only works with KiCad V7 files"""
-        self.logger.info(f"Reading {path}...")
-        """Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it"""
-        """keep track of property ids and Reference property location to use with new LCSC property"""
+        self.logger.info("Reading %s...", path)
+        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
+        # keep track of property ids and Reference property location to use with new LCSC property
         propRx = re.compile(
             '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
         )
