@@ -333,7 +333,9 @@ class RotationManagerDialog(wx.Dialog):
                     self.parent.library.insert_correction_data(row[0], row[1])
                 else:
                     self.logger.info(
-                        f"Correction '{row[0]}' exists already in database with correction value {row[1]}. Leaving this one out."
+                        "Correction '%s' exists already in database with correction value {%s}. Leaving this one out.",
+                        row[0],
+                        row[1],
                     )
         except Exception as err:  # pylint: disable=broad-exception-caught
             self.logger.debug(err)
@@ -389,14 +391,18 @@ class RotationManagerDialog(wx.Dialog):
                             row["regex"], row["correction"]
                         )
                         self.logger.info(
-                            f"Correction '{row['regex']}' exists already in database with correction value {row['correction']}. Overwrite it with local values from CSV."
+                            "Correction '%s' exists already in database with correction value '%s'. Overwrite it with local values from CSV.",
+                            row["regex"],
+                            row["correction"],
                         )
                     else:
                         self.parent.library.insert_correction_data(
                             row["regex"], row["correction"]
                         )
                         self.logger.info(
-                            f"Correction '{row['regex']}' with correction value {row['correction']} is added to the database from local CSV."
+                            "Correction '%s' with correction value '%s' is added to the database from local CSV.",
+                            row["regex"],
+                            row["correction"],
                         )
             self.populate_rotations_list()
             wx.PostEvent(self.parent, PopulateFootprintListEvent())
