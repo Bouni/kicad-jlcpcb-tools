@@ -14,6 +14,8 @@ from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
 
 class RotationManagerDialog(wx.Dialog):
+    """Dialog for managing part rotations."""
+
     def __init__(self, parent, footprint):
         wx.Dialog.__init__(
             self,
@@ -249,6 +251,7 @@ class RotationManagerDialog(wx.Dialog):
         self.populate_rotations_list()
 
     def quit_dialog(self, e):
+        """Close this dialog."""
         self.Destroy()
         self.EndModal(0)
 
