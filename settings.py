@@ -337,7 +337,7 @@ class SettingsDialog(wx.Dialog):
             ),
         )
 
-    def quit_dialog(self, e):
+    def quit_dialog(self, *_):
         """Close this dialog."""
         self.Destroy()
         self.EndModal(0)
