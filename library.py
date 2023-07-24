@@ -11,7 +11,7 @@ from glob import glob
 from pathlib import Path
 from threading import Thread
 
-import requests
+import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
 from .events import (
