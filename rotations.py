@@ -324,7 +324,8 @@ class RotationManagerDialog(wx.Dialog):
         self.parent.library.create_rotation_table()
         try:
             r = requests.get(
-                "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
+                "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv",
+                timeout=5,
             )
             corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
             next(corrections)
