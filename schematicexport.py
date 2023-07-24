@@ -4,9 +4,7 @@ import os
 import os.path
 import re
 
-from pcbnew import (
-    GetBuildVersion,
-)
+from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
 from .helpers import is_nightly
 
