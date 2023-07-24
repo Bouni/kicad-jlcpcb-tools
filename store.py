@@ -208,7 +208,8 @@ class Store:
             # if part is not in the database yet, create it
             if not dbpart:
                 self.logger.debug(
-                    f"Part {part[0]} does not exist in the database and will be created from the board."
+                    "Part %s does not exist in the database and will be created from the board.",
+                    part[0],
                 )
                 self.create_part(part)
             else:
@@ -219,7 +220,8 @@ class Store:
                     # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
                     if dbpart and not dbpart[3] and part[3]:
                         self.logger.debug(
-                            f"Part {part[0]} is already in the database but without lcsc value, so the value supplied from the board will be set."
+                            "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
+                            part[0],
                         )
                         self.update_part(part)
                     # if part in the database, has a lcsc value
@@ -229,18 +231,21 @@ class Store:
                             "lcsc_priority", True
                         ):
                             self.logger.debug(
-                                f"Part {part[0]} is already in the database and has a lcsc value, the value supplied from the board will be ignored."
+                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
+                                part[0],
                             )
                             part.pop(3)
                         else:
                             self.logger.debug(
-                                f"Part {part[0]} is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database."
+                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
+                                part[0],
                             )
                         self.update_part(part)
                 else:
                     # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
                     self.logger.debug(
-                        f"Part {part[0]} is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared."
+                        "Part %s is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared.",
+                        part[0],
                     )
                     self.update_part(part)
         self.import_legacy_assignments()
@@ -269,6 +274,6 @@ class Store:
                     self.set_bom(row["reference"], row["bom"])
                     self.set_pos(row["reference"], row["pos"])
                     self.logger.debug(
-                        f"Update {row['reference']} from legacy 'part_assignments.csv'"
+                        "Update %s from legacy 'part_assignments.csv'", row["reference"]
                     )
             os.rename(csv_file, f"{csv_file}.backup")
