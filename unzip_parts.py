@@ -1,10 +1,12 @@
 #!/bin/env python3
+"""Module for unziping and merging split db zip file."""
 
 import os
 from zipfile import ZipFile
 
 
 def unzip_parts(path):
+    """Unzip and merge split zip file."""
     # unzip (needs to go into download function finally)
     # Set the name of the original file
     db_zip_file = os.path.join(path, "parts.db.zip")
