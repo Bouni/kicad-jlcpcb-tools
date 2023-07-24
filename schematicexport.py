@@ -102,10 +102,9 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
 
-        f = open(path, "w", encoding="utf-8")
-        for line in newlines:
-            f.write(line + "\n")
-        f.close()
+        with open(path, "w", encoding="utf-8") as f:
+            for line in newlines:
+                f.write(line + "\n")
         self.logger.info("Added LCSC's to %s(maybe?)", path)
 
     def _update_schematic7(self, path):
@@ -177,8 +176,7 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
 
-        f = open(path, "w", encoding="utf-8")
-        for line in newlines:
-            f.write(line + "\n")
-        f.close()
+        with open(path, "w", encoding="utf-8") as f:
+            for line in newlines:
+                f.write(line + "\n")
         self.logger.info("Added LCSC's to %s (maybe?)", path)
