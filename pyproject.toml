@@ -25,6 +25,7 @@ disable = [
     "too-many-statements",
     "too-many-boolean-expressions",
     "invalid-name",
+    "duplicate-code",
 ]
 
 [tool.pylint.FORMAT]
