@@ -265,7 +265,7 @@ class Store:
         """Check if assignments of an old version are found and merge them into the database."""
         csv_file = os.path.join(self.project_path, "jlcpcb", "part_assignments.csv")
         if os.path.isfile(csv_file):
-            with open(csv_file) as f:
+            with open(csv_file, encoding="utf-8") as f:
                 csvreader = csv.DictReader(
                     f, fieldnames=("reference", "lcsc", "bom", "pos")
                 )
