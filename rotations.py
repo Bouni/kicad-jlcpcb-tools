@@ -335,7 +335,7 @@ class RotationManagerDialog(wx.Dialog):
                     self.logger.info(
                         f"Correction '{row[0]}' exists already in database with correction value {row[1]}. Leaving this one out."
                     )
-        except Exception as err:
+        except Exception as err:  # pylint: disable=broad-exception-caught
             self.logger.debug(err)
         self.populate_rotations_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
