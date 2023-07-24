@@ -29,6 +29,13 @@ repos:
       - id: markdownlint
         args:
           - --fix
+  - repo: local
+    hooks:
+      - id: pylint
+        name: pylint
+        entry: pylint
+        language: system
+        types: [python]
 # - repo: https://github.com/PyCQA/autoflake
 #   rev: v2.0.0
 #   hooks:
