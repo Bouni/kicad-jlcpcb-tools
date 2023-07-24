@@ -41,7 +41,7 @@ conn = sqlite3.connect(partsdb)
 # schema creation
 conn.execute(
     """
-    CREATE TABLE IF NOT EXISTS parts ( 
+    CREATE TABLE IF NOT EXISTS parts (
         'LCSC Part',
         'First Category',
         'Second Category',
