@@ -1,3 +1,5 @@
+"""This module contains the settings dialog."""
+
 import logging
 
 import wx
@@ -7,6 +9,8 @@ from .helpers import HighResWxSize, loadBitmapScaled
 
 
 class SettingsDialog(wx.Dialog):
+    """Dialog for plugin settings."""
+
     def __init__(self, parent):
         wx.Dialog.__init__(
             self,
@@ -334,5 +338,6 @@ class SettingsDialog(wx.Dialog):
         )
 
     def quit_dialog(self, e):
+        """Close this dialog."""
         self.Destroy()
         self.EndModal(0)
