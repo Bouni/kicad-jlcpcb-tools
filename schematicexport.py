@@ -72,8 +72,8 @@ class SchematicExport:
                 # found a LCSC property, so update it if needed
                 if key == "LCSC":
                     lastLcsc = value
-                    if lastLcsc != newLcsc and newLcsc != "":
-                        self.logger.info(f"Updating {newLcsc} on {lastRef}")
+                    if newLcsc not in (lastLcsc, ""):
+                        self.logger.info("Updating %s on %s", newLcsc, lastRef)
                         outLine = outLine.replace(
                             '"' + lastLcsc + '"', '"' + newLcsc + '"'
                         )
@@ -90,10 +90,8 @@ class SchematicExport:
             m = pinRx.search(inLine)
             if m:
                 if lastLcsc == "" and newLcsc != "" and lastLoc != "" and lastID != -1:
-                    self.logger.info(f"added {newLcsc} to {lastRef}")
-                    newTxt = '    (property "LCSC" "{}" (id {}) (at {} 0)'.format(
-                        newLcsc, (lastID + 1), lastLoc
-                    )
+                    self.logger.info("added %s to %s", newLcsc, lastRef)
+                    newTxt = f'    (property "LCSC" "{newLcsc}" (id {lastID + 1}) (at {lastLoc} 0)'
                     newlines.append(newTxt)
                     newlines.append("      (effects (font (size 1.27 1.27)) hide)")
                     newlines.append("    )")
@@ -108,7 +106,7 @@ class SchematicExport:
         for line in newlines:
             f.write(line + "\n")
         f.close()
-        self.logger.info(f"Added LCSC's to {path}(maybe?)")
+        self.logger.info("Added LCSC's to %s(maybe?)", path)
 
     def _update_schematic7(self, path):
         """This only works with KiCad V7 files"""
@@ -150,8 +148,8 @@ class SchematicExport:
                 # found a LCSC property, so update it if needed
                 if key == "LCSC":
                     lastLcsc = value
-                    if lastLcsc != newLcsc and newLcsc != "":
-                        self.logger.info(f"Updating {newLcsc} on {lastRef}")
+                    if newLcsc not in (lastLcsc, ""):
+                        self.logger.info("Updating %s on %s", newLcsc, lastRef)
                         outLine = outLine.replace(
                             '"' + lastLcsc + '"', '"' + newLcsc + '"'
                         )
@@ -168,10 +166,8 @@ class SchematicExport:
             m = pinRx.search(inLine)
             if m:
                 if lastLcsc == "" and newLcsc != "" and lastLoc != "":
-                    self.logger.info(f"added {newLcsc} to {lastRef}")
-                    newTxt = '    (property "LCSC" "{}" (at {} 0)'.format(
-                        newLcsc, lastLoc
-                    )
+                    self.logger.info("added %s to %s", newLcsc, lastRef)
+                    newTxt = f'    (property "LCSC" "{newLcsc}" (at {lastLoc} 0)'
                     newlines.append(newTxt)
                     newlines.append("      (effects (font (size 1.27 1.27)) hide)")
                     newlines.append("    )")
@@ -185,4 +181,4 @@ class SchematicExport:
         for line in newlines:
             f.write(line + "\n")
         f.close()
-        self.logger.info(f"Added LCSC's to {path}(maybe?)")
+        self.logger.info("Added LCSC's to %s (maybe?)", path)
