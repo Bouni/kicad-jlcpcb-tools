@@ -220,7 +220,7 @@ class SettingsDialog(wx.Dialog):
         self.lcsc_bom_cpl_image = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True),
+            loadBitmapScaled("bom.png", self.parent.scale_factor, static=True),
             wx.DefaultPosition,
             wx.DefaultSize,
             0,
@@ -344,7 +344,7 @@ class SettingsDialog(wx.Dialog):
                 "Add parts without LCSC number to BOM/POS"
             )
             self.lcsc_bom_cpl_image.SetBitmap(
-                loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True)
+                loadBitmapScaled("bom.png", self.parent.scale_factor, static=True)
             )
         else:
             self.lcsc_bom_cpl_setting.SetValue(add)
@@ -352,9 +352,7 @@ class SettingsDialog(wx.Dialog):
                 "Don't add parts without LCSC number to BOM/POS"
             )
             self.lcsc_bom_cpl_image.SetBitmap(
-                loadBitmapScaled(
-                    "database-outline.png", self.parent.scale_factor, static=True
-                )
+                loadBitmapScaled("no_bom.png", self.parent.scale_factor, static=True)
             )
 
     def load_settings(self):
