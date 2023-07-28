@@ -258,6 +258,9 @@ class Fabrication:
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
         self.corrections = self.parent.library.get_all_correction_data()
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
+        # add_without_lcsc = self.parent.settings.get("gerber", {}).get(
+        #     "lcsc_bom_pos", True
+        # )
         with open(
             os.path.join(self.outputdir, cplname), "w", newline="", encoding="utf-8"
         ) as csvfile:
@@ -269,6 +272,8 @@ class Fabrication:
                 for fp in get_footprint_by_ref(self.board, part[0]):
                     if get_exclude_from_pos(fp):
                         continue
+                    # if not add_without_lcsc and part
+                    self.logger.debug(part)
                     position = self.get_position(fp) - aux_orgin
                     writer.writerow(
                         [
