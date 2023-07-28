@@ -114,7 +114,7 @@ class Store:
             con.create_collation("naturalsort", natural_sort_collation)
             with con as cur:
                 # Query all parts that are supposed to be in the POS
-                query = "SELECT reference, value, footprint FROM part_info WHERE exclude_from_pos = '0' ORDER BY reference COLLATE naturalsort ASC"
+                query = "SELECT reference, value, footprint, lcsc FROM part_info WHERE exclude_from_pos = '0' ORDER BY reference COLLATE naturalsort ASC"
                 return [list(part) for part in cur.execute(query).fetchall()]
 
     def create_part(self, part):
