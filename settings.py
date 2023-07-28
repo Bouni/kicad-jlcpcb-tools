@@ -210,7 +210,7 @@ class SettingsDialog(wx.Dialog):
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
-            name="general_lcsc_bom_cpl",
+            name="gerber_lcsc_bom_cpl",
         )
 
         self.lcsc_bom_cpl_setting.SetToolTip(
@@ -373,7 +373,7 @@ class SettingsDialog(wx.Dialog):
             self.parent.settings.get("general", {}).get("lcsc_priority", True)
         )
         self.update_lcsc_bom_cpl(
-            self.parent.settings.get("general", {}).get("lcsc_bom_pos", True)
+            self.parent.settings.get("gerber", {}).get("lcsc_bom_pos", True)
         )
 
     def update_settings(self, event):
