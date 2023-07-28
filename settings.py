@@ -201,6 +201,37 @@ class SettingsDialog(wx.Dialog):
         lcsc_priority_sizer.Add(self.lcsc_priority_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_priority_sizer.Add(self.lcsc_priority_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Only parts with LCSC number in BOM/CPL #####
+
+        self.lcsc_bom_cpl_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Add parts without LCSC numbers to BOM/CPL",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_lcsc_bom_cpl",
+        )
+
+        self.lcsc_bom_cpl_setting.SetToolTip(
+            wx.ToolTip("Whether parts wihout LCSC number should be added to BOM/CPL")
+        )
+
+        self.lcsc_bom_cpl_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.lcsc_bom_cpl_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        lcsc_bom_cpl_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
+        lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -211,6 +242,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -304,6 +336,27 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_lcsc_bom_cpl(self, add):
+        """Update settings dialog according to the settings."""
+        if add:
+            self.lcsc_bom_cpl_setting.SetValue(add)
+            self.lcsc_bom_cpl_setting.SetLabel(
+                "Add parts without LCSC number to BOM/POS"
+            )
+            self.lcsc_bom_cpl_image.SetBitmap(
+                loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True)
+            )
+        else:
+            self.lcsc_bom_cpl_setting.SetValue(add)
+            self.lcsc_bom_cpl_setting.SetLabel(
+                "Don't add parts without LCSC number to BOM/POS"
+            )
+            self.lcsc_bom_cpl_image.SetBitmap(
+                loadBitmapScaled(
+                    "database-outline.png", self.parent.scale_factor, static=True
+                )
+            )
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly"""
         self.update_tented_vias(
@@ -320,6 +373,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_lcsc_priority(
             self.parent.settings.get("general", {}).get("lcsc_priority", True)
+        )
+        self.update_lcsc_bom_cpl(
+            self.parent.settings.get("general", {}).get("lcsc_bom_pos", True)
         )
 
     def update_settings(self, event):
