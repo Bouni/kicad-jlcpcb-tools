@@ -272,15 +272,8 @@ class Fabrication:
                 for fp in get_footprint_by_ref(self.board, part[0]):
                     if get_exclude_from_pos(fp):
                         continue
-                    self.logger.debug(
-                        "'%s' '%s' '%s'",
-                        add_without_lcsc,
-                        part[4],
-                        (not add_without_lcsc and not part[4]),
-                    )
-                    if not add_without_lcsc and not part[4]:
+                    if not add_without_lcsc and not part[3]:
                         continue
-                    self.logger.debug(part)
                     position = self.get_position(fp) - aux_orgin
                     writer.writerow(
                         [
