@@ -35,8 +35,15 @@ def getVersion():
         return f.read().strip()
 
 
+def GetOS():
+    """Get String with OS type"""
+    return wx.PlatformInformation.Get().GetOperatingSystemIdName()
+
+
 def GetScaleFactor(window):
-    """Workaround if wxWidgets Version does not support GetDPIScaleFactor"""
+    """Workaround if wxWidgets Version does not support GetDPIScaleFactor, for Mac OS always return 1.0"""
+    if "Apple Mac OS" in GetOS():
+        return 1.0
     if hasattr(window, "GetDPIScaleFactor"):
         return window.GetDPIScaleFactor()
     return 1.0
