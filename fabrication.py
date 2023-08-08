@@ -259,7 +259,7 @@ class Fabrication:
         self.corrections = self.parent.library.get_all_correction_data()
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
-            "lcsc_bom_pos", True
+            "lcsc_bom_cpl", True
         )
         with open(
             os.path.join(self.outputdir, cplname), "w", newline="", encoding="utf-8"
