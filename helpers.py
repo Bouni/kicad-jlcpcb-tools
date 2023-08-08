@@ -108,15 +108,17 @@ def natural_sort_collation(a, b):
 
 def get_lcsc_value(fp):
     """Get the first lcsc number (C123456 for example) from the properties of the footprint."""
-    # Kicad 7.99
+    # KiCad 7.99
     try:
         for field in fp.GetFields():
-            if re.match(r"^C\d+$", field.GetText()):
+            if re.match(r"lcsc", field.GetName(), re.IGNORECASE) and re.match(
+                r"^C\d+$", field.GetText()
+            ):
                 return field.GetText()
-    # KiCad < V7
+    # KiCad <= V7
     except AttributeError:
-        for value in fp.GetProperties().values():
-            if re.match(r"^C\d+$", value):
+        for key, value in fp.GetProperties().items():
+            if re.match(r"lcsc", key, re.IGNORECASE) and re.match(r"^C\d+$", value):
                 return value
     return ""
 
