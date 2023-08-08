@@ -291,11 +291,16 @@ class Fabrication:
     def generate_bom(self):
         """Generate BOM file."""
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
+        add_without_lcsc = self.parent.settings.get("gerber", {}).get(
+            "lcsc_bom_cpl", True
+        )
         with open(
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             for part in self.parent.store.read_bom_parts():
+                if not add_without_lcsc and not part[3]:
+                    continue
                 writer.writerow(part)
         self.logger.info("Finished generating BOM file")
