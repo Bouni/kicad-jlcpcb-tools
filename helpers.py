@@ -56,7 +56,7 @@ def loadBitmapScaled(filename, scale=1.0, static=False):
         bmp = wx.Bitmap(path)
         w, h = bmp.GetSize()
         img = bmp.ConvertToImage()
-        if wx.SystemSettings.GetAppearance().IsDark():
+        if wx.SystemSettings.GetAppearance().IsUsingDarkBackground():
             img.Replace(0, 0, 0, 255, 255, 255)
         bmp = wx.Bitmap(img.Scale(int(w * scale), int(h * scale)))
     else:
