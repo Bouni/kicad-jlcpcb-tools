@@ -35,8 +35,15 @@ def getVersion():
         return f.read().strip()
 
 
+def GetOS():
+    """Get String with OS type"""
+    return wx.PlatformInformation.Get().GetOperatingSystemIdName()
+
+
 def GetScaleFactor(window):
-    """Workaround if wxWidgets Version does not support GetDPIScaleFactor"""
+    """Workaround if wxWidgets Version does not support GetDPIScaleFactor, for Mac OS always return 1.0"""
+    if "Apple Mac OS" in GetOS():
+        return 1.0
     if hasattr(window, "GetDPIScaleFactor"):
         return window.GetDPIScaleFactor()
     return 1.0
@@ -110,15 +117,17 @@ def natural_sort_collation(a, b):
 
 def get_lcsc_value(fp):
     """Get the first lcsc number (C123456 for example) from the properties of the footprint."""
-    # Kicad 7.99
+    # KiCad 7.99
     try:
         for field in fp.GetFields():
-            if re.match(r"^C\d+$", field.GetText()):
+            if re.match(r"lcsc", field.GetName(), re.IGNORECASE) and re.match(
+                r"^C\d+$", field.GetText()
+            ):
                 return field.GetText()
-    # KiCad < V7
+    # KiCad <= V7
     except AttributeError:
-        for value in fp.GetProperties().values():
-            if re.match(r"^C\d+$", value):
+        for key, value in fp.GetProperties().items():
+            if re.match(r"lcsc", key, re.IGNORECASE) and re.match(r"^C\d+$", value):
                 return value
     return ""
 

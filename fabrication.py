@@ -258,6 +258,9 @@ class Fabrication:
         cplname = f"CPL-{self.filename.split('.')[0]}.csv"
         self.corrections = self.parent.library.get_all_correction_data()
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
+        add_without_lcsc = self.parent.settings.get("gerber", {}).get(
+            "lcsc_bom_cpl", True
+        )
         with open(
             os.path.join(self.outputdir, cplname), "w", newline="", encoding="utf-8"
         ) as csvfile:
@@ -268,6 +271,8 @@ class Fabrication:
             for part in self.parent.store.read_pos_parts():
                 for fp in get_footprint_by_ref(self.board, part[0]):
                     if get_exclude_from_pos(fp):
+                        continue
+                    if not add_without_lcsc and not part[3]:
                         continue
                     position = self.get_position(fp) - aux_orgin
                     writer.writerow(
@@ -286,11 +291,16 @@ class Fabrication:
     def generate_bom(self):
         """Generate BOM file."""
         bomname = f"BOM-{self.filename.split('.')[0]}.csv"
+        add_without_lcsc = self.parent.settings.get("gerber", {}).get(
+            "lcsc_bom_cpl", True
+        )
         with open(
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             for part in self.parent.store.read_bom_parts():
+                if not add_without_lcsc and not part[3]:
+                    continue
                 writer.writerow(part)
         self.logger.info("Finished generating BOM file")
