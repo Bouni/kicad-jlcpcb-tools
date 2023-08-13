@@ -25,6 +25,8 @@ from zipfile import ZipFile
 
 import humanize
 
+start = datetime.now()
+
 os.makedirs("db_build", exist_ok=True)
 os.chdir("db_build")
 
@@ -187,3 +189,7 @@ print(f"parts.db.zip: {humanize.naturalsize(os.path.getsize('parts.db.zip'))}")
 # remove the large zip file und uncompressed db after splitting
 os.unlink("parts.db.zip")
 os.unlink(partsdb)
+
+end = datetime.now()
+deltatime = end - start
+print(f"Elapsed time: {humanize.naturaldelta(deltatime)}")
