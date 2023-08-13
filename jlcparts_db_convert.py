@@ -23,6 +23,8 @@ from datetime import date, datetime
 from pathlib import Path
 from zipfile import ZipFile
 
+import humanize
+
 os.makedirs("db_build", exist_ok=True)
 os.chdir("db_build")
 
@@ -33,7 +35,8 @@ if partsdb.exists():
     partsdb.unlink()
 
 # connection to the jlcparts db
-conn_jp = sqlite3.connect("cache.sqlite3")
+jlcparts_db_name = "cache.sqlite3"
+conn_jp = sqlite3.connect(jlcparts_db_name)
 
 # connection to the plugin db we want to write
 conn = sqlite3.connect(partsdb)
@@ -174,6 +177,12 @@ with open("parts.db.zip", "rb") as z:
     # create a helper file for the downloader which indicates the number of chunk files
     with open("chunk_num.txt", "w", encoding="utf-8") as f:
         f.write(str(chunk_num - 1))
+
+# print out some stats
+jlcparts_db_size = humanize.naturalsize(os.path.getsize(jlcparts_db_name))
+print(f"jlcparts database ({jlcparts_db_name}): {jlcparts_db_size}")
+print(f"parts.db: {humanize.naturalsize(os.path.getsize('parts.db'))}")
+print(f"parts.db.zip: {humanize.naturalsize(os.path.getsize('parts.db.zip'))}")
 
 # remove the large zip file und uncompressed db after splitting
 os.unlink("parts.db.zip")
