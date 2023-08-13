@@ -136,12 +136,7 @@ class Library:
             for w in keywords:
                 # skip over empty keywords
                 if w != "":
-                    # Flag a keyword as a 'prefix token' if the token is
-                    # long enough. This strikes a balance between
-                    # search performance and search coverage
-                    wildcard = "*" if len(w) >= 2 else ""
-
-                    kw = f'"{w}"{wildcard}'
+                    kw = f'"{w}"'
                     keywords_intermediate.append(kw)
             keywords_entry = " AND ".join(keywords_intermediate)
             match_chunks.append(f"{keywords_entry}")
