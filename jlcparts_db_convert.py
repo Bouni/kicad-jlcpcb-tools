@@ -192,4 +192,4 @@ os.unlink(partsdb)
 
 end = datetime.now()
 deltatime = end - start
-print(f"Elapsed time: {humanize.naturaldelta(deltatime)}")
+print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
