@@ -279,7 +279,7 @@ class JlcpcbFTS5(Generate):
                 'Datasheet',
                 'Price',
                 'Stock'
-            )
+            , tokenize="trigram")
             """
         )
 
