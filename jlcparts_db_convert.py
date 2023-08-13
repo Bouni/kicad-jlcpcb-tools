@@ -56,7 +56,7 @@ conn.execute(
         'Datasheet',
         'Price',
         'Stock'
-    )
+    , tokenize="trigram")
     """
 )
 
