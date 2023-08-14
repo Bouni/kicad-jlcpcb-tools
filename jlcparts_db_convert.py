@@ -103,50 +103,69 @@ print("Reading categories")
 res = conn_jp.execute("SELECT * FROM categories")
 cats = {i: (c, sc) for i, c, sc in res.fetchall()}
 
+res = conn_jp.execute("select count(*) from components")
+results = res.fetchone()
+print(f"{humanize.intcomma(results[0])} parts to import")
+
+part_count = 0
 print("Reading components")
 res = conn_jp.execute("SELECT * FROM components")
-comps = res.fetchall()
+while True:
+    comps = res.fetchmany(size=100000)
 
-print("Done reading")
-conn_jp.close()
+    print(f"Read {humanize.intcomma(len(comps))} parts")
 
-# now extract the data from the jlcparts db and fill
-# it into the plugin database
-print("Building parts rows to insert")
-rows = []
-for c in comps:
-    price = json.loads(c[10])
-    price_str = ",".join(
-        [
-            f"{entry.get('qFrom')}-{entry.get('qTo') if entry.get('qTo') is not None else ''}:{entry.get('price')}"
-            for entry in price
-        ]
+    # if we have no more parts exit out of the loop
+    if len(comps) == 0:
+        break
+
+    part_count += len(comps)
+
+    # now extract the data from the jlcparts db and fill
+    # it into the plugin database
+    print("Building parts rows to insert")
+    rows = []
+    for c in comps:
+        price = json.loads(c[10])
+        price_str = ",".join(
+            [
+                f"{entry.get('qFrom')}-{entry.get('qTo') if entry.get('qTo') is not None else ''}:{entry.get('price')}"
+                for entry in price
+            ]
+        )
+        row = (
+            f"C{c[0]}",  # LCSC Part
+            cats[c[1]][0],  # First Category
+            cats[c[1]][1],  # Second Category
+            c[2],  # MFR.Part
+            c[3],  # Package
+            int(c[4]),  # Solder Joint
+            mans[c[5]],  # Manufacturer
+            "Basic" if c[6] else "Extended",  # Library Type
+            c[7],  # Description
+            c[8],  # Datasheet
+            price_str,  # Price
+            str(c[9]),  # Stock
+        )
+        rows.append(row)
+
+    print("Inserting into parts table")
+    conn.executemany(
+        "INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
     )
-    row = (
-        f"C{c[0]}",  # LCSC Part
-        cats[c[1]][0],  # First Category
-        cats[c[1]][1],  # Second Category
-        c[2],  # MFR.Part
-        c[3],  # Package
-        int(c[4]),  # Solder Joint
-        mans[c[5]],  # Manufacturer
-        "Basic" if c[6] else "Extended",  # Library Type
-        c[7],  # Description
-        c[8],  # Datasheet
-        price_str,  # Price
-        str(c[9]),  # Stock
-    )
-    rows.append(row)
+    conn.commit()
 
-print("Inserting into parts table")
-conn.executemany("INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
-conn.commit()
+print("Done importing parts")
+
+# metadata
 db_size = os.stat(partsdb).st_size
 conn.execute(
     "INSERT INTO meta VALUES(?, ?, ?, ?, ?)",
-    ["cache.sqlite3", db_size, len(comps), date.today(), datetime.now().isoformat()],
+    ["cache.sqlite3", db_size, part_count, date.today(), datetime.now().isoformat()],
 )
 conn.commit()
+
+conn_jp.close()
 conn.close()
 
 # compress the result
