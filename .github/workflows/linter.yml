@@ -54,6 +54,8 @@ jobs:
           python-version: "3.11"
       - name: Install pylint
         run: pip install pylint
+      - name: Install humanize
+        run: pip install humanize
       - name: Run pylint
         run: pylint $(git ls-files '*.py')
   ruff:
