@@ -16,6 +16,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             python3 python3-pip wget zip unzip p7zip-full
+      - name: Install python dependencies
+        run: |
+          pip install humanize
       - name: Update database
         run: |
           set -x
