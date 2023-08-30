@@ -226,6 +226,14 @@ def get_not_in_schematic(footprint):
     return bool(get_bit(val, NOT_IN_SCHEMATIC))
 
 
+def get_is_top(footprint):
+    """Get if the footprint is on the top or bottom."""
+    is_top = footprint.GetLayer() == 0
+    if footprint.IsFlipped():
+        is_top = not is_top
+    return is_top
+
+
 def set_tht(footprint):
     """Set the THT property of a footprint."""
     if not footprint:

@@ -27,6 +27,7 @@ from .helpers import (
     GetScaleFactor,
     HighResWxSize,
     get_footprint_by_ref,
+    get_is_top,
     getVersion,
     loadBitmapScaled,
     loadIconScaled,
@@ -589,7 +590,7 @@ class JLCPCBTools(wx.Dialog):
             part[6] = icons.get(part[6], icons.get(0))
             part[7] = icons.get(part[7], icons.get(0))
             part.insert(8, "")
-            side = "Top" if fp.GetLayer() == 0 else "Bot"
+            side = "Top" if get_is_top(fp) else "Bot"
             part.insert(9, side)
             part.insert(10, "")
             parts.append(part)

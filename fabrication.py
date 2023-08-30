@@ -36,7 +36,12 @@ try:
 except ImportError:
     NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
 
-from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd
+from .helpers import (
+    get_exclude_from_pos,
+    get_footprint_by_ref,
+    get_is_top,
+    get_smd,
+)
 
 
 class Fabrication:
@@ -75,7 +80,7 @@ class Fabrication:
             # we need to divide by 10 to get 180 out of 1800 for example.
             # This might be a bug in 5.99 / 6.0 RC
             rotation = original / 10
-        if footprint.GetLayer() != 0:
+        if not get_is_top(footprint):
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
         # First check if the value aka part name matches
@@ -91,7 +96,7 @@ class Fabrication:
 
     def rotate(self, footprint, rotation, correction):
         """Calculate the actual correction"""
-        if footprint.GetLayer() == 0:
+        if get_is_top(footprint):
             rotation = (rotation + int(correction)) % 360
             self.logger.info(
                 "Fixed rotation of %s (%s / %s) on Top Layer by %d degrees",
@@ -283,7 +288,7 @@ class Fabrication:
                             ToMM(position.x),
                             ToMM(position.y) * -1,
                             self.fix_rotation(fp),
-                            "top" if fp.GetLayer() == 0 else "bottom",
+                            "top" if get_is_top(fp) else "bottom",
                         ]
                     )
         self.logger.info("Finished generating CPL file")
