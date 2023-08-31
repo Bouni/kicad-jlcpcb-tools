@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sys
+import time
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
@@ -70,8 +71,8 @@ class JLCPCBTools(wx.Dialog):
     """Main Windows class for this plugin."""
 
     def __init__(self, parent):
-        if sys.platform != "darwin":
-            self.app = wx.App()
+        while not wx.GetApp():
+            time.sleep(1)
         wx.Dialog.__init__(
             self,
             parent,
