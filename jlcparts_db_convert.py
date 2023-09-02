@@ -65,6 +65,13 @@ conn.execute(
 
 conn.execute(
     """
+    CREATE UNIQUE INDEX parts_lcsc_part_index
+        ON parts ('LCSC Part')
+    """
+)
+
+conn.execute(
+    """
     CREATE TABLE IF NOT EXISTS mapping (
         'footprint',
         'value',
