@@ -176,19 +176,6 @@ class Generate:
         print(f"Deleting {self.output_db}")
         os.unlink(self.output_db)
 
-    def build(self):
-        """Run all of the steps to generate the database files for upload."""
-        self.remove_original()
-        self.connect_sqlite()
-        self.create_tables()
-        self.load_tables()
-        self.meta_data()
-        self.close_sqlite()
-        self.compress()
-        self.split()
-        self.display_stats()
-        self.cleanup()
-
 class Jlcpcb(Generate):
     """Sqlite parts database generator."""
 
@@ -255,6 +242,19 @@ class Jlcpcb(Generate):
             """
         )
 
+    def build(self):
+        """Run all of the steps to generate the database files for upload."""
+        self.remove_original()
+        self.connect_sqlite()
+        self.create_tables()
+        self.load_tables()
+        self.meta_data()
+        self.close_sqlite()
+        self.compress()
+        self.split()
+        self.display_stats()
+        self.cleanup()
+
 class JlcpcbFTS5(Generate):
     """FTS5 specific database generation."""
 
@@ -314,6 +314,25 @@ class JlcpcbFTS5(Generate):
             """
         )
 
+    def optimize(self):
+        """FTS5 optimize to minimize query times."""
+        print("Optimizing fts5 parts table")
+        self.conn.execute("insert into parts(parts) values('optimize')")
+        print("Done optimizing fts5 parts table")
+
+    def build(self):
+        """Run all of the steps to generate the database files for upload."""
+        self.remove_original()
+        self.connect_sqlite()
+        self.create_tables()
+        self.load_tables()
+        self.optimize()
+        self.meta_data()
+        self.close_sqlite()
+        self.compress()
+        self.split()
+        self.display_stats()
+        self.cleanup()
 
 
 output_directory = "db_build"
