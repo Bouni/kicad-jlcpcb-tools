@@ -44,18 +44,18 @@ conn = sqlite3.connect(partsdb)
 conn.execute(
     """
     CREATE virtual TABLE IF NOT EXISTS parts using fts5 (
-        'LCSC Part',
+        'LCSC Part' unindexed,
         'First Category',
         'Second Category',
         'MFR.Part',
         'Package',
-        'Solder Joint',
+        'Solder Joint' unindexed,
         'Manufacturer',
         'Library Type',
         'Description',
         'Datasheet',
-        'Price',
-        'Stock'
+        'Price' unindexed,
+        'Stock' unindexed
     , tokenize="trigram")
     """
 )
