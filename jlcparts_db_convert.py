@@ -154,6 +154,11 @@ while True:
 
 print("Done importing parts")
 
+# Optimize to minimize query times
+print("Optimizing fts5 parts table")
+conn.execute("insert into parts(parts) values('optimize')")
+print("Done optimizing fts5 parts table")
+
 # metadata
 db_size = os.stat(partsdb).st_size
 conn.execute(
