@@ -272,13 +272,13 @@ class JlcpcbFTS5(Generate):
                 'Second Category',
                 'MFR.Part',
                 'Package',
-                'Solder Joint',
+                'Solder Joint' unindexed,
                 'Manufacturer',
                 'Library Type',
                 'Description',
                 'Datasheet',
-                'Price',
-                'Stock'
+                'Price' unindexed,
+                'Stock' unindexed
             , tokenize="trigram")
             """
         )
