@@ -547,7 +547,7 @@ class Library:
                 sqlite3.connect(self.partsdb_file)
             ) as con, con as cur:
                 for row in cur.execute(
-                    'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
+                    'SELECT * from categories ORDER BY UPPER("First Category"), UPPER("Second Category")'
                 ):
                     self.category_map.setdefault(row[0], []).append(row[1])
         return list(self.category_map.keys())

@@ -91,6 +91,15 @@ conn.execute(
     """
 )
 
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS categories (
+        'First Category',
+        'Second Category'
+    )
+    """
+)
+
 # load the tables into memory
 print("Reading manufacturers")
 res = conn_jp.execute("SELECT * FROM manufacturers")
@@ -158,6 +167,11 @@ print("Done importing parts")
 print("Optimizing fts5 parts table")
 conn.execute("insert into parts(parts) values('optimize')")
 print("Done optimizing fts5 parts table")
+
+# categories table
+conn.execute(
+    'INSERT INTO categories SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
+)
 
 # metadata
 db_size = os.stat(partsdb).st_size
