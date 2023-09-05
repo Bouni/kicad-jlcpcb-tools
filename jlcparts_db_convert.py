@@ -314,6 +314,21 @@ class JlcpcbFTS5(Generate):
             """
         )
 
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS categories (
+                'First Category',
+                'Second Category'
+            )
+            """
+        )
+
+    def populate_categories(self):
+        """Populate the categories table."""
+        self.conn.execute(
+            'INSERT INTO categories SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
+        )
+
     def optimize(self):
         """FTS5 optimize to minimize query times."""
         print("Optimizing fts5 parts table")
@@ -326,6 +341,7 @@ class JlcpcbFTS5(Generate):
         self.connect_sqlite()
         self.create_tables()
         self.load_tables()
+        self.populate_categories()
         self.optimize()
         self.meta_data()
         self.close_sqlite()
