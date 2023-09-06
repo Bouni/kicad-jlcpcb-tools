@@ -236,86 +236,80 @@ class PartSelectorDialog(wx.Dialog):
         )
 
         search_sizer_one = wx.BoxSizer(wx.VERTICAL)
-        search_sizer_one.Add(keyword_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_one.Add(keyword_label, 0, wx.ALL, 5)
         search_sizer_one.Add(
             self.keyword,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
-        search_sizer_one.Add(
-            manufacturer_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
+        search_sizer_one.Add(manufacturer_label, 0, wx.ALL, 5)
         search_sizer_one.Add(
             self.manufacturer,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
-        search_sizer_one.Add(package_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_one.Add(package_label, 0, wx.ALL, 5)
         search_sizer_one.Add(
             self.package,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
         search_sizer_two = wx.BoxSizer(wx.VERTICAL)
-        search_sizer_two.Add(category_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_two.Add(category_label, 0, wx.ALL, 5)
         search_sizer_two.Add(
             self.category,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
-        search_sizer_two.Add(part_no_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_two.Add(part_no_label, 0, wx.ALL, 5)
         search_sizer_two.Add(
             self.part_no,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
-        search_sizer_two.Add(
-            solder_joints_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
+        search_sizer_two.Add(solder_joints_label, 0, wx.ALL, 5)
         search_sizer_two.Add(
             self.solder_joints,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
         search_sizer_three = wx.BoxSizer(wx.VERTICAL)
-        search_sizer_three.Add(
-            subcategory_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
+        search_sizer_three.Add(subcategory_label, 0, wx.ALL, 5)
         search_sizer_three.Add(
             self.subcategory,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
         search_sizer_four = wx.BoxSizer(wx.VERTICAL)
-        search_sizer_four.Add(basic_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_four.Add(basic_label, 0, wx.ALL, 5)
         search_sizer_four.Add(
             self.basic_checkbox,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
-        search_sizer_four.Add(extended_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_four.Add(extended_label, 0, wx.ALL, 5)
         search_sizer_four.Add(
             self.extended_checkbox,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
-        search_sizer_four.Add(stock_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        search_sizer_four.Add(stock_label, 0, wx.ALL, 5)
         search_sizer_four.Add(
             self.assert_stock_checkbox,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
@@ -323,14 +317,14 @@ class PartSelectorDialog(wx.Dialog):
         search_sizer_five.Add(
             help_button,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
         search_sizer_five.AddSpacer(80)
         search_sizer_five.Add(
             self.search_button,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
