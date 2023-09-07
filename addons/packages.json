@@ -1,0 +1,489 @@
+{
+  "packages": [
+    {
+      "$schema": "https://go.kicad.org/pcm/schemas/v1",
+      "name": "KiCAD JLCPCB tools",
+      "description": "A JLCPCB integration addon for KiCAD",
+      "description_full": "This plugin allows you to search the JLCPCB parts database, assign LCSC article numbers to your parts, generate production files for JLCPCB and much more.",
+      "identifier": "com.github.bouni.kicad-jlcpcb-tools",
+      "type": "plugin",
+      "author": {
+        "name": "Bouni",
+        "contact": {
+          "twitter": "@bouni2016"
+        }
+      },
+      "maintainer": {
+        "name": "Bouni",
+        "contact": {
+          "twitter": "@bouni2016"
+        }
+      },
+      "license": "MIT",
+      "resources": {
+        "homepage": "https://github.com/bouni/kicad-jlcpcb-tools"
+      },
+      "versions": [
+        {
+          "version": "2021.12.1",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "48611b125a44c254576a809f30c339d3dd876f29ef19dd501892997593e51e51",
+          "download_size": 66118,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2021.12.1/KiCAD-PCM-2021.12.1.zip",
+          "install_size": 147111
+        },
+        {
+          "version": "2021.12.2",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "6ec44b5911f8b795dfe77380f683798e8d935dffd40b0f0d48e2a2884ef2c615",
+          "download_size": 66205,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2021.12.2/KiCAD-PCM-2021.12.2.zip",
+          "install_size": 147592
+        },
+        {
+          "version": "2021.12.3",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "893bec769b1177fda0573aa097bde334437510e69583ad2649c852b4210092aa",
+          "download_size": 66212,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2021.12.3/KiCAD-PCM-2021.12.3.zip",
+          "install_size": 147552
+        },
+        {
+          "version": "2021.12.4",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "e40e83565bb70480f81a80c836ce7fe6ae352ffb11fa94ea801f142fb9f2ac44",
+          "download_size": 66258,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2021.12.4/KiCAD-PCM-2021.12.4.zip",
+          "install_size": 147708
+        },
+        {
+          "version": "2022.01.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "5bfedede6f0df1407be7228685128b7cf229e4d24a78d38cc9954c10372f53f7",
+          "download_size": 66299,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.01.01/KiCAD-PCM-2022.01.01.zip",
+          "install_size": 147879
+        },
+        {
+          "version": "2022.01.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "1fa93ce8550b44de0565b66e9ec75ed6252fe2b5a978a1e31043939711261f14",
+          "download_size": 66318,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.01.02/KiCAD-PCM-2022.01.02.zip",
+          "install_size": 147989
+        },
+        {
+          "version": "2022.01.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "93217e3f686d496d5f32cbd8e1f6582fcbeddd1162372c1a7ad4e3d8d669ada4",
+          "download_size": 66534,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.01.03/KiCAD-PCM-2022.01.03.zip",
+          "install_size": 148734
+        },
+        {
+          "version": "2022.01.04",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "66d4ef309ce7a56aa4a430a232a6932c99c69275120e341c0d7ae0dcafd9f92c",
+          "download_size": 66651,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.01.04/KiCAD-PCM-2022.01.04.zip",
+          "install_size": 149180
+        },
+        {
+          "version": "2022.01.05",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "86d2f0d234f4894f549a4411325215146bf26507d080098b757447f6c96b38d4",
+          "download_size": 66651,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.01.05/KiCAD-PCM-2022.01.05.zip",
+          "install_size": 149180
+        },
+        {
+          "version": "2022.01.06",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "9654c6ebc1bdd082ee556bb0efdcb428dc0ea9eaef098d2b931bca53ccc2f6fe",
+          "download_size": 67111,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.01.06/KiCAD-PCM-2022.01.06.zip",
+          "install_size": 154803
+        },
+        {
+          "version": "2022.02.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "044edce5b7372a4c95c45f620f585c9b0bd0a2794c57a94b649bc6ed6ae152cf",
+          "download_size": 69222,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.02.01/KiCAD-PCM-2022.02.01.zip",
+          "install_size": 158922
+        },
+        {
+          "version": "2022.02.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "91f0179ca96bc8eee2c6a015013ae9f64a8126969f75e1e7efe44230733b5094",
+          "download_size": 69371,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.02.02/KiCAD-PCM-2022.02.02.zip",
+          "install_size": 160048
+        },
+        {
+          "version": "2022.02.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "813049e2a416a95044d7e2a45288ad1c078ff8f0430ebd6eb640440f028a29f3",
+          "download_size": 69378,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.02.03/KiCAD-PCM-2022.02.03.zip",
+          "install_size": 160172
+        },
+        {
+          "version": "2022.02.04",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "6756431ab2d7d193baa49938ac4c1dec2f0859df1c819a18d7f5ae2ebe42eda1",
+          "download_size": 69791,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.02.04/KiCAD-PCM-2022.02.04.zip",
+          "install_size": 160978
+        },
+        {
+          "version": "2022.03.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "a6144cffd0c2b663d51b4d891b9774c3e902a345bebe59c2a9e566e47fbc1bc7",
+          "download_size": 70239,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.03.01/KiCAD-PCM-2022.03.01.zip",
+          "install_size": 163656
+        },
+        {
+          "version": "2022.03.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "4eefaee246741d33b16a0f5837dc716c52d1fecac85f4cf4def3a6d21cbfa705",
+          "download_size": 70387,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.03.02/KiCAD-PCM-2022.03.02.zip",
+          "install_size": 164700
+        },
+        {
+          "version": "2022.04.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "a882998273b8a977221692d9754d449af99e7bad356269221ba074aa98de7648",
+          "download_size": 70676,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.04.01/KiCAD-PCM-2022.04.01.zip",
+          "install_size": 166151
+        },
+        {
+          "version": "2022.04.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "e69e5d2fd95e70cf66980288801fc487084131e5a7cab1cb298a7ba2f7f14c4d",
+          "download_size": 70900,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.04.02/KiCAD-PCM-2022.04.02.zip",
+          "install_size": 166220
+        },
+        {
+          "version": "2022.04.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "0fcba5d7192973cd31739a6039d30a8fe560fd17f34e09f6ebb24677a938da67",
+          "download_size": 70889,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.04.03/KiCAD-PCM-2022.04.03.zip",
+          "install_size": 166180
+        },
+        {
+          "version": "2022.05.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "c70192d398c5f74f9b4ef21812f4fca5c29e44446fe1c064bfb07aeead2147c4",
+          "download_size": 70906,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.05.01/KiCAD-PCM-2022.05.01.zip",
+          "install_size": 166416
+        },
+        {
+          "version": "2022.06.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "c16e6635e619e2e1937ecd6ad6ba82284c01357e144564530baaa691e7b3778d",
+          "download_size": 71353,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.06.01/KiCAD-PCM-2022.06.01.zip",
+          "install_size": 167075
+        },
+        {
+          "version": "2022.06.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "e2602cc8a03a3ab14959ca6cfefd08c2a3bd373c3a0e7ff7be95732ea9a13ec8",
+          "download_size": 74360,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.06.02/KiCAD-PCM-2022.06.02.zip",
+          "install_size": 182323
+        },
+        {
+          "version": "2022.06.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "42a6d957d59b2d048d57b62c21fd3cd61da97fbac014de5cd8bb5e9971a961c9",
+          "download_size": 73935,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.06.03/KiCAD-PCM-2022.06.03.zip",
+          "install_size": 184944
+        },
+        {
+          "version": "2022.06.04",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "47c85dec395356ef02f3d25aa4869383aef54d347e4f7874902f73192973fb42",
+          "download_size": 73944,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.06.04/KiCAD-PCM-2022.06.04.zip",
+          "install_size": 183820
+        },
+        {
+          "version": "2022.07.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "d4c4fce851074852bc64ad25bbd679a9372060af70cf8ee6d72b2ccc08b51a80",
+          "download_size": 73952,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.07.01/KiCAD-PCM-2022.07.01.zip",
+          "install_size": 183786
+        },
+        {
+          "version": "2022.08.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "5fbeaf5decff38004771b57557dfaedab97202fbc14c1453077525a453de81ec",
+          "download_size": 75979,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.08.01/KiCAD-PCM-2022.08.01.zip",
+          "install_size": 188485
+        },
+        {
+          "version": "2022.08.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "902888241a901435615f0740846ab553cc38dda775319cd8bd12e25c13ce07b8",
+          "download_size": 75995,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.08.02/KiCAD-PCM-2022.08.02.zip",
+          "install_size": 188512
+        },
+        {
+          "version": "2022.09.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "d6237e6e0168ba0f6653d02255100f589e9592e95188cfd1ba8f17b75dbc1e50",
+          "download_size": 76166,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.09.01/KiCAD-PCM-2022.09.01.zip",
+          "install_size": 189143
+        },
+        {
+          "version": "2022.11.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "70f0c09c8ee9e57aad3068da33ecb6729cb60b17db5086886a909f1d3d60de19",
+          "download_size": 76770,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.11.01/KiCAD-PCM-2022.11.01.zip",
+          "install_size": 192156
+        },
+        {
+          "version": "2022.11.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "927dbccbe6f47daaaa584ed764632f669621ae59fcbbfa5273283e551e756377",
+          "download_size": 77171,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.11.02/KiCAD-PCM-2022.11.02.zip",
+          "install_size": 193270
+        },
+        {
+          "version": "2022.12.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "f9a847b11877003a86f1b5d970ce5aa39802004baf24afb45df263baff7e150a",
+          "download_size": 76998,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.12.01/KiCAD-PCM-2022.12.01.zip",
+          "install_size": 193798
+        },
+        {
+          "version": "2022.12.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "f466123b792806af0f030f5e3731dd4bab3817bf22b9b8b3e1452ddb7540adef",
+          "download_size": 77039,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.12.02/KiCAD-PCM-2022.12.02.zip",
+          "install_size": 193945
+        },
+        {
+          "version": "2022.12.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "c104a227f59a9d70759418355f117cc6d3e84380de572c285f0b70869974e5af",
+          "download_size": 77264,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.12.03/KiCAD-PCM-2022.12.03.zip",
+          "install_size": 194964
+        },
+        {
+          "version": "2022.12.04",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "5264458e035e52a7be2f0ca3d39bc4b6e2e8c8776bbc2785e96f3c6a80ae1b19",
+          "download_size": 77261,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2022.12.04/KiCAD-PCM-2022.12.04.zip",
+          "install_size": 194962
+        },
+        {
+          "version": "2023.01.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "9bd1513328970917ea7e135a668d0afdf1168204ac6f2be80260ad259077eea2",
+          "download_size": 77264,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.01.01/KiCAD-PCM-2023.01.01.zip",
+          "install_size": 194989
+        },
+        {
+          "version": "2023.01.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "416fa348cb1969ca76161252a341c59d3886b988f7857bded7954dc0db8d75f7",
+          "download_size": 88635,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.01.02/KiCAD-PCM-2023.01.02.zip",
+          "install_size": 212486
+        },
+        {
+          "version": "2023.02.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "6fed7b596b6c65e56d67eee6c4fd8de70ca22ee1966caeecf0e26537e46e6fde",
+          "download_size": 88536,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.02.01/KiCAD-PCM-2023.02.01.zip",
+          "install_size": 212240
+        },
+        {
+          "version": "2023.02.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "f089d8da23e7819d47563a54b1f8986ed8ca5b2e64e281f393eee8688046f69d",
+          "download_size": 88928,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.02.02/KiCAD-PCM-2023.02.02.zip",
+          "install_size": 215569
+        },
+        {
+          "version": "2023.02.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "01def797281c2dd3f3946dd6784e557227b06cb415b6929a63e5ea62f40d1150",
+          "download_size": 88645,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.02.03/KiCAD-PCM-2023.02.03.zip",
+          "install_size": 214899
+        },
+        {
+          "version": "2023.03.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "d9e4f5f38244dbb44f67d9ff6b4c70b1afae5deca65c0aefe9df913dc232fcbc",
+          "download_size": 88662,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.03.01/KiCAD-PCM-2023.03.01.zip",
+          "install_size": 214935
+        },
+        {
+          "version": "2023.03.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "78c33f1e269b06774125733bcec8ae9fd00e5f53dd6f2a7dc860bda6f45c1e7a",
+          "download_size": 88716,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.03.02/KiCAD-PCM-2023.03.02.zip",
+          "install_size": 215001
+        },
+        {
+          "version": "2023.05.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "4bbf253bf49a82880b7d26755bd3db9056999a2eabe4d55d1f34c0cc4ea28578",
+          "download_size": 91887,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.05.01/KiCAD-PCM-2023.05.01.zip",
+          "install_size": 226285
+        },
+        {
+          "version": "2023.05.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "2ed88531b41e8cae7328c08d1920bf068ff122ce1129e8855cedd7577ec540ae",
+          "download_size": 93830,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.05.02/KiCAD-PCM-2023.05.02.zip",
+          "install_size": 229734
+        },
+        {
+          "version": "2023.05.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "c48821e90ebfb5626c814b48402028f2049a688529517c2df7b3b61e0ae0cae3",
+          "download_size": 113849,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.05.03/KiCAD-PCM-2023.05.03.zip",
+          "install_size": 274773
+        },
+        {
+          "version": "2023.06.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "ed010c6aa31762ef89a71e6fc9aa20e0cf87af140fccdbca387671a4c4a40906",
+          "download_size": 114325,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.06.01/KiCAD-PCM-2023.06.01.zip",
+          "install_size": 275720
+        },
+        {
+          "version": "2023.07.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "fb16b6ea7cff03e25e87f0e1dfa69c7c6a92a44496009f51075b3d32ca6e7b75",
+          "download_size": 114412,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.07.01/KiCAD-PCM-2023.07.01.zip",
+          "install_size": 274163
+        },
+        {
+          "version": "2023.07.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "2430837299f5d33ba5ad405ec1d305ea642a099841dfd94fdd66b30c02b170e4",
+          "download_size": 114470,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.07.02/KiCAD-PCM-2023.07.02.zip",
+          "install_size": 274374
+        },
+        {
+          "version": "2023.08.01",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "d15c97fe1aca344efb2234ada8234e7db88fd96b0988c5e3d7ef4de51ffd411f",
+          "download_size": 123672,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.08.01/KiCAD-PCM-2023.08.01.zip",
+          "install_size": 295879
+        },
+        {
+          "version": "2023.08.02",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "c07daafa66737075a45c1c94b150a1c6e2f3012c1015809c5c17c25b0af732ee",
+          "download_size": 123726,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.08.02/KiCAD-PCM-2023.08.02.zip",
+          "install_size": 295997
+        },
+        {
+          "version": "2023.08.03",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "c7d4a03167792d1e26bf3b9c99fbada4ebd36e6733969c34c2e5a29840508c32",
+          "download_size": 124193,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.08.03/KiCAD-PCM-2023.08.03.zip",
+          "install_size": 297572
+        },
+        {
+          "version": "1.2",
+          "status": "testing",
+          "kicad_version": "6.0",
+          "download_sha256": "3e465b8b3719bc7df055fa63df60c18573b1d362e47cb2377117bc1de66b732b",
+          "download_size": 120469,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/1.2/jlcpcb_tools_plugin.zip.zip",
+          "install_size": 303825
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://go.kicad.org/pcm/schemas/v1#/definitions/Package#/definitions/Repository",
+  "maintainer": {
+    "name": "Bouni",
+    "contact": {
+      "twitter": "@bouni2016"
+    }
+  },
+  "name": "JLCPCB Tools Repository",
+  "packages": {
+    "sha256": "a0aadb338d4572435b9a871688bbea7ab5269cb6502760d11d06cffb83f64d86",
+    "update_time_utc": "2023-08-30 16:44:07",
+    "update_timestamp": 1693413847,
+    "url": "https://github.com/ebastler/ebastler-kicad-repository/raw/main/packages.json"
+  }
+}
