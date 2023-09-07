@@ -47,7 +47,7 @@ From there you can install the plugin via the GUI.
 
 ### Git
 
-Simply clone this repo into your scripting/plugins folder.
+Simply clone this repo into your `scripting/plugins` folder.
 
 **Windows**
 
@@ -70,7 +70,7 @@ cd ~/Library/Preferences/kicad/scripting/plugins
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
-You may need to create the scripting\plugins folder if it does not exist.
+You may need to create the `scripting/plugins` folder if it does not exist.
 
 ### Flatpack :warning:
 
@@ -85,7 +85,7 @@ See [issue #94](https://github.com/Bouni/kicad-jlcpcb-tools/issues/94) for more 
 
 ## Usage 🥳
 
-To access the plugin choose `Tools->External Plugins->JLCPCB Tools` from the *PCB Editor* menus
+To access the plugin choose `Tools → External Plugins → JLCPCB Tools` from the *PCB Editor* menus
 
 Checkout this screencast, it shows quickly how to use this plugin:
 
@@ -134,15 +134,15 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 
 ## Development
 
-1. fork repo
-2. git clone forked repo
-3. install pre-commit `pip install pre-commit`
-4. setup pre-commit `pre-commit install`
-5. create feature branch `git switch -c my-awesome-feature`
-6. make your changes
-7. commit your changes `git commit -m "Awesome new feature"`
-8. push to GitHub `git push`
+1. Fork repo
+2. Fit clone forked repo
+3. Install pre-commit `pip install pre-commit`
+4. Setup pre-commit `pre-commit run`
+5. Create feature branch `git switch -c my-awesome-feature`
+6. Make your changes
+7. Commit your changes `git commit -m "Awesome new feature"`
+8. Push to GitHub `git push`
 9. Create PR
 
-Make sure you make use of pre-commit-hooks in order to format everything nicely with `black`
-In the near future I'll add ruff / pylint and possibly other pre-commit-hooks that enforce nice and clean code style.
+Make sure you make use of pre-commit hooks in order to format everything nicely with `black`
+In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hooks that enforce nice and clean code style.
