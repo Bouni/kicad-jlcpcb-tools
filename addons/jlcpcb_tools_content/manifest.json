@@ -1,0 +1,29 @@
+{
+  "$schema": "https://go.kicad.org/pcm/schemas/v1",
+  "name": "KiCAD JLCPCB Tools Library",
+  "description": "A library of JLCPCB-specific symbols and footprints for KiCAD",
+  "description_full": "This library contains symbols and footprints that work with JLCPCB's PCB Fabrication Service and PCBA Service, including resources for tooling holes and order numbers.",
+  "identifier": "com.github.bouni.kicad-jlcpcb-tools-library",
+  "type": "library",
+  "author": {
+      "name": "Bouni",
+      "contact": {
+          "twitter": "@bouni2016"
+      }
+  },
+  "maintainer": {
+      "name": "Bouni",
+      "contact": {
+          "twitter": "@bouni2016"
+      }
+  },
+  "license": "MIT",
+  "resources": {
+      "homepage": "https://github.com/bouni/kicad-jlcpcb-tools"
+  },
+  "versions": [{
+      "version": "REPLACED BY release.py",
+      "status": "testing",
+      "kicad_version": "7.0"
+  }]
+}
