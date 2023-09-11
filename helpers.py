@@ -123,14 +123,14 @@ def get_lcsc_value(fp):
     # KiCad 7.99
     try:
         for field in fp.GetFields():
-            if re.match(r"lcsc", field.GetName(), re.IGNORECASE) and re.match(
+            if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and re.match(
                 r"^C\d+$", field.GetText()
             ):
                 return field.GetText()
     # KiCad <= V7
     except AttributeError:
         for key, value in fp.GetProperties().items():
-            if re.match(r"lcsc", key, re.IGNORECASE) and re.match(r"^C\d+$", value):
+            if re.match(r"lcsc|jlc", key, re.IGNORECASE) and re.match(r"^C\d+$", value):
                 return value
     return ""
 
