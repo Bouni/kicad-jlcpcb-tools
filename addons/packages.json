@@ -2,6 +2,41 @@
   "packages": [
     {
       "$schema": "https://go.kicad.org/pcm/schemas/v1",
+      "name": "KiCAD JLCPCB Tools Library",
+      "description": "A library of JLCPCB-specific symbols and footprints for KiCAD",
+      "description_full": "This library contains symbols and footprints that work with JLCPCB's PCB Fabrication Service and PCBA Service, including resources for tooling holes and order numbers.",
+      "identifier": "com.github.bouni.kicad-jlcpcb-tools-library",
+      "type": "library",
+      "author": {
+        "name": "Bouni",
+        "contact": {
+          "twitter": "@bouni2016"
+        }
+      },
+      "maintainer": {
+        "name": "Bouni",
+        "contact": {
+          "twitter": "@bouni2016"
+        }
+      },
+      "license": "MIT",
+      "resources": {
+        "homepage": "https://github.com/bouni/kicad-jlcpcb-tools"
+      },
+      "versions": [
+        {
+          "version": "0.0",
+          "status": "testing",
+          "kicad_version": "0.0",
+          "download_sha256": "0",
+          "download_size": 0,
+          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2021.12.1/KiCAD-PCM-2021.12.1.zip",
+          "install_size": 0
+        }
+      ]
+    },
+    {
+      "$schema": "https://go.kicad.org/pcm/schemas/v1",
       "name": "KiCAD JLCPCB tools",
       "description": "A JLCPCB integration addon for KiCAD",
       "description_full": "This plugin allows you to search the JLCPCB parts database, assign LCSC article numbers to your parts, generate production files for JLCPCB and much more.",
@@ -473,15 +508,6 @@
           "download_size": 124193,
           "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/2023.08.03/KiCAD-PCM-2023.08.03.zip",
           "install_size": 297572
-        },
-        {
-          "version": "1.2",
-          "status": "testing",
-          "kicad_version": "6.0",
-          "download_sha256": "3e465b8b3719bc7df055fa63df60c18573b1d362e47cb2377117bc1de66b732b",
-          "download_size": 120469,
-          "download_url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/1.2/jlcpcb_tools_plugin.zip.zip",
-          "install_size": 303825
         }
       ]
     }

@@ -1,12 +1,14 @@
 """
 Handles releasing a new version of the plugin.
 """
-import sys
-from pathlib import Path
-import shutil
-import json
 import hashlib
+import json
+import shutil
+import sys
 from datetime import datetime
+from pathlib import Path
+
+GIT_REPOSITORY_URL = "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools"
 
 
 def _remove_directory_tree(start_directory: Path) -> None:
@@ -53,12 +55,14 @@ def do_release(version: str) -> None:
     build_path.mkdir()
     build_src_path = build_path / "src"
     build_src_path.mkdir()
+    build_release_path = build_path / "release"
+    build_release_path.mkdir()
 
     # Load existing packages and their versions
     packages_src = addons_path / "packages.json"
     assert packages_src.exists()
     assert packages_src.is_file()
-    packages_json_target_path = build_path / "packages.json"
+    packages_json_target_path = build_release_path / "packages.json"
 
     with open(packages_src, "r") as f:
         packages_obj = json.load(f)
@@ -88,14 +92,15 @@ def do_release(version: str) -> None:
         with open(addon_path / "manifest.json", "r") as f:
             manifest = json.load(f)
 
-        # Update version
+        # Update manifest
         manifest["versions"][0]["version"] = version
+        manifest["resources"]["homepage"] = GIT_REPOSITORY_URL
 
         with open(target_addon_path / "manifest.json", "w") as f:
             json.dump(manifest, f, indent=2)
 
         # Zip package
-        zip_path_str = str(build_path / (addon_path.name))
+        zip_path_str = str(build_release_path / (addon_path.name))
         shutil.make_archive(zip_path_str, "zip", target_addon_path)
         zip_path = Path(zip_path_str + ".zip")
 
@@ -115,7 +120,7 @@ def do_release(version: str) -> None:
 
         assert len(manifest["versions"]) == 1
 
-        download_url = f"https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/{version}/{zip_path.name}.zip"
+        download_url = f"{GIT_REPOSITORY_URL}/releases/download/{version}/{zip_path.name}.zip"
 
         new_version_entry = manifest["versions"][0] | {
             "download_sha256": zipped_sha256,
@@ -144,17 +149,18 @@ def do_release(version: str) -> None:
     repository_src = addons_path / "repository.json"
     assert repository_src.exists()
     assert repository_src.is_file()
-    repository_json_target_path = build_path / "repository.json"
+    repository_json_target_path = build_release_path / "repository.json"
 
     with open(repository_src, "r") as f:
         repository_obj = json.load(f)
 
     update_time = datetime.utcnow()
+    packages_url = f"{GIT_REPOSITORY_URL}/releases/download/{version}/packages.json"
     repository_packages = {
         "sha256": _get_sha256(packages_json_target_path),
         "update_time_utc": update_time.strftime("%Y-%m-%d %H:%M:%S"),
         "update_timestamp": round(update_time.timestamp()),
-        "url": "https://github.com/Bouni/kicad-jlcpcb-tools/releases/download/{version}/repository.json",
+        "url": packages_url,
     }
 
     repository_obj["packages"] = repository_packages
