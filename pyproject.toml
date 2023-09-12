@@ -38,6 +38,7 @@ disable = [
     "too-many-boolean-expressions",
     "invalid-name",
     "duplicate-code",
+    "unspecified-encoding",
 ]
 
 [tool.pylint.FORMAT]

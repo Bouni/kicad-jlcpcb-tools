@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-GIT_REPOSITORY_URL = "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools"
+GIT_REPOSITORY_URL = "https://github.com/Bouni/kicad-jlcpcb-tools"
 
 
 def _remove_directory_tree(start_directory: Path) -> None:
@@ -44,6 +44,9 @@ def _get_sha256(file: Path) -> str:
         return digest.hexdigest()
 
 def do_release(version: str) -> None:
+    """
+    Main function that takes in a version argument
+    """
     # Check that version matches regex
     regex_check = re.match(r"^\d{1,4}(\.\d{1,4}(\.\d{1,6})?)?$", version)
     if not regex_check:
@@ -203,11 +206,17 @@ def do_release(version: str) -> None:
 
 
 def exit_help() -> None:
+    """
+    Prints help information and exits.
+    """
     print("Usage: python release.py VERSION")
 
     sys.exit(1)
 
 def main():
+    """
+    Entry function.
+    """
     if len(sys.argv) != 2:
         exit_help()
 
