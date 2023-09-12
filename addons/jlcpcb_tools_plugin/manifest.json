@@ -24,6 +24,6 @@
   "versions": [{
       "version": "REPLACED BY release.py",
       "status": "testing",
-      "kicad_version": "6.0"
+      "kicad_version": "7.0"
   }]
 }
