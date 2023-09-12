@@ -1,0 +1,55 @@
+---
+name: KiCAD Addon Release
+on:  # yamllint disable-line rule:truthy
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Get latest tag
+        id: latest-tag
+        uses: oprypin/find-latest-tag@v1
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          repository: ${{ github.repository }}
+          releases-only: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tag name
+        id: tag-name
+        run: |
+          dispatch_tag="${{ steps.latest-tag.outputs.tag }}"
+          release_tag="${{ github.ref_name }}"
+          final_tag=${dispatch_tag:-${release_tag}}
+          echo "tag=$final_tag" >> $GITHUB_OUTPUT
+
+      - name: Create archive
+        run: python ./bin/release.py ${{steps.tag-name.outputs.tag }}
+
+      - name: Upload files to a GitHub release
+        uses: svenstaro/upload-release-action@2.7.0
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file_glob: true
+          file: ./build/release/*
+          overwrite: true
+          tag: ${{ steps.tag-name.outputs.tag }}
+
+      # Commit changed packages and repository files
+      - name: Commit updated json files
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          branch: main
+          file_pattern: "addons/*.json"
+          commit_message: "chore: Update KiCAD Repository Information"
