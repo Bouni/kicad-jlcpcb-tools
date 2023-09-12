@@ -17,7 +17,7 @@
           "twitter": "@bouni2016"
       }
   },
-  "license": "WTFPL",
+  "license": "MIT",
   "resources": {
       "homepage": "https://github.com/bouni/kicad-jlcpcb-tools"
   },
