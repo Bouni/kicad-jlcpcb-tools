@@ -3,6 +3,7 @@ Handles releasing a new version of the plugin.
 """
 import hashlib
 import json
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -43,6 +44,12 @@ def _get_sha256(file: Path) -> str:
         return digest.hexdigest()
 
 def do_release(version: str) -> None:
+    # Check that version matches regex
+    regex_check = re.match(r"^\d{1,4}(\.\d{1,4}(\.\d{1,6})?)?$", version)
+    if not regex_check:
+        print(r"Version must match regex '^\d{1,4}(\.\d{1,4}(\.\d{1,6})?)?$'")
+        sys.exit(1)
+
     this_file = Path(sys.argv[0]).resolve()
     project_root = this_file.parents[1]
     addons_path = project_root / "addons"
@@ -129,7 +136,7 @@ def do_release(version: str) -> None:
         }
 
         # Check if new version already exists
-        existing_versions = list(entry["version"] for entry in packages_obj["packages"][idx_in_packages]["versions"])
+        existing_versions = [entry["version"] for entry in packages_obj["packages"][idx_in_packages]["versions"]]
         if new_version_entry["version"] in existing_versions:
             print("Version already present! You can only release a new version.")
             sys.exit(1)

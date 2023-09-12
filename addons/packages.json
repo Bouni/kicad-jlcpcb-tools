@@ -25,22 +25,13 @@
       },
       "versions": [
         {
-          "version": "2023.09.12",
+          "version": "2023.09.11",
           "status": "testing",
           "kicad_version": "7.0",
           "download_sha256": "18882664f5aaa24631901b8214d2a530038f2ed2dcbab39d695ccd3d4f93b2ed",
           "download_size": 14464,
           "download_url": "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools/releases/download/2023.09.12/jlcpcb_tools_content.zip",
           "install_size": 19427
-        },
-        {
-          "version": "test_release_4",
-          "status": "testing",
-          "kicad_version": "7.0",
-          "download_sha256": "a5bfed5a029b95a57ad8cf2f787931a7f20adad706d4d94aa302402ba79535b6",
-          "download_size": 14450,
-          "download_url": "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools/releases/download/test_release_4/jlcpcb_tools_content.zip",
-          "install_size": 19297
         }
       ]
     },
@@ -519,22 +510,13 @@
           "install_size": 297572
         },
         {
-          "version": "2023.09.12",
+          "version": "2023.09.11",
           "status": "testing",
           "kicad_version": "6.0",
           "download_sha256": "64932246450178b8bfbe41442e558126c492447dfea77d78f46f7d2b72f8ac16",
           "download_size": 118116,
           "download_url": "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools/releases/download/2023.09.12/jlcpcb_tools_plugin.zip",
           "install_size": 297413
-        },
-        {
-          "version": "test_release_4",
-          "status": "testing",
-          "kicad_version": "6.0",
-          "download_sha256": "f151d09252ee5d3bbf45456cfbb046aa73389a3510df9b5e0b656d17fb8a695e",
-          "download_size": 117747,
-          "download_url": "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools/releases/download/test_release_4/jlcpcb_tools_plugin.zip",
-          "install_size": 291308
         }
       ]
     }

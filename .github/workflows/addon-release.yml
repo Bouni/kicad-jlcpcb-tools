@@ -12,12 +12,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Debug Information
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        # if: ${{ false }}
+        run: echo "$GITHUB_CONTEXT"
+
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
 
-      - name: Get latest tag
+      - name: Get latest tag (Workflow Dispatch)
         id: latest-tag
         uses: oprypin/find-latest-tag@v1
         if: github.event_name == 'workflow_dispatch'
