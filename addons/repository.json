@@ -1,0 +1,16 @@
+{
+  "$schema": "https://go.kicad.org/pcm/schemas/v1#/definitions/Package#/definitions/Repository",
+  "maintainer": {
+    "name": "Bouni",
+    "contact": {
+      "twitter": "@bouni2016"
+    }
+  },
+  "name": "JLCPCB Tools Repository",
+  "packages": {
+    "sha256": "ae005c2cdbf2bddd62d13c2db1ca6b7aa9907618212ef7d2771cd0c2170a0079",
+    "update_time_utc": "2023-09-12 17:17:12",
+    "update_timestamp": 1694539033,
+    "url": "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools/releases/download/test_release_4/packages.json"
+  }
+}
