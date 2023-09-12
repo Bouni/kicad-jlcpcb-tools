@@ -22,6 +22,7 @@ def _remove_directory_tree(start_directory: Path) -> None:
             _remove_directory_tree(path)
     start_directory.rmdir()
 
+
 def _get_directory_size(start_directory: Path) -> int:
     size_sum = 0
     for path in start_directory.iterdir():
@@ -33,6 +34,7 @@ def _get_directory_size(start_directory: Path) -> int:
 
     return size_sum
 
+
 def _get_sha256(file: Path) -> str:
     with open(file, "rb") as f:
         # Can only be used in Python 3.11
@@ -42,6 +44,7 @@ def _get_sha256(file: Path) -> str:
         digest.update(f.read())
 
         return digest.hexdigest()
+
 
 def do_release(version: str) -> None:
     """
@@ -133,7 +136,9 @@ def do_release(version: str) -> None:
 
         assert len(manifest["versions"]) == 1
 
-        download_url = f"{GIT_REPOSITORY_URL}/releases/download/{version}/{zip_path.name}"
+        download_url = (
+            f"{GIT_REPOSITORY_URL}/releases/download/{version}/{zip_path.name}"
+        )
         new_version_entry = manifest["versions"][0] | {
             "download_sha256": zipped_sha256,
             "download_size": zipped_size,
@@ -142,7 +147,10 @@ def do_release(version: str) -> None:
         }
 
         # Check if new version already exists
-        existing_versions = [entry["version"] for entry in packages_obj["packages"][idx_in_packages]["versions"]]
+        existing_versions = [
+            entry["version"]
+            for entry in packages_obj["packages"][idx_in_packages]["versions"]
+        ]
         if new_version_entry["version"] in existing_versions:
             print("Version already present! You can only release a new version.")
             sys.exit(1)
@@ -213,6 +221,7 @@ def exit_help() -> None:
 
     sys.exit(1)
 
+
 def main():
     """
     Entry function.
@@ -226,6 +235,7 @@ def main():
     print("Built release. See output in ./build")
 
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
