@@ -8,9 +8,9 @@
   },
   "name": "JLCPCB Tools Repository",
   "packages": {
-    "sha256": "3bf4738b94a21f54f66832f4923941f47159a552d450156708c2009457b40fa0",
-    "update_time_utc": "2023-09-12 17:01:30",
-    "update_timestamp": 1694530890,
-    "url": "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools/releases/download/2023.09.12-7/packages.json"
+    "sha256": "91cba8f6c213a00722e8eb9bb77f3ed495f326e410fc79adf5b1eacf0d711f49",
+    "update_time_utc": "2023-09-12 17:15:14",
+    "update_timestamp": 1694531714,
+    "url": "https://github.com/JeppeKlitgaard/kicad-jlcpcb-tools/releases/download/2023.09.12/packages.json"
   }
 }
