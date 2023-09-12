@@ -1,4 +1,4 @@
-# ![The main window](addons/jlcpcb_tools_plugin/plugins/icons/jlcpcb-icon.png) KiCAD JLCPCB tools
+# ![The main window](addons/jlcpcb_tools_plugin/plugins/icons/jlcpcb-icon.png) KiCAD JLCPCB Tools
 
 <a href="https://ko-fi.com/I3I364QTM" target="_blank"><img src="https://ko-fi.com/img/githubbutton_sm.svg" height="30px"/></a> <a href="https://www.buymeacoffee.com/bouni" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" height="30px"/></a> <a href="https://github.com/sponsors/Bouni" target="_blank"><img src="https://img.shields.io/badge/-Github Sponsor-fafbfc?style=flat&logo=GitHub%20Sponsors" height="30px"/></a>
 
@@ -12,20 +12,26 @@
 
 ***
 
-Plugin to generate all files necessary for JLCPCB board fabrication and assembly
+KiCAD JLCPCB Tools consists of a `pcbnew` plugin and a library containing symbols and footprints.
+
+The plugin is able to generate all files necessary for JLCPCB board fabrication and
+assembly in a convenient manner:
 
 - Gerber files
 - Excellon files
 - BOM file
 - CPL file
 
-Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
+Further, it lets you search the JLCPCB parts database and assign parts directly to the footprints which results in them being put into the BOM file.
 
 ![The main window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/main.png)
 
 ![The parts library window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_library.png)
 
 ![The parts details dialog](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_details.png)
+
+The library adds schematic symbols and associated footprints for the _User Specified Order Number_
+and _User Specified Tooling Holes_ functionality offered by JLCPCB.
 
 ## Warning 🔥
 
@@ -39,7 +45,9 @@ If you find any sort of problems, please create an issue so that I can hopefully
 
 ### KiCAD PCM
 
-Add my custom repo to *the Plugin and Content Manager*, the URL is `https://raw.githubusercontent.com/Bouni/bouni-kicad-repository/main/repository.json`
+Add the KiCAD JLCPCB Tools Repository to the _Plugin and Content Manager_ found in
+the KiCAD Project Overview by entering the following URL:
+`https://github.com/Bouni/kicad-jlcpcb-tools/releases/latest/download/repository.json`
 
 ![image](https://user-images.githubusercontent.com/948965/147682006-9e1dd74a-79d3-492b-a108-15d284acf2b1.png)
 
@@ -47,30 +55,20 @@ From there you can install the plugin via the GUI.
 
 ### Git
 
-Simply clone this repo into your `scripting/plugins` folder.
+Simply clone this repository and sym-link the following:
 
-**Windows**
+- `addons/jlcpcb_tools_plugin` ⟶ `{KICAD}/scripting/plugins`
+- `addons/jlcpcb_tools_library/3dmodels` ⟶ `{KICAD}/3dmodels`
+- `addons/jlcpcb_tools_library/symbols` ⟶ `{KICAD}/symbols`
+- `addons/jlcpcb_tools_library/footprints` ⟶ `{KICAD}/footprints`
 
-```sh
-cd C:\users\<username>\Documents\kicad\<version>\scripting\plugins\  # <username> is your username, <version> can be 6.0, 7.0, or 7.99 depending on the version you use
-git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
-```
+Where `{KICAD}` is:
 
-**Linux**
+- **Windows**: `C:\Users\<username>\Documents\KiCad\{VERSION}`
+- **Linux**: `/home/<username>/.local/share/kicad/{VERSION}`
+- **MacOS**: `~/Library/Preferences/kicad/{VERSION}`
 
-```sh
-cd /home/<username>/.local/share/kicad/<version>/scripting/plugins  # <version> can be 6.0, 7.0, or 7.99 depending on the version you use
-git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
-```
-
-**Linux**
-
-```sh
-cd ~/Library/Preferences/kicad/scripting/plugins
-git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
-```
-
-You may need to create the `scripting/plugins` folder if it does not exist.
+And `{VERSION}` is one of `6.0`, `7.0`, `7.99` for the supported KiCAD versions.
 
 ### Flatpack :warning:
 
@@ -85,7 +83,7 @@ See [issue #94](https://github.com/Bouni/kicad-jlcpcb-tools/issues/94) for more 
 
 ## Usage 🥳
 
-To access the plugin choose `Tools → External Plugins → JLCPCB Tools` from the *PCB Editor* menus
+To access the plugin choose `Tools → External Plugins → JLCPCB Tools` from the _PCB Editor_ menus
 
 Checkout this screencast, it shows quickly how to use this plugin:
 
@@ -93,7 +91,7 @@ Checkout this screencast, it shows quickly how to use this plugin:
 
 ## Keyboard shortcuts
 
-Windows can be closed with ctrl-w/ctrl-q/command-w/command-w (OS dependent) and escape.
+Windows can be closed with `CTRL w` / `CTRL q` / `CMD w` / `CMD q` (OS dependent) and escape.
 Pressing enter in the keyword text box will start a search.
 
 ### Toggle BOM / CPL attributes
