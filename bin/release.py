@@ -62,6 +62,8 @@ def do_release(version: str) -> None:
     build_path.mkdir()
     build_src_path = build_path / "src"
     build_src_path.mkdir()
+    build_src_resources_path = build_src_path / "resources"
+    build_src_resources_path.mkdir()
     build_release_path = build_path / "release"
     build_release_path.mkdir()
 
@@ -118,8 +120,9 @@ def do_release(version: str) -> None:
         # Add to packages
         # Get index
         idxs_in_packages = []
+        identifier = manifest["identifier"]
         for idx, package in enumerate(packages_obj["packages"]):
-            if package["identifier"] == manifest["identifier"]:
+            if package["identifier"] == identifier:
                 idxs_in_packages.append(idx)
 
         assert len(idxs_in_packages) == 1, "Multiple/No matches!"
@@ -143,6 +146,15 @@ def do_release(version: str) -> None:
 
         packages_obj["packages"][idx_in_packages]["versions"].append(new_version_entry)
 
+        # Copy over resources
+        addon_resources_path = build_src_resources_path / identifier
+        shutil.copytree(target_addon_path / "resources", addon_resources_path)
+
+    # Compile resources
+    resources_zip_str = str(build_release_path / "resources")
+    resources_zip_path = Path(resources_zip_str + ".zip")
+    shutil.make_archive(resources_zip_str, "zip", build_src_resources_path)
+
     # Write packages.json in build directory
     with open(packages_json_target_path, "w") as f:
         json.dump(packages_obj, f, indent=2)
@@ -161,15 +173,26 @@ def do_release(version: str) -> None:
         repository_obj = json.load(f)
 
     update_time = datetime.utcnow()
+    update_time_utc = update_time.strftime("%Y-%m-%d %H:%M:%S")
+    update_timestamp = round(update_time.timestamp())
     packages_url = f"{GIT_REPOSITORY_URL}/releases/download/{version}/packages.json"
     repository_packages = {
         "sha256": _get_sha256(packages_json_target_path),
-        "update_time_utc": update_time.strftime("%Y-%m-%d %H:%M:%S"),
-        "update_timestamp": round(update_time.timestamp()),
+        "update_time_utc": update_time_utc,
+        "update_timestamp": update_timestamp,
         "url": packages_url,
     }
-
     repository_obj["packages"] = repository_packages
+
+    zipped_sha256 = _get_sha256(resources_zip_path)
+    resources_url = f"{GIT_REPOSITORY_URL}/releases/download/{version}/resources.zip"
+    repository_resources = {
+        "sha256": zipped_sha256,
+        "update_time_utc": update_time_utc,
+        "update_timestamp": update_timestamp,
+        "url": resources_url,
+    }
+    repository_obj["resources"] = repository_resources
 
     with open(repository_json_target_path, "w") as f:
         json.dump(repository_obj, f, indent=2)
