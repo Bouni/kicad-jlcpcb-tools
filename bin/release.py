@@ -120,8 +120,7 @@ def do_release(version: str) -> None:
 
         assert len(manifest["versions"]) == 1
 
-        download_url = f"{GIT_REPOSITORY_URL}/releases/download/{version}/{zip_path.name}.zip"
-
+        download_url = f"{GIT_REPOSITORY_URL}/releases/download/{version}/{zip_path.name}"
         new_version_entry = manifest["versions"][0] | {
             "download_sha256": zipped_sha256,
             "download_size": zipped_size,
@@ -166,6 +165,10 @@ def do_release(version: str) -> None:
     repository_obj["packages"] = repository_packages
 
     with open(repository_json_target_path, "w") as f:
+        json.dump(repository_obj, f, indent=2)
+
+    # Update packages.json in addons directory
+    with open(addons_path / "repository.json", "w") as f:
         json.dump(repository_obj, f, indent=2)
 
 
