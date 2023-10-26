@@ -230,7 +230,7 @@ class Fabrication:
         offset = self.board.GetDesignSettings().GetAuxOrigin()
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
-        drlwriter.SetFormat(False)
+        drlwriter.SetFormat(True)  # True = metric drill files
         genDrl = True
         genMap = True
         drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
