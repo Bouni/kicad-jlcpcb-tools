@@ -36,7 +36,7 @@ try:
 except ImportError:
     NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
 
-from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd
+from .helpers import get_exclude_from_pos, get_footprint_by_ref
 
 
 class Fabrication:
@@ -113,9 +113,10 @@ class Fabrication:
 
     def get_position(self, footprint):
         """Calculate position based on center of bounding box."""
-        if get_smd(footprint):
-            return footprint.GetPosition()
-        bbox = footprint.GetBoundingBox(False, False)
+        pads = footprint.Pads()
+        bbox = pads[0].GetBoundingBox()
+        for pad in pads:
+            bbox.Merge(pad.GetBoundingBox())
         return bbox.GetCenter()
 
     def generate_geber(self, layer_count=None):
@@ -230,7 +231,7 @@ class Fabrication:
         offset = self.board.GetDesignSettings().GetAuxOrigin()
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
-        drlwriter.SetFormat(True)  # True = metric drill files
+        drlwriter.SetFormat(False)
         genDrl = True
         genMap = True
         drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
