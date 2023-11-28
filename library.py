@@ -33,7 +33,7 @@ class LibraryState(Enum):
 
 
 class Library:
-    """A storage class to get data from a sqlite database and write it back"""
+    """A storage class to get data from a sqlite database and write it back."""
 
     # no longer works
     CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
@@ -53,7 +53,7 @@ class Library:
         self.check_library()
 
     def setup(self):
-        """Check if folders and database exist, setup if not"""
+        """Check if folders and database exist, setup if not."""
         if not os.path.isdir(self.datadir):
             self.logger.info(
                 "Data directory 'jlcpcb' does not exist and will be created."
@@ -61,7 +61,7 @@ class Library:
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
 
     def check_library(self):
-        """Check if the database files exists, if not trigger update / create database"""
+        """Check if the database files exists, if not trigger update / create database."""
         if (
             not os.path.isfile(self.partsdb_file)
             or os.path.getsize(self.partsdb_file) == 0
@@ -83,7 +83,7 @@ class Library:
             self.migrate_mappings()
 
     def set_order_by(self, n):
-        """Set which value we want to order by when getting data from the database"""
+        """Set which value we want to order by when getting data from the database."""
         order_by = [
             "LCSC Part",
             "MFR.Part",

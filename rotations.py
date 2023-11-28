@@ -254,7 +254,7 @@ class RotationManagerDialog(wx.Dialog):
         self.EndModal(0)
 
     def enable_toolbar_buttons(self, state):
-        """Control the state of all the buttons in toolbar on the right side"""
+        """Control the state of all the buttons in toolbar on the right side."""
         for b in [
             self.save_button,
             self.delete_button,
@@ -318,7 +318,7 @@ class RotationManagerDialog(wx.Dialog):
             self.enable_toolbar_buttons(False)
 
     def download_correction_data(self, *_):
-        """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo"""
+        """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo."""
         self.parent.library.create_rotation_table()
         try:
             r = requests.get(
@@ -379,7 +379,7 @@ class RotationManagerDialog(wx.Dialog):
             self._export_corrections(path)
 
     def _import_corrections(self, path):
-        """Corrections import logic"""
+        """Corrections import logic."""
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 csvreader = csv.DictReader(f, fieldnames=("regex", "correction"))
@@ -407,7 +407,7 @@ class RotationManagerDialog(wx.Dialog):
             wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def _export_corrections(self, path):
-        """Corrections export logic"""
+        """Corrections export logic."""
         with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
             csvwriter.writerow(["Footprint pattern", "Correction"])
