@@ -30,7 +30,7 @@ class SchematicExport:
                 self._update_schematic(path)
 
     def _update_schematic(self, path):
-        """This only works with KiCad V6 files."""
+        """Only works with KiCad V6 files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
@@ -107,7 +107,7 @@ class SchematicExport:
         self.logger.info("Added LCSC's to %s(maybe?)", path)
 
     def _update_schematic7(self, path):
-        """This only works with KiCad V7 files."""
+        """Only works with KiCad V7 files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property

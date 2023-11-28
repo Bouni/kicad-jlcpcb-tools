@@ -1,10 +1,8 @@
 #!/bin/env python3
 
-"""Use the amazing work of https://github.com/yaqwsx/jlcparts and
-convert their database into something we can conveniently use for
-this plugin.
-This replaces the old .csv based database creation that JLCPCB
-no longer supports.
+"""Use the amazing work of https://github.com/yaqwsx/jlcparts and convert their database into something we can conveniently use for this plugin.
+
+This replaces the old .csv based database creation that JLCPCB no longer supports.
 
 Before this script can run, the cache.sqlite3 file has to be
 present in db_build folder. Download and reassemble it like

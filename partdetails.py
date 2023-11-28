@@ -1,4 +1,4 @@
-"""This module contains the part details modal dialog."""
+"""Contains the part details modal dialog."""
 
 import io
 import logging

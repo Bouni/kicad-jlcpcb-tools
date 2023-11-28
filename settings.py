@@ -1,4 +1,4 @@
-"""This module contains the settings dialog."""
+"""Contains the settings dialog."""
 
 import logging
 

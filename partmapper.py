@@ -1,4 +1,4 @@
-"""This module contains the part mapper."""
+"""Contains the part mapper."""
 
 import csv
 import logging
@@ -230,7 +230,7 @@ class PartMapperManagerDialog(wx.Dialog):
             self._export_mappings(path)
 
     def _import_mappings(self, path):
-        """Mappings import logic."""
+        """Import logic for Mappings."""
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 csvreader = csv.DictReader(f, fieldnames=("footprint", "value", "lcsc"))
@@ -249,7 +249,7 @@ class PartMapperManagerDialog(wx.Dialog):
             self.populate_mapping_list()
 
     def _export_mappings(self, path):
-        """Mappings export logic."""
+        """Export logic for mappings."""
         with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
             csvwriter.writerow(["Footprint", "Part Value", "LCSC Part"])

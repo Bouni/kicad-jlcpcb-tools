@@ -1,4 +1,4 @@
-"""This module contains the main window of the plugin."""
+"""Contains the main window of the plugin."""
 
 import json
 import logging
@@ -1079,6 +1079,7 @@ class JLCPCBTools(wx.Dialog):
         self.logger = logging.getLogger(__name__)
 
     def __del__(self):
+        """Cleanup."""
         pass
 
 

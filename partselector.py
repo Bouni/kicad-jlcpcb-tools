@@ -1,4 +1,4 @@
-"""This module contains the part selector modal window."""
+"""Contains the part selector modal window."""
 
 import logging
 import time
