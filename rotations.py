@@ -7,9 +7,7 @@ import os
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
-from .events import (
-    PopulateFootprintListEvent,
-)
+from .events import PopulateFootprintListEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
 
@@ -381,7 +379,7 @@ class RotationManagerDialog(wx.Dialog):
             self._export_corrections(path)
 
     def _import_corrections(self, path):
-        """corrections import logic"""
+        """Corrections import logic"""
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 csvreader = csv.DictReader(f, fieldnames=("regex", "correction"))
@@ -409,7 +407,7 @@ class RotationManagerDialog(wx.Dialog):
             wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def _export_corrections(self, path):
-        """corrections export logic"""
+        """Corrections export logic"""
         with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
             csvwriter.writerow(["Footprint pattern", "Correction"])

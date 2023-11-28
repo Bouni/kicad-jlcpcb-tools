@@ -3,8 +3,8 @@
 import csv
 import logging
 import os
-import re
 from pathlib import Path
+import re
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from pcbnew import (  # pylint: disable=import-error

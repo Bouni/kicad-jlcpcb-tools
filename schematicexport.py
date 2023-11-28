@@ -10,7 +10,6 @@ from .helpers import is_nightly
 
 
 class SchematicExport:
-
     """A class to export Schematic files"""
 
     # This only works with KiCad V6/V7 files, if the format changes, this will probably break
