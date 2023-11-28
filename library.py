@@ -1,4 +1,4 @@
-"""This module handle the JLCPCB parts database."""
+"""Handle the JLCPCB parts database."""
 
 import contextlib
 from enum import Enum
@@ -353,7 +353,7 @@ class Library:
         Thread(target=self.download).start()
 
     def download(self):
-        """The actual worker thread that downloads and imports the parts data."""
+        """Actual worker thread that downloads and imports the parts data."""
         self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())

@@ -1,4 +1,4 @@
-"""This module handles the generation of the Gerber files, the BOM and the POS file."""
+"""Handles the generation of the Gerber files, the BOM and the POS file."""
 
 import csv
 import logging
@@ -40,7 +40,7 @@ from .helpers import get_exclude_from_pos, get_footprint_by_ref, get_smd
 
 
 class Fabrication:
-    """This class contains all functionality to generate the JLCPCB production files."""
+    """Contains all functionality to generate the JLCPCB production files."""
 
     def __init__(self, parent):
         self.parent = parent
@@ -119,7 +119,7 @@ class Fabrication:
         return bbox.GetCenter()
 
     def generate_geber(self, layer_count=None):
-        """Generating Gerber files."""
+        """Generate Gerber files."""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
         pctl = PLOT_CONTROLLER(self.board)
         popt = pctl.GetPlotOptions()

@@ -1,4 +1,4 @@
-"""This module contains helper function used all over the plugin."""
+"""Contains helper function used all over the plugin."""
 
 import os
 import re
