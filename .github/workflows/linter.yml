@@ -17,47 +17,6 @@ jobs:
         run: npm install -g markdownlint-cli
       - name: Run markdownlint
         run: markdownlint "**/*.md"
-  yamllint:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-      - name: Install yamllint
-        run: pip install --user yamllint
-      - name: Run yamllint
-        run: yamllint .
-  black:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-      - name: Install black
-        run: pip install black
-      - name: Run black
-        run: black --diff --check --verbose $(git ls-files '*.py')
-  pylint:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-      - name: Install pylint
-        run: pip install pylint
-      - name: Install humanize
-        run: pip install humanize
-      - name: Run pylint
-        run: pylint $(git ls-files '*.py')
   ruff:
     runs-on: ubuntu-latest
     steps:
