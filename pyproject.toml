@@ -108,6 +108,7 @@ ignore = [
     "E501",  # line too long
     "E722",  # Do not use bare except, specify exception instead
     "E731",  # do not assign a lambda expression, use a def
+    "S608",  # Ignore Possible SQL injection vector through string-based query construction
 
     # Ignore ignored, as the rule is now back in preview/nursery, which cannot
     # be ignored anymore without warnings.
