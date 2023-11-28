@@ -508,22 +508,22 @@ class JLCPCBTools(wx.Dialog):
         self.library.create_mapping_table()
 
     def quit_dialog(self, *_):
-        """Destroy dialog on close"""
+        """Destroy dialog on close."""
         self.Destroy()
         self.EndModal(0)
 
     def init_library(self):
-        """Initialize the parts library"""
+        """Initialize the parts library."""
         self.library = Library(self)
 
     def init_store(self):
-        """Initialize the store of part assignments"""
+        """Initialize the store of part assignments."""
         self.store = Store(self, self.project_path)
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
 
     def init_fabrication(self):
-        """Initialize the fabrication"""
+        """Initialize the fabrication."""
         self.fabrication = Fabrication(self)
 
     def reset_gauge(self, *_):
@@ -532,18 +532,18 @@ class JLCPCBTools(wx.Dialog):
         self.gauge.SetValue(0)
 
     def update_gauge(self, e):
-        """Update the gauge"""
+        """Update the gauge."""
         self.gauge.SetValue(int(e.value))
 
     def assign_parts(self, e):
-        """Assign a selected LCSC number to parts"""
+        """Assign a selected LCSC number to parts."""
         for reference in e.references:
             self.store.set_lcsc(reference, e.lcsc)
             self.store.set_stock(reference, e.stock)
         self.populate_footprint_list()
 
     def display_message(self, e):
-        """Dispaly a message with the data from the event"""
+        """Dispaly a message with the data from the event."""
         styles = {
             "info": wx.ICON_INFORMATION,
             "warning": wx.ICON_WARNING,
@@ -699,17 +699,17 @@ class JLCPCBTools(wx.Dialog):
         )
 
     def enable_all_buttons(self, state):
-        """Control state of all the buttons"""
+        """Control state of all the buttons."""
         self.enable_top_buttons(state)
         self.enable_part_specific_toolbar_buttons(state)
 
     def enable_top_buttons(self, state):
-        """Control the state of all the buttons in the top section"""
+        """Control the state of all the buttons in the top section."""
         for button in (ID_GENERATE, ID_DOWNLOAD, ID_LAYERS):
             self.upper_toolbar.EnableTool(button, state)
 
     def enable_part_specific_toolbar_buttons(self, state):
-        """Control the state of all the buttons that relate to parts in toolbar on the right side"""
+        """Control the state of all the buttons that relate to parts in toolbar on the right side."""
         for button in (
             ID_SELECT_PART,
             ID_REMOVE_PART,
@@ -807,21 +807,21 @@ class JLCPCBTools(wx.Dialog):
             self.show_part_details_dialog(part)
 
     def get_column_by_name(self, column_title_to_find):
-        """Lookup a column in our main footprint table by matching its title"""
+        """Lookup a column in our main footprint table by matching its title."""
         for col in self.footprint_list.Columns:
             if col.Title == column_title_to_find:
                 return col
         return None
 
     def get_column_position_by_name(self, column_title_to_find):
-        """Lookup the index of a column in our main footprint table by matching its title"""
+        """Lookup the index of a column in our main footprint table by matching its title."""
         col = self.get_column_by_name(column_title_to_find)
         if not col:
             return -1
         return self.footprint_list.GetColumnPosition(col)
 
     def get_selected_part_id_from_gui(self):
-        """Get a list of LCSC part#s currently selected"""
+        """Get a list of LCSC part#s currently selected."""
         lcsc_ids_selected = []
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
@@ -865,19 +865,19 @@ class JLCPCBTools(wx.Dialog):
         SettingsDialog(self).ShowModal()
 
     def update_settings(self, e):
-        """Update the settings on change"""
+        """Update the settings on change."""
         if e.section not in self.settings:
             self.settings[e.section] = {}
         self.settings[e.section][e.setting] = e.value
         self.save_settings()
 
     def load_settings(self):
-        """Load settings from settings.json"""
+        """Load settings from settings.json."""
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
 
     def save_settings(self):
-        """Save settings to settings.json"""
+        """Save settings to settings.json."""
         with open(
             os.path.join(PLUGIN_PATH, "settings.json"), "w", encoding="utf-8"
         ) as j:
@@ -1059,7 +1059,7 @@ class JLCPCBTools(wx.Dialog):
         conMenu.Destroy()  # destroy to avoid memory leak
 
     def init_logger(self):
-        """Initialize logger to log into textbox"""
+        """Initialize logger to log into textbox."""
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
         # Log to stderr

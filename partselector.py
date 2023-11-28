@@ -525,7 +525,7 @@ class PartSelectorDialog(wx.Dialog):
         self.enable_toolbar_buttons(False)
 
     def update_settings(self, event):
-        """Update the settings on change"""
+        """Update the settings on change."""
         wx.PostEvent(
             self.parent,
             UpdateSetting(
@@ -561,7 +561,7 @@ class PartSelectorDialog(wx.Dialog):
             self.enable_toolbar_buttons(False)
 
     def enable_toolbar_buttons(self, state):
-        """Control the state of all the buttons in toolbar on the right side"""
+        """Control the state of all the buttons in toolbar on the right side."""
         for b in [
             self.select_part_button,
             self.part_details_button,
@@ -648,7 +648,7 @@ class PartSelectorDialog(wx.Dialog):
             dialog.ShowModal()
 
     def help(self, *_):
-        """Show message box with help instructions"""
+        """Show message box with help instructions."""
         title = "Help"
         text = """
         Use % as wildcard selector. \n

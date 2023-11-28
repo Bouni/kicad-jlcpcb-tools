@@ -10,7 +10,7 @@ from .helpers import is_nightly
 
 
 class SchematicExport:
-    """A class to export Schematic files"""
+    """A class to export Schematic files."""
 
     # This only works with KiCad V6/V7 files, if the format changes, this will probably break
 
@@ -19,7 +19,7 @@ class SchematicExport:
         self.parent = parent
 
     def load_schematic(self, paths):
-        """Load schematic file"""
+        """Load schematic file."""
         if is_nightly(GetBuildVersion()):
             self.logger.info("Kicad 7+...")
             for path in paths:
@@ -30,7 +30,7 @@ class SchematicExport:
                 self._update_schematic(path)
 
     def _update_schematic(self, path):
-        """This only works with KiCad V6 files"""
+        """This only works with KiCad V6 files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
@@ -107,7 +107,7 @@ class SchematicExport:
         self.logger.info("Added LCSC's to %s(maybe?)", path)
 
     def _update_schematic7(self, path):
-        """This only works with KiCad V7 files"""
+        """This only works with KiCad V7 files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
