@@ -1,44 +1,144 @@
-[tool.isort]
-profile = "black"
+[project]
+name        = "Kicad-jlcpcb-tools"
+license     = {text = "MIT"}
+description = "Plugin to generate BOM + CPL files for JLCPCB."
+readme      = "README.md"
+
+# [tool.pylint]
+# max-line-length = 120
+# extension-pkg-whitelist = "wx"
+
+# [tool.pylint."MESSAGES CONTROL"]
+# disable = [
+#     "fixme",
+#     "format",
+#     "wrong-import-order",
+#     "too-few-public-methods",
+#     "too-many-ancestors",
+#     "too-many-arguments",
+#     "too-many-branches",
+#     "too-many-instance-attributes",
+#     "too-many-lines",
+#     "too-many-locals",
+#     "too-many-public-methods",
+#     "too-many-return-statements",
+#     "too-many-statements",
+#     "too-many-boolean-expressions",
+#     "invalid-name",
+#     "duplicate-code",
+# ]
+
+# [tool.pylint.FORMAT]
+# expected-line-ending-format = "LF"
 
 [tool.ruff]
 select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
+    "B002", # Python does not support the unary prefix increment
+    "B007", # Loop control variable {name} not used within loop body
+    "B014", # Exception handler with duplicate exception
+    "B023", # Function definition does not bind loop variable {name}
+    "B026", # Star-arg unpacking after a keyword argument is strongly discouraged
+    "C",  # complexity
+    "COM818", # Trailing comma on bare tuple prohibited
+    "D",  # docstrings
+    "DTZ003",  # Use datetime.now(tz=) instead of datetime.utcnow()
+    "DTZ004",  # Use datetime.fromtimestamp(ts, tz=) instead of datetime.utcfromtimestamp(ts)
+    "E",  # pycodestyle
+    "F",  # pyflakes/autoflake
+    "G", # flake8-logging-format
     "I",  # isort
-    "C",  # flake8-comprehensions
-    "B",  # flake8-bugbear
+    "ICN001", # import concentions; {name} should be imported as {asname}
+    "ISC001", # Implicitly concatenated string literals on one line
+    "N804", # First argument of a class method should be named cls
+    "N805", # First argument of a method should be named self
+    "N815", # Variable {name} in class scope should not be mixedCase
+    "PGH001", # No builtin eval() allowed
+    "PGH004",  # Use specific rule codes when using noqa
+    "PLC0414", # Useless import alias. Import alias does not rename original package.
+    "PLC", # pylint
+    "PLE", # pylint
+    "PLR", # pylint
+    "PLW", # pylint
+    "Q000", # Double quotes found but single quotes preferred
+    "RUF006", # Store a reference to the return value of asyncio.create_task
+    "S102", # Use of exec detected
+    "S103",  # bad-file-permissions
+    "S108",  # hardcoded-temp-file
+    "S306",  # suspicious-mktemp-usage
+    "S307",  # suspicious-eval-usage
+    "S313",  # suspicious-xmlc-element-tree-usage
+    "S314",  # suspicious-xml-element-tree-usage
+    "S315",  # suspicious-xml-expat-reader-usage
+    "S316",  # suspicious-xml-expat-builder-usage
+    "S317",  # suspicious-xml-sax-usage
+    "S318",  # suspicious-xml-mini-dom-usage
+    "S319",  # suspicious-xml-pull-dom-usage
+    "S320",  # suspicious-xmle-tree-usage
+    "S601",  # paramiko-call
+    "S602",  # subprocess-popen-with-shell-equals-true
+    "S604",  # call-with-shell-equals-true
+    "S608",  # hardcoded-sql-expression
+    "S609",  # unix-command-wildcard-injection
+    "SIM105", # Use contextlib.suppress({exception}) instead of try-except-pass
+    "SIM117", # Merge with-statements that use the same scope
+    "SIM118", # Use {key} in {dict} instead of {key} in {dict}.keys()
+    "SIM201", # Use {left} != {right} instead of not {left} == {right}
+    "SIM208", # Use {expr} instead of not (not {expr})
+    "SIM212", # Use {a} if {a} else {b} instead of {b} if not {a} else {a}
+    "SIM300", # Yoda conditions. Use 'age == 42' instead of '42 == age'.
+    "SIM401", # Use get from dict with default instead of an if block
+    "T100", # Trace found: {name} used
+    "T20",  # flake8-print
+    "TID251", # Banned imports
+    "TRY004", # Prefer TypeError exception for invalid type
+    "TRY200", # Use raise from to specify exception cause
+    "TRY302", # Remove exception handler; error is immediately re-raised
+    "UP",  # pyupgrade
+    "W",  # pycodestyle
 ]
+
 ignore = [
-    "E501",  # line too long, handled by black
-    "E722",  # Do not use bare except, specify exception instead
     "C901",  # too complex
+    "D202",  # No blank lines allowed after function docstring
+    "D203",  # 1 blank line required before class docstring
+    "D213",  # Multi-line docstring summary should start at the second line
+    "D406",  # Section name should end with a newline
+    "D407",  # Section name underlining
+    "E501",  # line too long
+    "E722",  # Do not use bare except, specify exception instead
+    "E731",  # do not assign a lambda expression, use a def
+
+    # Ignore ignored, as the rule is now back in preview/nursery, which cannot
+    # be ignored anymore without warnings.
+    # https://github.com/astral-sh/ruff/issues/7491
+    # "PLC1901", # Lots of false positives
+
+    # False positives https://github.com/astral-sh/ruff/issues/5386
+    "PLC0208", # Use a sequence type instead of a `set` when iterating over values
+    "PLR0911", # Too many return statements ({returns} > {max_returns})
+    "PLR0912", # Too many branches ({branches} > {max_branches})
+    "PLR0913", # Too many arguments to function call ({c_args} > {max_args})
+    "PLR0915", # Too many statements ({statements} > {max_statements})
+    "PLR2004",  # Magic value used in comparison, consider replacing {value} with a constant variable
+    "PLW2901", # Outer {outer_kind} variable {name} overwritten by inner {inner_kind} target
+    "UP006", # keep type annotation style as is
+    "UP007", # keep type annotation style as is
+    # Ignored due to performance: https://github.com/charliermarsh/ruff/issues/2923
+    "UP038", # Use `X | Y` in `isinstance` call instead of `(X, Y)`
+
 ]
 
-[tool.pylint]
-max-line-length = 120
-extension-pkg-whitelist = "wx"
 
-[tool.pylint."MESSAGES CONTROL"]
-disable = [
-    "fixme",
-    "format",
-    "wrong-import-order",
-    "too-few-public-methods",
-    "too-many-ancestors",
-    "too-many-arguments",
-    "too-many-branches",
-    "too-many-instance-attributes",
-    "too-many-lines",
-    "too-many-locals",
-    "too-many-public-methods",
-    "too-many-return-statements",
-    "too-many-statements",
-    "too-many-boolean-expressions",
-    "invalid-name",
-    "duplicate-code",
+[tool.ruff.flake8-pytest-style]
+fixture-parentheses = false
+
+[tool.ruff.isort]
+force-sort-within-sections = true
+known-first-party = [
+    "homeassistant",
 ]
+combine-as-imports = true
+split-on-trailing-comma = false
 
-[tool.pylint.FORMAT]
-expected-line-ending-format = "LF"
+[tool.ruff.mccabe]
+max-complexity = 25
