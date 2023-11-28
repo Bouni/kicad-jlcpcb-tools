@@ -68,20 +68,19 @@ class Store:
 
     def create_db(self):
         """Create the sqlite database tables."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute(
-                    "CREATE TABLE IF NOT EXISTS part_info ("
-                    "reference NOT NULL PRIMARY KEY,"
-                    "value TEXT NOT NULL,"
-                    "footprint TEXT NOT NULL,"
-                    "lcsc TEXT,"
-                    "stock NUMERIC,"
-                    "exclude_from_bom NUMERIC DEFAULT 0,"
-                    "exclude_from_pos NUMERIC DEFAULT 0"
-                    ")",
-                )
-            cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS part_info ("
+                "reference NOT NULL PRIMARY KEY,"
+                "value TEXT NOT NULL,"
+                "footprint TEXT NOT NULL,"
+                "lcsc TEXT,"
+                "stock NUMERIC,"
+                "exclude_from_bom NUMERIC DEFAULT 0,"
+                "exclude_from_pos NUMERIC DEFAULT 0"
+                ")",
+            )
+        cur.commit()
 
     def read_all(self):
         """Read all parts from the database."""
@@ -97,16 +96,15 @@ class Store:
 
     def read_bom_parts(self):
         """Read all parts that should be included in the BOM."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
-                subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
-                query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
-                a = [list(part) for part in cur.execute(query).fetchall()]
-                # Query all parts that are supposed to be in the BOM but have no lcsc number
-                query = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
-                b = [list(part) for part in cur.execute(query).fetchall()]
-                return a + b
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
+            subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
+            query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
+            a = [list(part) for part in cur.execute(query).fetchall()]
+            # Query all parts that are supposed to be in the BOM but have no lcsc number
+            query = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
+            b = [list(part) for part in cur.execute(query).fetchall()]
+            return a + b
 
     def read_pos_parts(self):
         """Read all parts that should be included in the POS."""
@@ -119,78 +117,70 @@ class Store:
 
     def create_part(self, part):
         """Create a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute("INSERT INTO part_info VALUES (?,?,?,?,'',?,?)", part)
-                cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute("INSERT INTO part_info VALUES (?,?,?,?,'',?,?)", part)
+            cur.commit()
 
     def update_part(self, part):
         """Update a part in the database, overwrite lcsc if supplied."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                if len(part) == 6:
-                    cur.execute(
-                        "UPDATE part_info set value = ?, footprint = ?, lcsc = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
-                        part[1:] + part[0:1],
-                    )
-                else:
-                    cur.execute(
-                        "UPDATE part_info set value = ?, footprint = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
-                        part[1:] + part[0:1],
-                    )
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            if len(part) == 6:
+                cur.execute(
+                    "UPDATE part_info set value = ?, footprint = ?, lcsc = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
+                    part[1:] + part[0:1],
+                )
+            else:
+                cur.execute(
+                    "UPDATE part_info set value = ?, footprint = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
+                    part[1:] + part[0:1],
+                )
 
-                cur.commit()
+            cur.commit()
 
     def get_part(self, ref):
         """Get a part from the database by its reference."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                return cur.execute(
-                    "SELECT * FROM part_info WHERE reference=?", (ref,)
-                ).fetchone()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            return cur.execute(
+                "SELECT * FROM part_info WHERE reference=?", (ref,)
+            ).fetchone()
 
     def delete_part(self, ref):
         """Delete a part from the database by its reference."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute("DELETE FROM part_info WHERE reference=?", (ref,))
-                cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute("DELETE FROM part_info WHERE reference=?", (ref,))
+            cur.commit()
 
     def set_stock(self, ref, stock):
         """Set the stock value for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute(
-                    f"UPDATE part_info SET stock = '{int(stock)}' WHERE reference = '{ref}'"
-                )
-                cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                f"UPDATE part_info SET stock = '{int(stock)}' WHERE reference = '{ref}'"
+            )
+            cur.commit()
 
     def set_bom(self, ref, state):
         """Change the BOM attribute for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute(
-                    f"UPDATE part_info SET exclude_from_bom = '{int(state)}' WHERE reference = '{ref}'"
-                )
-                cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                f"UPDATE part_info SET exclude_from_bom = '{int(state)}' WHERE reference = '{ref}'"
+            )
+            cur.commit()
 
     def set_pos(self, ref, state):
         """Change the BOM attribute for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute(
-                    f"UPDATE part_info SET exclude_from_pos = '{int(state)}' WHERE reference = '{ref}'"
-                )
-                cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                f"UPDATE part_info SET exclude_from_pos = '{int(state)}' WHERE reference = '{ref}'"
+            )
+            cur.commit()
 
     def set_lcsc(self, ref, value):
         """Change the BOM attribute for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute(
-                    f"UPDATE part_info SET lcsc = '{value}' WHERE reference = '{ref}'"
-                )
-                cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                f"UPDATE part_info SET lcsc = '{value}' WHERE reference = '{ref}'"
+            )
+            cur.commit()
 
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
@@ -254,12 +244,11 @@ class Store:
     def clean_database(self):
         """Delete all parts from the database that are no longer present on the board."""
         refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(GetBoard())]
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            with con as cur:
-                cur.execute(
-                    f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
-                )
-                cur.commit()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
+            )
+            cur.commit()
 
     def import_legacy_assignments(self):
         """Check if assignments of an old version are found and merge them into the database."""
