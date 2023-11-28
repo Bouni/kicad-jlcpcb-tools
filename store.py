@@ -1,4 +1,4 @@
-"""This module contains the data storge for a project."""
+"""Contains the data storge for a project."""
 
 import contextlib
 import csv

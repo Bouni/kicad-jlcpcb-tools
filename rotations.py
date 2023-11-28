@@ -1,4 +1,4 @@
-"""This module contains the rotations manager."""
+"""Contains the rotations manager."""
 
 import csv
 import logging

@@ -1,4 +1,4 @@
-"""This module contains the Action Plugin."""
+"""Contains the Action Plugin."""
 
 import os
 
