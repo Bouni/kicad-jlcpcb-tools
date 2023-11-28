@@ -145,7 +145,7 @@ def get_valid_footprints(board):
 
 
 def get_footprint_keys(fp):
-    """get keys from footprint for sorting."""
+    """Get keys from footprint for sorting."""
     try:
         package = str(fp.GetFPID().GetLibItemName())
     except ValueError:
@@ -158,7 +158,7 @@ def get_footprint_keys(fp):
 
 
 def get_footprint_by_ref(board, ref):
-    """get a footprint from the list of footprints by its Reference."""
+    """Get a footprint from the list of footprints by its Reference."""
     fps = []
     for fp in get_valid_footprints(board):
         if str(fp.GetReference()) == ref:

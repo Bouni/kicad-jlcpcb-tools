@@ -7,10 +7,10 @@ import re
 import sys
 import time
 
-import wx  # pylint: disable=import-error
-import wx.dataview  # pylint: disable=import-error
 from pcbnew import GetBoard, GetBuildVersion  # pylint: disable=import-error
+import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
+import wx.dataview  # pylint: disable=import-error
 
 from .const import Column
 from .events import (
