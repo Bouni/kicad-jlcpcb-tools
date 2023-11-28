@@ -202,11 +202,9 @@ class Store:
                     part[0],
                 )
                 self.create_part(part)
-            else:
-                # if the board part matches the dbpart except for the LCSC and the stock value,
-                if part[0:3] == list(dbpart[0:3]) and part[4:] == [
+            elif part[0:3] == list(dbpart[0:3]) and part[4:] == [
                     bool(x) for x in dbpart[5:]
-                ]:
+                ]: # if the board part matches the dbpart except for the LCSC and the stock value,
                     # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
                     if dbpart and not dbpart[3] and part[3]:
                         self.logger.debug(
@@ -231,13 +229,13 @@ class Store:
                                 part[0],
                             )
                         self.update_part(part)
-                else:
-                    # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
-                    self.logger.debug(
-                        "Part %s is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared.",
-                        part[0],
-                    )
-                    self.update_part(part)
+            else:
+                # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
+                self.logger.debug(
+                    "Part %s is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared.",
+                    part[0],
+                )
+                self.update_part(part)
         self.import_legacy_assignments()
         self.clean_database()
 
