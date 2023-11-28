@@ -134,7 +134,7 @@ class PartDetailsDialog(wx.Dialog):
         return result
 
     def get_part_data(self):
-        """fetch part data from JLCPCB API and parse it into the table, set picture and PDF link"""
+        """Fetch part data from JLCPCB API and parse it into the table, set picture and PDF link"""
         headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36",
         }

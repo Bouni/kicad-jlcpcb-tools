@@ -1,7 +1,6 @@
 #!/bin/env python3
 
-"""
-Use the amazing work of https://github.com/yaqwsx/jlcparts and
+"""Use the amazing work of https://github.com/yaqwsx/jlcparts and
 convert their database into something we can conveniently use for
 this plugin.
 This replaces the old .csv based database creation that JLCPCB
@@ -15,12 +14,12 @@ https://github.com/yaqwsx/jlcparts/blob/1a07e1ff42fef2d35419cfb9ba47df090037cc7b
 by @markusdd
 """
 
+from datetime import date, datetime
 import json
 import os
+from pathlib import Path
 import sqlite3
 import zipfile
-from datetime import date, datetime
-from pathlib import Path
 from zipfile import ZipFile
 
 import humanize

@@ -1,15 +1,15 @@
 """This module handle the JLCPCB parts database."""
 
 import contextlib
-import logging
-import os
-import shlex
-import sqlite3
-import time
 from enum import Enum
 from glob import glob
+import logging
+import os
 from pathlib import Path
+import shlex
+import sqlite3
 from threading import Thread
+import time
 
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
@@ -237,7 +237,7 @@ class Library:
                 cur.commit()
 
     def get_all_correction_data(self):
-        """get all corrections from the database."""
+        """Get all corrections from the database."""
         with contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as con:
             with con as cur:
                 try:
@@ -294,7 +294,7 @@ class Library:
                 cur.commit()
 
     def get_all_mapping_data(self):
-        """get all mapping from the database."""
+        """Get all mapping from the database."""
         with contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con:
             with con as cur:
                 return [
