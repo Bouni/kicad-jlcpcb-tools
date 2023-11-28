@@ -80,7 +80,7 @@ class Store:
                 "exclude_from_pos NUMERIC DEFAULT 0"
                 ")",
             )
-        cur.commit()
+            cur.commit()
 
     def read_all(self):
         """Read all parts from the database."""
