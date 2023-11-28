@@ -90,7 +90,7 @@ class Fabrication:
         return rotation
 
     def rotate(self, footprint, rotation, correction):
-        """Calculate the actual correction"""
+        """Calculate the actual correction."""
         if footprint.GetLayer() == 0:
             rotation = (rotation + int(correction)) % 360
             self.logger.info(
@@ -112,14 +112,14 @@ class Fabrication:
         return rotation
 
     def get_position(self, footprint):
-        """Calculate position based on center of bounding box"""
+        """Calculate position based on center of bounding box."""
         if get_smd(footprint):
             return footprint.GetPosition()
         bbox = footprint.GetBoundingBox(False, False)
         return bbox.GetCenter()
 
     def generate_geber(self, layer_count=None):
-        """Generating Gerber files"""
+        """Generating Gerber files."""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
         pctl = PLOT_CONTROLLER(self.board)
         popt = pctl.GetPlotOptions()

@@ -16,19 +16,19 @@ NOT_IN_SCHEMATIC = 4
 
 
 def is_nightly(version: str) -> bool:
-    """Check if version is a Nightly build"""
+    """Check if version is a Nightly build."""
     return any(v in version for v in ("6.99", "7.0", "7.99"))
 
 
 def getWxWidgetsVersion():
-    """Get wx widgets version"""
+    """Get wx widgets version."""
     v = re.search(r"wxWidgets\s([\d\.]+)", wx.version())
     v = int(v.group(1).replace(".", ""))
     return v
 
 
 def getVersion():
-    """READ Version from file"""
+    """READ Version from file."""
     if not os.path.isfile(os.path.join(PLUGIN_PATH, "VERSION")):
         return "unknown"
     with open(os.path.join(PLUGIN_PATH, "VERSION"), encoding="utf-8") as f:
@@ -36,12 +36,12 @@ def getVersion():
 
 
 def GetOS():
-    """Get String with OS type"""
+    """Get String with OS type."""
     return wx.PlatformInformation.Get().GetOperatingSystemIdName()
 
 
 def GetScaleFactor(window):
-    """Workaround if wxWidgets Version does not support GetDPIScaleFactor, for Mac OS always return 1.0"""
+    """Workaround if wxWidgets Version does not support GetDPIScaleFactor, for Mac OS always return 1.0."""
     if "Apple Mac OS" in GetOS():
         return 1.0
     if hasattr(window, "GetDPIScaleFactor"):
@@ -50,14 +50,14 @@ def GetScaleFactor(window):
 
 
 def HighResWxSize(window, size):
-    """Workaround if wxWidgets Version does not support FromDIP"""
+    """Workaround if wxWidgets Version does not support FromDIP."""
     if hasattr(window, "FromDIP"):
         return window.FromDIP(size)
     return size
 
 
 def loadBitmapScaled(filename, scale=1.0, static=False):
-    """Load a scaled bitmap, handle differences between Kicad versions"""
+    """Load a scaled bitmap, handle differences between Kicad versions."""
     if filename:
         path = os.path.join(PLUGIN_PATH, "icons", filename)
         bmp = wx.Bitmap(path)
@@ -77,7 +77,7 @@ def loadBitmapScaled(filename, scale=1.0, static=False):
 
 
 def loadIconScaled(filename, scale=1.0):
-    """Load a scaled icon, handle differences between Kicad versions"""
+    """Load a scaled icon, handle differences between Kicad versions."""
     bmp = loadBitmapScaled(filename, scale=scale, static=False)
     if getWxWidgetsVersion() > 315:
         return bmp
@@ -136,7 +136,7 @@ def get_lcsc_value(fp):
 
 
 def get_valid_footprints(board):
-    """Get all footprints that have a valid reference (drop all REF**)"""
+    """Get all footprints that have a valid reference (drop all REF**)."""
     footprints = []
     for fp in board.GetFootprints():
         if re.match(r"\w+\d+", fp.GetReference()):

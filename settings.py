@@ -356,7 +356,7 @@ class SettingsDialog(wx.Dialog):
             )
 
     def load_settings(self):
-        """Load settings and set checkboxes accordingly"""
+        """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
             self.parent.settings.get("gerber", {}).get("tented_vias", True)
         )

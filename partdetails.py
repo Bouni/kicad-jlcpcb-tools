@@ -125,7 +125,7 @@ class PartDetailsDialog(wx.Dialog):
         webbrowser.open(self.pdfurl)
 
     def get_scaled_bitmap(self, url, width, height):
-        """Download a picture from a URL and convert it into a wx Bitmap"""
+        """Download a picture from a URL and convert it into a wx Bitmap."""
         content = requests.get(url, timeout=10).content
         io_bytes = io.BytesIO(content)
         image = wx.Image(io_bytes)
@@ -134,7 +134,7 @@ class PartDetailsDialog(wx.Dialog):
         return result
 
     def get_part_data(self):
-        """Fetch part data from JLCPCB API and parse it into the table, set picture and PDF link"""
+        """Fetch part data from JLCPCB API and parse it into the table, set picture and PDF link."""
         headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36",
         }
