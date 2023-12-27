@@ -1,6 +1,7 @@
 ---
 default: true
-MD013: false
-MD026: false
-MD033: false
-MD036: false
+MD013: false # ignore line length
+MD026: false # ignore Trailing punctuation in header
+MD033: false # allow inline HTML
+MD036: false # allow Emphasis used instead of a header
+MD045: false # Don't force Alt text for images
