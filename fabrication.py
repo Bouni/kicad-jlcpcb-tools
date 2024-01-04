@@ -91,24 +91,14 @@ class Fabrication:
 
     def rotate(self, footprint, rotation, correction):
         """Calculate the actual correction."""
-        if footprint.GetLayer() == 0:
-            rotation = (rotation + int(correction)) % 360
-            self.logger.info(
-                "Fixed rotation of %s (%s / %s) on Top Layer by %d degrees",
-                footprint.GetReference(),
-                footprint.GetValue(),
-                footprint.GetFPID().GetLibItemName(),
-                correction,
-            )
-        else:
-            rotation = (rotation - int(correction)) % 360
-            self.logger.info(
-                "Fixed rotation of %s (%s / %s) on Bottom Layer by %d degrees",
-                footprint.GetReference(),
-                footprint.GetValue(),
-                footprint.GetFPID().GetLibItemName(),
-                correction,
-            )
+        rotation = (rotation + int(correction)) % 360
+        self.logger.info(
+            "Fixed rotation of %s (%s / %s) on Top Layer by %d degrees",
+            footprint.GetReference(),
+            footprint.GetValue(),
+            footprint.GetFPID().GetLibItemName(),
+            correction,
+        )
         return rotation
 
     def get_position(self, footprint):
