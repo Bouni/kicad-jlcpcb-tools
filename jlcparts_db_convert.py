@@ -323,6 +323,100 @@ class JlcpcbFTS5(Generate):
             """
         )
 
+    def load_tables(self):
+        """Load the input data into the output database."""
+
+        # load the tables into memory
+        print("Reading manufacturers")
+        res = self.conn_jp.execute("SELECT * FROM manufacturers")
+        mans = dict(res.fetchall())
+
+        print("Reading categories")
+        res = self.conn_jp.execute("SELECT * FROM categories")
+        cats = {i: (c, sc) for i, c, sc in res.fetchall()}
+
+        res = self.conn_jp.execute("select count(*) from components")
+        results = res.fetchone()
+        print(f"{humanize.intcomma(results[0])} parts to import")
+
+        self.part_count = 0
+        print("Reading components")
+        res = self.conn_jp.execute("SELECT * FROM components")
+        while True:
+            comps = res.fetchmany(size=100000)
+
+            print(f"Read {humanize.intcomma(len(comps))} parts")
+
+            # if we have no more parts exit out of the loop
+            if len(comps) == 0:
+                break
+
+            self.part_count += len(comps)
+
+            # now extract the data from the jlcparts db and fill
+            # it into the plugin database
+            print("Building parts rows to insert")
+            rows = []
+            for c in comps:
+                price = json.loads(c[10])
+                price_str = ",".join(
+                    [
+                        f"{entry.get('qFrom')}-{entry.get('qTo') if entry.get('qTo') is not None else ''}:{entry.get('price')}"
+                        for entry in price
+                    ]
+                )
+
+                description = c[7]
+
+                # strip ROHS out of descriptions where present
+                # and add 'not ROHS' where ROHS is not present
+                # as 99% of parts are ROHS at this point
+                if " ROHS".lower() not in description.lower():
+                    description += " not ROHS"
+                else:
+                    description = description.replace(" ROHS", "")
+
+                second_category = cats[c[1]][1]
+
+                # strip the 'Second category' out of the description if it
+                # is duplicated there
+                description = description.replace(second_category, "")
+
+                package = c[3]
+
+                # remove 'Package' from the description if it is duplicated there
+                description = description.replace(package, "")
+
+                # replace double spaces with single spaces in description
+                description.replace("  ", " ")
+
+                # remove trailing spaces from description
+                description = description.strip()
+
+                row = (
+                    f"C{c[0]}",  # LCSC Part
+                    cats[c[1]][0],  # First Category
+                    cats[c[1]][1],  # Second Category
+                    c[2],  # MFR.Part
+                    package,  # Package
+                    int(c[4]),  # Solder Joint
+                    mans[c[5]],  # Manufacturer
+                    "Basic" if c[6] else "Extended",  # Library Type
+                    description,  # Description
+                    c[8],  # Datasheet
+                    price_str,  # Price
+                    str(c[9]),  # Stock
+                )
+                rows.append(row)
+
+            print("Inserting into parts table")
+            self.conn.executemany(
+                "INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
+            )
+            self.conn.commit()
+
+        print("Done importing parts")
+
     def populate_categories(self):
         """Populate the categories table."""
         self.conn.execute(
