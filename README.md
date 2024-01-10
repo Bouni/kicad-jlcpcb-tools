@@ -146,3 +146,21 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 
 Make sure you make use of pre-commit hooks in order to format everything nicely with `black`
 In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hooks that enforce nice and clean code style.
+
+## How to rebuild the parts database
+
+The parts database is rebuilt by the [update_parts_database.yml GitHub workflow](https://github.com/Bouni/kicad-jlcpcb-tools/blob/main/.github/workflows/update_parts_database.yml)
+
+You can reference the steps in the 'Update database' section for the commands to run locally.
+
+## Standalone mode
+
+Allows the plugin UI to be started without KiCAD, enabling debugging with an IDE like pycharm / vscode.
+
+To start in standalone mode invoke the KiCAD bundled python, with the plugin directory as a module. For example:
+
+```sh
+/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m kicad-jlcpcb-tools
+```
+
+At the moment standalone mode is still under development.

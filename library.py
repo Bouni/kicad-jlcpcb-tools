@@ -1,6 +1,10 @@
 """Handle the JLCPCB parts database."""
 
 import contextlib
+import logging
+import os
+import sqlite3
+import time
 from enum import Enum
 from glob import glob
 import logging
@@ -103,6 +107,15 @@ class Library:
 
     def search(self, parameters):
         """Search the database for parts that meet the given parameters."""
+
+        # skip searching if there are no keywords and the part number
+        # field is empty as there are too many parts for the search
+        # to reasonbly show the desired part
+        if parameters["keyword"] == "" and (
+            "part_no" not in parameters or parameters["part_no"] == ""
+        ):
+            return []
+
         columns = [
             "LCSC Part",
             "MFR.Part",
@@ -117,41 +130,38 @@ class Library:
         s = ",".join(f'"{c}"' for c in columns)
         query = f"SELECT {s} FROM parts WHERE "
 
-        try:
-            keywords = shlex.split(parameters["keyword"])
-        except ValueError as e:
-            self.logger.error("Can't split keyword: %s", str(e))
-
-        keyword_columns = [
-            "LCSC Part",
-            "Description",
-            "MFR.Part",
-            "Package",
-            "Manufacturer",
-        ]
+        match_chunks = []
         query_chunks = []
-        for kw in keywords:
-            q = " OR ".join(f'"{c}" LIKE "%{kw}%"' for c in keyword_columns)
-            query_chunks.append(f"({q})")
+
+        if parameters["keyword"] != "":
+            keywords = parameters["keyword"].split(" ")
+            keywords_intermediate = []
+            for w in keywords:
+                # skip over empty keywords
+                if w != "":
+                    kw = f'"{w}"'
+                    keywords_intermediate.append(kw)
+            keywords_entry = " AND ".join(keywords_intermediate)
+            match_chunks.append(f"{keywords_entry}")
 
         if "manufacturer" in parameters and parameters["manufacturer"] != "":
             p = parameters["manufacturer"]
-            query_chunks.append(f'"Manufacturer" LIKE "{p}"')
+            match_chunks.append(f'"Manufacturer":"{p}"')
         if "package" in parameters and parameters["package"] != "":
             p = parameters["package"]
-            query_chunks.append(f'"Package" LIKE "{p}"')
+            match_chunks.append(f'"Package":"{p}"')
         if "category" in parameters and parameters["category"] != "":
             p = parameters["category"]
-            query_chunks.append(f'"First Category" LIKE "{p}"')
+            match_chunks.append(f'"First Category":"{p}"')
         if "subcategory" in parameters and parameters["subcategory"] != "":
             p = parameters["subcategory"]
-            query_chunks.append(f'"Second Category" LIKE "{p}"')
+            match_chunks.append(f'"Second Category":"{p}"')
         if "part_no" in parameters and parameters["part_no"] != "":
             p = parameters["part_no"]
-            query_chunks.append(f'"MFR.Part" LIKE "{p}"')
+            match_chunks.append(f'"MFR.Part":"{p}"')
         if "solder_joints" in parameters and parameters["solder_joints"] != "":
             p = parameters["solder_joints"]
-            query_chunks.append(f'"Solder Joint" LIKE "{p}"')
+            match_chunks.append(f'"Solder Joint":"{p}"')
 
         library_types = []
         if parameters["basic"]:
@@ -164,10 +174,19 @@ class Library:
         if parameters["stock"]:
             query_chunks.append('"Stock" > "0"')
 
-        if not query_chunks:
+        if not match_chunks and not query_chunks:
             return []
 
-        query += " AND ".join(query_chunks)
+        if match_chunks:
+            query += "parts MATCH '"
+            query += " AND ".join(match_chunks)
+            query += "'"
+
+        if query_chunks:
+            if match_chunks:
+                query += " AND "
+            query += " AND ".join(query_chunks)
+
         query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
         query += " LIMIT 1000"
 
@@ -363,7 +382,7 @@ class Library:
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
         # Download the zipped parts database
-        url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
+        url_stub = "https://chmorgan.github.io/jlcpcb-db/"
         cnt_file = "chunk_num.txt"
         cnt = 0
         chunk_file_stub = "parts.db.zip."
@@ -521,12 +540,14 @@ class Library:
         information from the on-disk database.
         """
         if not self.category_map:
+            self.category_map.setdefault("", "")
+
             # Populate the cache.
             with contextlib.closing(
                 sqlite3.connect(self.partsdb_file)
             ) as con, con as cur:
                 for row in cur.execute(
-                    'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
+                    'SELECT * from categories ORDER BY UPPER("First Category"), UPPER("Second Category")'
                 ):
                     self.category_map.setdefault(row[0], []).append(row[1])
         return list(self.category_map.keys())

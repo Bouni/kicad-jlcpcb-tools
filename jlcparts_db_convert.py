@@ -43,27 +43,20 @@ conn = sqlite3.connect(partsdb)
 # schema creation
 conn.execute(
     """
-    CREATE TABLE IF NOT EXISTS parts (
-        'LCSC Part',
+    CREATE virtual TABLE IF NOT EXISTS parts using fts5 (
+        'LCSC Part' unindexed,
         'First Category',
         'Second Category',
         'MFR.Part',
         'Package',
-        'Solder Joint',
+        'Solder Joint' unindexed,
         'Manufacturer',
         'Library Type',
         'Description',
         'Datasheet',
-        'Price',
-        'Stock'
-    )
-    """
-)
-
-conn.execute(
-    """
-    CREATE UNIQUE INDEX parts_lcsc_part_index
-        ON parts ('LCSC Part')
+        'Price' unindexed,
+        'Stock' unindexed
+    , tokenize="trigram")
     """
 )
 
@@ -94,6 +87,15 @@ conn.execute(
     CREATE TABLE IF NOT EXISTS rotation (
         'regex',
         'correction'
+    )
+    """
+)
+
+conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS categories (
+        'First Category',
+        'Second Category'
     )
     """
 )
@@ -160,6 +162,16 @@ while True:
     conn.commit()
 
 print("Done importing parts")
+
+# Optimize to minimize query times
+print("Optimizing fts5 parts table")
+conn.execute("insert into parts(parts) values('optimize')")
+print("Done optimizing fts5 parts table")
+
+# categories table
+conn.execute(
+    'INSERT INTO categories SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
+)
 
 # metadata
 db_size = os.stat(partsdb).st_size
