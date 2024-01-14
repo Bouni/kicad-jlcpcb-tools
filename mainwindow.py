@@ -27,7 +27,6 @@ from .helpers import (
     GetListIcon,
     GetScaleFactor,
     HighResWxSize,
-    get_footprint_by_ref,
     getVersion,
     loadBitmapScaled,
     loadIconScaled,
@@ -575,7 +574,8 @@ class JLCPCBTools(wx.Dialog):
         numbers = []
         parts = []
         for part in self.store.read_all():
-            fp = get_footprint_by_ref(pcbnew.GetBoard(), part[0])[0]
+            board = pcbnew.GetBoard()
+            fp = board.FindFootprintByReference(part[0])
             if part[3] and part[3] not in numbers:
                 numbers.append(part[3])
             part.insert(4, "")
@@ -730,7 +730,8 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(pcbnew.GetBoard(), ref)[0]
+            board = pcbnew.GetBoard()
+            fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, bom)
@@ -749,7 +750,8 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(pcbnew.GetBoard(), ref)[0]
+            board = pcbnew.GetBoard()
+            fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, bom)
             self.footprint_list.SetValue(
@@ -763,7 +765,8 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(pcbnew.GetBoard(), ref)[0]
+            board = pcbnew.GetBoard()
+            fp = board.FindFootprintByReference(ref)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, pos)
             self.footprint_list.SetValue(

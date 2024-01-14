@@ -157,15 +157,6 @@ def get_footprint_keys(fp):
     return (package, reference)
 
 
-def get_footprint_by_ref(board, ref):
-    """Get a footprint from the list of footprints by its Reference."""
-    fps = []
-    for fp in get_valid_footprints(board):
-        if str(fp.GetReference()) == ref:
-            fps.append(fp)
-    return fps
-
-
 def get_bit(value, bit):
     """Get the nth bit of a byte."""
     return value & (1 << bit)

@@ -36,7 +36,7 @@ try:
 except ImportError:
     NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
 
-from .helpers import get_exclude_from_pos, get_footprint_by_ref
+from .helpers import get_exclude_from_pos
 
 
 class Fabrication:
@@ -269,8 +269,9 @@ class Fabrication:
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
+            board = GetBoard()
             for part in self.parent.store.read_pos_parts():
-                for fp in get_footprint_by_ref(self.board, part[0]):
+                for fp in board.FindFootprintByReference(part[0]):
                     if get_exclude_from_pos(fp):
                         continue
                     if not add_without_lcsc and not part[3]:
