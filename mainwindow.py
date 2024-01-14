@@ -692,11 +692,41 @@ class JLCPCBTools(wx.Dialog):
             self.hide_pos_button.SetLabel("Hide excluded POS")
         self.populate_footprint_list()
 
+    @staticmethod
+    def fp_set_highlight(fp):
+        """Highlight the component of a footprint. Work around as FOOTPRINT.SetBrightened() is inop for 7.0.10."""
+        pads_list = fp.Pads()
+        for pad in pads_list:
+            pad.SetBrightened()
+        drawings = fp.GraphicalItems()
+        for item in drawings:
+            item.SetBrightened()
+
     def OnFootprintSelected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
         self.enable_part_specific_toolbar_buttons(
             self.footprint_list.GetSelectedItemsCount() > 0
         )
+
+        self.logger.info("selection changed, count %d", self.footprint_list.GetSelectedItemsCount())
+
+        # clear the present selections
+#        selection = GetCurrentSelection()
+#        for selected in selection:
+#            selected.ClearSelected()
+
+        # select all of the selected items in the footprint_list
+        if self.footprint_list.GetSelectedItemsCount() > 0:
+            for item in self.footprint_list.GetSelections():
+                row = self.footprint_list.ItemToRow(item)
+                ref = self.footprint_list.GetTextValue(row, 0)
+                self.logger.info("ref is %s", ref)
+                fp = get_footprint_by_ref(self.get_board(), ref)[0]
+                self.logger.info(fp)
+
+#                fp.SetSelected()
+#                fp.SetBrightened()
+                JLCPCBTools.fp_set_highlight(fp)
 
     def enable_all_buttons(self, state):
         """Control state of all the buttons."""
