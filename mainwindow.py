@@ -7,7 +7,7 @@ import re
 import sys
 import time
 
-from pcbnew import GetBoard, GetBuildVersion  # pylint: disable=import-error
+import pcbnew
 import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
@@ -82,12 +82,12 @@ class JLCPCBTools(wx.Dialog):
             size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
-        self.KicadBuildVersion = GetBuildVersion()
+        self.KicadBuildVersion = pcbnew.GetBuildVersion()
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
-        self.project_path = os.path.split(GetBoard().GetFileName())[0]
-        self.board_name = os.path.split(GetBoard().GetFileName())[1]
+        self.project_path = os.path.split(pcbnew.GetBoard().GetFileName())[0]
+        self.board_name = os.path.split(pcbnew.GetBoard().GetFileName())[1]
         self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -575,7 +575,7 @@ class JLCPCBTools(wx.Dialog):
         numbers = []
         parts = []
         for part in self.store.read_all():
-            fp = get_footprint_by_ref(GetBoard(), part[0])[0]
+            fp = get_footprint_by_ref(pcbnew.GetBoard(), part[0])[0]
             if part[3] and part[3] not in numbers:
                 numbers.append(part[3])
             part.insert(4, "")
@@ -730,7 +730,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)[0]
+            fp = get_footprint_by_ref(pcbnew.GetBoard(), ref)[0]
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, bom)
@@ -749,7 +749,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)[0]
+            fp = get_footprint_by_ref(pcbnew.GetBoard(), ref)[0]
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, bom)
             self.footprint_list.SetValue(
@@ -763,7 +763,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            fp = get_footprint_by_ref(GetBoard(), ref)[0]
+            fp = get_footprint_by_ref(pcbnew.GetBoard(), ref)[0]
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, pos)
             self.footprint_list.SetValue(
