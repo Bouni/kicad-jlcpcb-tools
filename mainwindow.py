@@ -725,7 +725,7 @@ class JLCPCBTools(wx.Dialog):
                 fp = get_footprint_by_ref(self.get_board(), ref)[0]
                 self.logger.info(fp)
 
-#                fp.SetSelected()
+                fp.SetSelected()
 #                fp.SetBrightened()
                 JLCPCBTools.fp_set_highlight(fp)
                 pcbnew.Refresh()
