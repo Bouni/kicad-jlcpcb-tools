@@ -698,6 +698,23 @@ class JLCPCBTools(wx.Dialog):
             self.footprint_list.GetSelectedItemsCount() > 0
         )
 
+        # clear the present selections
+        selection = pcbnew.GetCurrentSelection()
+        for selected in selection:
+            selected.ClearSelected()
+
+        # select all of the selected items in the footprint_list
+        if self.footprint_list.GetSelectedItemsCount() > 0:
+            for item in self.footprint_list.GetSelections():
+                row = self.footprint_list.ItemToRow(item)
+                ref = self.footprint_list.GetTextValue(row, 0)
+                fp = pcbnew.GetBoard().FindFootprintByReference(ref)
+
+                fp.SetSelected()
+
+            # cause pcbnew to refresh the board with the changes to the selected footprint(s)
+            pcbnew.Refresh()
+
     def enable_all_buttons(self, state):
         """Control state of all the buttons."""
         self.enable_top_buttons(state)
