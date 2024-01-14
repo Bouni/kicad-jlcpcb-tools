@@ -7,6 +7,7 @@ import re
 import sys
 import time
 
+import pcbnew
 from pcbnew import GetBoard, GetBuildVersion  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
@@ -727,6 +728,7 @@ class JLCPCBTools(wx.Dialog):
 #                fp.SetSelected()
 #                fp.SetBrightened()
                 JLCPCBTools.fp_set_highlight(fp)
+                pcbnew.Refresh()
 
     def enable_all_buttons(self, state):
         """Control state of all the buttons."""
