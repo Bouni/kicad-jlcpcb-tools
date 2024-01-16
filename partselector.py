@@ -607,14 +607,29 @@ class PartSelectorDialog(wx.Dialog):
         if parts is None:
             return
         count = len(parts)
-        if count == 1000:
+        if count >= 1000:
             self.result_count.SetLabel(
                 f"{count} Results (limited) in {search_duration_text}"
             )
         else:
             self.result_count.SetLabel(f"{count} Results in {search_duration_text}")
         for p in parts:
-            self.part_list.AppendItem([str(c) for c in p])
+            item = [str(c) for c in p]
+            # Munge price to be more readable
+            pricecol = 7 # Must match order in library.py search function
+            price = []
+            try:
+                for t in item[pricecol].split(","):
+                    qty, p = t.split(":")
+                    p = float(p)
+                    if p < 1.0:
+                        price.append(f"{qty}:{p * 100:.2f}c")
+                    else:
+                        price.append(f"{qty}:${p:.2f}")
+                item[pricecol] = ",".join(price)
+            except ValueError:
+                self.logger.warning("unable to parse price %s", item[pricecol])
+            self.part_list.AppendItem(item)
 
     def select_part(self, *_):
         """Save the selected part number and close the modal."""
