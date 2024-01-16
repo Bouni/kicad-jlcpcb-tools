@@ -140,7 +140,7 @@ class Library:
         if "package" in parameters and parameters["package"] != "":
             p = parameters["package"]
             query_chunks.append(f'"Package" LIKE "{p}"')
-        if "category" in parameters and parameters["category"] != "":
+        if "category" in parameters and parameters["category"] != "" and parameters["category"] != "All":
             p = parameters["category"]
             query_chunks.append(f'"First Category" LIKE "{p}"')
         if "subcategory" in parameters and parameters["subcategory"] != "":
@@ -529,7 +529,9 @@ class Library:
                     'SELECT DISTINCT "First Category", "Second Category" FROM parts ORDER BY UPPER("First Category"), UPPER("Second Category")'
                 ):
                     self.category_map.setdefault(row[0], []).append(row[1])
-        return list(self.category_map.keys())
+        tmp = list(self.category_map.keys())
+        tmp.insert(0, 'All')
+        return tmp
 
     def get_subcategories(self, category):
         """Get the subcategories associated with the given category."""
