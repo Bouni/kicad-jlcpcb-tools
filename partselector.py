@@ -422,6 +422,13 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
+            "Stock",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(parent.scale_factor * 50),
+            align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
+        self.part_list.AppendTextColumn(
             "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
@@ -440,13 +447,6 @@ class PartSelectorDialog(wx.Dialog):
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Stock",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 50),
-            align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
 
