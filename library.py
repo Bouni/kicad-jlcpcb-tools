@@ -103,16 +103,18 @@ class Library:
 
     def search(self, parameters):
         """Search the database for parts that meet the given parameters."""
+        # Note: this must mach the widget order in PartSelectorDialog init and
+        # populate_part_list in parselector.py
         columns = [
             "LCSC Part",
             "MFR.Part",
             "Package",
             "Solder Joint",
             "Library Type",
+            "Stock",
             "Manufacturer",
             "Description",
             "Price",
-            "Stock",
         ]
         s = ",".join(f'"{c}"' for c in columns)
         query = f"SELECT {s} FROM parts WHERE "
