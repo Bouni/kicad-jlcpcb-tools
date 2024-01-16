@@ -389,26 +389,26 @@ class PartSelectorDialog(wx.Dialog):
         self.part_list.AppendTextColumn(
             "LCSC",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 80),
+            width=int(parent.scale_factor * 60),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
             "MFR Number",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 140),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
             "Package",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
-            "Joints",
+            "Pins",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 40),
             align=wx.ALIGN_CENTER,
@@ -417,38 +417,38 @@ class PartSelectorDialog(wx.Dialog):
         self.part_list.AppendTextColumn(
             "Type",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 80),
+            width=int(parent.scale_factor * 50),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
             "Manufacturer",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 140),
+            width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
             "Description",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 300),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
             "Price",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 50),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
 
         self.part_list.SetMinSize(HighResWxSize(parent.window, wx.Size(1050, 500)))
 
