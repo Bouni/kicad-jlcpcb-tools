@@ -530,7 +530,7 @@ class Library:
                 ):
                     self.category_map.setdefault(row[0], []).append(row[1])
         tmp = list(self.category_map.keys())
-        tmp.insert(0, 'All')
+        tmp.insert(0, "All")
         return tmp
 
     def get_subcategories(self, category):
