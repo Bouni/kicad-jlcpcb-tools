@@ -271,23 +271,23 @@ class Fabrication:
             )
             board = GetBoard()
             for part in self.parent.store.read_pos_parts():
-                for fp in board.FindFootprintByReference(part[0]):
-                    if get_exclude_from_pos(fp):
-                        continue
-                    if not add_without_lcsc and not part[3]:
-                        continue
-                    position = self.get_position(fp) - aux_orgin
-                    writer.writerow(
-                        [
-                            part[0],
-                            part[1],
-                            part[2],
-                            ToMM(position.x),
-                            ToMM(position.y) * -1,
-                            self.fix_rotation(fp),
-                            "top" if fp.GetLayer() == 0 else "bottom",
-                        ]
-                    )
+                fp = board.FindFootprintByReference(part[0])
+                if get_exclude_from_pos(fp):
+                    continue
+                if not add_without_lcsc and not part[3]:
+                    continue
+                position = self.get_position(fp) - aux_orgin
+                writer.writerow(
+                    [
+                        part[0],
+                        part[1],
+                        part[2],
+                        ToMM(position.x),
+                        ToMM(position.y) * -1,
+                        self.fix_rotation(fp),
+                        "top" if fp.GetLayer() == 0 else "bottom",
+                    ]
+                )
         self.logger.info("Finished generating CPL file")
 
     def generate_bom(self):
