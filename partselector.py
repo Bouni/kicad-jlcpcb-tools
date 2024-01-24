@@ -623,10 +623,10 @@ class PartSelectorDialog(wx.Dialog):
                     qty, p = t.split(":")
                     p = float(p)
                     if p < 1.0:
-                        price.append(f"{qty}:{p * 100:.2f}c")
+                        price.append(f"{qty}: {p * 100:.2f}c")
                     else:
-                        price.append(f"{qty}:${p:.2f}")
-                item[pricecol] = ",".join(price)
+                        price.append(f"{qty}: ${p:.2f}")
+                item[pricecol] = ", ".join(price)
             except ValueError:
                 self.logger.warning("unable to parse price %s", item[pricecol])
             self.part_list.AppendItem(item)
