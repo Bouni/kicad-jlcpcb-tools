@@ -616,7 +616,7 @@ class PartSelectorDialog(wx.Dialog):
         for p in parts:
             item = [str(c) for c in p]
             # Munge price to be more readable
-            pricecol = 7 # Must match order in library.py search function
+            pricecol = 8 # Must match order in library.py search function
             price = []
             try:
                 for t in item[pricecol].split(","):
