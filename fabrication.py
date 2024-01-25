@@ -229,7 +229,7 @@ class Fabrication:
 
     def zip_gerber_excellon(self):
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
-        zipname = f"GERBER-{self.filename.split('.')[0]}.zip"
+        zipname = f"GERBER-{self.filename[:-4]}.zip"
         with ZipFile(
             os.path.join(self.outputdir, zipname),
             "w",
@@ -246,7 +246,7 @@ class Fabrication:
 
     def generate_cpl(self):
         """Generate placement file (CPL)."""
-        cplname = f"CPL-{self.filename.split('.')[0]}.csv"
+        cplname = f"CPL-{self.filename[:-4]}.csv"
         self.corrections = self.parent.library.get_all_correction_data()
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
@@ -282,7 +282,7 @@ class Fabrication:
 
     def generate_bom(self):
         """Generate BOM file."""
-        bomname = f"BOM-{self.filename.split('.')[0]}.csv"
+        bomname = f"BOM-{self.filename[:-4]}.csv"
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
