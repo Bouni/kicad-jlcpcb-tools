@@ -5,6 +5,7 @@ import logging
 import os
 
 import wx  # pylint: disable=import-error
+import wx.dataview  # pylint: disable=import-error
 
 from .helpers import HighResWxSize, loadBitmapScaled
 

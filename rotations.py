@@ -6,6 +6,7 @@ import os
 
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
+import wx.dataview  # pylint: disable=import-error
 
 from .events import PopulateFootprintListEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
