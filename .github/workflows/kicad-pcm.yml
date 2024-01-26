@@ -22,7 +22,7 @@ jobs:
         id: latest-release
 
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Create archive
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
