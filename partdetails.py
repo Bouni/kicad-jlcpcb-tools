@@ -6,6 +6,7 @@ import webbrowser
 
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
+import wx.dataview  # pylint: disable=import-error
 
 from .helpers import HighResWxSize, loadBitmapScaled
 

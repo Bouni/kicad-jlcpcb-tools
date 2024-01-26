@@ -4,6 +4,7 @@ import logging
 import time
 
 import wx  # pylint: disable=import-error
+import wx.dataview  # pylint: disable=import-error
 
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
