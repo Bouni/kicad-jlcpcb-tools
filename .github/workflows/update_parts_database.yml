@@ -3,6 +3,7 @@ name: "Update parts database"
 on:
   schedule:  # 2 hours after jlcparts updates their database
     - cron: "0 5 * * *"
+  workflow_dispatch:  # allow for manually trigger workflow
 jobs:
   build_and_update:
     name: "Update component database and frontend"
