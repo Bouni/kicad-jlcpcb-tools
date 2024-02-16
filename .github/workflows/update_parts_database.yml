@@ -55,6 +55,7 @@ jobs:
     runs-on: ubuntu-20.04
     needs: build_and_update
     permissions:
+      actions: write
       contents: write
       pages: write
       id-token: write
