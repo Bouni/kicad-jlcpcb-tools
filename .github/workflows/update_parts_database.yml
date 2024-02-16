@@ -69,6 +69,6 @@ jobs:
         uses: actions/deploy-pages@v4
       # delete-artifact
       - name: Clean
-        uses: geekyeggo/delete-artifact@v4.1
+        uses: geekyeggo/delete-artifact@v4
         with:
           name: github-pages
