@@ -248,7 +248,7 @@ class Library:
                 result = cur.execute(
                     "SELECT * FROM rotation ORDER BY regex ASC"
                 ).fetchall()
-                return [list(c) for c in result]
+                return [(c[0], int(c[1])) for c in result]
             except sqlite3.OperationalError:
                 return []
 
