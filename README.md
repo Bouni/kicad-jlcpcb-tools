@@ -40,7 +40,8 @@ If you find any sort of problems, please create an issue so that I can hopefully
 ### KiCAD PCM
 
 Add my custom repo to *the Plugin and Content Manager*, the URL is:
-```
+
+```sh
 https://raw.githubusercontent.com/Bouni/bouni-kicad-repository/main/repository.json
 ```
 
