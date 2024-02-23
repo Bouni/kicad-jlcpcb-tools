@@ -639,7 +639,7 @@ class PartSelectorDialog(wx.Dialog):
         if row == -1:
             return
         selection = self.part_list.GetTextValue(row, 0)
-        stock = self.part_list.GetTextValue(row, 8)
+        stock = self.part_list.GetTextValue(row, 5)
         wx.PostEvent(
             self.parent,
             AssignPartsEvent(
