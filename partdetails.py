@@ -127,7 +127,10 @@ class PartDetailsDialog(wx.Dialog):
 
     def get_scaled_bitmap(self, url, width, height):
         """Download a picture from a URL and convert it into a wx Bitmap."""
-        content = requests.get(url, timeout=10).content
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36"
+        }  # pretend we are browser, otherwise their cloud service blocks the request
+        content = requests.get(url, headers=headers, timeout=10).content
         io_bytes = io.BytesIO(content)
         image = wx.Image(io_bytes)
         image = image.Scale(width, height, wx.IMAGE_QUALITY_HIGH)
