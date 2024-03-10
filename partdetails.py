@@ -157,14 +157,15 @@ class PartDetailsDialog(wx.Dialog):
             )
 
         parameters = {
-            "componentCode": "Component code",
-            "firstTypeNameEn": "Primary category",
-            "secondTypeNameEn": "Secondary category",
+            "componentCode": "Component Code",
+            "firstTypeNameEn": "Primary Category",
+            "secondTypeNameEn": "Secondary Category",
             "componentBrandEn": "Brand",
-            "componentName": "Full name",
+            "componentName": "Full Name",
             "componentDesignator": "Designator",
             "componentModelEn": "Model",
             "componentSpecificationEn": "Specification",
+            "assemblyProcess": "Assembly Process",
             "describe": "Description",
             "matchedPartDetail": "Details",
             "stockCount": "Stock",
