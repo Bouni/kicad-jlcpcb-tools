@@ -150,3 +150,7 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 
 Make sure you make use of pre-commit hooks in order to format everything nicely with `black`
 In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hooks that enforce nice and clean code style.
+
+## Common Issues
+When installing the plugin, it may not show up as it requires the python package `request` to be installed:
+you can install it with `pip install requests`
