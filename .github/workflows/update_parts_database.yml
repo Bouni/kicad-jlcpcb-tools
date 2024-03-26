@@ -28,8 +28,12 @@ jobs:
           cd db_build
 
           wget -q https://yaqwsx.github.io/jlcparts/data/cache.zip
-          for seq in $(seq 1 9); do
-            wget -q https://yaqwsx.github.io/jlcparts/data/cache.z0$seq || true
+
+          VOLUMES=$(7z l cache.zip | grep "Volume Index = " | grep -Eoh "[0-9]+")
+
+          for seq in $(seq 1 $VOLUMES); do
+            CACHE=$(printf '%02d' $seq)
+            wget -q https://yaqwsx.github.io/jlcparts/data/cache.z$CACHE || true
           done
 
           7z x cache.zip
