@@ -15,10 +15,17 @@ EXCLUDE_FROM_BOM = 3
 NOT_IN_SCHEMATIC = 4
 
 
-def is_nightly(version: str) -> bool:
-    """Check if version is a Nightly build."""
-    return any(v in version for v in ("6.99", "7.0", "7.99"))
+def is_version8(version: str) -> bool:
+    """Check if version is 8 or 8 Nightly build"""
+    return any(v in version for v in ("8.0", "8.99"))
 
+def is_version7(version: str) -> bool:
+    """Check if version is 7"""
+    return any(v in version for v in ("7.0"))
+
+def is_version6(version: str) -> bool:
+    """Check if version is 6"""
+    return any(v in version for v in ("6.0"))
 
 def getWxWidgetsVersion():
     """Get wx widgets version."""
