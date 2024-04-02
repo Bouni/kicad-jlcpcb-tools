@@ -39,9 +39,9 @@ class SchematicExport:
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
         propRx = re.compile(
-            "\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(id\\s(\\d+)\\)\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)"
+            '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(id\\s(\\d+)\\)\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
         )
-        pinRx = re.compile("\\(pin\\s\\"(.*)\\"\\s\\(")
+        pinRx = re.compile('\\(pin\\s\\"(.*)\\"\\s\\(')
 
         store_parts = self.parent.store.read_all()
 
@@ -116,9 +116,9 @@ class SchematicExport:
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
         propRx = re.compile(
-            "\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)"
+            '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
         )
-        pinRx = re.compile("\\(pin\\s\\"(.*)\\"\\s\\(")
+        pinRx = re.compile('\\(pin\\s\\"(.*)\\"\\s\\(')
 
         store_parts = self.parent.store.read_all()
 
@@ -190,12 +190,12 @@ class SchematicExport:
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
         propRx = re.compile(
-            "\\(property\\s\\"(.*)\\"\\s"(.*)\\""
+            '\\(property\\s\\"(.*)\\"\\s"(.*)\\"'
         )
         atRx = re.compile(
             "\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)"
         )
-        pinRx = re.compile("\\(pin\\s\\"(.*)\\"")
+        pinRx = re.compile('\\(pin\\s\\"(.*)\\"')
 
         store_parts = self.parent.store.read_all()
 
