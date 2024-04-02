@@ -20,7 +20,7 @@ class SchematicExport:
         self.parent = parent
 
     def load_schematic(self, paths):
-        """Load schematic file"""
+        """Load schematic file."""
         if is_version8(GetBuildVersion()):
             self.logger.info("Kicad 8+...")
             for path in paths:
@@ -204,8 +204,6 @@ class SchematicExport:
         lastLcsc = ""
         newLcsc = ""
         lastRef = ""
-        in_bom = 1 #if part[6]: BOM
-        #on_board = 1 #if part[7]: POS
 
         lines = []
         newlines = []
@@ -224,12 +222,12 @@ class SchematicExport:
 
             if "(symbol" in inLine and "(lib_id" in inLine2:  # skip library section
                 partSection = True
-            
+
             #self.logger.info("line %d", i)
             m = propRx.search(inLine)
             m2 = atRx.search(inLine2)
             if m and m2 and partSection:
-                key = m.group(1)               
+                key = m.group(1)
                 #self.logger.info("key %s", key)
                 # found a LCSC property, so update it if needed
                 if key == "LCSC" or key == "LCSC_PN" or key == "JLC_PN":
@@ -250,7 +248,6 @@ class SchematicExport:
                     for part in store_parts:
                         if value == part[0]:
                             newLcsc = part[3]
-                            in_bom = part[6]
                             break
             # if we hit the pin section without finding a LCSC property, add it
             m3 = pinRx.search(inLine)
@@ -266,9 +263,7 @@ class SchematicExport:
                 newLcsc = ""
                 lastRef = ""
             newlines.append(outLine)
-            
         newlines.append(lines[len(lines)-1].rstrip())
-
         with open(path, "w", encoding="utf-8") as f:
             for line in newlines:
                 f.write(line + "\n")
