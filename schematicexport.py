@@ -10,7 +10,6 @@ from .helpers import is_version8, is_version7, is_version6
 
 
 class SchematicExport:
-
     """A class to export Schematic files."""
 
     # This only works with KiCad v6/v7/v8 files, if the format changes, this will probably break
@@ -184,7 +183,7 @@ class SchematicExport:
             for line in newlines:
                 f.write(line + "\n")
         self.logger.info("Added LCSC's to %s (maybe?)", path)
-        
+
     def _update_schematic8(self, path):
         """Only works with KiCad V8 files."""
         self.logger.info("Reading %s...", path)
