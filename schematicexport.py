@@ -6,7 +6,7 @@ import re
 
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
-from .helpers import is_version8, is_version7, is_version6
+from .helpers import is_version6, is_version7, is_version8
 
 
 class SchematicExport:
