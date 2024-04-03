@@ -29,4 +29,4 @@ jobs:
       - name: Install ruff
         run: pip install ruff
       - name: Run ruff
-        run: ruff $(git ls-files '*.py')
+        run: ruff check $(git ls-files '*.py')
