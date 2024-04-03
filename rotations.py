@@ -63,11 +63,11 @@ class RotationManagerDialog(wx.Dialog):
         )
 
         sizer_left = wx.BoxSizer(wx.VERTICAL)
-        sizer_left.Add(regex_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_left.Add(regex_label, 0, wx.ALL, 5)
         sizer_left.Add(
             self.regex,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
@@ -86,11 +86,11 @@ class RotationManagerDialog(wx.Dialog):
         )
 
         sizer_right = wx.BoxSizer(wx.VERTICAL)
-        sizer_right.Add(correction_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_right.Add(correction_label, 0, wx.ALL, 5)
         sizer_right.Add(
             self.correction,
             0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
