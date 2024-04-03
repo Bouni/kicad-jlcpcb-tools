@@ -255,8 +255,9 @@ class SchematicExport:
                     self.logger.info("added %s to %s", newLcsc, lastRef)
                     newTxt = f'\t\t(property "LCSC" "{newLcsc}"\n\t\t\t(at {lastLoc} 0)'
                     newlines.append(newTxt)
-                    newlines.append("\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\t\t\t\t\n)\n\t\t\t\t(hide yes)")
+                    newlines.append("\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\n\t\t\t\t)\n\t\t\t\t(hide yes)")
                     newlines.append("\t\t\t)")
+                    newlines.append("\t\t)")
                 lastLoc = ""
                 lastLcsc = ""
                 newLcsc = ""
