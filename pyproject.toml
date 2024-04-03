@@ -4,34 +4,8 @@ license     = {text = "MIT"}
 description = "Plugin to generate BOM + CPL files for JLCPCB."
 readme      = "README.md"
 
-# [tool.pylint]
-# max-line-length = 120
-# extension-pkg-whitelist = "wx"
+[tool.ruff.lint]
 
-# [tool.pylint."MESSAGES CONTROL"]
-# disable = [
-#     "fixme",
-#     "format",
-#     "wrong-import-order",
-#     "too-few-public-methods",
-#     "too-many-ancestors",
-#     "too-many-arguments",
-#     "too-many-branches",
-#     "too-many-instance-attributes",
-#     "too-many-lines",
-#     "too-many-locals",
-#     "too-many-public-methods",
-#     "too-many-return-statements",
-#     "too-many-statements",
-#     "too-many-boolean-expressions",
-#     "invalid-name",
-#     "duplicate-code",
-# ]
-
-# [tool.pylint.FORMAT]
-# expected-line-ending-format = "LF"
-
-[tool.ruff]
 select = [
     "B002", # Python does not support the unary prefix increment
     "B007", # Loop control variable {name} not used within loop body
@@ -127,23 +101,19 @@ ignore = [
     "UP007", # keep type annotation style as is
     # Ignored due to performance: https://github.com/charliermarsh/ruff/issues/2923
     "UP038", # Use `X | Y` in `isinstance` call instead of `(X, Y)`
-
 ]
 
 
-[tool.ruff.flake8-pytest-style]
+[tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 force-sort-within-sections = true
-known-first-party = [
-    "homeassistant",
-]
 combine-as-imports = true
 split-on-trailing-comma = false
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "jlcparts_db_convert.py" = ["T201"]
 
-[tool.ruff.mccabe]
+[tool.ruff.lint.mccabe]
 max-complexity = 25
