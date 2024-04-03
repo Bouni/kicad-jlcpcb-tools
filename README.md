@@ -150,3 +150,74 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 
 Make sure you make use of pre-commit hooks in order to format everything nicely with `black`
 In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hooks that enforce nice and clean code style.
+
+## Standalone mode
+
+Allows the plugin UI to be started without KiCAD, enabling debugging with an IDE like pycharm / vscode.
+
+Standalone mode is under development.
+
+### Limitations
+
+- All board / footprint / value data are hardcoded stubs, see standalone_impl.py
+
+### How to use
+
+To use the plugin in standlone mode you'll need to identify three pieces of information specific to your Kicad version, plugin path, and OS.
+
+#### Python
+
+The <i><b>{KiCad python}</b></i> should be used, this can be found at different locations depending on your system:
+
+| OS | Kicad python |
+|---|---|
+|Mac| /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3|
+|Linux| TBD|
+|Windows | TBD|
+
+#### Working directory
+
+The <i><b>{working directory}</b></i> should be your plugins directory, ie:
+
+|OS | Working dir|
+|Mac| ~/Documents/KiCad/8.0/scripting/plugins/|
+|Linux|TBD|
+|Windows|TBD|
+
+#### Plugin folder name
+
+The <i><b>{kicad-jlcpcb-tools folder name}</b></i> should be the name of the kicad-jlcpcb-tools folder.
+
+- For Kicad managed plugins this may be like
+
+> com_github_bouni_kicad-jlcpcb-tools
+
+- If you are developing kicad-jlcpcb-tools this is the folder you cloned the kicad-jlcpcb-tools as.
+
+#### Command line
+
+- Change to the working directory as noted above
+- Run the python interpreter with the <i><b>{kicad-jlcpcb-tools folder name}</b></i> folder as a module.
+
+For example:
+
+```sh
+cd {working directory}
+{kicad_python} -m {kicad-jlcpcb-tools folder name}
+```
+
+For example on Mac:
+
+```sh
+/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m kicad-jlcpcb-tools
+```
+
+#### IDE
+
+- Configure the command line to be '{kicad_python} -m {kicad-jlcpcb-tools folder name}'
+- Set the working directory to {working directory}
+
+If using PyCharm or Jetbrains IDEs, set the interpreter to Kicad's python, <i><b>{Kicad python}</b></i> and under 'run configuration' select Python.
+
+Click on 'script path' and change instead to 'module name',
+entering the name of the kicad-jlcpcb-tools folder, <i><b>{kicad-jlcpcb-tools folder name}</b></i>.

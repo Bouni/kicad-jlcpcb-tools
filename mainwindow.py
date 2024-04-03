@@ -7,7 +7,7 @@ import re
 import sys
 import time
 
-import pcbnew
+import pcbnew as kicad_pcbnew
 import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
@@ -65,11 +65,17 @@ ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
+class KicadProvider:
+    """KiCad implementation of the provider, see standalone_impl.py for the stub version."""
+
+    def get_pcbnew(self):
+        """Get the pcbnew instance."""
+        return kicad_pcbnew
 
 class JLCPCBTools(wx.Dialog):
-    """Main Windows class for this plugin."""
+    """JLCPCBTools main dialog."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, kicad_provider=KicadProvider()):
         while not wx.GetApp():
             time.sleep(1)
         wx.Dialog.__init__(
@@ -81,12 +87,13 @@ class JLCPCBTools(wx.Dialog):
             size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
-        self.KicadBuildVersion = pcbnew.GetBuildVersion()
+        self.pcbnew = kicad_provider.get_pcbnew()
+        self.KicadBuildVersion = self.pcbnew.GetBuildVersion()
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
-        self.project_path = os.path.split(pcbnew.GetBoard().GetFileName())[0]
-        self.board_name = os.path.split(pcbnew.GetBoard().GetFileName())[1]
+        self.project_path = os.path.split(self.pcbnew.GetBoard().GetFileName())[0]
+        self.board_name = os.path.split(self.pcbnew.GetBoard().GetFileName())[1]
         self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -517,13 +524,13 @@ class JLCPCBTools(wx.Dialog):
 
     def init_store(self):
         """Initialize the store of part assignments."""
-        self.store = Store(self, self.project_path)
+        self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
 
     def init_fabrication(self):
         """Initialize the fabrication."""
-        self.fabrication = Fabrication(self)
+        self.fabrication = Fabrication(self, self.pcbnew.GetBoard())
 
     def reset_gauge(self, *_):
         """Initialize the gauge."""
@@ -574,8 +581,7 @@ class JLCPCBTools(wx.Dialog):
         numbers = []
         parts = []
         for part in self.store.read_all():
-            board = pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(part[0])
+            fp = self.pcbnew.GetBoard().FindFootprintByReference(part[0])
             if part[3] and part[3] not in numbers:
                 numbers.append(part[3])
             part.insert(4, "")
@@ -699,7 +705,7 @@ class JLCPCBTools(wx.Dialog):
         )
 
         # clear the present selections
-        selection = pcbnew.GetCurrentSelection()
+        selection = self.pcbnew.GetCurrentSelection()
         for selected in selection:
             selected.ClearSelected()
 
@@ -708,12 +714,12 @@ class JLCPCBTools(wx.Dialog):
             for item in self.footprint_list.GetSelections():
                 row = self.footprint_list.ItemToRow(item)
                 ref = self.footprint_list.GetTextValue(row, 0)
-                fp = pcbnew.GetBoard().FindFootprintByReference(ref)
+                fp = self.pcbnew.GetBoard().FindFootprintByReference(ref)
 
                 fp.SetSelected()
 
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
-            pcbnew.Refresh()
+            self.pcbnew.Refresh()
 
     def enable_all_buttons(self, state):
         """Control state of all the buttons."""
@@ -747,7 +753,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            board = pcbnew.GetBoard()
+            board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
@@ -767,7 +773,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            board = pcbnew.GetBoard()
+            board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, bom)
@@ -782,7 +788,7 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             selected_rows.append(row)
             ref = self.footprint_list.GetTextValue(row, 0)
-            board = pcbnew.GetBoard()
+            board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, pos)
