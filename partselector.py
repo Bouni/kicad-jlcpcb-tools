@@ -53,15 +53,16 @@ class PartSelectorDialog(wx.Dialog):
         keyword_label = wx.StaticText(
             self,
             wx.ID_ANY,
-            "Keyword",
+            "Keywords",
             size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            style=wx.ALIGN_RIGHT
         )
         self.keyword = wx.TextCtrl(
             self,
             wx.ID_ANY,
             lcsc_selection,
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(800, 24)),
             wx.TE_PROCESS_ENTER,
         )
         self.keyword.SetHint("e.g. 10k 0603")
@@ -230,14 +231,16 @@ class PartSelectorDialog(wx.Dialog):
             0,
         )
 
-        search_sizer_one = wx.BoxSizer(wx.VERTICAL)
-        search_sizer_one.Add(keyword_label, 0, wx.ALL, 5)
-        search_sizer_one.Add(
+        keyword_search_row1 = wx.BoxSizer(wx.HORIZONTAL)
+        keyword_search_row1.Add(keyword_label, 0, wx.ALL, 5)
+        keyword_search_row1.Add(
             self.keyword,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
+
+        search_sizer_one = wx.BoxSizer(wx.VERTICAL)
         search_sizer_one.Add(manufacturer_label, 0, wx.ALL, 5)
         search_sizer_one.Add(
             self.manufacturer,
@@ -324,13 +327,19 @@ class PartSelectorDialog(wx.Dialog):
         )
         help_button.SetBitmapMargins((2, 0))
 
-        search_sizer = wx.StaticBoxSizer(wx.HORIZONTAL, self, "Search")
-        search_sizer.Add(search_sizer_one, 0, wx.RIGHT, 20)
-        search_sizer.Add(search_sizer_two, 0, wx.RIGHT, 20)
-        search_sizer.Add(search_sizer_three, 0, wx.RIGHT, 20)
-        search_sizer.Add(search_sizer_four, 0, wx.RIGHT, 20)
-        search_sizer.Add(search_sizer_five, 0, wx.RIGHT, 20)
+        search_sizer = wx.StaticBoxSizer(wx.VERTICAL, self, "Search")
+
+        search_sizer.Add(keyword_search_row1)
+
+        search_sizer_row2 = wx.StaticBoxSizer(wx.HORIZONTAL, self)
+        search_sizer_row2.Add(search_sizer_one, 0, wx.RIGHT, 20)
+        search_sizer_row2.Add(search_sizer_two, 0, wx.RIGHT, 20)
+        search_sizer_row2.Add(search_sizer_three, 0, wx.RIGHT, 20)
+        search_sizer_row2.Add(search_sizer_four, 0, wx.RIGHT, 20)
+        search_sizer_row2.Add(search_sizer_five, 0, wx.RIGHT, 20)
         # search_sizer.Add(help_button, 0, wx.RIGHT, 20)
+
+        search_sizer.Add(search_sizer_row2)
 
         self.keyword.Bind(wx.EVT_TEXT, self.search_dwell)
         self.manufacturer.Bind(wx.EVT_TEXT, self.search_dwell)
