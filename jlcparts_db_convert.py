@@ -35,7 +35,8 @@ if partsdb.exists():
 
 # connection to the jlcparts db
 jlcparts_db_name = "cache.sqlite3"
-conn_jp = sqlite3.connect(jlcparts_db_name)
+db_uri = f"file:{jlcparts_db_name}?mode=rw"
+conn_jp = sqlite3.connect(db_uri, uri=True)
 
 # connection to the plugin db we want to write
 conn = sqlite3.connect(partsdb)
