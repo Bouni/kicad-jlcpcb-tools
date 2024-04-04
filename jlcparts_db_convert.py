@@ -24,7 +24,6 @@ import humanize
 
 start = datetime.now()
 
-os.makedirs("db_build", exist_ok=True)
 os.chdir("db_build")
 
 partsdb = Path("parts.db")
