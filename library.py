@@ -41,7 +41,7 @@ class Library:
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.order_by = "LCSC Part"
+        self.order_by = None
         self.order_dir = "ASC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.partsdb_file = os.path.join(self.datadir, "parts.db")
@@ -125,11 +125,11 @@ class Library:
             self.logger.error("Can't split keyword: %s", str(e))
 
         keyword_columns = [
-            "LCSC Part",
+            # "LCSC Part",
             "Description",
             "MFR.Part",
-            "Package",
-            "Manufacturer",
+            # "Package",
+            # "Manufacturer",
         ]
         query_chunks = []
         for kw in keywords:
@@ -141,19 +141,25 @@ class Library:
             query_chunks.append(f'"Manufacturer" LIKE "{p}"')
         if "package" in parameters and parameters["package"] != "":
             p = parameters["package"]
-            query_chunks.append(f'"Package" LIKE "{p}"')
+            if p.isdigit():
+                query_chunks.append(f'"Package" = "{p}" COLLATE NOCASE')
+            else:
+                query_chunks.append(f'"Package" LIKE "{p}%"')
         if "category" in parameters and parameters["category"] != "" and parameters["category"] != "All":
             p = parameters["category"]
-            query_chunks.append(f'"First Category" LIKE "{p}"')
+            query_chunks.append(f'"First Category" LIKE "{p}%"')
         if "subcategory" in parameters and parameters["subcategory"] != "":
             p = parameters["subcategory"]
-            query_chunks.append(f'"Second Category" LIKE "{p}"')
+            query_chunks.append(f'"Second Category" LIKE "{p}%"')
         if "part_no" in parameters and parameters["part_no"] != "":
             p = parameters["part_no"]
-            query_chunks.append(f'"MFR.Part" LIKE "{p}"')
+            if p.isdigit():
+                query_chunks.append(f'("MFR.Part" = "{p}" COLLATE NOCASE OR "LCSC Part" = "{p}" COLLATE NOCASE)')
+            else:
+                query_chunks.append(f'("MFR.Part" LIKE "{p}%" OR "LCSC Part" = "{p}" COLLATE NOCASE)')
         if "solder_joints" in parameters and parameters["solder_joints"] != "":
             p = parameters["solder_joints"]
-            query_chunks.append(f'"Solder Joint" LIKE "{p}"')
+            query_chunks.append(f'"Solder Joint" = "{p}"')
 
         library_types = []
         if parameters["basic"]:
@@ -170,7 +176,11 @@ class Library:
             return []
 
         query += " AND ".join(query_chunks)
-        query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+
+        if self.order_by != None:
+            # query = f"SELECT * FROM ({query})"
+            query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+
         query += " LIMIT 1000"
 
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
