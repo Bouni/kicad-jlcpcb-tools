@@ -173,7 +173,7 @@ The <i><b>{KiCad python}</b></i> should be used, this can be found at different 
 |---|---|
 |Mac| /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3|
 |Linux| TBD|
-|Windows | TBD|
+|Windows | C:\Program Files\KiCad\8.0\bin\python.exe|
 
 #### Working directory
 
@@ -182,7 +182,7 @@ The <i><b>{working directory}</b></i> should be your plugins directory, ie:
 |OS | Working dir|
 |Mac| ~/Documents/KiCad/8.0/scripting/plugins/|
 |Linux|TBD|
-|Windows|TBD|
+|Windows| %USERPROFILE%\Documents\KiCad\8.0\scripting\plugins\|
 
 #### Plugin folder name
 
@@ -210,6 +210,12 @@ For example on Mac:
 
 ```sh
 /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m kicad-jlcpcb-tools
+```
+
+For example on Windows:
+
+```cmd
+& 'C:\Program Files\KiCad\8.0\bin\python.exe' -m kicad-jlcpcb-tools
 ```
 
 #### IDE
