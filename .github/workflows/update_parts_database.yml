@@ -7,7 +7,7 @@ on:
 jobs:
   build_and_update:
     name: "Update component database and frontend"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     environment: github-pages
     steps:
       - name: Checkout
@@ -16,7 +16,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            python3 python3-pip wget zip unzip p7zip-full
+            python3 python3-pip wget zip unzip p7zip-full sqlite3
+      - name: Show versions
+        run: |
+          sqlite3 --version
+          python3 --version
+          python3 -c "import sqlite3; import pprint; db = sqlite3.connect(':memory:'); cursor = db.execute('PRAGMA COMPILE_OPTIONS'); pprint.pprint(cursor.fetchall())"
+
       - name: Install python dependencies
         run: |
           pip install humanize
