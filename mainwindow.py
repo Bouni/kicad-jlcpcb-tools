@@ -616,13 +616,13 @@ class JLCPCBTools(wx.Dialog):
             # First check if the part name mathes
             for regex, correction in corrections:
                 if re.search(regex, str(part[1])):
-                    part[8] = correction
+                    part[8] = str(correction)
                     break
             # If there was no match for the part name, check if the package matches
             if part[8] == "":
                 for regex, correction in corrections:
                     if re.search(regex, str(part[2])):
-                        part[8] = correction
+                        part[8] = str(correction)
                         break
 
             self.footprint_list.AppendItem(part)
