@@ -621,7 +621,9 @@ class JLCPCBTools(wx.Dialog):
             )
             if detail:
                 part[4] = detail[0][2]
-                part[5] = detail[0][1]
+                if part[5] != str(detail[0][1]):
+                    part[5] = str(detail[0][1])
+                    self.store.set_stock(part[0], detail[0][1])
             # First check if the part name mathes
             for regex, correction in corrections:
                 if re.search(regex, str(part[1])):
