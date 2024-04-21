@@ -383,6 +383,17 @@ class Library:
             numbers = ",".join([f'"{n}"' for n in lcsc])
 
             try:
+                rows = cur.execute(f'SELECT partsId FROM parts_by_lcsc where lcsc IN ({numbers})').fetchall()
+                if len(rows) == len(lcsc):
+                    numbers = ",".join([f'"{r[0]}"' for r in rows])
+                    return cur.execute(
+                        f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where rowid IN ({numbers})'
+                    ).fetchall()
+            except Exception as e:
+                self.logger.debug(f"{e}")
+                pass
+
+            try:
                 return cur.execute(
                     f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where "LCSC Part" IN ({numbers})'
                 ).fetchall()
@@ -530,6 +541,30 @@ class Library:
                 self.create_tables(["placeholder_invalid_column_fix_errors"])
                 return
         else:
+            self.logger.debug("Indexing parts table...")
+            wx.PostEvent(self.parent, UpdateGaugeEvent(value=0))
+            with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+                con.execute('CREATE TABLE IF NOT EXISTS parts_by_lcsc (partsId INTEGER, lcsc TEXT);')
+                howMany = con.execute('SELECT COUNT(*) FROM parts').fetchone()[0]
+                con.execute('DROP INDEX IF EXISTS LCSCpartIdx;')
+                cur = con.execute('SELECT rowid, `LCSC Part` FROM parts')
+                progress = 0
+                for i in range(howMany):
+                    r = cur.fetchone()
+                    if r is None:
+                        break
+                    con.execute('INSERT OR REPLACE INTO parts_by_lcsc (partsId, lcsc) VALUES (?, ?)', (r[0], r[1]))
+                    p = int(i / howMany * 100)
+                    if p > progress:
+                        wx.PostEvent(self.parent, UpdateGaugeEvent(value=p))
+                        progress = p
+
+                wx.PostEvent(self.parent, UpdateGaugeEvent(value=100))
+                self.logger.debug("Finalising database index...")                
+                con.commit()
+                con.execute('CREATE INDEX IF NOT EXISTS LCSCpartIdx ON parts_by_lcsc(lcsc);')                
+                con.commit()
+
             wx.PostEvent(self.parent, ResetGaugeEvent())
             end = time.time()
             wx.PostEvent(self.parent, PopulateFootprintListEvent())
