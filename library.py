@@ -553,15 +553,14 @@ class Library:
             self.logger.debug("Indexing parts table...")
             wx.PostEvent(self.parent, UpdateGaugeEvent(value=0))
             with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+                con.execute('DROP TABLE parts_by_lcsc;')
                 con.execute('CREATE TABLE IF NOT EXISTS parts_by_lcsc (partsId INTEGER, lcsc TEXT);')
-                howMany = con.execute('SELECT COUNT(*) FROM parts').fetchone()[0]
                 con.execute('DROP INDEX IF EXISTS LCSCpartIdx;')
                 cur = con.execute('SELECT rowid, `LCSC Part` FROM parts')
+                indexedParts = cur.fetchall()
+                howMany = len(indexedParts)
                 progress = 0
-                for i in range(howMany):
-                    r = cur.fetchone()
-                    if r is None:
-                        break
+                for i, r in enumerate(indexedParts):
                     con.execute('INSERT OR REPLACE INTO parts_by_lcsc (partsId, lcsc) VALUES (?, ?)', (r[0], r[1]))
                     p = int(i / howMany * 100)
                     if p > progress:
@@ -573,6 +572,7 @@ class Library:
                 con.commit()
                 con.execute('CREATE INDEX IF NOT EXISTS LCSCpartIdx ON parts_by_lcsc(lcsc);')                
                 con.commit()
+                self.logger.debug("Indexing parts table done.")
 
             wx.PostEvent(self.parent, ResetGaugeEvent())
             end = time.time()
