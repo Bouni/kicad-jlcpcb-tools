@@ -382,17 +382,26 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
             numbers = ",".join([f'"{n}"' for n in lcsc])
 
+            # try retrieving from the cached index first (LCSC Part indexing from FTS5 parts is sloooooow)
             try:
-                rows = cur.execute(f'SELECT partsId FROM parts_by_lcsc where lcsc IN ({numbers})').fetchall()
-                if len(rows) == len(lcsc):
-                    numbers = ",".join([f'"{r[0]}"' for r in rows])
-                    return cur.execute(
-                        f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where rowid IN ({numbers})'
-                    ).fetchall()
+                rows = cur.execute(f'SELECT lcsc, partsId FROM parts_by_lcsc where lcsc IN ({numbers})').fetchall()
+                
+                # orphaned parts found
+                if len(rows) != len(lcsc):
+                    rowid_by_lcsc = dict(rows)
+                    for lc in lcsc:
+                        if lc not in rowid_by_lcsc:
+                            self.logger.debug(f"LCSC Part `{lc}` not found in the database.")
+
+                numbers = ",".join([f'"{r[0]}"' for r in rows])
+                return cur.execute(
+                    f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where rowid IN ({numbers})'
+                ).fetchall()
             except Exception as e:
                 self.logger.debug(f"{e}")
                 pass
 
+            # fall back to the direct approach
             try:
                 return cur.execute(
                     f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where "LCSC Part" IN ({numbers})'
