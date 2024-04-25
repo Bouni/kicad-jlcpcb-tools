@@ -128,18 +128,36 @@ class Library:
         query = f"SELECT {s} FROM parts WHERE "
 
         match_chunks = []
+        like_chunks = []
+
         query_chunks = []
 
+        # Build 'match_chunks' and 'like_chunks' arrays
+        #
+        # FTS5 (https://www.sqlite.org/fts5.html) has a substring limit of
+        # at least 3 characters.
+        # 'Substrings consisting of fewer than 3 unicode characters do not
+        #  match any rows when used with a full-text query'
+        #
+        # However, they will still match with a LIKE.
+        #
+        # So extract out the <3 character strings and add a 'LIKE' term
+        # for each of those.
         if parameters["keyword"] != "":
             keywords = parameters["keyword"].split(" ")
-            keywords_intermediate = []
+            match_keywords_intermediate = []
             for w in keywords:
                 # skip over empty keywords
                 if w != "":
-                    kw = f'"{w}"'
-                    keywords_intermediate.append(kw)
-            keywords_entry = " AND ".join(keywords_intermediate)
-            match_chunks.append(f"{keywords_entry}")
+                    if len(w) < 3: # LIKE entry
+                        kw = f"description LIKE '%{w}%'"
+                        like_chunks.append(kw)
+                    else: # MATCH entry
+                        kw = f'"{w}"'
+                        match_keywords_intermediate.append(kw)
+            if match_keywords_intermediate:
+                match_entry = " AND ".join(match_keywords_intermediate)
+                match_chunks.append(f"{match_entry}")
 
         if "manufacturer" in parameters and parameters["manufacturer"] != "":
             p = parameters["manufacturer"]
@@ -171,7 +189,7 @@ class Library:
         if parameters["stock"]:
             query_chunks.append('"Stock" > "0"')
 
-        if not match_chunks and not query_chunks:
+        if not match_chunks and not like_chunks and not query_chunks:
             return []
 
         if match_chunks:
@@ -179,8 +197,13 @@ class Library:
             query += " AND ".join(match_chunks)
             query += "'"
 
-        if query_chunks:
+        if like_chunks:
             if match_chunks:
+                query += " AND "
+            query += " AND ".join(like_chunks)
+
+        if query_chunks:
+            if match_chunks or like_chunks:
                 query += " AND "
             query += " AND ".join(query_chunks)
 
