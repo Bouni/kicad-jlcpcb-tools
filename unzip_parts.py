@@ -25,10 +25,9 @@ def unzip_parts(path):
             # Open the split file
             with open(split_path, "rb") as split_file:
                 # Read the file data
-                file_data = split_file.read()
-
-                # Append the file data to the original file
-                db.write(file_data)
+                while (file_data := split_file.read(1024 * 1024)):
+                    # Append the file data to the original file
+                    db.write(file_data)
 
             # Delete the split file
             os.unlink(split_path)
