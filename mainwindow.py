@@ -15,11 +15,13 @@ import wx.dataview  # pylint: disable=import-error
 from .const import Column
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
+    EVT_LOGBOX_APPEND_EVENT,
     EVT_MESSAGE_EVENT,
     EVT_POPULATE_FOOTPRINT_LIST_EVENT,
     EVT_RESET_GAUGE_EVENT,
     EVT_UPDATE_GAUGE_EVENT,
     EVT_UPDATE_SETTING,
+    LogboxAppendEvent,
 )
 from .fabrication import Fabrication
 from .helpers import (
@@ -501,6 +503,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_ASSIGN_PARTS_EVENT, self.assign_parts)
         self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
         self.Bind(EVT_UPDATE_SETTING, self.update_settings)
+        self.Bind(EVT_LOGBOX_APPEND_EVENT, self.logbox_append)
 
         self.enable_part_specific_toolbar_buttons(False)
 
@@ -897,6 +900,10 @@ class JLCPCBTools(wx.Dialog):
         self.settings[e.section][e.setting] = e.value
         self.save_settings()
 
+    def logbox_append(self, e):
+        """Write text to the logbox."""
+        self.logbox.WriteText(e.msg)
+
     def load_settings(self):
         """Load settings from settings.json."""
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
@@ -1092,7 +1099,7 @@ class JLCPCBTools(wx.Dialog):
         handler1 = logging.StreamHandler(sys.stderr)
         handler1.setLevel(logging.DEBUG)
         # and to our GUI
-        handler2 = LogBoxHandler(self.logbox)
+        handler2 = LogBoxHandler(self.logbox, self)
         handler2.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(funcName)s -  %(message)s",
@@ -1112,15 +1119,15 @@ class JLCPCBTools(wx.Dialog):
 class LogBoxHandler(logging.StreamHandler):
     """Logging class for the logging textbox at th ebottom of the mainwindow."""
 
-    def __init__(self, textctrl):
+    def __init__(self, textctrl, event_destination):
         logging.StreamHandler.__init__(self)
         self.textctrl = textctrl
+        self.event_destination = event_destination
 
     def emit(self, record):
-        """Pokemon exception that hopefully helps getting this working with threads."""
-        try:
-            msg = self.format(record)
-            self.textctrl.WriteText(msg + "\n")
-            self.flush()
-        except:  # pylint: disable=bare-except
-            pass
+        """Marshal the event over to the main thread."""
+        msg = self.format(record)
+        wx.QueueEvent(self.event_destination, LogboxAppendEvent(
+                msg=f"{msg}\n"
+            )
+        )
