@@ -406,7 +406,7 @@ class Library:
                 "Parts db is split into %s parts. Proceeding to download...", r.text
             )
             cnt = int(r.text)
-            self.logger.debug("Removing any spurios old zip part files...")
+            self.logger.debug("Removing any spurious old zip part files...")
             for p in glob(str(Path(self.datadir) / (chunk_file_stub + "*"))):
                 self.logger.debug("Removing %s.", p)
                 os.unlink(p)
