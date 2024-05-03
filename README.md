@@ -139,7 +139,7 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 ## Development
 
 1. Fork repo
-2. Fit clone forked repo
+2. Git clone forked repo
 3. Install pre-commit `pip install pre-commit`
 4. Setup pre-commit `pre-commit run`
 5. Create feature branch `git switch -c my-awesome-feature`
