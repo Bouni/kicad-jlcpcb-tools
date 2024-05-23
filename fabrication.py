@@ -77,7 +77,11 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
-        # First check if the value aka part name matches
+        # First check if the reference matches
+        for regex, correction in self.corrections:
+            if re.search(regex, str(footprint.GetReference())):
+                return self.rotate(footprint, rotation, correction)
+        # Then check if the value aka part name matches
         for regex, correction in self.corrections:
             if re.search(regex, str(footprint.GetValue())):
                 return self.rotate(footprint, rotation, correction)
