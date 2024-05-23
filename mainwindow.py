@@ -64,6 +64,7 @@ ID_HIDE_BOM = 13
 ID_HIDE_POS = 14
 ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
+ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
@@ -616,11 +617,18 @@ class JLCPCBTools(wx.Dialog):
             if detail:
                 part[4] = detail[0][2]
                 part[5] = detail[0][1]
-            # First check if the part name mathes
+            # First check if the part reference mathes
             for regex, correction in corrections:
-                if re.search(regex, str(part[1])):
+                regex = str(regex).lower().replace('ref:', '').replace(' ', '')
+                if regex == str(part[0]).lower():
                     part[8] = str(correction)
                     break
+            # First check if the part name mathes
+            if part[8] == "":
+                for regex, correction in corrections:
+                    if re.search(regex, str(part[1])):
+                        part[8] = str(correction)
+                        break
             # If there was no match for the part name, check if the package matches
             if part[8] == "":
                 for regex, correction in corrections:
@@ -982,7 +990,11 @@ class JLCPCBTools(wx.Dialog):
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
                 return
-            if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
+            if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
+                package = self.footprint_list.GetTextValue(row, 0)
+                if package != "":
+                    RotationManagerDialog(self, "Ref: " + re.escape(package)).ShowModal()
+            elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
                 package = self.footprint_list.GetTextValue(row, 2)
                 if package != "":
                     RotationManagerDialog(self, "^" + re.escape(package)).ShowModal()
@@ -1067,6 +1079,12 @@ class JLCPCBTools(wx.Dialog):
         paste_lcsc = wx.MenuItem(conMenu, wx.NewIdRef(), "Paste LCSC")
         conMenu.Append(paste_lcsc)
         conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
+
+        rotation_by_reference = wx.MenuItem(
+            conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE, "Add Rotation by reference"
+        )
+        conMenu.Append(rotation_by_reference)
+        conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_reference)
 
         rotation_by_package = wx.MenuItem(
             conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE, "Add Rotation by package"
