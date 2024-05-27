@@ -54,6 +54,8 @@ class Library:
                 "Data directory 'jlcpcb' does not exist and will be created."
             )
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
+        else:
+            self.logger.info("Data directory '%s' exists, not creating", self.datadir)
 
     def check_library(self):
         """Check if the database files exists, if not trigger update / create database."""
