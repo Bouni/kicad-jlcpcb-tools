@@ -51,7 +51,7 @@ class Library:
         """Check if folders and database exist, setup if not."""
         if not os.path.isdir(self.datadir):
             self.logger.info(
-                "Data directory 'jlcpcb' does not exist and will be created."
+                "Data directory '%s' does not exist and will be created.", self.datadir
             )
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
         else:
