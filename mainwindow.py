@@ -518,6 +518,10 @@ class JLCPCBTools(wx.Dialog):
 
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
+        root = logging.getLogger()
+        root.removeHandler(self.logging_handler1)
+        root.removeHandler(self.logging_handler2)
+
         self.Destroy()
         self.EndModal(0)
 
@@ -1096,19 +1100,19 @@ class JLCPCBTools(wx.Dialog):
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
         # Log to stderr
-        handler1 = logging.StreamHandler(sys.stderr)
-        handler1.setLevel(logging.DEBUG)
+        self.logging_handler1 = logging.StreamHandler(sys.stderr)
+        self.logging_handler1.setLevel(logging.DEBUG)
         # and to our GUI
-        handler2 = LogBoxHandler(self)
-        handler2.setLevel(logging.DEBUG)
+        self.logging_handler2 = LogBoxHandler(self)
+        self.logging_handler2.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(funcName)s -  %(message)s",
             datefmt="%Y.%m.%d %H:%M:%S",
         )
-        handler1.setFormatter(formatter)
-        handler2.setFormatter(formatter)
-        root.addHandler(handler1)
-        root.addHandler(handler2)
+        self.logging_handler1.setFormatter(formatter)
+        self.logging_handler2.setFormatter(formatter)
+        root.addHandler(self.logging_handler1)
+        root.addHandler(self.logging_handler2)
         self.logger = logging.getLogger(__name__)
 
     def __del__(self):
