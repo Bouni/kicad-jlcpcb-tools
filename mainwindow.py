@@ -1099,7 +1099,7 @@ class JLCPCBTools(wx.Dialog):
         handler1 = logging.StreamHandler(sys.stderr)
         handler1.setLevel(logging.DEBUG)
         # and to our GUI
-        handler2 = LogBoxHandler(self.logbox, self)
+        handler2 = LogBoxHandler(self)
         handler2.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(funcName)s -  %(message)s",
@@ -1119,9 +1119,8 @@ class JLCPCBTools(wx.Dialog):
 class LogBoxHandler(logging.StreamHandler):
     """Logging class for the logging textbox at th ebottom of the mainwindow."""
 
-    def __init__(self, textctrl, event_destination):
+    def __init__(self, event_destination):
         logging.StreamHandler.__init__(self)
-        self.textctrl = textctrl
         self.event_destination = event_destination
 
     def emit(self, record):
