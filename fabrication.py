@@ -241,7 +241,7 @@ class Fabrication:
                         continue
                     filePath = os.path.join(folderName, filename)
                     zipfile.write(filePath, os.path.basename(filePath))
-        self.logger.info("Finished generating ZIP file")
+        self.logger.info("Finished generating ZIP file %s", os.path.join(self.outputdir, zipname))
 
     def generate_cpl(self):
         """Generate placement file (CPL)."""
@@ -299,4 +299,4 @@ class Fabrication:
                 if not add_without_lcsc and not part[3]:
                     continue
                 writer.writerow(part)
-        self.logger.info("Finished generating BOM file")
+        self.logger.info("Finished generating BOM file %s", os.path.join(self.outputdir, bomname))
