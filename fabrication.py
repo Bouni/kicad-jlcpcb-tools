@@ -35,7 +35,6 @@ try:
 except ImportError:
     NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
 
-from .helpers import get_exclude_from_pos
 
 
 class Fabrication:
