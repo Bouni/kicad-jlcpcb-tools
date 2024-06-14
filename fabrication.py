@@ -278,6 +278,7 @@ class Fabrication:
                 )
         self.logger.info("Finished generating CPL file %s", os.path.join(self.outputdir, cplname))
 
+
     def generate_bom(self):
         """Generate BOM file."""
         bomname = f"BOM-{Path(self.filename).stem}.csv"
@@ -289,12 +290,7 @@ class Fabrication:
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
-            footprints = sorted(self.board.Footprints(), key = lambda x: x.GetReference())
-            for fp in footprints:
-            # for part in self.parent.store.read_bom_parts():
-                part = self.parent.store.get_part(fp.GetReference())
-                if part[5] == 1: # Exclude from BOM
-                    continue
+            for part in self.parent.store.read_bom_parts():
                 if not add_without_lcsc and not part[3]:
                     continue
                 writer.writerow(part)
