@@ -260,6 +260,8 @@ class Fabrication:
             footprints = sorted(self.board.Footprints(), key = lambda x: x.GetReference())
             for fp in footprints:
                 part = self.parent.store.get_part(fp.GetReference())
+                if not part: # No matching part in the database, continue
+                    continue
                 if part[6] == 1: # Exclude from POS
                     continue
                 if not add_without_lcsc and not part[3]:
