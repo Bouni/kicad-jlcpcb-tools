@@ -261,6 +261,7 @@ class Fabrication:
             for fp in footprints:
                 part = self.parent.store.get_part(fp.GetReference())
                 if not part: # No matching part in the database, continue
+                    self.logger.debug("No matching database entry found for %s", fp.GetReference())
                     continue
                 if part[6] == 1: # Exclude from POS
                     continue
