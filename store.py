@@ -82,15 +82,14 @@ class Store:
             )
             cur.commit()
 
-    def read_all(self):
+    def read_all(self) -> dict:
         """Read all parts from the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             con.create_collation("naturalsort", natural_sort_collation)
             con.row_factory = dict_factory
-            with con as cur:
-                return cur.execute(
-                    f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
-                ).fetchall()
+            return cur.execute(
+                f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
+            ).fetchall()
 
     def read_bom_parts(self):
         """Read all parts that should be included in the BOM."""
