@@ -112,7 +112,7 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             con.row_factory = dict_factory
             return cur.execute(
-                "SELECT * FROM part_info WHERE reference=?", (ref,)
+                "SELECT * FROM part_info WHERE reference = :reference", {"reference": ref}
             ).fetchone()
 
 
