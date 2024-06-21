@@ -119,8 +119,9 @@ class Store:
     def set_stock(self, ref: str, stock: int):
         """Set the stock value for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            self.logger.debug(ref)
             cur.execute(
-                f"UPDATE part_info SET stock = '{int(stock)}' WHERE reference = '{ref}'"
+                "UPDATE part_info SET stock = :stock WHERE reference = :reference", {"reference": ref, "stock": stock}
             )
             cur.commit()
 

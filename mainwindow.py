@@ -554,7 +554,7 @@ class JLCPCBTools(wx.Dialog):
         """Assign a selected LCSC number to parts."""
         for reference in e.references:
             self.store.set_lcsc(reference, e.lcsc)
-            self.store.set_stock(reference, e.stock)
+            self.store.set_stock(reference, int(e.stock))
         self.populate_footprint_list()
 
     def display_message(self, e):
