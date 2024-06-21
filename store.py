@@ -91,26 +91,6 @@ class Store:
                 f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
             ).fetchall()
 
-    def read_bom_parts(self):
-        """Read all parts that should be included in the BOM."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
-            subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
-            query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
-            a = [list(part) for part in cur.execute(query).fetchall()]
-            # Query all parts that are supposed to be in the BOM but have no lcsc number
-            query = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
-            b = [list(part) for part in cur.execute(query).fetchall()]
-            return a + b
-
-    def read_pos_parts(self):
-        """Read all parts that should be included in the POS."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            con.create_collation("naturalsort", natural_sort_collation)
-            with con as cur:
-                # Query all parts that are supposed to be in the POS
-                query = "SELECT reference, value, footprint, lcsc FROM part_info WHERE exclude_from_pos = '0' ORDER BY reference COLLATE naturalsort ASC"
-                return [list(part) for part in cur.execute(query).fetchall()]
 
     def create_part(self, part: dict):
         """Create a part in the database."""
