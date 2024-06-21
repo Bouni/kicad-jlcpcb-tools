@@ -779,7 +779,7 @@ class JLCPCBTools(wx.Dialog):
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
-            self.store.set_bom(ref, bom)
+            self.store.set_bom(ref, int(bom))
             self.store.set_pos(ref, pos)
             self.footprint_list.SetValue(
                 GetListIcon(bom, self.scale_factor), row, Column.BOM
@@ -798,7 +798,7 @@ class JLCPCBTools(wx.Dialog):
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
-            self.store.set_bom(ref, bom)
+            self.store.set_bom(ref, int(bom))
             self.footprint_list.SetValue(
                 GetListIcon(bom, self.scale_factor), row, Column.BOM
             )
