@@ -212,14 +212,12 @@ class Store:
                 board_part["reference"],
                 board_part["value"],
                 board_part["footprint"],
+                board_part["exclude_from_bom"],
+                board_part["exclude_from_pos"],
             ] == [
                 db_part["reference"],
                 db_part["value"],
                 db_part["footprint"],
-            ] and [
-                board_part["exclude_from_bom"],
-                board_part["exclude_from_pos"],
-            ] == [
                 bool(db_part["exclude_from_bom"]),
                 bool(db_part["exclude_from_pos"]),
             ]:
