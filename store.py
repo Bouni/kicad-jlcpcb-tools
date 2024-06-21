@@ -112,10 +112,10 @@ class Store:
                 query = "SELECT reference, value, footprint, lcsc FROM part_info WHERE exclude_from_pos = '0' ORDER BY reference COLLATE naturalsort ASC"
                 return [list(part) for part in cur.execute(query).fetchall()]
 
-    def create_part(self, part):
+    def create_part(self, part: dict):
         """Create a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute("INSERT INTO part_info VALUES (?,?,?,?,'',?,?)", part)
+            cur.execute("INSERT INTO part_info VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)", part)
             cur.commit()
 
     def update_part(self, part):
