@@ -135,9 +135,10 @@ class Store:
 
             cur.commit()
 
-    def get_part(self, ref):
+    def get_part(self, ref: str) -> dict:
         """Get a part from the database by its reference."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            con.row_factory = dict_factory
             return cur.execute(
                 "SELECT * FROM part_info WHERE reference=?", (ref,)
             ).fetchone()
@@ -183,57 +184,77 @@ class Store:
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
         for fp in get_valid_footprints(self.board):
-            part = [
-                fp.GetReference(),
-                fp.GetValue(),
-                str(fp.GetFPID().GetLibItemName()),
-                get_lcsc_value(fp),
-                get_exclude_from_bom(fp),
-                get_exclude_from_pos(fp),
-            ]
-            dbpart = self.get_part(part[0])
+            board_part = {
+                "reference": fp.GetReference(),
+                "value": fp.GetValue(),
+                "footprint": str(fp.GetFPID().GetLibItemName()),
+                "lcsc": get_lcsc_value(fp),
+                "exclude_from_bom": get_exclude_from_bom(fp),
+                "exclude_from_pos": get_exclude_from_pos(fp),
+            }
+            db_part = self.get_part(board_part["reference"])
             # if part is not in the database yet, create it
-            if not dbpart:
+            if not db_part:
                 self.logger.debug(
                     "Part %s does not exist in the database and will be created from the board.",
-                    part[0],
+                    board_part["reference"],
                 )
+<<<<<<< HEAD
                 self.create_part(part)
             elif (
                 part[0:3] == list(dbpart[0:3])
                 and part[4:] == [bool(x) for x in dbpart[5:]]
             ):  # if the board part matches the dbpart except for the LCSC and the stock value,
+=======
+                self.create_part(board_part)
+            # if the board part matches the db_part except for the LCSC and the stock value
+            elif [
+                board_part["reference"],
+                board_part["value"],
+                board_part["footprint"],
+            ] == [
+                db_part["reference"],
+                db_part["value"],
+                db_part["footprint"],
+            ] and [
+                board_part["exclude_from_bom"],
+                board_part["exclude_from_pos"],
+            ] == [
+                bool(db_part["exclude_from_bom"]),
+                bool(db_part["exclude_from_pos"]),
+            ]:
+>>>>>>> 2621281 (Improve get_part to use dict_factory for better readability)
                 # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
-                if dbpart and not dbpart[3] and part[3]:
+                if db_part and not db_part["lcsc"] and board_part["lcsc"]:
                     self.logger.debug(
                         "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
-                        part[0],
+                        board_part["reference"],
                     )
-                    self.update_part(part)
+                    self.update_part(board_part)
                 # if part in the database, has a lcsc value
-                elif dbpart and dbpart[3] and part[3]:
+                elif db_part and db_part["lcsc"] and board_part["lcsc"]:
                     # update lcsc value as well if setting is accordingly
                     if not self.parent.settings.get("general", {}).get(
                         "lcsc_priority", True
                     ):
                         self.logger.debug(
                             "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
-                            part[0],
+                            board_part["reference"],
                         )
-                        part.pop(3)
+                        board_part["lcsc"] = None
                     else:
                         self.logger.debug(
                             "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
-                            part[0],
+                            board_part["reference"],
                         )
-                    self.update_part(part)
+                    self.update_part(board_part)
             else:
                 # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
                 self.logger.debug(
                     "Part %s is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared.",
-                    part[0],
+                    board_part["reference"],
                 )
-                self.update_part(part)
+                self.update_part(board_part)
         self.import_legacy_assignments()
         self.clean_database()
 
