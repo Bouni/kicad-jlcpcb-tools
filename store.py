@@ -137,7 +137,7 @@ class Store:
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                f"UPDATE part_info SET exclude_from_pos = '{int(state)}' WHERE reference = '{ref}'"
+                "UPDATE part_info SET exclude_from_pos = :state WHERE reference = :reference", {"reference": ref, "state": state}
             )
             cur.commit()
 
@@ -243,8 +243,8 @@ class Store:
                 )
                 for row in csvreader:
                     self.set_lcsc(row["reference"], row["lcsc"])
-                    self.set_bom(row["reference"], row["bom"])
-                    self.set_pos(row["reference"], row["pos"])
+                    self.set_bom(row["reference"], int(row["bom"]))
+                    self.set_pos(row["reference"], int(row["pos"]))
                     self.logger.debug(
                         "Update %s from legacy 'part_assignments.csv'", row["reference"]
                     )
