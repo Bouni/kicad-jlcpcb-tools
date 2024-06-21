@@ -128,6 +128,14 @@ def natural_sort_collation(a, b):
     return -1 if natorder.index(a) == 0 else 1
 
 
+def dict_factory(cursor, row) -> dict:
+    """Row factory that returns a dict."""
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        d[col[0]] = row[idx]
+    return d
+
+
 def get_lcsc_value(fp):
     """Get the first lcsc number (C123456 for example) from the properties of the footprint."""
     # KiCad 7.99
