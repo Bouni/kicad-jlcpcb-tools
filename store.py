@@ -122,17 +122,17 @@ class Store:
     def update_part(self, part):
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            if len(part) == 6:
-                cur.execute(
-                    "UPDATE part_info set value = ?, footprint = ?, lcsc = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
-                    part[1:] + part[0:1],
-                )
-            else:
-                cur.execute(
-                    "UPDATE part_info set value = ?, footprint = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
-                    part[1:] + part[0:1],
-                )
-
+            cur.execute(
+                "UPDATE part_info set value = ?, footprint = ?, lcsc = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
+                (
+                    part["value"],
+                    part["footprint"],
+                    part["lcsc"],
+                    part["exclude_from_bom"],
+                    part["exclude_from_pos"],
+                    part["reference"],
+                ),
+            )
             cur.commit()
 
     def get_part(self, ref: str) -> dict:
