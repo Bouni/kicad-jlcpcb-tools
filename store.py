@@ -123,15 +123,8 @@ class Store:
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info set value = ?, footprint = ?, lcsc = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
-                (
-                    part["value"],
-                    part["footprint"],
-                    part["lcsc"],
-                    part["exclude_from_bom"],
-                    part["exclude_from_pos"],
-                    part["reference"],
-                ),
+                "UPDATE part_info set value = :value, footprint = :footprint, lcsc = :lcsc, exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos WHERE reference = :reference",
+                part,
             )
             cur.commit()
 
