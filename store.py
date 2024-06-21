@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 
 from .helpers import (
+    dict_factory,
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_lcsc_value,
@@ -40,7 +41,7 @@ class Store:
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
         self.create_db()
 
-    def set_order_by(self, n):
+    def set_order_by(self, n: int):
         """Set which value we want to order by when getting data from the database."""
         if n > 7:
             return
@@ -81,159 +82,136 @@ class Store:
             )
             cur.commit()
 
-    def read_all(self):
+    def read_all(self) -> dict:
         """Read all parts from the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
-            con.create_collation("naturalsort", natural_sort_collation)
-            with con as cur:
-                return [
-                    list(part)
-                    for part in cur.execute(
-                        f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
-                    ).fetchall()
-                ]
-
-    def read_bom_parts(self):
-        """Read all parts that should be included in the BOM."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
-            subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
-            query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
-            a = [list(part) for part in cur.execute(query).fetchall()]
-            # Query all parts that are supposed to be in the BOM but have no lcsc number
-            query = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
-            b = [list(part) for part in cur.execute(query).fetchall()]
-            return a + b
-
-    def read_pos_parts(self):
-        """Read all parts that should be included in the POS."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
-            with con as cur:
-                # Query all parts that are supposed to be in the POS
-                query = "SELECT reference, value, footprint, lcsc FROM part_info WHERE exclude_from_pos = '0' ORDER BY reference COLLATE naturalsort ASC"
-                return [list(part) for part in cur.execute(query).fetchall()]
+            con.row_factory = dict_factory
+            return cur.execute(
+                f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
+            ).fetchall()
 
-    def create_part(self, part):
+
+    def create_part(self, part: dict):
         """Create a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute("INSERT INTO part_info VALUES (?,?,?,?,'',?,?)", part)
+            cur.execute("INSERT INTO part_info VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)", part)
             cur.commit()
 
-    def update_part(self, part):
+    def update_part(self, part: dict):
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            if len(part) == 6:
-                cur.execute(
-                    "UPDATE part_info set value = ?, footprint = ?, lcsc = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
-                    part[1:] + part[0:1],
-                )
-            else:
-                cur.execute(
-                    "UPDATE part_info set value = ?, footprint = ?, exclude_from_bom = ?, exclude_from_pos = ? WHERE reference = ?",
-                    part[1:] + part[0:1],
-                )
-
+            cur.execute(
+                "UPDATE part_info set value = :value, footprint = :footprint, lcsc = :lcsc, exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos WHERE reference = :reference",
+                part,
+            )
             cur.commit()
 
-    def get_part(self, ref):
+    def get_part(self, ref: str) -> dict:
         """Get a part from the database by its reference."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            con.row_factory = dict_factory
             return cur.execute(
-                "SELECT * FROM part_info WHERE reference=?", (ref,)
+                "SELECT * FROM part_info WHERE reference = :reference", {"reference": ref}
             ).fetchone()
 
-    def delete_part(self, ref):
-        """Delete a part from the database by its reference."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute("DELETE FROM part_info WHERE reference=?", (ref,))
-            cur.commit()
 
-    def set_stock(self, ref, stock):
+    def set_stock(self, ref: str, stock: int):
         """Set the stock value for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                f"UPDATE part_info SET stock = '{int(stock)}' WHERE reference = '{ref}'"
+                "UPDATE part_info SET stock = :stock WHERE reference = :reference", {"reference": ref, "stock": stock}
             )
             cur.commit()
 
-    def set_bom(self, ref, state):
+    def set_bom(self, ref: str, state: int):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                f"UPDATE part_info SET exclude_from_bom = '{int(state)}' WHERE reference = '{ref}'"
+                "UPDATE part_info SET exclude_from_bom = :state WHERE reference = :reference", {"reference": ref, "state": state}
             )
             cur.commit()
 
-    def set_pos(self, ref, state):
+    def set_pos(self, ref: str, state: int):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                f"UPDATE part_info SET exclude_from_pos = '{int(state)}' WHERE reference = '{ref}'"
+                "UPDATE part_info SET exclude_from_pos = :state WHERE reference = :reference", {"reference": ref, "state": state}
             )
             cur.commit()
 
-    def set_lcsc(self, ref, value):
+    def set_lcsc(self, ref: str, lcsc: str):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                f"UPDATE part_info SET lcsc = '{value}' WHERE reference = '{ref}'"
+                "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference", {"reference": ref, "lcsc": lcsc}
             )
             cur.commit()
 
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
         for fp in get_valid_footprints(self.board):
-            part = [
-                fp.GetReference(),
-                fp.GetValue(),
-                str(fp.GetFPID().GetLibItemName()),
-                get_lcsc_value(fp),
-                get_exclude_from_bom(fp),
-                get_exclude_from_pos(fp),
-            ]
-            dbpart = self.get_part(part[0])
+            board_part = {
+                "reference": fp.GetReference(),
+                "value": fp.GetValue(),
+                "footprint": str(fp.GetFPID().GetLibItemName()),
+                "lcsc": get_lcsc_value(fp),
+                "exclude_from_bom": get_exclude_from_bom(fp),
+                "exclude_from_pos": get_exclude_from_pos(fp),
+            }
+            db_part = self.get_part(board_part["reference"])
             # if part is not in the database yet, create it
-            if not dbpart:
+            if not db_part:
                 self.logger.debug(
                     "Part %s does not exist in the database and will be created from the board.",
-                    part[0],
+                    board_part["reference"],
                 )
-                self.create_part(part)
-            elif part[0:3] == list(dbpart[0:3]) and part[4:] == [
-                    bool(x) for x in dbpart[5:]
-                ]: # if the board part matches the dbpart except for the LCSC and the stock value,
-                    # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
-                    if dbpart and not dbpart[3] and part[3]:
+                self.create_part(board_part)
+            # if the board part matches the db_part except for the LCSC and the stock value
+            elif [
+                board_part["reference"],
+                board_part["value"],
+                board_part["footprint"],
+                board_part["exclude_from_bom"],
+                board_part["exclude_from_pos"],
+            ] == [
+                db_part["reference"],
+                db_part["value"],
+                db_part["footprint"],
+                bool(db_part["exclude_from_bom"]),
+                bool(db_part["exclude_from_pos"]),
+            ]:
+                # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
+                if db_part and not db_part["lcsc"] and board_part["lcsc"]:
+                    self.logger.debug(
+                        "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
+                        board_part["reference"],
+                    )
+                    self.update_part(board_part)
+                # if part in the database, has a lcsc value
+                elif db_part and db_part["lcsc"] and board_part["lcsc"]:
+                    # update lcsc value as well if setting is accordingly
+                    if not self.parent.settings.get("general", {}).get(
+                        "lcsc_priority", True
+                    ):
                         self.logger.debug(
-                            "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
-                            part[0],
+                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
+                            board_part["reference"],
                         )
-                        self.update_part(part)
-                    # if part in the database, has a lcsc value
-                    elif dbpart and dbpart[3] and part[3]:
-                        # update lcsc value as well if setting is accordingly
-                        if not self.parent.settings.get("general", {}).get(
-                            "lcsc_priority", True
-                        ):
-                            self.logger.debug(
-                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
-                                part[0],
-                            )
-                            part.pop(3)
-                        else:
-                            self.logger.debug(
-                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
-                                part[0],
-                            )
-                        self.update_part(part)
+                        board_part["lcsc"] = None
+                    else:
+                        self.logger.debug(
+                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
+                            board_part["reference"],
+                        )
+                    self.update_part(board_part)
             else:
                 # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
                 self.logger.debug(
                     "Part %s is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared.",
-                    part[0],
+                    board_part["reference"],
                 )
-                self.update_part(part)
+                self.update_part(board_part)
         self.import_legacy_assignments()
         self.clean_database()
 
@@ -256,8 +234,8 @@ class Store:
                 )
                 for row in csvreader:
                     self.set_lcsc(row["reference"], row["lcsc"])
-                    self.set_bom(row["reference"], row["bom"])
-                    self.set_pos(row["reference"], row["pos"])
+                    self.set_bom(row["reference"], int(row["bom"]))
+                    self.set_pos(row["reference"], int(row["pos"]))
                     self.logger.debug(
                         "Update %s from legacy 'part_assignments.csv'", row["reference"]
                     )

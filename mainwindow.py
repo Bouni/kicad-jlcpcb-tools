@@ -67,12 +67,14 @@ ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
+
 class KicadProvider:
     """KiCad implementation of the provider, see standalone_impl.py for the stub version."""
 
     def get_pcbnew(self):
         """Get the pcbnew instance."""
         return kicad_pcbnew
+
 
 class JLCPCBTools(wx.Dialog):
     """JLCPCBTools main dialog."""
@@ -552,7 +554,7 @@ class JLCPCBTools(wx.Dialog):
         """Assign a selected LCSC number to parts."""
         for reference in e.references:
             self.store.set_lcsc(reference, e.lcsc)
-            self.store.set_stock(reference, e.stock)
+            self.store.set_stock(reference, int(e.stock))
         self.populate_footprint_list()
 
     def display_message(self, e):
@@ -588,24 +590,23 @@ class JLCPCBTools(wx.Dialog):
         numbers = []
         parts = []
         for part in self.store.read_all():
-            fp = self.pcbnew.GetBoard().FindFootprintByReference(part[0])
-            if part[3] and part[3] not in numbers:
-                numbers.append(part[3])
-            part.insert(4, "")
-            part[5] = str(part[5])
+            fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
+            if part["lcsc"] and part["lcsc"] not in numbers:
+                numbers.append(part["lcsc"])
+            part["stock"] = str(part["stock"])
             # don't show the part if hide BOM is set
-            if self.hide_bom_parts and part[6]:
+            if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
             # don't show the part if hide POS is set
-            if self.hide_pos_parts and part[7]:
+            if self.hide_pos_parts and part["exclude_from_pos"]:
                 continue
             # decide which icon to use
-            part[6] = icons.get(part[6], icons.get(0))
-            part[7] = icons.get(part[7], icons.get(0))
-            part.insert(8, "")
-            side = "Top" if fp.GetLayer() == 0 else "Bot"
-            part.insert(9, side)
-            part.insert(10, "")
+            part["exclude_from_bom"] = icons.get(part["exclude_from_bom"], icons.get(0))
+            part["exclude_from_pos"] = icons.get(part["exclude_from_pos"], icons.get(0))
+            part["side"] = "Top" if fp.GetLayer() == 0 else "Bot"
+            part["rotation"] = ""
+            part["type"] = ""
+            part["side"] = ""
             parts.append(part)
         details = self.library.get_part_details(numbers)
         corrections = self.library.get_all_correction_data()
@@ -613,26 +614,40 @@ class JLCPCBTools(wx.Dialog):
         for part in parts:
             detail = list(
                 filter(
-                    lambda x, lcsc=part[3]: x[0] == lcsc,
+                    lambda x, lcsc=part["lcsc"]: x[0] == lcsc,
                     details,
                 )
             )
             if detail:
-                part[4] = detail[0][2]
-                part[5] = detail[0][1]
+                part["type"] = detail[0][2]
+                part["stock"] = detail[0][1]
             # First check if the part name mathes
             for regex, correction in corrections:
-                if re.search(regex, str(part[1])):
-                    part[8] = str(correction)
+                if re.search(regex, str(part["reference"])):
+                    part["rotation"] = str(correction)
                     break
             # If there was no match for the part name, check if the package matches
-            if part[8] == "":
+            if part["rotation"] == "":
                 for regex, correction in corrections:
-                    if re.search(regex, str(part[2])):
-                        part[8] = str(correction)
+                    if re.search(regex, str(part["footprint"])):
+                        part["rotation"] = str(correction)
                         break
 
-            self.footprint_list.AppendItem(part)
+            self.footprint_list.AppendItem(
+                [
+                    part["reference"],
+                    part["value"],
+                    part["footprint"],
+                    part["lcsc"],
+                    part["type"],
+                    part["stock"],
+                    part["exclude_from_bom"],
+                    part["exclude_from_pos"],
+                    part["rotation"],
+                    part["side"],
+                    "",
+                ]
+            )
 
     def OnSortFootprintList(self, e):
         """Set order_by to the clicked column and trigger list refresh."""
@@ -764,8 +779,8 @@ class JLCPCBTools(wx.Dialog):
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
-            self.store.set_bom(ref, bom)
-            self.store.set_pos(ref, pos)
+            self.store.set_bom(ref, int(bom))
+            self.store.set_pos(ref, int(pos))
             self.footprint_list.SetValue(
                 GetListIcon(bom, self.scale_factor), row, Column.BOM
             )
@@ -783,7 +798,7 @@ class JLCPCBTools(wx.Dialog):
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
-            self.store.set_bom(ref, bom)
+            self.store.set_bom(ref, int(bom))
             self.footprint_list.SetValue(
                 GetListIcon(bom, self.scale_factor), row, Column.BOM
             )
@@ -798,7 +813,7 @@ class JLCPCBTools(wx.Dialog):
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             pos = toggle_exclude_from_pos(fp)
-            self.store.set_pos(ref, pos)
+            self.store.set_pos(ref, int(pos))
             self.footprint_list.SetValue(
                 GetListIcon(pos, self.scale_factor), row, Column.POS
             )
@@ -827,7 +842,7 @@ class JLCPCBTools(wx.Dialog):
         for r in range(self.footprint_list.GetItemCount()):
             value = self.footprint_list.GetValue(r, 1)
             fp = self.footprint_list.GetValue(r, 2)
-            if part[1] == value and part[2] == fp:
+            if part["value"] == value and part["footprint"] == fp:
                 self.footprint_list.SelectRow(r)
 
     def get_part_details(self, *_):
@@ -1130,7 +1145,4 @@ class LogBoxHandler(logging.StreamHandler):
     def emit(self, record):
         """Marshal the event over to the main thread."""
         msg = self.format(record)
-        wx.QueueEvent(self.event_destination, LogboxAppendEvent(
-                msg=f"{msg}\n"
-            )
-        )
+        wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
