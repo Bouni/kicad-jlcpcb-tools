@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 
 from .helpers import (
+    dict_factory,
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_lcsc_value,
@@ -85,13 +86,11 @@ class Store:
         """Read all parts from the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
+            con.row_factory = dict_factory
             with con as cur:
-                return [
-                    list(part)
-                    for part in cur.execute(
-                        f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
-                    ).fetchall()
-                ]
+                return cur.execute(
+                    f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
+                ).fetchall()
 
     def read_bom_parts(self):
         """Read all parts that should be included in the BOM."""
