@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 
 from .helpers import (
+    dict_factory,
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_lcsc_value,
@@ -85,13 +86,11 @@ class Store:
         """Read all parts from the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
+            con.row_factory = dict_factory
             with con as cur:
-                return [
-                    list(part)
-                    for part in cur.execute(
-                        f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
-                    ).fetchall()
-                ]
+                return cur.execute(
+                    f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
+                ).fetchall()
 
     def read_bom_parts(self):
         """Read all parts that should be included in the BOM."""
@@ -201,32 +200,32 @@ class Store:
                 )
                 self.create_part(part)
             elif part[0:3] == list(dbpart[0:3]) and part[4:] == [
-                    bool(x) for x in dbpart[5:]
-                ]: # if the board part matches the dbpart except for the LCSC and the stock value,
-                    # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
-                    if dbpart and not dbpart[3] and part[3]:
+                bool(x) for x in dbpart[5:]
+            ]:  # if the board part matches the dbpart except for the LCSC and the stock value,
+                # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
+                if dbpart and not dbpart[3] and part[3]:
+                    self.logger.debug(
+                        "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
+                        part[0],
+                    )
+                    self.update_part(part)
+                # if part in the database, has a lcsc value
+                elif dbpart and dbpart[3] and part[3]:
+                    # update lcsc value as well if setting is accordingly
+                    if not self.parent.settings.get("general", {}).get(
+                        "lcsc_priority", True
+                    ):
                         self.logger.debug(
-                            "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
+                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
                             part[0],
                         )
-                        self.update_part(part)
-                    # if part in the database, has a lcsc value
-                    elif dbpart and dbpart[3] and part[3]:
-                        # update lcsc value as well if setting is accordingly
-                        if not self.parent.settings.get("general", {}).get(
-                            "lcsc_priority", True
-                        ):
-                            self.logger.debug(
-                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
-                                part[0],
-                            )
-                            part.pop(3)
-                        else:
-                            self.logger.debug(
-                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
-                                part[0],
-                            )
-                        self.update_part(part)
+                        part.pop(3)
+                    else:
+                        self.logger.debug(
+                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
+                            part[0],
+                        )
+                    self.update_part(part)
             else:
                 # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
                 self.logger.debug(
