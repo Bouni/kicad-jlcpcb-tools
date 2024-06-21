@@ -89,10 +89,10 @@ class Library:
             "Package",
             "Solder Joint",
             "Library Type",
+            "Stock",
             "Manufacturer",
             "Description",
             "Price",
-            "Stock",
         ]
         if self.order_by == order_by[n] and self.order_dir == "ASC":
             self.order_dir = "DESC"
