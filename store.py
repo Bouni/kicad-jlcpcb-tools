@@ -41,7 +41,7 @@ class Store:
             Path(self.datadir).mkdir(parents=True, exist_ok=True)
         self.create_db()
 
-    def set_order_by(self, n):
+    def set_order_by(self, n: int):
         """Set which value we want to order by when getting data from the database."""
         if n > 7:
             return
@@ -118,7 +118,7 @@ class Store:
             cur.execute("INSERT INTO part_info VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)", part)
             cur.commit()
 
-    def update_part(self, part):
+    def update_part(self, part: dict):
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
@@ -135,13 +135,13 @@ class Store:
                 "SELECT * FROM part_info WHERE reference=?", (ref,)
             ).fetchone()
 
-    def delete_part(self, ref):
+    def delete_part(self, ref: str):
         """Delete a part from the database by its reference."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute("DELETE FROM part_info WHERE reference=?", (ref,))
             cur.commit()
 
-    def set_stock(self, ref, stock):
+    def set_stock(self, ref: str, stock: int):
         """Set the stock value for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
@@ -149,7 +149,7 @@ class Store:
             )
             cur.commit()
 
-    def set_bom(self, ref, state):
+    def set_bom(self, ref: str, state: int):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
@@ -157,7 +157,7 @@ class Store:
             )
             cur.commit()
 
-    def set_pos(self, ref, state):
+    def set_pos(self, ref: str, state: int):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
@@ -165,7 +165,7 @@ class Store:
             )
             cur.commit()
 
-    def set_lcsc(self, ref, value):
+    def set_lcsc(self, ref: str, value: str):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
