@@ -141,11 +141,11 @@ class Store:
             )
             cur.commit()
 
-    def set_lcsc(self, ref: str, value: str):
+    def set_lcsc(self, ref: str, lcsc: str):
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                f"UPDATE part_info SET lcsc = '{value}' WHERE reference = '{ref}'"
+                "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference", {"reference": ref, "lcsc": lcsc}
             )
             cur.commit()
 
