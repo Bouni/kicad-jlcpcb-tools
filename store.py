@@ -115,11 +115,6 @@ class Store:
                 "SELECT * FROM part_info WHERE reference=?", (ref,)
             ).fetchone()
 
-    def delete_part(self, ref: str):
-        """Delete a part from the database by its reference."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute("DELETE FROM part_info WHERE reference=?", (ref,))
-            cur.commit()
 
     def set_stock(self, ref: str, stock: int):
         """Set the stock value for a part in the database."""
