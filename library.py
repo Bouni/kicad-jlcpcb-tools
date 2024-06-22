@@ -384,7 +384,7 @@ class Library:
 
             try:
                 return cur.execute(
-                    f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where "LCSC Part" IN ({numbers})'
+                    f'SELECT "LCSC Part", "Stock", "Library Type", "Description" FROM parts where "LCSC Part" IN ({numbers})'
                 ).fetchall()
             except sqlite3.OperationalError:
                 # parts tabble doesn't exist. can indicate our database is corrupt or we weren't able

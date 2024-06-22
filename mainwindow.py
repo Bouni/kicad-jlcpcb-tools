@@ -261,7 +261,7 @@ class JLCPCBTools(wx.Dialog):
                 "bom-pos.png",
                 self.scale_factor,
             ),
-            "Toggle exclud from BOM and POS attribute",
+            "Toggle exclude from BOM and POS attribute",
         )
 
         self.toggle_bom_button = self.right_toolbar.AddTool(
@@ -380,7 +380,7 @@ class JLCPCBTools(wx.Dialog):
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(self.scale_factor * 300),
+            width=int(self.scale_factor * 150),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
@@ -431,6 +431,13 @@ class JLCPCBTools(wx.Dialog):
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(self.scale_factor * 40),
             align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        )
+        self.description = self.footprint_list.AppendTextColumn(
+            "Description",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(self.scale_factor * 300),
+            align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint_list.AppendTextColumn(
@@ -606,6 +613,7 @@ class JLCPCBTools(wx.Dialog):
             side = "Top" if fp.GetLayer() == 0 else "Bot"
             part.insert(9, side)
             part.insert(10, "")
+            part.insert(11, "")
             parts.append(part)
         details = self.library.get_part_details(numbers)
         corrections = self.library.get_all_correction_data()
@@ -620,7 +628,8 @@ class JLCPCBTools(wx.Dialog):
             if detail:
                 part[4] = detail[0][2]
                 part[5] = detail[0][1]
-            # First check if the part name mathes
+                part[10] = detail[0][3]  # Description
+            # First check if the part name matches
             for regex, correction in corrections:
                 if re.search(regex, str(part[1])):
                     part[8] = str(correction)

@@ -203,6 +203,7 @@ class SchematicExport:
         lastLcsc = ""
         newLcsc = ""
         lastRef = ""
+        property_name = self.parent.settings.get("schematic", {}).get("property_name", "LCSC")
 
         lines = []
         newlines = []
@@ -229,7 +230,7 @@ class SchematicExport:
                 key = m.group(1)
                 #self.logger.info("key %s", key)
                 # found a LCSC property, so update it if needed
-                if key in {"LCSC", "LCSC_PN", "JLC_PN"}:
+                if key in {"LCSC", "LCSC_PN", "LCSC Part", "JLC_PN"}:
                     value = m.group(2)
                     lastLcsc = value
                     if newLcsc not in (lastLcsc, ""):
@@ -253,7 +254,7 @@ class SchematicExport:
             if m3 and partSection:
                 if lastLcsc == "" and newLcsc != "" and lastLoc != "":
                     self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'\t\t(property "LCSC" "{newLcsc}"\n\t\t\t(at {lastLoc} 0)'
+                    newTxt = f'\t\t(property "{property_name}" "{newLcsc}"\n\t\t\t(at {lastLoc} 0)'
                     newlines.append(newTxt)
                     newlines.append("\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\n\t\t\t\t)\n\t\t\t\t(hide yes)")
                     newlines.append("\t\t\t)")
@@ -267,4 +268,4 @@ class SchematicExport:
         with open(path, "w", encoding="utf-8") as f:
             for line in newlines:
                 f.write(line + "\n")
-        self.logger.info("Added LCSC's to %s (maybe?)", path)
+        self.logger.info("Added \"%s\"'s to %s (maybe?)", property_name, path)
