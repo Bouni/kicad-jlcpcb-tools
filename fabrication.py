@@ -102,11 +102,16 @@ class Fabrication:
 
     def get_position(self, footprint):
         """Calculate position based on center of bounding box."""
-        pads = footprint.Pads()
-        bbox = pads[0].GetBoundingBox()
-        for pad in pads:
-            bbox.Merge(pad.GetBoundingBox())
-        return bbox.GetCenter()
+        try:
+            pads = footprint.Pads()
+            bbox = pads[0].GetBoundingBox()
+            for pad in pads:
+                bbox.Merge(pad.GetBoundingBox())
+            #self.logger.info(" => %s", bbox.GetCenter())
+            return bbox.GetCenter()
+        except:
+            self.logger.info("WARNING footprint %s: original position used", footprint.GetReference())
+            return footprint.GetPosition()
 
     def generate_geber(self, layer_count=None):
         """Generate Gerber files."""
