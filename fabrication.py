@@ -101,11 +101,16 @@ class Fabrication:
 
     def get_position(self, footprint):
         """Calculate position based on center of bounding box."""
-        pads = footprint.Pads()
-        bbox = pads[0].GetBoundingBox()
-        for pad in pads:
-            bbox.Merge(pad.GetBoundingBox())
-        return bbox.GetCenter()
+        try:
+            pads = footprint.Pads()
+            bbox = pads[0].GetBoundingBox()
+            for pad in pads:
+                bbox.Merge(pad.GetBoundingBox())
+            #self.logger.info(" => %s", bbox.GetCenter())
+            return bbox.GetCenter()
+        except:
+            self.logger.info("WARNING footprint %s: original position used", footprint.GetReference())
+            return footprint.GetPosition()
 
     def generate_geber(self, layer_count=None):
         """Generate Gerber files."""
@@ -293,6 +298,13 @@ class Fabrication:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             for part in self.parent.store.read_bom_parts():
+                components = part[1].split(",")
+                for component in components:
+                    for fp in self.board.Footprints():
+                        if fp.GetReference() == component and fp.IsDNP():
+                            components.remove(component)
+                            part[1] = ','.join(components)
+                            self.logger.info("Component %s has 'Do not placed' enabled: removing from BOM", component)
                 if not add_without_lcsc and not part[3]:
                     continue
                 writer.writerow(part)
