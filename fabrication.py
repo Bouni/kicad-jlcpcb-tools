@@ -309,6 +309,13 @@ class Fabrication:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
             for part in self.parent.store.read_bom_parts():
+                components = part[1].split(",")
+                for component in components:
+                    for fp in self.board.Footprints():
+                        if fp.GetReference() == component and fp.IsDNP():
+                            components.remove(component)
+                            part[1] = ','.join(components)
+                            self.logger.info("Component %s has 'Do not placed' enabled: removing from BOM", component)
                 if not add_without_lcsc and not part[3]:
                     continue
                 writer.writerow(part)
