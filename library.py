@@ -384,21 +384,21 @@ class Library:
 
             # try retrieving from the cached index first (LCSC Part indexing from FTS5 parts is sloooooow)
             try:
-                rows = cur.execute(f'SELECT lcsc, partsId FROM parts_by_lcsc where lcsc IN ({numbers})').fetchall()
-                
+                rows = cur.execute(f"SELECT lcsc, partsId FROM parts_by_lcsc where lcsc IN ({numbers})").fetchall()
+
                 # orphaned parts found
                 if len(rows) != len(lcsc):
                     rowid_by_lcsc = dict(rows)
                     for lc in lcsc:
                         if lc not in rowid_by_lcsc:
-                            self.logger.debug(f"LCSC Part `{lc}` not found in the database.")
+                            self.logger.debug("LCSC Part `%s` not found in the database.", lc)
 
                 numbers = ",".join([f'"{r[0]}"' for r in rows])
                 return cur.execute(
                     f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where rowid IN ({numbers})'
                 ).fetchall()
             except Exception as e:
-                self.logger.debug(f"{e}")
+                self.logger.debug(repr(e))
                 pass
 
             # fall back to the direct approach
@@ -553,24 +553,24 @@ class Library:
             self.logger.debug("Indexing parts table...")
             wx.PostEvent(self.parent, UpdateGaugeEvent(value=0))
             with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
-                con.execute('DROP TABLE IF EXISTS parts_by_lcsc;')
-                con.execute('CREATE TABLE IF NOT EXISTS parts_by_lcsc (partsId INTEGER, lcsc TEXT);')
-                con.execute('DROP INDEX IF EXISTS LCSCpartIdx;')
-                cur = con.execute('SELECT rowid, `LCSC Part` FROM parts')
+                con.execute("DROP TABLE IF EXISTS parts_by_lcsc;")
+                con.execute("CREATE TABLE IF NOT EXISTS parts_by_lcsc (partsId INTEGER, lcsc TEXT);")
+                con.execute("DROP INDEX IF EXISTS LCSCpartIdx;")
+                cur = con.execute("SELECT rowid, `LCSC Part` FROM parts")
                 indexedParts = cur.fetchall()
                 howMany = len(indexedParts)
                 progress = 0
                 for i, r in enumerate(indexedParts):
-                    con.execute('INSERT OR REPLACE INTO parts_by_lcsc (partsId, lcsc) VALUES (?, ?)', (r[0], r[1]))
+                    con.execute("INSERT OR REPLACE INTO parts_by_lcsc (partsId, lcsc) VALUES (?, ?)", (r[0], r[1]))
                     p = int(i / howMany * 100)
                     if p > progress:
                         wx.PostEvent(self.parent, UpdateGaugeEvent(value=p))
                         progress = p
 
                 wx.PostEvent(self.parent, UpdateGaugeEvent(value=100))
-                self.logger.debug("Finalising database index...")                
+                self.logger.debug("Finalising database index...")
                 con.commit()
-                con.execute('CREATE INDEX IF NOT EXISTS LCSCpartIdx ON parts_by_lcsc(lcsc);')                
+                con.execute("CREATE INDEX IF NOT EXISTS LCSCpartIdx ON parts_by_lcsc(lcsc);")
                 con.commit()
                 self.logger.debug("Indexing parts table done.")
 
