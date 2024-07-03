@@ -67,12 +67,14 @@ ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 
+
 class KicadProvider:
     """KiCad implementation of the provider, see standalone_impl.py for the stub version."""
 
     def get_pcbnew(self):
         """Get the pcbnew instance."""
         return kicad_pcbnew
+
 
 class JLCPCBTools(wx.Dialog):
     """JLCPCBTools main dialog."""
@@ -220,7 +222,7 @@ class JLCPCBTools(wx.Dialog):
             self,
             wx.ID_ANY,
             wx.DefaultPosition,
-            wx.Size(128, -1),
+            wx.Size(int(self.scale_factor * 128), -1),
             wx.TB_VERTICAL | wx.TB_TEXT | wx.TB_NODIVIDER,
         )
 
@@ -1130,7 +1132,4 @@ class LogBoxHandler(logging.StreamHandler):
     def emit(self, record):
         """Marshal the event over to the main thread."""
         msg = self.format(record)
-        wx.QueueEvent(self.event_destination, LogboxAppendEvent(
-                msg=f"{msg}\n"
-            )
-        )
+        wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
