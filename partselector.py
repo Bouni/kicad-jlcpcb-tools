@@ -642,6 +642,24 @@ class PartSelectorDialog(wx.Dialog):
         # search now that categories might have changed
         self.search(None)
 
+    def get_price(self, quantity, prices):
+        """Find the prce for the number of selected parts accordning to the price ranges."""
+        price_ranges = prices.split(",")
+        min_quantity = int(price_ranges[0].split("-")[0])
+        if quantity <= min_quantity:
+            range, price = price_ranges[0].split(":")
+            return price
+        for p in price_ranges:
+            range, price = p.split(":")
+            lower,upper = range.split("-")
+            if not upper: # upper bound of price ranges
+                return price
+            lower = int(lower)
+            upper = int(upper)
+            self.logger.debug(upper)
+            if lower <= quantity < upper:
+                return price
+
     def populate_part_list(self, parts, search_duration):
         """Populate the list with the result of the search."""
         search_duration_text = (
@@ -662,19 +680,19 @@ class PartSelectorDialog(wx.Dialog):
         for p in parts:
             item = [str(c) for c in p]
             # Munge price to be more readable
-            pricecol = 8  # Must match order in library.py search function
-            price = []
-            try:
-                for t in item[pricecol].split(","):
-                    qty, p = t.split(":")
-                    p = float(p)
-                    if p < 1.0:
-                        price.append(f"{qty}: {p * 100:.2f}c")
-                    else:
-                        price.append(f"{qty}: ${p:.2f}")
-                item[pricecol] = ", ".join(price)
-            except ValueError:
-                self.logger.warning("unable to parse price %s", item[pricecol])
+            pricecol = 8 # Must match order in library.py search function
+            item[pricecol] = f"{len(self.parts)} parts: {self.get_price(len(self.parts), item[pricecol])} each"
+            # try:
+            #     for t in item[pricecol].split(","):
+            #         qty, p = t.split(":")
+            #         p = float(p)
+            #         if p < 1.0:
+            #             price.append(f"{qty}: {p * 100:.2f}c")
+            #         else:
+            #             price.append(f"{qty}: ${p:.2f}")
+            #     item[pricecol] = ", ".join(price)
+            # except ValueError:
+            #     self.logger.warning("unable to parse price %s", item[pricecol])
             self.part_list.AppendItem(item)
 
     def select_part(self, *_):
