@@ -4,7 +4,7 @@
 
 ***
 
-<img src="https://img.shields.io/badge/KiCAD-v6-blue"/> <img src="https://img.shields.io/badge/KiCAD-v7-green"/> <img src="https://img.shields.io/badge/KiCAD-v7.99-ff69b4"/>
+<img src="https://img.shields.io/badge/KiCAD-v7-green"/> <img src="https://img.shields.io/badge/KiCAD-v8-purple"/> <img src="https://img.shields.io/badge/KiCAD-v8.99-ff69b4"/>
 
 ***
 
@@ -29,7 +29,7 @@ Furthermore it lets you search the JLCPCB parts database and assign parts direct
 
 ## Warning 🔥
 
-I try to keep it working with 7.99 nightly builds but there are massive API changes on the horizon and I'm not sure if I can keep up with them.
+I try to keep it working with 8.99 nightly builds but there are massive API changes on the horizon and I'm not sure if I can keep up with them.
 
 **This is under a lot of developments, so consider this README out of date all the time 😏**
 
@@ -56,14 +56,14 @@ Simply clone this repo into your `scripting/plugins` folder.
 **Windows**
 
 ```sh
-cd C:\users\<username>\Documents\kicad\<version>\scripting\plugins\  # <username> is your username, <version> can be 6.0, 7.0, or 7.99 depending on the version you use
+cd C:\users\<username>\Documents\kicad\<version>\scripting\plugins\  # <username> is your username, <version> can be 7.0, 8.0, or 8.99 depending on the version you use
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
 **Linux**
 
 ```sh
-cd /home/<username>/.local/share/kicad/<version>/scripting/plugins  # <version> can be 6.0, 7.0, or 7.99 depending on the version you use
+cd /home/<username>/.local/share/kicad/<version>/scripting/plugins  # <version> can be 7.0, 8.0, or 8.99 depending on the version you use
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
@@ -177,18 +177,22 @@ The <i><b>{KiCad python}</b></i> should be used, this can be found at different 
 
 | OS | Kicad python |
 |---|---|
-|Mac| /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3|
-|Linux| TBD|
-|Windows | C:\Program Files\KiCad\8.0\bin\python.exe|
+|Mac| /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 |
+|Linux| /usr/bin/python3 |
+|Windows | C:\Program Files\KiCad\8.0\bin\python.exe |
 
 #### Working directory
 
 The <i><b>{working directory}</b></i> should be your plugins directory, ie:
 
-|OS | Working dir|
-|Mac| ~/Documents/KiCad/8.0/scripting/plugins/|
-|Linux|TBD|
-|Windows| %USERPROFILE%\Documents\KiCad\8.0\scripting\plugins\|
+| OS | Working dir |
+|---|---|
+|Mac| ~/Documents/KiCad/<version>/scripting/plugins/ |
+|Linux| ~/.local/share/kicad/<version>/scripting/plugins/ |
+|Windows| %USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\ |
+
+> [!NOTE]  
+> <version> can be 7.0, 8.0, or 8.99 depending on the version you use
 
 #### Plugin folder name
 
@@ -216,6 +220,12 @@ For example on Mac:
 
 ```sh
 /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m kicad-jlcpcb-tools
+```
+
+For example on Linux:
+
+```sh
+cd ~/.local/share/kicad/8.0/scripting/plugins/ && python -m kicad-jlcpcb-tools
 ```
 
 For example on Windows:
