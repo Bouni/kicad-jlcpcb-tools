@@ -2,12 +2,14 @@
 
 import io
 import logging
+from pathlib import Path
 import webbrowser
 
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
+from .events import MessageEvent
 from .helpers import HighResWxSize, loadBitmapScaled
 
 
@@ -28,6 +30,10 @@ class PartDetailsDialog(wx.Dialog):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.part = part
+        self.datasheet_path = Path(self.parent.project_path) / "datasheets"
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36"
+        }  # pretend we are browser, otherwise their cloud service blocks the request
         self.pdfurl = None
         self.picture = None
 
@@ -78,6 +84,15 @@ class PartDetailsDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(200, 200)),
             0,
         )
+        self.savepdf_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Download Datasheet",
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
         self.openpdf_button = wx.Button(
             self,
             wx.ID_ANY,
@@ -87,7 +102,16 @@ class PartDetailsDialog(wx.Dialog):
             0,
         )
 
+        self.savepdf_button.Bind(wx.EVT_BUTTON, self.savepdf)
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
+
+        self.savepdf_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-cloud-download-outline.png",
+                self.parent.scale_factor,
+            )
+        )
+        self.openpdf_button.SetBitmapMargins((2, 0))
 
         self.openpdf_button.SetBitmap(
             loadBitmapScaled(
@@ -104,6 +128,7 @@ class PartDetailsDialog(wx.Dialog):
         right_side_layout = wx.BoxSizer(wx.VERTICAL)
         right_side_layout.Add(self.image, 10, wx.ALL | wx.EXPAND, 5)
         right_side_layout.AddStretchSpacer(50)
+        right_side_layout.Add(self.savepdf_button, 5, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
         right_side_layout.Add(self.openpdf_button, 5, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
         layout = wx.BoxSizer(wx.HORIZONTAL)
         layout.Add(self.data_list, 30, wx.ALL | wx.EXPAND, 5)
@@ -120,17 +145,43 @@ class PartDetailsDialog(wx.Dialog):
         self.Destroy()
         self.EndModal(0)
 
+    def savepdf(self, *_):
+        """Download a datasheet from The LCSC API."""
+        filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
+        self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
+        self.datasheet_path.mkdir(parents=True, exist_ok=True)
+        r = requests.get(
+            str(self.pdfurl), stream=True, headers=self.headers, timeout=10
+        )
+        if r:
+            with open(self.datasheet_path / filename, "wb") as f:
+                f.write(r.content)
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Success",
+                    text="Successfully downloaded datasheet!",
+                    style="info",
+                ),
+            )
+        else:
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Error",
+                    text="Failed to download datasheet!",
+                    style="error",
+                ),
+            )
+
     def openpdf(self, *_):
         """Open the linked datasheet PDF on button click."""
         self.logger.info("opening %s", str(self.pdfurl))
-        webbrowser.open(self.pdfurl)
+        webbrowser.open(str(self.pdfurl))
 
     def get_scaled_bitmap(self, url, width, height):
         """Download a picture from a URL and convert it into a wx Bitmap."""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36"
-        }  # pretend we are browser, otherwise their cloud service blocks the request
-        content = requests.get(url, headers=headers, timeout=10).content
+        content = requests.get(url, headers=self.headers, timeout=10).content
         io_bytes = io.BytesIO(content)
         image = wx.Image(io_bytes)
         image = image.Scale(width, height, wx.IMAGE_QUALITY_HIGH)
@@ -139,12 +190,9 @@ class PartDetailsDialog(wx.Dialog):
 
     def get_part_data(self):
         """Fetch part data from JLCPCB API and parse it into the table, set picture and PDF link."""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36",
-        }
         r = requests.get(
             f"https://cart.jlcpcb.com/shoppingCart/smtGood/getComponentDetail?componentCode={self.part}",
-            headers=headers,
+            headers=self.headers,
             timeout=10,
         )
         if r.status_code != requests.codes.ok:  # pylint: disable=no-member
