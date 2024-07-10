@@ -138,8 +138,6 @@ class Fabrication:
 
         popt.SetSubtractMaskFromSilk(True)
 
-        popt.SetPlotViaOnMaskLayer(False)  # Set this to True if you need untented vias
-
         popt.SetUseAuxOrigin(True)
 
         # Tented vias or not, selcted by user in settings
