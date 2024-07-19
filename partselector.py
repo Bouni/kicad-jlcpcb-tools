@@ -55,7 +55,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             "Keywords",
             size=HighResWxSize(parent.window, wx.Size(150, 15)),
-            style=wx.ALIGN_RIGHT
+            style=wx.ALIGN_RIGHT,
         )
         self.keyword = wx.TextCtrl(
             self,
@@ -620,7 +620,7 @@ class PartSelectorDialog(wx.Dialog):
         for p in parts:
             item = [str(c) for c in p]
             # Munge price to be more readable
-            pricecol = 8 # Must match order in library.py search function
+            pricecol = 8  # Must match order in library.py search function
             price = []
             try:
                 for t in item[pricecol].split(","):

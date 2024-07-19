@@ -200,33 +200,34 @@ class Store:
                     part[0],
                 )
                 self.create_part(part)
-            elif part[0:3] == list(dbpart[0:3]) and part[4:] == [
-                    bool(x) for x in dbpart[5:]
-                ]: # if the board part matches the dbpart except for the LCSC and the stock value,
-                    # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
-                    if dbpart and not dbpart[3] and part[3]:
+            elif (
+                part[0:3] == list(dbpart[0:3])
+                and part[4:] == [bool(x) for x in dbpart[5:]]
+            ):  # if the board part matches the dbpart except for the LCSC and the stock value,
+                # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
+                if dbpart and not dbpart[3] and part[3]:
+                    self.logger.debug(
+                        "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
+                        part[0],
+                    )
+                    self.update_part(part)
+                # if part in the database, has a lcsc value
+                elif dbpart and dbpart[3] and part[3]:
+                    # update lcsc value as well if setting is accordingly
+                    if not self.parent.settings.get("general", {}).get(
+                        "lcsc_priority", True
+                    ):
                         self.logger.debug(
-                            "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
+                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
                             part[0],
                         )
-                        self.update_part(part)
-                    # if part in the database, has a lcsc value
-                    elif dbpart and dbpart[3] and part[3]:
-                        # update lcsc value as well if setting is accordingly
-                        if not self.parent.settings.get("general", {}).get(
-                            "lcsc_priority", True
-                        ):
-                            self.logger.debug(
-                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
-                                part[0],
-                            )
-                            part.pop(3)
-                        else:
-                            self.logger.debug(
-                                "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
-                                part[0],
-                            )
-                        self.update_part(part)
+                        part.pop(3)
+                    else:
+                        self.logger.debug(
+                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
+                            part[0],
+                        )
+                    self.update_part(part)
             else:
                 # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
                 self.logger.debug(

@@ -149,10 +149,10 @@ class Library:
             for w in keywords:
                 # skip over empty keywords
                 if w != "":
-                    if len(w) < 3: # LIKE entry
+                    if len(w) < 3:  # LIKE entry
                         kw = f"description LIKE '%{w}%'"
                         like_chunks.append(kw)
-                    else: # MATCH entry
+                    else:  # MATCH entry
                         kw = f'"{w}"'
                         match_keywords_intermediate.append(kw)
             if match_keywords_intermediate:
@@ -165,7 +165,11 @@ class Library:
         if "package" in parameters and parameters["package"] != "":
             p = parameters["package"]
             match_chunks.append(f'"Package":"{p}"')
-        if "category" in parameters and parameters["category"] != "" and parameters["category"] != "All":
+        if (
+            "category" in parameters
+            and parameters["category"] != ""
+            and parameters["category"] != "All"
+        ):
             p = parameters["category"]
             match_chunks.append(f'"First Category":"{p}"')
         if "subcategory" in parameters and parameters["subcategory"] != "":

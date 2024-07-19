@@ -1,4 +1,5 @@
 """Module for exporting LCSC data to schematic."""
+
 import logging
 import os
 import os.path
@@ -189,12 +190,8 @@ class SchematicExport:
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile(
-            '\\(property\\s\\"(.*)\\"\\s"(.*)\\"'
-        )
-        atRx = re.compile(
-            "\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)"
-        )
+        propRx = re.compile('\\(property\\s\\"(.*)\\"\\s"(.*)\\"')
+        atRx = re.compile("\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)")
         pinRx = re.compile('\\(pin\\s\\"(.*)\\"')
 
         store_parts = self.parent.store.read_all()
@@ -214,7 +211,7 @@ class SchematicExport:
         os.rename(path, path + "_old")
         partSection = False
 
-        for i in range(0, len(lines)-1):
+        for i in range(0, len(lines) - 1):
             inLine = lines[i].rstrip()
             inLine2 = lines[i + 1].rstrip()
             outLine = inLine
@@ -222,12 +219,12 @@ class SchematicExport:
             if "(symbol" in inLine and "(lib_id" in inLine2:  # skip library section
                 partSection = True
 
-            #self.logger.info("line %d", i)
+            # self.logger.info("line %d", i)
             m = propRx.search(inLine)
             m2 = atRx.search(inLine2)
             if m and m2 and partSection:
                 key = m.group(1)
-                #self.logger.info("key %s", key)
+                # self.logger.info("key %s", key)
                 # found a LCSC property, so update it if needed
                 if key in {"LCSC", "LCSC_PN", "JLC_PN"}:
                     value = m.group(2)
@@ -242,7 +239,7 @@ class SchematicExport:
                 if key == "Reference":
                     lastLoc = m2.group(1)
                     value = m.group(2)
-                    #self.logger.info("value %s", value)
+                    # self.logger.info("value %s", value)
                     lastRef = value
                     for part in store_parts:
                         if value == part[0]:
@@ -255,7 +252,9 @@ class SchematicExport:
                     self.logger.info("added %s to %s", newLcsc, lastRef)
                     newTxt = f'\t\t(property "LCSC" "{newLcsc}"\n\t\t\t(at {lastLoc} 0)'
                     newlines.append(newTxt)
-                    newlines.append("\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\n\t\t\t\t)\n\t\t\t\t(hide yes)")
+                    newlines.append(
+                        "\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\n\t\t\t\t)\n\t\t\t\t(hide yes)"
+                    )
                     newlines.append("\t\t\t)")
                     newlines.append("\t\t)")
                 lastLoc = ""
@@ -263,7 +262,7 @@ class SchematicExport:
                 newLcsc = ""
                 lastRef = ""
             newlines.append(outLine)
-        newlines.append(lines[len(lines)-1].rstrip())
+        newlines.append(lines[len(lines) - 1].rstrip())
         with open(path, "w", encoding="utf-8") as f:
             for line in newlines:
                 f.write(line + "\n")

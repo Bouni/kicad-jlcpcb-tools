@@ -1,5 +1,6 @@
 """Stubs for standalone usage of the plugin."""
 
+
 class LIB_ID_Stub:
     """Implementation of pcbnew.LIB_ID."""
 
@@ -67,6 +68,7 @@ class BoardStub:
         """Get a list of footprints that match a reference."""
         return Footprint_Stub(reference, "stub", 100)
 
+
 class PcbnewStub:
     """Stub implementation of pcbnew."""
 
@@ -87,6 +89,7 @@ class PcbnewStub:
 
     def Refresh(self):
         """Redraw the screen."""
+
 
 class KicadStub:
     """Stub implementation of Kicad."""
