@@ -322,7 +322,6 @@ class Fabrication:
                             )
                 if not add_without_lcsc and not part["lcsc"]:
                     continue
-                self.logger.debug(part)
                 writer.writerow(
                     [
                         part["value"],
