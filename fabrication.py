@@ -10,8 +10,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from pcbnew import (  # pylint: disable=import-error
     EXCELLON_WRITER,
     PCB_PLOT_PARAMS,
+    PCB_VIA,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
+    VECTOR2I,
     ZONE_FILLER,
     B_Cu,
     B_Mask,
@@ -34,7 +36,6 @@ try:
     NO_DRILL_SHAPE = DRILL_MARKS_NO_DRILL_SHAPE
 except ImportError:
     NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
-
 
 
 class Fabrication:
@@ -110,6 +111,7 @@ class Fabrication:
     def generate_geber(self, layer_count=None):
         """Generate Gerber files."""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
+
         pctl = PLOT_CONTROLLER(self.board)
         popt = pctl.GetPlotOptions()
 
@@ -141,9 +143,12 @@ class Fabrication:
         popt.SetUseAuxOrigin(True)
 
         # Tented vias or not, selcted by user in settings
-        popt.SetPlotViaOnMaskLayer(
-            not self.parent.settings.get("gerber", {}).get("tented_vias", True)
-        )
+        # Only possible via settings in KiCAD < 8.99
+        # In KiCAD 8.99 this must be set in the layer settings of KiCAD
+        if hasattr(PCB_VIA, "SetPlotViaOnMaskLayer"):
+            popt.SetPlotViaOnMaskLayer(
+                not self.parent.settings.get("gerber", {}).get("tented_vias", True)
+            )
 
         popt.SetUseGerberX2format(True)
 
@@ -238,7 +243,9 @@ class Fabrication:
                         continue
                     filePath = os.path.join(folderName, filename)
                     zipfile.write(filePath, os.path.basename(filePath))
-        self.logger.info("Finished generating ZIP file %s", os.path.join(self.outputdir, zipname))
+        self.logger.info(
+            "Finished generating ZIP file %s", os.path.join(self.outputdir, zipname)
+        )
 
     def generate_cpl(self):
         """Generate placement file (CPL)."""
@@ -255,16 +262,21 @@ class Fabrication:
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
-            footprints = sorted(self.board.Footprints(), key = lambda x: x.GetReference())
+            footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
             for fp in footprints:
                 part = self.parent.store.get_part(fp.GetReference())
-                if not part: # No matching part in the database, continue
+                if not part:  # No matching part in the database, continue
                     continue
-                if part[6] == 1: # Exclude from POS
+                if part[6] == 1:  # Exclude from POS
                     continue
                 if not add_without_lcsc and not part[3]:
                     continue
-                position = self.get_position(fp) - aux_orgin
+                try:  # Kicad <= 8.0
+                    position = self.get_position(fp) - aux_orgin
+                except TypeError:  # Kicad 8.99
+                    x1, y1 = self.get_position(fp)
+                    x2, y2 = aux_orgin
+                    position = VECTOR2I(x1 - x2, y1 - y2)
                 writer.writerow(
                     [
                         part[0],
@@ -276,8 +288,9 @@ class Fabrication:
                         "top" if fp.GetLayer() == 0 else "bottom",
                     ]
                 )
-        self.logger.info("Finished generating CPL file %s", os.path.join(self.outputdir, cplname))
-
+        self.logger.info(
+            "Finished generating CPL file %s", os.path.join(self.outputdir, cplname)
+        )
 
     def generate_bom(self):
         """Generate BOM file."""
@@ -294,4 +307,6 @@ class Fabrication:
                 if not add_without_lcsc and not part[3]:
                     continue
                 writer.writerow(part)
-        self.logger.info("Finished generating BOM file %s", os.path.join(self.outputdir, bomname))
+        self.logger.info(
+            "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
+        )
