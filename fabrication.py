@@ -109,7 +109,9 @@ class Fabrication:
                 bbox.Merge(pad.GetBoundingBox())
             return bbox.GetCenter()
         except:
-            self.logger.info("WARNING footprint %s: original position used", footprint.GetReference())
+            self.logger.info(
+                "WARNING footprint %s: original position used", footprint.GetReference()
+            )
             return footprint.GetPosition()
 
     def generate_geber(self, layer_count=None):
@@ -313,8 +315,11 @@ class Fabrication:
                     for fp in self.board.Footprints():
                         if fp.GetReference() == component and fp.IsDNP():
                             components.remove(component)
-                            part[1] = ','.join(components)
-                            self.logger.info("Component %s has 'Do not placed' enabled: removing from BOM", component)
+                            part[1] = ",".join(components)
+                            self.logger.info(
+                                "Component %s has 'Do not placed' enabled: removing from BOM",
+                                component,
+                            )
                 if not add_without_lcsc and not part[3]:
                     continue
                 writer.writerow(part)
