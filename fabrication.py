@@ -273,9 +273,9 @@ class Fabrication:
                 part = self.parent.store.get_part(fp.GetReference())
                 if not part:  # No matching part in the database, continue
                     continue
-                if part[6] == 1:  # Exclude from POS
+                if part["exclude_from_pos"] == 1:
                     continue
-                if not add_without_lcsc and not part[3]:
+                if not add_without_lcsc and not part["lcsc"]:
                     continue
                 try:  # Kicad <= 8.0
                     position = self.get_position(fp) - aux_orgin
@@ -285,9 +285,9 @@ class Fabrication:
                     position = VECTOR2I(x1 - x2, y1 - y2)
                 writer.writerow(
                     [
-                        part[0],
-                        part[1],
-                        part[2],
+                        part["reference"],
+                        part["value"],
+                        part["footprint"],
                         ToMM(position.x),
                         ToMM(position.y) * -1,
                         self.fix_rotation(fp),
