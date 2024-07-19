@@ -91,6 +91,18 @@ class Store:
                 f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
             ).fetchall()
 
+    def read_bom_parts(self) -> dict:
+        """Read all parts that should be included in the BOM."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            con.row_factory = dict_factory
+            # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
+            subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
+            query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
+            a = cur.execute(query).fetchall()
+            # Query all parts that are supposed to be in the BOM but have no lcsc number
+            query = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
+            b = cur.execute(query).fetchall()
+            return a + b
 
     def create_part(self, part: dict):
         """Create a part in the database."""
