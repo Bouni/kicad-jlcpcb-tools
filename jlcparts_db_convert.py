@@ -26,12 +26,11 @@ import humanize
 class Generate:
     """Base class for database generation."""
 
-    def __init__(self, output_db: Path, chunk_num: Path ):
+    def __init__(self, output_db: Path, chunk_num: Path):
         self.output_db = output_db
         self.jlcparts_db_name = "cache.sqlite3"
         self.compressed_output_db = f"{self.output_db}.zip"
         self.chunk_num = chunk_num
-
 
     def remove_original(self):
         """Remove the original output database."""
@@ -119,7 +118,13 @@ class Generate:
         db_size = os.stat(self.output_db).st_size
         self.conn.execute(
             "INSERT INTO meta VALUES(?, ?, ?, ?, ?)",
-            ["cache.sqlite3", db_size, self.part_count, date.today(), datetime.now().isoformat()],
+            [
+                "cache.sqlite3",
+                db_size,
+                self.part_count,
+                date.today(),
+                datetime.now().isoformat(),
+            ],
         )
         self.conn.commit()
 
@@ -160,12 +165,17 @@ class Generate:
             # create a helper file for the downloader which indicates the number of chunk files
             with open(self.chunk_num, "w", encoding="utf-8") as f:
                 f.write(str(chunk_num - 1))
+
     def display_stats(self):
         """Print out some stats."""
         jlcparts_db_size = humanize.naturalsize(os.path.getsize(self.jlcparts_db_name))
         print(f"jlcparts database ({self.jlcparts_db_name}): {jlcparts_db_size}")
-        print(f"output db: {humanize.naturalsize(os.path.getsize(self.output_db.name))}")
-        print(f"output db (compressed): {humanize.naturalsize(os.path.getsize(self.compressed_output_db))}")
+        print(
+            f"output db: {humanize.naturalsize(os.path.getsize(self.output_db.name))}"
+        )
+        print(
+            f"output db (compressed): {humanize.naturalsize(os.path.getsize(self.compressed_output_db))}"
+        )
 
     def cleanup(self):
         """Remove the compressed zip file und output db after splitting."""
@@ -175,6 +185,7 @@ class Generate:
 
         print(f"Deleting {self.output_db}")
         os.unlink(self.output_db)
+
 
 class Jlcpcb(Generate):
     """Sqlite parts database generator."""
@@ -254,6 +265,7 @@ class Jlcpcb(Generate):
         self.split()
         self.display_stats()
         self.cleanup()
+
 
 class JlcpcbFTS5(Generate):
     """FTS5 specific database generation."""
@@ -461,7 +473,6 @@ generator.build()
 end = datetime.now()
 deltatime = end - start
 print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
-
 
 
 # sqlite fts5 database
