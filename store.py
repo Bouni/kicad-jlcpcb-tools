@@ -178,13 +178,6 @@ class Store:
                     "Part %s does not exist in the database and will be created from the board.",
                     board_part["reference"],
                 )
-<<<<<<< HEAD
-                self.create_part(part)
-            elif (
-                part[0:3] == list(dbpart[0:3])
-                and part[4:] == [bool(x) for x in dbpart[5:]]
-            ):  # if the board part matches the dbpart except for the LCSC and the stock value,
-=======
                 self.create_part(board_part)
             # if the board part matches the db_part except for the LCSC and the stock value
             elif [
@@ -200,7 +193,6 @@ class Store:
                 bool(db_part["exclude_from_bom"]),
                 bool(db_part["exclude_from_pos"]),
             ]:
->>>>>>> 2621281 (Improve get_part to use dict_factory for better readability)
                 # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
                 if db_part and not db_part["lcsc"] and board_part["lcsc"]:
                     self.logger.debug(
