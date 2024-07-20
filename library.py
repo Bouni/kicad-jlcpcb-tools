@@ -382,19 +382,21 @@ class Library:
             con.commit()
 
     def get_part_details(self, lcsc):
-        """Get the part details for a list of lcsc numbers."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
-            numbers = ",".join([f'"{n}"' for n in lcsc])
+        """Get the part details for a list of LCSC numbers using optimized FTS5 querying."""
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
+            con.row_factory = sqlite3.Row  # To access columns by names
+            cur = con.cursor()
+            results = []
+            query = '''SELECT "LCSC Part", "Stock", "Library Type" FROM parts WHERE "LCSC Part" MATCH ?'''
 
-            try:
-                return cur.execute(
-                    f'SELECT "LCSC Part", "Stock", "Library Type" FROM parts where "LCSC Part" IN ({numbers})'
-                ).fetchall()
-            except sqlite3.OperationalError:
-                # parts tabble doesn't exist. can indicate our database is corrupt or we weren't able
-                # to populate from the URL.
-                # act like we returned nothing then.
-                return []
+            # Use parameter binding to prevent SQL injection and handle the query more efficiently
+            for number in lcsc:
+                # Each number needs to be wrapped in double quotes for exact match in FTS5
+                match_query = f'"{number}"'
+                cur.execute(query, (match_query,))
+                results.extend(cur.fetchall())
+
+            return results
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
