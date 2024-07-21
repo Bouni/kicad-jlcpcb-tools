@@ -387,15 +387,14 @@ class Library:
             con.row_factory = sqlite3.Row  # To access columns by names
             cur = con.cursor()
             results = []
-            query = '''SELECT "LCSC Part", "Stock", "Library Type" FROM parts WHERE "LCSC Part" MATCH ?'''
+            query = '''SELECT "LCSC Part", "Stock", "Library Type" FROM parts WHERE parts MATCH ?'''
 
             # Use parameter binding to prevent SQL injection and handle the query more efficiently
             for number in lcsc:
                 # Each number needs to be wrapped in double quotes for exact match in FTS5
-                match_query = f'"{number}"'
+                match_query = f'"LCSC Part:{number}"'
                 cur.execute(query, (match_query,))
                 results.extend(cur.fetchall())
-
             return results
 
     def update(self):
