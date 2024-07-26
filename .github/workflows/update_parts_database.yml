@@ -41,6 +41,11 @@ jobs:
         run: |
           set -x
 
+          # Print the current disk usage, might help with future "no disk space left" issues
+          echo "============================================================================================================================="
+          df -h
+          echo "============================================================================================================================="
+
           mkdir -p db_build
           cd db_build
 
@@ -58,6 +63,12 @@ jobs:
 
           ls -lah
           cd ..
+
+          # Print the current disk usage, might help with future "no disk space left" issues
+          echo "============================================================================================================================="
+          df -h
+          echo "============================================================================================================================="
+
           # creates the converted database in 80M split-zip files in folder db_build
           python3 jlcparts_db_convert.py
           # remove the source db, as we don't want to package that one
@@ -65,6 +76,11 @@ jobs:
           # some info output for sanity check
           ls -lah db_build
           du -cslh db_build
+
+          # Print the current disk usage, might help with future "no disk space left" issues
+          echo "============================================================================================================================="
+          df -h
+          echo "============================================================================================================================="
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
