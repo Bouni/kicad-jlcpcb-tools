@@ -263,7 +263,7 @@ class JLCPCBTools(wx.Dialog):
                 "bom-pos.png",
                 self.scale_factor,
             ),
-            "Toggle exclud from BOM and POS attribute",
+            "Toggle exclude from BOM and POS attribute",
         )
 
         self.toggle_bom_button = self.right_toolbar.AddTool(
@@ -382,7 +382,7 @@ class JLCPCBTools(wx.Dialog):
         self.footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(self.scale_factor * 300),
+            width=int(self.scale_factor * 150),
             align=wx.ALIGN_CENTER,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
@@ -433,6 +433,13 @@ class JLCPCBTools(wx.Dialog):
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(self.scale_factor * 40),
             align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        )
+        self.description = self.footprint_list.AppendTextColumn(
+            "Description",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(self.scale_factor * 300),
+            align=wx.ALIGN_LEFT,
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         )
         self.footprint_list.AppendTextColumn(
@@ -607,6 +614,7 @@ class JLCPCBTools(wx.Dialog):
             part["rotation"] = ""
             part["type"] = ""
             part["side"] = ""
+            part["description"] = ""
             parts.append(part)
         details = self.library.get_part_details(numbers)
         corrections = self.library.get_all_correction_data()
@@ -615,7 +623,7 @@ class JLCPCBTools(wx.Dialog):
             if details:
                 part["type"] = details["type"]
                 part["stock"] = details["stock"]
-            # First check if the part name mathes
+                part["description"] = details["description"]
             for regex, correction in corrections:
                 if re.search(regex, str(part["reference"])):
                     part["rotation"] = str(correction)
@@ -639,6 +647,7 @@ class JLCPCBTools(wx.Dialog):
                     part["exclude_from_pos"],
                     part["rotation"],
                     part["side"],
+                    part["description"],
                     "",
                 ]
             )
