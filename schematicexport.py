@@ -224,7 +224,7 @@ class SchematicExport:
                 key = m.group(1)
                 # self.logger.info("key %s", key)
                 # found a LCSC property, so update it if needed
-                if key in {"LCSC", "LCSC_PN", "JLC_PN"}:
+                if key in {"LCSC", "LCSC_PN", "LCSC Part", "JLC_PN"}:
                     value = m.group(2)
                     lastLcsc = value
                     if newLcsc not in (lastLcsc, ""):
