@@ -624,6 +624,7 @@ class JLCPCBTools(wx.Dialog):
                 part["type"] = details["type"]
                 part["stock"] = details["stock"]
                 part["description"] = details["description"]
+            # First check if the part name matches
             for regex, correction in corrections:
                 if re.search(regex, str(part["reference"])):
                     part["rotation"] = str(correction)
