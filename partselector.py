@@ -67,6 +67,26 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.keyword.SetHint("e.g. 10k 0603")
 
+        self.ohm_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Ω",
+            wx.DefaultPosition,
+            HighResWxSize(parent.window, wx.Size(20, -1)),
+            0,
+        )
+        self.ohm_button.SetToolTip("Append the Ω symbol to the search string")
+
+        self.micro_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "µ",
+            wx.DefaultPosition,
+            HighResWxSize(parent.window, wx.Size(20, -1)),
+            0,
+        )
+        self.micro_button.SetToolTip("Append the µ symbol to the search string")
+
         manufacturer_label = wx.StaticText(
             self,
             wx.ID_ANY,
@@ -239,6 +259,18 @@ class PartSelectorDialog(wx.Dialog):
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
+        keyword_search_row1.Add(
+            self.ohm_button,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            5,
+        )
+        keyword_search_row1.Add(
+            self.micro_button,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            5,
+        )
 
         search_sizer_one = wx.BoxSizer(wx.VERTICAL)
         search_sizer_one.Add(manufacturer_label, 0, wx.ALL, 5)
@@ -342,6 +374,8 @@ class PartSelectorDialog(wx.Dialog):
         search_sizer.Add(search_sizer_row2)
 
         self.keyword.Bind(wx.EVT_TEXT, self.search_dwell)
+        self.ohm_button.Bind(wx.EVT_BUTTON, self.add_ohm_symbol)
+        self.micro_button.Bind(wx.EVT_BUTTON, self.add_micro_symbol)
         self.manufacturer.Bind(wx.EVT_TEXT, self.search_dwell)
         self.package.Bind(wx.EVT_TEXT, self.search_dwell)
         self.category.Bind(wx.EVT_COMBOBOX, self.update_subcategories)
@@ -560,6 +594,14 @@ class PartSelectorDialog(wx.Dialog):
             self.part_details_button,
         ]:
             b.Enable(bool(state))
+
+    def add_ohm_symbol(self, *_):
+        """Append the Ω symbol to the search string."""
+        self.keyword.AppendText("Ω")
+
+    def add_micro_symbol(self, *_):
+        """Append the µ symbol to the search string."""
+        self.keyword.AppendText("µ")
 
     def search_dwell(self, *_):
         """Initiate a search once the timeout expires.
