@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 class LCSC_API:
-    """Unofficual LCSC API."""
+    """Unofficial LCSC API."""
 
     def __init__(self):
         self.headers = {
