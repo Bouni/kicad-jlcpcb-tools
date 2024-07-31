@@ -679,20 +679,8 @@ class PartSelectorDialog(wx.Dialog):
             self.result_count.SetLabel(f"{count} Results in {search_duration_text}")
         for p in parts:
             item = [str(c) for c in p]
-            # Munge price to be more readable
             pricecol = 8 # Must match order in library.py search function
             item[pricecol] = f"{len(self.parts)} parts: {self.get_price(len(self.parts), item[pricecol])} each"
-            # try:
-            #     for t in item[pricecol].split(","):
-            #         qty, p = t.split(":")
-            #         p = float(p)
-            #         if p < 1.0:
-            #             price.append(f"{qty}: {p * 100:.2f}c")
-            #         else:
-            #             price.append(f"{qty}: ${p:.2f}")
-            #     item[pricecol] = ", ".join(price)
-            # except ValueError:
-            #     self.logger.warning("unable to parse price %s", item[pricecol])
             self.part_list.AppendItem(item)
 
     def select_part(self, *_):
