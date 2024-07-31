@@ -643,7 +643,7 @@ class PartSelectorDialog(wx.Dialog):
         self.search(None)
 
     def get_price(self, quantity, prices):
-        """Find the prce for the number of selected parts accordning to the price ranges."""
+        """Find the price for the number of selected parts accordning to the price ranges."""
         price_ranges = prices.split(",")
         min_quantity = int(price_ranges[0].split("-")[0])
         if quantity <= min_quantity:
