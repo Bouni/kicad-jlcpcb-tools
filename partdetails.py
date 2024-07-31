@@ -108,7 +108,7 @@ class PartDetailsDialog(wx.Dialog):
                 self.parent.scale_factor,
             )
         )
-        self.openpdf_button.SetBitmapMargins((2, 0))
+        self.savepdf_button.SetBitmapMargins((2, 0))
 
         self.openpdf_button.SetBitmap(
             loadBitmapScaled(
