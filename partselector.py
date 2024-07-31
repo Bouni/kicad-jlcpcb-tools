@@ -642,23 +642,23 @@ class PartSelectorDialog(wx.Dialog):
         # search now that categories might have changed
         self.search(None)
 
-    def get_price(self, quantity, prices):
+    def get_price(self, quantity, prices) -> float:
         """Find the price for the number of selected parts accordning to the price ranges."""
         price_ranges = prices.split(",")
         min_quantity = int(price_ranges[0].split("-")[0])
         if quantity <= min_quantity:
             range, price = price_ranges[0].split(":")
-            return price
+            return float(price)
         for p in price_ranges:
             range, price = p.split(":")
             lower,upper = range.split("-")
             if not upper: # upper bound of price ranges
-                return price
+                return float(price)
             lower = int(lower)
             upper = int(upper)
             self.logger.debug(upper)
             if lower <= quantity < upper:
-                return price
+                return float(price)
 
     def populate_part_list(self, parts, search_duration):
         """Populate the list with the result of the search."""
@@ -680,7 +680,8 @@ class PartSelectorDialog(wx.Dialog):
         for p in parts:
             item = [str(c) for c in p]
             pricecol = 8 # Must match order in library.py search function
-            item[pricecol] = f"{len(self.parts)} parts: {self.get_price(len(self.parts), item[pricecol])} each"
+            price = round(self.get_price(len(self.parts), item[pricecol]) , 3)
+            item[pricecol] = f"{len(self.parts)} parts: ${price} each"
             self.part_list.AppendItem(item)
 
     def select_part(self, *_):
