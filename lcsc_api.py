@@ -1,6 +1,8 @@
-import requests  # pylint: disable=import-error
+"""Unofficial LCSC API."""
 import io
 from pathlib import Path
+
+import requests  # pylint: disable=import-error
 
 
 class LCSC_API:
@@ -43,4 +45,3 @@ class LCSC_API:
         with open(path, "wb") as f:
             f.write(r.content)
         return {"success": True, "msg": "Successfully downloaded datasheet!"}
-
