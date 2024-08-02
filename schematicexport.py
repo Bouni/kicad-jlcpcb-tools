@@ -162,8 +162,8 @@ class SchematicExport:
                     lastLoc = m.group(3)
                     lastRef = value
                     for part in store_parts:
-                        if value == part[0]:
-                            newLcsc = part[3]
+                        if value == part["reference"]:
+                            newLcsc = part["lcsc"]
                             break
             # if we hit the pin section without finding a LCSC property, add it
             m = pinRx.search(inLine)
@@ -240,8 +240,8 @@ class SchematicExport:
                     # self.logger.info("value %s", value)
                     lastRef = value
                     for part in store_parts:
-                        if value == part[0]:
-                            newLcsc = part[3]
+                        if value == part["reference"]:
+                            newLcsc = part["lcsc"]
                             break
                 if key == "Sheetfile":
                     file_name = m.group(2)
