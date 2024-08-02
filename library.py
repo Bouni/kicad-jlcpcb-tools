@@ -387,12 +387,12 @@ class Library:
             con.row_factory = dict_factory
             cur = con.cursor()
             results = []
-            query = '''SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH ?'''
+            query = '''SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type, "Description" FROM parts WHERE parts MATCH ?'''
 
             # Use parameter binding to prevent SQL injection and handle the query more efficiently
             for number in lcsc:
                 # Each number needs to be wrapped in double quotes for exact match in FTS5
-                match_query = f'"LCSC Part:{number}"'
+                match_query = f'"lcsc:{number}"'
                 cur.execute(query, (match_query,))
                 results.extend(cur.fetchall())
             if results:

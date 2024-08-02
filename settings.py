@@ -232,6 +232,24 @@ class SettingsDialog(wx.Dialog):
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Property name used when updating schematics #####
+        self.property_name_setting = wx.ComboBox(
+        self,
+            size=wx.DefaultSize,
+            choices=["LCSC", "LCSC_PN", "LCSC Part", "JLC_PN"],
+            value="LCSC",
+            name="schematic_property_name",
+        )
+        self.property_name_setting.SetToolTip(
+            wx.ToolTip("The property name that will be used when updating schematics")
+        )
+        self.property_name_setting.Bind(wx.EVT_COMBOBOX, self.update_settings)
+        self.property_name_label = wx.StaticText(self, label="Property name:")
+
+        property_name_sizer = wx.BoxSizer()
+        property_name_sizer.Add(self.property_name_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        property_name_sizer.Add(self.property_name_setting, 0, wx.ALL | wx.EXPAND, 5)
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -243,6 +261,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(property_name_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -355,6 +374,10 @@ class SettingsDialog(wx.Dialog):
                 loadBitmapScaled("no_bom.png", self.parent.scale_factor, static=True)
             )
 
+    def update_property_name(self, name):
+        """Update settings dialog according to the settings."""
+        self.property_name_setting.SetValue(name)
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
@@ -374,6 +397,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_lcsc_bom_cpl(
             self.parent.settings.get("gerber", {}).get("lcsc_bom_cpl", True)
+        )
+        self.update_property_name(
+            self.parent.settings.get("schematic", {}).get("property_name", "LCSC")
         )
 
     def update_settings(self, event):
