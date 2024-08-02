@@ -387,7 +387,7 @@ class Library:
             con.row_factory = dict_factory
             cur = con.cursor()
             results = []
-            query = '''SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH ?'''
+            query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH ?"""
 
             # Use parameter binding to prevent SQL injection and handle the query more efficiently
             for number in lcsc:
@@ -640,3 +640,11 @@ class Library:
                 self.logger.debug("Droped mappings table from parts database.")
             except sqlite3.OperationalError:
                 return
+
+    def get_last_update(self) -> str:
+        """Get last update from meta table."""
+        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
+            last_update = cur.execute("SELECT last_update FROM meta").fetchone()
+            if last_update:
+                return last_update[0]
+            return ""

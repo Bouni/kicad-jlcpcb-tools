@@ -1,5 +1,6 @@
 """Contains the main window of the plugin."""
 
+from datetime import datetime as dt
 import json
 import logging
 import os
@@ -530,6 +531,10 @@ class JLCPCBTools(wx.Dialog):
     def init_library(self):
         """Initialize the parts library."""
         self.library = Library(self)
+        last_update = self.library.get_last_update()
+        if last_update:
+            last_update = dt.fromisoformat(last_update).strftime("%Y-%m-%d %H:%M")
+        self.SetTitle(f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",)
 
     def init_store(self):
         """Initialize the store of part assignments."""
