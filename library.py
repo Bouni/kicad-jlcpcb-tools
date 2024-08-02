@@ -390,7 +390,6 @@ class Library:
             query = '''SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH :number LIMIT 1'''
             # Use parameter binding to prevent SQL injection and handle the query more efficiently
             for number in lcsc:
-                self.logger.debug(number)
                 cur.execute(query, {"number": f'"{number}"'})
                 results.extend(cur.fetchall())
             return results
