@@ -612,15 +612,9 @@ class JLCPCBTools(wx.Dialog):
         corrections = self.library.get_all_correction_data()
         # find rotation correction values
         for part in parts:
-            detail = list(
-                filter(
-                    lambda x, lcsc=part["lcsc"]: x[0] == lcsc,
-                    details,
-                )
-            )
-            if detail:
-                part["type"] = detail[0][2]
-                part["stock"] = detail[0][1]
+            if details:
+                part["type"] = details["type"]
+                part["stock"] = details["stock"]
             # First check if the part name mathes
             for regex, correction in corrections:
                 if re.search(regex, str(part["reference"])):
