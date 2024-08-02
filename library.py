@@ -392,7 +392,7 @@ class Library:
             for number in lcsc:
                 self.logger.debug(number)
                 cur.execute(query, {"number": f'"{number}"'})
-                results.extend([x for x in cur.fetchall() if x["lcsc"] == number]) # Filter exact match as FTS5 does return every match
+                results.extend(cur.fetchall())
             return results
 
     def update(self):
