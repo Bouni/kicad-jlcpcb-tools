@@ -391,7 +391,7 @@ class Library:
             # Use parameter binding to prevent SQL injection and handle the query more efficiently
             for number in lcsc:
                 cur.execute(query, {"number": number})
-                results.extend(cur.fetchall())
+                results.extend([x for x in cur.fetchall() if x[0] == number]) # Filter exact match as FTS5 does return every match
             if results:
                 return results[0]
             return {}
