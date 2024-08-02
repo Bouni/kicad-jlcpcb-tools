@@ -19,7 +19,7 @@ from .events import (
     ResetGaugeEvent,
     UpdateGaugeEvent,
 )
-from .helpers import PLUGIN_PATH, natural_sort_collation
+from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .unzip_parts import unzip_parts
 
 
@@ -381,13 +381,13 @@ class Library:
             con.executemany(query, data)
             con.commit()
 
-    def get_part_details(self, lcsc):
+    def get_part_details(self, lcsc: list) -> dict:
         """Get the part details for a list of LCSC numbers using optimized FTS5 querying."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
-            con.row_factory = sqlite3.Row  # To access columns by names
+            con.row_factory = dict_factory
             cur = con.cursor()
             results = []
-            query = '''SELECT "LCSC Part", "Stock", "Library Type" FROM parts WHERE parts MATCH ?'''
+            query = '''SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH ?'''
 
             # Use parameter binding to prevent SQL injection and handle the query more efficiently
             for number in lcsc:
@@ -395,7 +395,9 @@ class Library:
                 match_query = f'"LCSC Part:{number}"'
                 cur.execute(query, (match_query,))
                 results.extend(cur.fetchall())
-            return results
+            if results:
+                return results[0]
+            return {}
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
