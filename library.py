@@ -387,11 +387,11 @@ class Library:
             con.row_factory = dict_factory
             cur = con.cursor()
             results = []
-            query = '''SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH :number LIMIT 1'''
+            query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH :number"""
             # Use parameter binding to prevent SQL injection and handle the query more efficiently
             for number in lcsc:
-                cur.execute(query, {"number": f'"{number}"'})
-                results.extend(cur.fetchall())
+                cur.execute(query, {"number": number})
+                results.extend([n for n in cur.fetchall() if n["lcsc"] == number])
             return results
 
     def update(self):
