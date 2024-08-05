@@ -381,18 +381,14 @@ class Library:
             con.executemany(query, data)
             con.commit()
 
-    def get_part_details(self, lcsc: list) -> list:
-        """Get the part details for a list of LCSC numbers using optimized FTS5 querying."""
+    def get_part_details(self, number: str) -> dict:
+        """Get the part details for a LCSC number using optimized FTS5 querying."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.row_factory = dict_factory
             cur = con.cursor()
-            results = []
             query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH :number"""
-            # Use parameter binding to prevent SQL injection and handle the query more efficiently
-            for number in lcsc:
-                cur.execute(query, {"number": number})
-                results.extend([n for n in cur.fetchall() if n["lcsc"] == number])
-            return results
+            cur.execute(query, {"number": number})
+            return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""

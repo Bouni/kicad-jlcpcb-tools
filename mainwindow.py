@@ -587,13 +587,13 @@ class JLCPCBTools(wx.Dialog):
                 ),
             ),
         }
-        numbers = []
+        details = {}
         parts = []
         for part in self.store.read_all():
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
-            if part["lcsc"] and part["lcsc"] not in numbers:
-                numbers.append(part["lcsc"])
-            part["stock"] = str(part["stock"])
+            # Get part stock and type from library, skip if part number was already looked up before
+            if part["lcsc"] and part["lcsc"] not in details:
+                details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
@@ -605,23 +605,14 @@ class JLCPCBTools(wx.Dialog):
             part["exclude_from_pos"] = icons.get(part["exclude_from_pos"], icons.get(0))
             part["side"] = "Top" if fp.GetLayer() == 0 else "Bot"
             part["rotation"] = ""
-            part["type"] = ""
+            part["type"] = details.get(part["lcsc"], {}).get("type", "")
+            part["stock"] = details.get(part["lcsc"], {}).get("stock", "")
             part["side"] = ""
             parts.append(part)
-        details = self.library.get_part_details(numbers)
         corrections = self.library.get_all_correction_data()
         # find rotation correction values
         for part in parts:
-            detail = list(
-                filter(
-                    lambda x, lcsc=part["lcsc"]: x["lcsc"] == lcsc,
-                    details,
-                )
-            )
-            if detail:
-                part["type"] = detail[0]["type"]
-                part["stock"] = detail[0]["stock"]
-            # First check if the part name mathes
+            # First check if the part name matches
             for regex, correction in corrections:
                 if re.search(regex, str(part["reference"])):
                     part["rotation"] = str(correction)
