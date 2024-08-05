@@ -566,6 +566,18 @@ class JLCPCBTools(wx.Dialog):
         }
         wx.MessageBox(e.text, e.title, style=styles.get(e.style, wx.ICON_INFORMATION))
 
+    def get_correction(self, part: dict, corrections: list) -> str:
+        """Try to find correction data for a given part."""
+        # First check if the part name matches
+        for regex, correction in corrections:
+            if re.search(regex, str(part["reference"])):
+                return str(correction)
+        # If there was no match for the part name, check if the package matches
+        for regex, correction in corrections:
+            if re.search(regex, str(part["footprint"])):
+                return str(correction)
+        return ""
+
     def populate_footprint_list(self, *_):
         """Populate/Refresh list of footprints."""
         if not self.store:
@@ -587,58 +599,35 @@ class JLCPCBTools(wx.Dialog):
                 ),
             ),
         }
-        numbers = []
-        parts = []
+        details = {}
+        corrections = self.library.get_all_correction_data()
         for part in self.store.read_all():
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
-            if part["lcsc"] and part["lcsc"] not in numbers:
-                numbers.append(part["lcsc"])
-            part["stock"] = str(part["stock"])
+            # Get part stock and type from library, skip if part number was already looked up before
+            if part["lcsc"] and part["lcsc"] not in details:
+                details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
             # don't show the part if hide POS is set
             if self.hide_pos_parts and part["exclude_from_pos"]:
                 continue
-            # decide which icon to use
-            part["exclude_from_bom"] = icons.get(part["exclude_from_bom"], icons.get(0))
-            part["exclude_from_pos"] = icons.get(part["exclude_from_pos"], icons.get(0))
-            part["side"] = "Top" if fp.GetLayer() == 0 else "Bot"
-            part["rotation"] = ""
-            part["type"] = ""
-            part["side"] = ""
-            parts.append(part)
-        details = self.library.get_part_details(numbers)
-        corrections = self.library.get_all_correction_data()
-        # find rotation correction values
-        for part in parts:
-            if details:
-                part["type"] = details["type"]
-                part["stock"] = details["stock"]
-            # First check if the part name mathes
-            for regex, correction in corrections:
-                if re.search(regex, str(part["reference"])):
-                    part["rotation"] = str(correction)
-                    break
-            # If there was no match for the part name, check if the package matches
-            if part["rotation"] == "":
-                for regex, correction in corrections:
-                    if re.search(regex, str(part["footprint"])):
-                        part["rotation"] = str(correction)
-                        break
-
             self.footprint_list.AppendItem(
                 [
                     part["reference"],
                     part["value"],
                     part["footprint"],
                     part["lcsc"],
-                    part["type"],
-                    part["stock"],
-                    part["exclude_from_bom"],
-                    part["exclude_from_pos"],
-                    part["rotation"],
-                    part["side"],
+                    details.get(part["lcsc"], {}).get("type", ""),  # type
+                    details.get(part["lcsc"], {}).get("stock", ""),  # stock
+                    icons.get(
+                        part["exclude_from_bom"], icons.get(0)
+                    ),  # exclude_from_bom icon
+                    icons.get(
+                        part["exclude_from_pos"], icons.get(0)
+                    ),  # exclude_from_pos icon
+                    self.get_correction(part, corrections),  # rotation
+                    "Top" if fp.GetLayer() == 0 else "Bot",  # Side
                     "",
                 ]
             )
