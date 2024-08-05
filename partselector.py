@@ -656,7 +656,6 @@ class PartSelectorDialog(wx.Dialog):
                 return float(price)
             lower = int(lower)
             upper = int(upper)
-            self.logger.debug(upper)
             if lower <= quantity < upper:
                 return float(price)
 
