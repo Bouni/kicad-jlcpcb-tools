@@ -680,7 +680,8 @@ class PartSelectorDialog(wx.Dialog):
             item = [str(c) for c in p]
             pricecol = 8 # Must match order in library.py search function
             price = round(self.get_price(len(self.parts), item[pricecol]) , 3)
-            item[pricecol] = f"{len(self.parts)} parts: ${price} each"
+            sum = round(price * len(self.parts), 3)
+            item[pricecol] = f"{len(self.parts)} parts: ${price} each / ${sum} total"
             self.part_list.AppendItem(item)
 
     def select_part(self, *_):
