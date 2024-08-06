@@ -606,6 +606,8 @@ class JLCPCBTools(wx.Dialog):
             # Get part stock and type from library, skip if part number was already looked up before
             if part["lcsc"] and part["lcsc"] not in details:
                 details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
+                if part["stock"] != details[part["lcsc"]]["stock"]:
+                    self.store.set_stock(part["reference"], details[part["lcsc"]]["stock"])
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
