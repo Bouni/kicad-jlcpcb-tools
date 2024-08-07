@@ -162,3 +162,7 @@ class PartListDataModel(dv.PyDataViewModel):
         """Remove all entries from the data model."""
         self.data.clear()
         self.Cleared()
+
+    def get_reference(self, item):
+        """Get the reference of an item."""
+        return self.ItemToObject(item)[0]

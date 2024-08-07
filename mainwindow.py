@@ -411,9 +411,9 @@ class JLCPCBTools(wx.Dialog):
 
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
 
-        # self.footprint_list.Bind(
-        #     wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
-        # )
+        self.footprint_list.Bind(
+            dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
+        )
 
         # self.footprint_list.Bind(
         #     wx.dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown
@@ -656,12 +656,9 @@ class JLCPCBTools(wx.Dialog):
         # select all of the selected items in the footprint_list
         if self.footprint_list.GetSelectedItemsCount() > 0:
             for item in self.footprint_list.GetSelections():
-                row = self.footprint_list.ItemToRow(item)
-                ref = self.footprint_list.GetTextValue(row, 0)
+                ref = self.partlist_data_model.get_reference(item)
                 fp = self.pcbnew.GetBoard().FindFootprintByReference(ref)
-
                 fp.SetSelected()
-
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
             self.pcbnew.Refresh()
 
