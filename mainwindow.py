@@ -12,7 +12,6 @@ import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
-from .const import Column
 from .datamodel import PartListDataModel
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
@@ -27,7 +26,6 @@ from .events import (
 from .fabrication import Fabrication
 from .helpers import (
     PLUGIN_PATH,
-    GetListIcon,
     GetScaleFactor,
     HighResWxSize,
     getVersion,
@@ -690,53 +688,35 @@ class JLCPCBTools(wx.Dialog):
 
     def toggle_bom_pos(self, *_):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
-        selected_rows = []
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            selected_rows.append(row)
-            ref = self.footprint_list.GetTextValue(row, 0)
+            ref = self.partlist_data_model.get_reference(item)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, int(bom))
             self.store.set_pos(ref, int(pos))
-            self.footprint_list.SetValue(
-                GetListIcon(bom, self.scale_factor), row, Column.BOM
-            )
-            self.footprint_list.SetValue(
-                GetListIcon(pos, self.scale_factor), row, Column.POS
-            )
+            self.partlist_data_model.toggle_bom_pos(item)
 
     def toggle_bom(self, *_):
         """Toggle the exclude from BOM attribute of a footprint."""
-        selected_rows = []
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            selected_rows.append(row)
-            ref = self.footprint_list.GetTextValue(row, 0)
+            ref = self.partlist_data_model.get_reference(item)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, int(bom))
-            self.footprint_list.SetValue(
-                GetListIcon(bom, self.scale_factor), row, Column.BOM
-            )
+            self.partlist_data_model.toggle_bom(item)
 
     def toggle_pos(self, *_):
         """Toggle the exclude from POS attribute of a footprint."""
-        selected_rows = []
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            selected_rows.append(row)
-            ref = self.footprint_list.GetTextValue(row, 0)
+            ref = self.partlist_data_model.get_reference(item)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, int(pos))
-            self.footprint_list.SetValue(
-                GetListIcon(pos, self.scale_factor), row, Column.POS
-            )
+            self.partlist_data_model.toggle_pos(item)
 
     def remove_lcsc_number(self, *_):
         """Remove an assigned a LCSC Part number to a footprint."""

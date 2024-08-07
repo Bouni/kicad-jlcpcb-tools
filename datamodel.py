@@ -208,3 +208,26 @@ class PartListDataModel(dv.PyDataViewModel):
         obj[TYPE_COL] = ""
         obj[STOCK_COL] = ""
         self.ItemChanged(self.ObjectToItem(obj))
+
+    def toggle_bom(self, item):
+        """Toggle BOM for a given item."""
+        obj = self.ItemToObject(item)
+        if obj[BOM_COL] == self.bom_pos_icons[0]:
+            obj[BOM_COL] = self.bom_pos_icons[1]
+        else:
+            obj[BOM_COL] = self.bom_pos_icons[0]
+        self.ItemChanged(self.ObjectToItem(obj))
+
+    def toggle_pos(self, item):
+        """Toggle POS for a given item."""
+        obj = self.ItemToObject(item)
+        if obj[POS_COL] == self.bom_pos_icons[0]:
+            obj[POS_COL] = self.bom_pos_icons[1]
+        else:
+            obj[POS_COL] = self.bom_pos_icons[0]
+        self.ItemChanged(self.ObjectToItem(obj))
+
+    def toggle_bom_pos(self, item):
+        """Toggle BOM and POS for a given item."""
+        self.toggle_bom(item)
+        self.toggle_pos(item)
