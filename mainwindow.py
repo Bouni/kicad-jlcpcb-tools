@@ -370,7 +370,11 @@ class JLCPCBTools(wx.Dialog):
             "Value", 1, width=250, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         footprint = self.footprint_list.AppendTextColumn(
-            "Footprint", 2, width=250, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+            "Footprint",
+            2,
+            width=250,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
         )
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
@@ -405,91 +409,6 @@ class JLCPCBTools(wx.Dialog):
         rotation.SetSortable(True)
         side.SetSortable(True)
 
-        # self.footprint_list = wx.dataview.DataViewListCtrl(
-        #     self,
-        #     wx.ID_ANY,
-        #     wx.DefaultPosition,
-        #     wx.DefaultSize,
-        #     style=wx.dataview.DV_MULTIPLE,
-        # )
-        # self.footprint_list.SetMinSize(HighResWxSize(self.window, wx.Size(750, 400)))
-        # self.reference = self.footprint_list.AppendTextColumn(
-        #     "Reference",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 100),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.value = self.footprint_list.AppendTextColumn(
-        #     "Value",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 200),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.footprint = self.footprint_list.AppendTextColumn(
-        #     "Footprint",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 300),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.lcsc = self.footprint_list.AppendTextColumn(
-        #     "LCSC",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 100),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.type_column = self.footprint_list.AppendTextColumn(
-        #     "Type",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 100),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.stock = self.footprint_list.AppendTextColumn(
-        #     "Stock",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 100),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.bom = self.footprint_list.AppendIconTextColumn(
-        #     "BOM",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 40),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.pos = self.footprint_list.AppendIconTextColumn(
-        #     "POS",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 40),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.rot = self.footprint_list.AppendTextColumn(
-        #     "Rotation",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 60),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.side = self.footprint_list.AppendTextColumn(
-        #     "Side",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     width=int(self.scale_factor * 40),
-        #     align=wx.ALIGN_CENTER,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
-        # self.footprint_list.AppendTextColumn(
-        #     "",
-        #     mode=wx.dataview.DATAVIEW_CELL_INERT,
-        #     align=wx.ALIGN_CENTER,
-        #     width=1,
-        #     flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        # )
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # self.footprint_list.Bind(
@@ -629,28 +548,10 @@ class JLCPCBTools(wx.Dialog):
         return "0"
 
     def populate_footprint_list(self, *_):
-        """Populate/Refresh list of footprints."""
-
+        """Populate list of footprints."""
         if not self.store:
             self.init_store()
         self.partlist_data_model.RemoveAll()
-
-        # icons = {
-        #     0: wx.dataview.DataViewIconText(
-        #         "",
-        #         loadIconScaled(
-        #             "mdi-check-color.png",
-        #             self.scale_factor,
-        #         ),
-        #     ),
-        #     1: wx.dataview.DataViewIconText(
-        #         "",
-        #         loadIconScaled(
-        #             "mdi-close-color.png",
-        #             self.scale_factor,
-        #         ),
-        #     ),
-        # }
         details = {}
         corrections = self.library.get_all_correction_data()
         for part in self.store.read_all():
@@ -664,7 +565,6 @@ class JLCPCBTools(wx.Dialog):
             # don't show the part if hide POS is set
             if self.hide_pos_parts and part["exclude_from_pos"]:
                 continue
-
             self.partlist_data_model.AddEntry(
                 [
                     part["reference"],
@@ -679,27 +579,6 @@ class JLCPCBTools(wx.Dialog):
                     str(fp.GetLayer()),
                 ]
             )
-
-
-            # self.footprint_list.AppendItem(
-            #     [
-            #         part["reference"],
-            #         part["value"],
-            #         part["footprint"],
-            #         part["lcsc"],
-            #         details.get(part["lcsc"], {}).get("type", ""),  # type
-            #         details.get(part["lcsc"], {}).get("stock", ""),  # stock
-            #         icons.get(
-            #             part["exclude_from_bom"], icons.get(0)
-            #         ),  # exclude_from_bom icon
-            #         icons.get(
-            #             part["exclude_from_pos"], icons.get(0)
-            #         ),  # exclude_from_pos icon
-            #         self.get_correction(part, corrections),  # rotation
-            #         "Top" if fp.GetLayer() == 0 else "Bot",  # Side
-            #         "",
-            #     ]
-            # )
 
     def OnSortFootprintList(self, e):
         """Set order_by to the clicked column and trigger list refresh."""
