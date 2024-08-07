@@ -186,6 +186,10 @@ class PartListDataModel(dv.PyDataViewModel):
         """Get the lcsc of an item."""
         return self.ItemToObject(item)[LCSC_COL]
 
+    def get_footprint(self, item):
+        """Get the footprint of an item."""
+        return self.ItemToObject(item)[FP_COL]
+
     def select_alike(self, item):
         """Select all items that have the same value and footprint."""
         obj = self.ItemToObject(item)

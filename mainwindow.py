@@ -854,21 +854,15 @@ class JLCPCBTools(wx.Dialog):
                     self.partlist_data_model.set_lcsc(reference, lcsc, details["type"], details["stock"])
                     self.store.set_lcsc(reference, lcsc)
 
-    def add_part_rot(self, e):
+    def add_rotation(self, e):
         """Add part rotation for the current part."""
-        return
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            if row == -1:
-                return
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
-                package = self.footprint_list.GetTextValue(row, 2)
-                if package != "":
-                    RotationManagerDialog(self, "^" + re.escape(package)).ShowModal()
+                if footprint := self.partlist_data_model.get_footprint(item):
+                    RotationManagerDialog(self, "^" + re.escape(footprint)).ShowModal()
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
-                name = self.footprint_list.GetTextValue(row, 1)
-                if name != "":
-                    RotationManagerDialog(self, re.escape(name)).ShowModal()
+                if value := self.partlist_data_model.get_value(item):
+                    RotationManagerDialog(self, re.escape(value)).ShowModal()
 
     def save_all_mappings(self, *_):
         """Save all mappings."""
