@@ -360,7 +360,7 @@ class JLCPCBTools(wx.Dialog):
         table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
 
         self.footprint_list = dv.DataViewCtrl(
-            self, style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES
+            self, style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_MULTIPLE
         )
 
         reference = self.footprint_list.AppendTextColumn(
