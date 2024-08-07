@@ -945,13 +945,13 @@ class JLCPCBTools(wx.Dialog):
             "Add Rotation by package",
         )
         right_click_menu.Append(rotation_by_package)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_package)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_rotation, rotation_by_package)
 
         rotation_by_name = wx.MenuItem(
             right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name"
         )
         right_click_menu.Append(rotation_by_name)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_name)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_rotation, rotation_by_name)
 
         find_mapping = wx.MenuItem(
             right_click_menu, wx.NewIdRef(), "Find LCSC from Mappings"
