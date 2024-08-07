@@ -864,6 +864,7 @@ class JLCPCBTools(wx.Dialog):
 
     def add_part_rot(self, e):
         """Add part rotation for the current part."""
+        return
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
             if row == -1:
@@ -879,15 +880,15 @@ class JLCPCBTools(wx.Dialog):
 
     def save_all_mappings(self, *_):
         """Save all mappings."""
-        for r in range(self.footprint_list.GetItemCount()):
-            footp = self.footprint_list.GetTextValue(r, 2)
-            partval = self.footprint_list.GetTextValue(r, 1)
-            lcscpart = self.footprint_list.GetTextValue(r, 3)
-            if footp != "" and partval != "" and lcscpart != "":
-                if self.library.get_mapping_data(footp, partval):
-                    self.library.update_mapping_data(footp, partval, lcscpart)
+        for item in self.partlist_data_model.get_all():
+            value = item[1]
+            footprint = item[2]
+            lcsc = item[3]
+            if footprint != "" and value != "" and lcsc != "":
+                if self.library.get_mapping_data(footprint, value):
+                    self.library.update_mapping_data(footprint, value, lcsc)
                 else:
-                    self.library.insert_mapping_data(footp, partval, lcscpart)
+                    self.library.insert_mapping_data(footprint, value, lcsc)
         self.logger.info("All mappings saved")
 
     def export_to_schematic(self, *_):

@@ -170,6 +170,10 @@ class PartListDataModel(dv.PyDataViewModel):
         self.data.clear()
         self.Cleared()
 
+    def get_all(self):
+        """Get tall items."""
+        return self.data
+
     def get_reference(self, item):
         """Get the reference of an item."""
         return self.ItemToObject(item)[REF_COL]
