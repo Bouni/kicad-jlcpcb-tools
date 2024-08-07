@@ -62,8 +62,12 @@ ID_HIDE_BOM = 13
 ID_HIDE_POS = 14
 ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
+ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
+ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
+ID_CONTEXT_MENU_FIND_MAPPING = wx.NewIdRef()
+ID_CONTEXT_MENU_ADD_MAPPING = wx.NewIdRef()
 
 
 class KicadProvider:
@@ -851,7 +855,9 @@ class JLCPCBTools(wx.Dialog):
                 for item in self.footprint_list.GetSelections():
                     details = self.library.get_part_details(lcsc)
                     reference = self.partlist_data_model.get_reference(item)
-                    self.partlist_data_model.set_lcsc(reference, lcsc, details["type"], details["stock"])
+                    self.partlist_data_model.set_lcsc(
+                        reference, lcsc, details["type"], details["stock"]
+                    )
                     self.store.set_lcsc(reference, lcsc)
 
     def add_rotation(self, e):
@@ -916,7 +922,9 @@ class JLCPCBTools(wx.Dialog):
                     self.store.set_lcsc(reference, lcsc)
                     self.logger.info("Found %s", lcsc)
                     details = self.library.get_part_details(lcsc)
-                    self.partlist_data_model.set_lcsc(reference, lcsc, details["type"], details["stock"])
+                    self.partlist_data_model.set_lcsc(
+                        reference, lcsc, details["type"], details["stock"]
+                    )
 
     def sanitize_lcsc(self, lcsc_PN):
         """Sanitize a given LCSC number using a regex."""
@@ -929,11 +937,15 @@ class JLCPCBTools(wx.Dialog):
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
 
-        copy_lcsc = wx.MenuItem(right_click_menu, wx.NewIdRef(), "Copy LCSC")
+        copy_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_COPY_LCSC, "Copy LCSC"
+        )
         right_click_menu.Append(copy_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
 
-        paste_lcsc = wx.MenuItem(right_click_menu, wx.NewIdRef(), "Paste LCSC")
+        paste_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_PASTE_LCSC, "Paste LCSC"
+        )
         right_click_menu.Append(paste_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
@@ -952,13 +964,13 @@ class JLCPCBTools(wx.Dialog):
         right_click_menu.Bind(wx.EVT_MENU, self.add_rotation, rotation_by_name)
 
         find_mapping = wx.MenuItem(
-            right_click_menu, wx.NewIdRef(), "Find LCSC from Mappings"
+            right_click_menu, ID_CONTEXT_MENU_FIND_MAPPING, "Find LCSC from Mappings"
         )
         right_click_menu.Append(find_mapping)
         right_click_menu.Bind(wx.EVT_MENU, self.search_foot_mapping, find_mapping)
 
         add_mapping = wx.MenuItem(
-            right_click_menu, wx.NewIdRef(), "Add Footprint Mapping"
+            right_click_menu, ID_CONTEXT_MENU_ADD_MAPPING, "Add Footprint Mapping"
         )
         right_click_menu.Append(add_mapping)
         right_click_menu.Bind(wx.EVT_MENU, self.add_foot_mapping, add_mapping)
