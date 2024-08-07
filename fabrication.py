@@ -323,12 +323,7 @@ class Fabrication:
                 if not add_without_lcsc and not part["lcsc"]:
                     continue
                 writer.writerow(
-                    [
-                        part["value"],
-                        part["refs"],
-                        part["footprint"],
-                        part["lcsc"]
-                    ]
+                    [part["value"], part["refs"], part["footprint"], part["lcsc"]]
                 )
         self.logger.info(
             "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
