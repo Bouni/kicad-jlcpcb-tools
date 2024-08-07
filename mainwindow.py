@@ -414,9 +414,7 @@ class JLCPCBTools(wx.Dialog):
             dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
         )
 
-        # self.footprint_list.Bind(
-        #     wx.dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown
-        # )
+        self.footprint_list.Bind(dv.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown)
 
         table_sizer.Add(self.right_toolbar, 1, wx.EXPAND, 5)
         # ---------------------------------------------------------------------
@@ -837,13 +835,9 @@ class JLCPCBTools(wx.Dialog):
     def copy_part_lcsc(self, *_):
         """Fetch part details from LCSC and show them in a modal."""
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            if row == -1:
-                return
-            part = self.footprint_list.GetTextValue(row, 3)
-            if part != "":
+            if lcsc := self.partlist_data_model.get_lcsc(item):
                 if wx.TheClipboard.Open():
-                    wx.TheClipboard.SetData(wx.TextDataObject(part))
+                    wx.TheClipboard.SetData(wx.TextDataObject(lcsc))
                     wx.TheClipboard.Close()
 
     def paste_part_lcsc(self, *_):
@@ -946,37 +940,44 @@ class JLCPCBTools(wx.Dialog):
 
     def OnRightDown(self, *_):
         """Right click context menu for action on parts table."""
-        conMenu = wx.Menu()
-        copy_lcsc = wx.MenuItem(conMenu, wx.NewIdRef(), "Copy LCSC")
-        conMenu.Append(copy_lcsc)
-        conMenu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
+        right_click_menu = wx.Menu()
 
-        paste_lcsc = wx.MenuItem(conMenu, wx.NewIdRef(), "Paste LCSC")
-        conMenu.Append(paste_lcsc)
-        conMenu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
+        copy_lcsc = wx.MenuItem(right_click_menu, wx.NewIdRef(), "Copy LCSC")
+        right_click_menu.Append(copy_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
+
+        paste_lcsc = wx.MenuItem(right_click_menu, wx.NewIdRef(), "Paste LCSC")
+        right_click_menu.Append(paste_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
         rotation_by_package = wx.MenuItem(
-            conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE, "Add Rotation by package"
+            right_click_menu,
+            ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE,
+            "Add Rotation by package",
         )
-        conMenu.Append(rotation_by_package)
-        conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_package)
+        right_click_menu.Append(rotation_by_package)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_package)
 
         rotation_by_name = wx.MenuItem(
-            conMenu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name"
+            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name"
         )
-        conMenu.Append(rotation_by_name)
-        conMenu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_name)
+        right_click_menu.Append(rotation_by_name)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_part_rot, rotation_by_name)
 
-        find_mapping = wx.MenuItem(conMenu, wx.NewIdRef(), "Find LCSC from Mappings")
-        conMenu.Append(find_mapping)
-        conMenu.Bind(wx.EVT_MENU, self.search_foot_mapping, find_mapping)
+        find_mapping = wx.MenuItem(
+            right_click_menu, wx.NewIdRef(), "Find LCSC from Mappings"
+        )
+        right_click_menu.Append(find_mapping)
+        right_click_menu.Bind(wx.EVT_MENU, self.search_foot_mapping, find_mapping)
 
-        add_mapping = wx.MenuItem(conMenu, wx.NewIdRef(), "Add Footprint Mapping")
-        conMenu.Append(add_mapping)
-        conMenu.Bind(wx.EVT_MENU, self.add_foot_mapping, add_mapping)
+        add_mapping = wx.MenuItem(
+            right_click_menu, wx.NewIdRef(), "Add Footprint Mapping"
+        )
+        right_click_menu.Append(add_mapping)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_foot_mapping, add_mapping)
 
-        self.footprint_list.PopupMenu(conMenu)
-        conMenu.Destroy()  # destroy to avoid memory leak
+        self.footprint_list.PopupMenu(right_click_menu)
+        right_click_menu.Destroy()  # destroy to avoid memory leak
 
     def init_logger(self):
         """Initialize logger to log into textbox."""
