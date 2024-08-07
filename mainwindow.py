@@ -746,22 +746,12 @@ class JLCPCBTools(wx.Dialog):
 
     def select_alike(self, *_):
         """Select all parts that have the same value and footprint."""
-        num_sel = (
-            self.footprint_list.GetSelectedItemsCount()
-        )  # could have selected more than 1 item (by mistake?)
-        if num_sel == 1:
-            item = self.footprint_list.GetSelection()
-        else:
+        if self.footprint_list.GetSelectedItemsCount() > 1:
             self.logger.warning("Select only one component, please.")
             return
-        row = self.footprint_list.ItemToRow(item)
-        ref = self.footprint_list.GetValue(row, 0)
-        part = self.store.get_part(ref)
-        for r in range(self.footprint_list.GetItemCount()):
-            value = self.footprint_list.GetValue(r, 1)
-            fp = self.footprint_list.GetValue(r, 2)
-            if part["value"] == value and part["footprint"] == fp:
-                self.footprint_list.SelectRow(r)
+        item = self.footprint_list.GetSelection()
+        for item in self.partlist_data_model.select_alike(item):
+            self.footprint_list.Select(item)
 
     def get_part_details(self, *_):
         """Fetch part details from LCSC and show them one after another each in a modal."""

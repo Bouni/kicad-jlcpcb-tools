@@ -168,6 +168,15 @@ class PartListDataModel(dv.PyDataViewModel):
         """Get the reference of an item."""
         return self.ItemToObject(item)[0]
 
+    def select_alike(self, item):
+        """Select all items that have the same value and footprint."""
+        obj = self.ItemToObject(item)
+        alike = []
+        for data in self.data:
+            if data[1:3] == obj[1:3]:
+                alike.append(self.ObjectToItem(data))
+        return alike
+
     def remove_lcsc_number(self, item):
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)
