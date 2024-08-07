@@ -54,7 +54,7 @@ ID_MAPPINGS = 3
 ID_DOWNLOAD = 4
 ID_SETTINGS = 5
 ID_SELECT_PART = 6
-ID_REMOVE_PART = 7
+ID_REMOVE_LCSC_NUMBER = 7
 ID_SELECT_ALIKE = 8
 ID_TOGGLE_BOM_POS = 9
 ID_TOGGLE_BOM = 10
@@ -236,8 +236,8 @@ class JLCPCBTools(wx.Dialog):
             "Assign a LCSC number to a footprint",
         )
 
-        self.remove_part_button = self.right_toolbar.AddTool(
-            ID_REMOVE_PART,
+        self.remove_lcsc_number_button = self.right_toolbar.AddTool(
+            ID_REMOVE_LCSC_NUMBER,
             "Remove LCSC number",
             loadBitmapScaled(
                 "mdi-close-box-outline.png",
@@ -339,7 +339,7 @@ class JLCPCBTools(wx.Dialog):
         )
 
         self.Bind(wx.EVT_TOOL, self.select_part, self.select_part_button)
-        self.Bind(wx.EVT_TOOL, self.remove_part, self.remove_part_button)
+        self.Bind(wx.EVT_TOOL, self.remove_lcsc_number, self.remove_lcsc_number_button)
         self.Bind(wx.EVT_TOOL, self.select_alike, self.select_alike_button)
         self.Bind(wx.EVT_TOOL, self.toggle_bom_pos, self.toggle_bom_pos_button)
         self.Bind(wx.EVT_TOOL, self.toggle_bom, self.toggle_bom_button)
@@ -676,7 +676,7 @@ class JLCPCBTools(wx.Dialog):
         """Control the state of all the buttons that relate to parts in toolbar on the right side."""
         for button in (
             ID_SELECT_PART,
-            ID_REMOVE_PART,
+            ID_REMOVE_LCSC_NUMBER,
             ID_SELECT_ALIKE,
             ID_TOGGLE_BOM_POS,
             ID_TOGGLE_BOM,
@@ -737,7 +737,7 @@ class JLCPCBTools(wx.Dialog):
                 GetListIcon(pos, self.scale_factor), row, Column.POS
             )
 
-    def remove_part(self, *_):
+    def remove_lcsc_number(self, *_):
         """Remove an assigned a LCSC Part number to a footprint."""
         for item in self.footprint_list.GetSelections():
             row = self.footprint_list.ItemToRow(item)
