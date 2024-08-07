@@ -847,14 +847,12 @@ class JLCPCBTools(wx.Dialog):
             success = wx.TheClipboard.GetData(text_data)
             wx.TheClipboard.Close()
         if success:
-            lcsc = self.sanitize_lcsc(text_data.GetText())
-            if lcsc == "":
-                return
-            for item in self.footprint_list.GetSelections():
-                row = self.footprint_list.ItemToRow(item)
-                reference = self.footprint_list.GetTextValue(row, 0)
-                self.store.set_lcsc(reference, lcsc)
-            self.populate_footprint_list()
+            if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
+                for item in self.footprint_list.GetSelections():
+                    details = self.library.get_part_details(lcsc)
+                    reference = self.partlist_data_model.get_reference(item)
+                    self.partlist_data_model.set_lcsc(reference, lcsc, details["type"], details["stock"])
+                    self.store.set_lcsc(reference, lcsc)
 
     def add_part_rot(self, e):
         """Add part rotation for the current part."""
