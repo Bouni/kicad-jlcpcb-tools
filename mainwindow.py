@@ -743,6 +743,7 @@ class JLCPCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
             self.store.set_lcsc(ref, "")
+            self.store.set_stock(ref, None)
             self.partlist_data_model.remove_lcsc_number(item)
 
     def select_alike(self, *_):

@@ -8,9 +8,14 @@ import wx.dataview as dv
 from .helpers import loadIconScaled
 
 REF_COL = 0
+VALUE_COL = 1
+FP_COL = 2
 LCSC_COL = 3
+TYPE_COL = 4
+STOCK_COL = 5
 BOM_COL = 6
 POS_COL = 7
+ROT_COL = 8
 SIDE_COL = 9
 
 
@@ -186,4 +191,6 @@ class PartListDataModel(dv.PyDataViewModel):
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)
         obj[LCSC_COL] = ""
-        self.ItemChanged(item)
+        obj[TYPE_COL] = ""
+        obj[STOCK_COL] = ""
+        self.ItemChanged(self.ObjectToItem(obj))
