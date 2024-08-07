@@ -7,6 +7,7 @@ import wx.dataview as dv
 
 from .helpers import loadIconScaled
 
+LCSC_COL = 3
 BOM_COL = 6
 POS_COL = 7
 SIDE_COL = 9
@@ -166,3 +167,9 @@ class PartListDataModel(dv.PyDataViewModel):
     def get_reference(self, item):
         """Get the reference of an item."""
         return self.ItemToObject(item)[0]
+
+    def remove_lcsc_number(self, item):
+        """Remove the LCSC number of an item."""
+        obj = self.ItemToObject(item)
+        obj[LCSC_COL] = ""
+        self.ItemChanged(item)

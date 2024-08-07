@@ -740,10 +740,9 @@ class JLCPCBTools(wx.Dialog):
     def remove_lcsc_number(self, *_):
         """Remove an assigned a LCSC Part number to a footprint."""
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            ref = self.footprint_list.GetTextValue(row, 0)
+            ref = self.partlist_data_model.get_reference(item)
             self.store.set_lcsc(ref, "")
-        self.populate_footprint_list()
+            self.partlist_data_model.remove_lcsc_number(item)
 
     def select_alike(self, *_):
         """Select all parts that have the same value and footprint."""
