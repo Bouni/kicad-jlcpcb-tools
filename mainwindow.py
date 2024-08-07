@@ -521,7 +521,7 @@ class JLCPCBTools(wx.Dialog):
         for reference in e.references:
             self.store.set_lcsc(reference, e.lcsc)
             self.store.set_stock(reference, int(e.stock))
-        self.populate_footprint_list()
+            self.partlist_data_model.set_lcsc(reference, e.lcsc, e.type, e.stock)
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -830,14 +830,13 @@ class JLCPCBTools(wx.Dialog):
         """Select a part from the library and assign it to the selected footprint(s)."""
         selection = {}
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            reference = self.footprint_list.GetTextValue(row, 0)
-            value = self.footprint_list.GetTextValue(row, 1)
-            lcsc = self.footprint_list.GetTextValue(row, 3)
+            ref = self.partlist_data_model.get_reference(item)
+            lcsc = self.partlist_data_model.get_lcsc(item)
+            value = self.partlist_data_model.get_value(item)
             if lcsc != "":
-                selection[reference] = lcsc
+                selection[ref] = lcsc
             else:
-                selection[reference] = value
+                selection[ref] = value
         PartSelectorDialog(self, selection).ShowModal()
 
     def generate_fabrication_data(self, *_):

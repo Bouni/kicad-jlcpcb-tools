@@ -174,6 +174,10 @@ class PartListDataModel(dv.PyDataViewModel):
         """Get the reference of an item."""
         return self.ItemToObject(item)[REF_COL]
 
+    def get_value(self, item):
+        """Get the value of an item."""
+        return self.ItemToObject(item)[VALUE_COL]
+
     def get_lcsc(self, item):
         """Get the lcsc of an item."""
         return self.ItemToObject(item)[LCSC_COL]
@@ -186,6 +190,16 @@ class PartListDataModel(dv.PyDataViewModel):
             if data[1:3] == obj[1:3]:
                 alike.append(self.ObjectToItem(data))
         return alike
+
+    def set_lcsc(self, ref, lcsc, type, stock):
+        """Set an lcsc number, type and stock for given reference."""
+        if (index := self.find_index(ref)) is None:
+            return
+        item = self.data[index]
+        item[LCSC_COL] = lcsc
+        item[TYPE_COL] = type
+        item[STOCK_COL] = stock
+        self.ItemChanged(self.ObjectToItem(item))
 
     def remove_lcsc_number(self, item):
         """Remove the LCSC number of an item."""

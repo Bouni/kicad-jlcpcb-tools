@@ -128,7 +128,7 @@ class Store:
             ).fetchone()
 
 
-    def set_stock(self, ref: str, stock: int):
+    def set_stock(self, ref: str, stock: int | None):
         """Set the stock value for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
