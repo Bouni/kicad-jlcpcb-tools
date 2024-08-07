@@ -145,7 +145,7 @@ class Store:
             cur.commit()
 
     def set_pos(self, ref: str, state: int):
-        """Change the BOM attribute for a part in the database."""
+        """Change the POS attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 "UPDATE part_info SET exclude_from_pos = :state WHERE reference = :reference", {"reference": ref, "state": state}
@@ -153,7 +153,7 @@ class Store:
             cur.commit()
 
     def set_lcsc(self, ref: str, lcsc: str):
-        """Change the BOM attribute for a part in the database."""
+        """Change the LCSC attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference", {"reference": ref, "lcsc": lcsc}
