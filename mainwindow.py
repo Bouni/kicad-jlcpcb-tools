@@ -412,10 +412,6 @@ class JLCPCBTools(wx.Dialog):
         table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # self.footprint_list.Bind(
-        #     wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self.OnSortFootprintList
-        # )
-
-        # self.footprint_list.Bind(
         #     wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
         # )
 
@@ -579,11 +575,6 @@ class JLCPCBTools(wx.Dialog):
                     str(fp.GetLayer()),
                 ]
             )
-
-    def OnSortFootprintList(self, e):
-        """Set order_by to the clicked column and trigger list refresh."""
-        self.store.set_order_by(e.GetColumn())
-        self.populate_footprint_list()
 
     def OnBomHide(self, *_):
         """Hide all parts from the list that have 'in BOM' set to No."""
