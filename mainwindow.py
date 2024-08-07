@@ -907,18 +907,16 @@ class JLCPCBTools(wx.Dialog):
     def search_foot_mapping(self, *_):
         """Search for a footprint mapping."""
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            if row == -1:
-                return
-            footp = self.footprint_list.GetTextValue(row, 2)
-            partval = self.footprint_list.GetTextValue(row, 1)
-            if footp != "" and partval != "":
-                if self.library.get_mapping_data(footp, partval):
-                    lcsc = self.library.get_mapping_data(footp, partval)[2]
-                    reference = self.footprint_list.GetTextValue(row, 0)
+            reference = self.partlist_data_model.get_reference(item)
+            footprint = self.partlist_data_model.get_footprint(item)
+            value = self.partlist_data_model.get_value(item)
+            if footprint != "" and value != "":
+                if self.library.get_mapping_data(footprint, value):
+                    lcsc = self.library.get_mapping_data(footprint, value)[2]
                     self.store.set_lcsc(reference, lcsc)
                     self.logger.info("Found %s", lcsc)
-        self.populate_footprint_list()
+                    details = self.library.get_part_details(lcsc)
+                    self.partlist_data_model.set_lcsc(reference, lcsc, details["type"], details["stock"])
 
     def sanitize_lcsc(self, lcsc_PN):
         """Sanitize a given LCSC number using a regex."""
