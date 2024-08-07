@@ -895,17 +895,14 @@ class JLCPCBTools(wx.Dialog):
     def add_foot_mapping(self, *_):
         """Add a footprint mapping."""
         for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            if row == -1:
-                return
-            footp = self.footprint_list.GetTextValue(row, 2)
-            partval = self.footprint_list.GetTextValue(row, 1)
-            lcscpart = self.footprint_list.GetTextValue(row, 3)
-            if footp != "" and partval != "" and lcscpart != "":
-                if self.library.get_mapping_data(footp, partval):
-                    self.library.update_mapping_data(footp, partval, lcscpart)
+            footprint = self.partlist_data_model.get_footprint(item)
+            value = self.partlist_data_model.get_value(item)
+            lcsc = self.partlist_data_model.get_lcsc(item)
+            if footprint != "" and value != "" and lcsc != "":
+                if self.library.get_mapping_data(footprint, value):
+                    self.library.update_mapping_data(footprint, value, lcsc)
                 else:
-                    self.library.insert_mapping_data(footp, partval, lcscpart)
+                    self.library.insert_mapping_data(footprint, value, lcsc)
 
     def search_foot_mapping(self, *_):
         """Search for a footprint mapping."""
