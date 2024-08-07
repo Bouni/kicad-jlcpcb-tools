@@ -774,12 +774,6 @@ class JLCPCBTools(wx.Dialog):
             return -1
         return self.footprint_list.GetColumnPosition(col)
 
-    def get_row_item_in_column(self, row, column_title):
-        """Get an item from a row based on the column title."""
-        return self.footprint_list.GetTextValue(
-            row, self.get_column_position_by_name(column_title)
-        )
-
     def show_part_details_dialog(self, part):
         """Show the part details modal dialog."""
         wx.BeginBusyCursor()
