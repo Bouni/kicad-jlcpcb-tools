@@ -360,7 +360,8 @@ class JLCPCBTools(wx.Dialog):
         table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
 
         self.footprint_list = dv.DataViewCtrl(
-            self, style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_MULTIPLE
+            self,
+            style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_MULTIPLE,
         )
 
         reference = self.footprint_list.AppendTextColumn(
@@ -755,12 +756,9 @@ class JLCPCBTools(wx.Dialog):
 
     def get_part_details(self, *_):
         """Fetch part details from LCSC and show them one after another each in a modal."""
-        parts = self.get_selected_part_id_from_gui()
-        if not parts:
-            return
-
-        for part in parts:
-            self.show_part_details_dialog(part)
+        for item in self.footprint_list.GetSelections():
+            if lcsc := self.partlist_data_model.get_lcsc(item):
+                self.show_part_details_dialog(lcsc)
 
     def get_column_by_name(self, column_title_to_find):
         """Lookup a column in our main footprint table by matching its title."""
@@ -775,19 +773,6 @@ class JLCPCBTools(wx.Dialog):
         if not col:
             return -1
         return self.footprint_list.GetColumnPosition(col)
-
-    def get_selected_part_id_from_gui(self):
-        """Get a list of LCSC part#s currently selected."""
-        lcsc_ids_selected = []
-        for item in self.footprint_list.GetSelections():
-            row = self.footprint_list.ItemToRow(item)
-            if row == -1:
-                continue
-
-            lcsc_id = self.get_row_item_in_column(row, "LCSC")
-            lcsc_ids_selected.append(lcsc_id)
-
-        return lcsc_ids_selected
 
     def get_row_item_in_column(self, row, column_title):
         """Get an item from a row based on the column title."""

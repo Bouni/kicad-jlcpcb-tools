@@ -7,6 +7,7 @@ import wx.dataview as dv
 
 from .helpers import loadIconScaled
 
+REF_COL = 0
 LCSC_COL = 3
 BOM_COL = 6
 POS_COL = 7
@@ -166,7 +167,11 @@ class PartListDataModel(dv.PyDataViewModel):
 
     def get_reference(self, item):
         """Get the reference of an item."""
-        return self.ItemToObject(item)[0]
+        return self.ItemToObject(item)[REF_COL]
+
+    def get_lcsc(self, item):
+        """Get the lcsc of an item."""
+        return self.ItemToObject(item)[LCSC_COL]
 
     def select_alike(self, item):
         """Select all items that have the same value and footprint."""
