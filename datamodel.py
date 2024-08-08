@@ -7,17 +7,6 @@ import wx.dataview as dv
 
 from .helpers import loadIconScaled
 
-REF_COL = 0
-VALUE_COL = 1
-FP_COL = 2
-LCSC_COL = 3
-TYPE_COL = 4
-STOCK_COL = 5
-BOM_COL = 6
-POS_COL = 7
-ROT_COL = 8
-SIDE_COL = 9
-
 
 class PartListDataModel(dv.PyDataViewModel):
     """Datamodel for use with the DataViewCtrl of the mainwindow."""
@@ -25,6 +14,19 @@ class PartListDataModel(dv.PyDataViewModel):
     def __init__(self, scale_factor):
         super().__init__()
         self.data = []
+        self.columns = {
+            "REF_COL": 0,
+            "VALUE_COL": 1,
+            "FP_COL": 2,
+            "LCSC_COL": 3,
+            "TYPE_COL": 4,
+            "STOCK_COL": 5,
+            "BOM_COL": 6,
+            "POS_COL": 7,
+            "ROT_COL": 8,
+            "SIDE_COL": 9,
+        }
+
         self.bom_pos_icons = [
             loadIconScaled(
                 "mdi-check-color.png",
@@ -57,7 +59,7 @@ class PartListDataModel(dv.PyDataViewModel):
 
     def GetColumnCount(self):
         """Get number of columns."""
-        return 10
+        return len(self.columns)
 
     def GetColumnType(self, col):
         """Get type of each column."""
@@ -94,7 +96,11 @@ class PartListDataModel(dv.PyDataViewModel):
     def GetValue(self, item, col):
         """Get value of an item."""
         row = self.ItemToObject(item)
-        if col in [BOM_COL, POS_COL, SIDE_COL]:
+        if col in [
+            self.columns["BOM_COL"],
+            self.columns["POS_COL"],
+            self.columns["SIDE_COL"],
+        ]:
             icon = row[col]
             return dv.DataViewIconText("", icon)
         return row[col]
@@ -102,7 +108,11 @@ class PartListDataModel(dv.PyDataViewModel):
     def SetValue(self, value, item, col):
         """Set value of an item."""
         row = self.ItemToObject(item)
-        if col in [BOM_COL, POS_COL, SIDE_COL]:
+        if col in [
+            self.columns["BOM_COL"],
+            self.columns["POS_COL"],
+            self.columns["SIDE_COL"],
+        ]:
             return False
         row[col] = value
         return True
@@ -137,9 +147,15 @@ class PartListDataModel(dv.PyDataViewModel):
 
     def AddEntry(self, data: list):
         """Add a new entry to the data model."""
-        data[BOM_COL] = self.get_bom_pos_icon(data[BOM_COL])
-        data[POS_COL] = self.get_bom_pos_icon(data[POS_COL])
-        data[SIDE_COL] = self.get_side_icon(data[SIDE_COL])
+        data[self.columns["BOM_COL"]] = self.get_bom_pos_icon(
+            data[self.columns["BOM_COL"]]
+        )
+        data[self.columns["POS_COL"]] = self.get_bom_pos_icon(
+            data[self.columns["POS_COL"]]
+        )
+        data[self.columns["SIDE_COL"]] = self.get_side_icon(
+            data[self.columns["SIDE_COL"]]
+        )
         self.data.append(data)
         self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
 
@@ -149,9 +165,9 @@ class PartListDataModel(dv.PyDataViewModel):
             return
         item = self.data[index]
         for i in range(0, len(data)):
-            if i in [BOM_COL, POS_COL]:
+            if i in [self.columns["BOM_COL"], self.columns["POS_COL"]]:
                 item[i] = self.get_bom_pos_icon(data[i])
-            elif i == SIDE_COL:
+            elif i == self.columns["SIDE_COL"]:
                 item[i] = self.get_side_icon(data[i])
             else:
                 item[i] = data[i]
@@ -176,19 +192,19 @@ class PartListDataModel(dv.PyDataViewModel):
 
     def get_reference(self, item):
         """Get the reference of an item."""
-        return self.ItemToObject(item)[REF_COL]
+        return self.ItemToObject(item)[self.columns["REF_COL"]]
 
     def get_value(self, item):
         """Get the value of an item."""
-        return self.ItemToObject(item)[VALUE_COL]
+        return self.ItemToObject(item)[self.columns["VALUE_COL"]]
 
     def get_lcsc(self, item):
         """Get the lcsc of an item."""
-        return self.ItemToObject(item)[LCSC_COL]
+        return self.ItemToObject(item)[self.columns["LCSC_COL"]]
 
     def get_footprint(self, item):
         """Get the footprint of an item."""
-        return self.ItemToObject(item)[FP_COL]
+        return self.ItemToObject(item)[self.columns["FP_COL"]]
 
     def select_alike(self, item):
         """Select all items that have the same value and footprint."""
@@ -204,35 +220,35 @@ class PartListDataModel(dv.PyDataViewModel):
         if (index := self.find_index(ref)) is None:
             return
         item = self.data[index]
-        item[LCSC_COL] = lcsc
-        item[TYPE_COL] = type
-        item[STOCK_COL] = stock
+        item[self.columns["LCSC_COL"]] = lcsc
+        item[self.columns["TYPE_COL"]] = type
+        item[self.columns["STOCK_COL"]] = stock
         self.ItemChanged(self.ObjectToItem(item))
 
     def remove_lcsc_number(self, item):
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)
-        obj[LCSC_COL] = ""
-        obj[TYPE_COL] = ""
-        obj[STOCK_COL] = ""
+        obj[self.columns["LCSC_COL"]] = ""
+        obj[self.columns["TYPE_COL"]] = ""
+        obj[self.columns["STOCK_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_bom(self, item):
         """Toggle BOM for a given item."""
         obj = self.ItemToObject(item)
-        if obj[BOM_COL] == self.bom_pos_icons[0]:
-            obj[BOM_COL] = self.bom_pos_icons[1]
+        if obj[self.columns["BOM_COL"]] == self.bom_pos_icons[0]:
+            obj[self.columns["BOM_COL"]] = self.bom_pos_icons[1]
         else:
-            obj[BOM_COL] = self.bom_pos_icons[0]
+            obj[self.columns["BOM_COL"]] = self.bom_pos_icons[0]
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_pos(self, item):
         """Toggle POS for a given item."""
         obj = self.ItemToObject(item)
-        if obj[POS_COL] == self.bom_pos_icons[0]:
-            obj[POS_COL] = self.bom_pos_icons[1]
+        if obj[self.columns["POS_COL"]] == self.bom_pos_icons[0]:
+            obj[self.columns["POS_COL"]] = self.bom_pos_icons[1]
         else:
-            obj[POS_COL] = self.bom_pos_icons[0]
+            obj[self.columns["POS_COL"]] = self.bom_pos_icons[0]
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_bom_pos(self, item):
