@@ -22,11 +22,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Check code with ruff
+        uses: chartboost/ruff-action@v1
         with:
-          python-version: "3.11"
-      - name: Install ruff
-        run: pip install ruff
-      - name: Run ruff
-        run: ruff check $(git ls-files '*.py')
+          version: 0.5.6
+          args: check 
+          src: "."
