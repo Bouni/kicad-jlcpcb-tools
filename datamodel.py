@@ -159,28 +159,6 @@ class PartListDataModel(dv.PyDataViewModel):
         self.data.append(data)
         self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
 
-    def UpdateEntry(self, data: list):
-        """Update an entry in the data model."""
-        if (index := self.find_index(data[0])) is None:
-            return
-        item = self.data[index]
-        for i in range(0, len(data)):
-            if i in [self.columns["BOM_COL"], self.columns["POS_COL"]]:
-                item[i] = self.get_bom_pos_icon(data[i])
-            elif i == self.columns["SIDE_COL"]:
-                item[i] = self.get_side_icon(data[i])
-            else:
-                item[i] = data[i]
-        self.ItemChanged(self.ObjectToItem(item))
-
-    def RemoveEntry(self, ref: str):
-        """Remove an entry from the data model."""
-        if (index := self.find_index(ref)) is None:
-            return
-        item = self.ObjectToItem(self.data[index])
-        self.data.remove(self.data[index])
-        self.ItemDeleted(dv.NullDataViewItem, item)
-
     def RemoveAll(self):
         """Remove all entries from the data model."""
         self.data.clear()
