@@ -43,19 +43,19 @@ class Store:
 
     def set_order_by(self, n: int):
         """Set which value we want to order by when getting data from the database."""
-        if n > 7:
-            return
-        # The following two cases are just a temporary hack and will eventually be replaced by
+        # The sorting is just a temporary hack and will eventually be replaced by
         # direct sorting via DataViewListCtrl rather than via SQL query
-        if n == 4:
+
+        # ignore type, rotation and side
+        if n == 4 or n > 7 :
             return
-        if n > 4:
-            n = n - 1
+        # this order must match the order of the footprint list
         order_by = [
             "reference",
             "value",
             "footprint",
             "lcsc",
+            "type", # ignored
             "stock",
             "exclude_from_bom",
             "exclude_from_pos",
