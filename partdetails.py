@@ -147,7 +147,9 @@ class PartDetailsDialog(wx.Dialog):
         filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
         self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
         self.datasheet_path.mkdir(parents=True, exist_ok=True)
-        result = self.lcsc_api.download_datasheet(self.pdfurl, self.datasheet_path / filename)
+        result = self.lcsc_api.download_datasheet(
+            self.pdfurl, self.datasheet_path / filename
+        )
         title = "Success" if result["success"] else "Error"
         style = "info" if result["success"] else "error"
         wx.PostEvent(

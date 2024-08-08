@@ -107,7 +107,10 @@ class Store:
     def create_part(self, part: dict):
         """Create a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute("INSERT INTO part_info VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)", part)
+            cur.execute(
+                "INSERT INTO part_info VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)",
+                part,
+            )
             cur.commit()
 
     def update_part(self, part: dict):
@@ -124,15 +127,16 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             con.row_factory = dict_factory
             return cur.execute(
-                "SELECT * FROM part_info WHERE reference = :reference", {"reference": ref}
+                "SELECT * FROM part_info WHERE reference = :reference",
+                {"reference": ref},
             ).fetchone()
 
-
-    def set_stock(self, ref: str, stock: int):
+    def set_stock(self, ref: str, stock: int | None):
         """Set the stock value for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info SET stock = :stock WHERE reference = :reference", {"reference": ref, "stock": stock}
+                "UPDATE part_info SET stock = :stock WHERE reference = :reference",
+                {"reference": ref, "stock": stock},
             )
             cur.commit()
 
@@ -140,23 +144,26 @@ class Store:
         """Change the BOM attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info SET exclude_from_bom = :state WHERE reference = :reference", {"reference": ref, "state": state}
+                "UPDATE part_info SET exclude_from_bom = :state WHERE reference = :reference",
+                {"reference": ref, "state": state},
             )
             cur.commit()
 
     def set_pos(self, ref: str, state: int):
-        """Change the BOM attribute for a part in the database."""
+        """Change the POS attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info SET exclude_from_pos = :state WHERE reference = :reference", {"reference": ref, "state": state}
+                "UPDATE part_info SET exclude_from_pos = :state WHERE reference = :reference",
+                {"reference": ref, "state": state},
             )
             cur.commit()
 
     def set_lcsc(self, ref: str, lcsc: str):
-        """Change the BOM attribute for a part in the database."""
+        """Change the LCSC attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference", {"reference": ref, "lcsc": lcsc}
+                "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference",
+                {"reference": ref, "lcsc": lcsc},
             )
             cur.commit()
 

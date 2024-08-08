@@ -228,7 +228,9 @@ class SchematicExport:
                     value = m.group(2)
                     lastLcsc = value
                     if newLcsc not in (lastLcsc, ""):
-                        self.logger.info("Updating %s on %s in %s", newLcsc, lastRef, path)
+                        self.logger.info(
+                            "Updating %s on %s in %s", newLcsc, lastRef, path
+                        )
                         outLine = outLine.replace(
                             '"' + lastLcsc + '"', '"' + newLcsc + '"'
                         )

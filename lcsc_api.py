@@ -1,4 +1,5 @@
 """Unofficial LCSC API."""
+
 import io
 from pathlib import Path
 

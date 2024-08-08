@@ -651,8 +651,8 @@ class PartSelectorDialog(wx.Dialog):
             return float(price)
         for p in price_ranges:
             range, price = p.split(":")
-            lower,upper = range.split("-")
-            if not upper: # upper bound of price ranges
+            lower, upper = range.split("-")
+            if not upper:  # upper bound of price ranges
                 return float(price)
             lower = int(lower)
             upper = int(upper)
@@ -678,8 +678,8 @@ class PartSelectorDialog(wx.Dialog):
             self.result_count.SetLabel(f"{count} Results in {search_duration_text}")
         for p in parts:
             item = [str(c) for c in p]
-            pricecol = 8 # Must match order in library.py search function
-            price = round(self.get_price(len(self.parts), item[pricecol]) , 3)
+            pricecol = 8  # Must match order in library.py search function
+            price = round(self.get_price(len(self.parts), item[pricecol]), 3)
             sum = round(price * len(self.parts), 3)
             item[pricecol] = f"{len(self.parts)} parts: ${price} each / ${sum} total"
             self.part_list.AppendItem(item)
@@ -691,11 +691,13 @@ class PartSelectorDialog(wx.Dialog):
         if row == -1:
             return
         selection = self.part_list.GetTextValue(row, 0)
+        type = self.part_list.GetTextValue(row, 4)
         stock = self.part_list.GetTextValue(row, 5)
         wx.PostEvent(
             self.parent,
             AssignPartsEvent(
                 lcsc=selection,
+                type=type,
                 stock=stock,
                 references=self.parts.keys(),
             ),
