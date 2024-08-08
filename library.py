@@ -34,9 +34,6 @@ class LibraryState(Enum):
 class Library:
     """A storage class to get data from a sqlite database and write it back."""
 
-    # no longer works
-    CSV_URL = "https://jlcpcb.com/componentSearch/uploadComponentInfo"
-
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
@@ -355,17 +352,6 @@ class Library:
                 ).fetchall()
             ]
 
-    def update_meta_data(self, filename, size, partcount, date, last_update):
-        """Update the meta data table."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
-            cur.execute("DELETE from meta")
-            cur.commit()
-            cur.execute(
-                "INSERT INTO meta VALUES (?, ?, ?, ?, ?)",
-                (filename, size, partcount, date, last_update),
-            )
-            cur.commit()
-
     def create_parts_table(self, columns):
         """Create the parts table."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
@@ -373,18 +359,10 @@ class Library:
             cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
             cur.commit()
 
-    def insert_parts(self, data, cols):
-        """Insert many parts at once."""
-        with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
-            cols = ",".join(["?"] * cols)
-            query = f"INSERT INTO parts VALUES ({cols})"
-            con.executemany(query, data)
-            con.commit()
-
     def get_part_details(self, number: str) -> dict:
         """Get the part details for a LCSC number using optimized FTS5 querying."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
-            con.row_factory = dict_factory
+            con.row_factory = dict_factory  # noqa: DC05
             cur = con.cursor()
             query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH :number"""
             cur.execute(query, {"number": number})
