@@ -10,7 +10,7 @@ from .mainwindow import JLCPCBTools
 class JLCPCBPlugin(ActionPlugin):
     """JLCPCBPlugin instance of ActionPlugin."""
 
-    def defaults(self):   # noqa: DC04
+    def defaults(self):  # noqa: DC04
         """Define defaults."""
         # pylint: disable=attribute-defined-outside-init
         self.name = "JLCPCB Tools"

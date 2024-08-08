@@ -497,7 +497,9 @@ class JLCPCBTools(wx.Dialog):
         last_update = self.library.get_last_update()
         if last_update:
             last_update = dt.fromisoformat(last_update).strftime("%Y-%m-%d %H:%M")
-        self.SetTitle(f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",)
+        self.SetTitle(
+            f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",
+        )
 
     def init_store(self):
         """Initialize the store of part assignments."""
@@ -985,7 +987,7 @@ class LogBoxHandler(logging.StreamHandler):
         logging.StreamHandler.__init__(self)
         self.event_destination = event_destination
 
-    def emit(self, record):   # noqa: DC04
+    def emit(self, record):  # noqa: DC04
         """Marshal the event over to the main thread."""
         msg = self.format(record)
         wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
