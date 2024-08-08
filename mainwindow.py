@@ -31,6 +31,7 @@ from .helpers import (
     HighResWxSize,
     getVersion,
     loadBitmapScaled,
+    set_lcsc_value,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
@@ -500,7 +501,9 @@ class JLCPCBTools(wx.Dialog):
         last_update = self.library.get_last_update()
         if last_update:
             last_update = dt.fromisoformat(last_update).strftime("%Y-%m-%d %H:%M")
-        self.SetTitle(f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",)
+        self.SetTitle(
+            f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",
+        )
 
     def init_store(self):
         """Initialize the store of part assignments."""
@@ -526,6 +529,9 @@ class JLCPCBTools(wx.Dialog):
         for reference in e.references:
             self.store.set_lcsc(reference, e.lcsc)
             self.store.set_stock(reference, int(e.stock))
+            board = self.pcbnew.GetBoard()
+            fp = board.FindFootprintByReference(reference)
+            set_lcsc_value(fp, e.lcsc)
             self.partlist_data_model.set_lcsc(reference, e.lcsc, e.type, e.stock)
 
     def display_message(self, e):
