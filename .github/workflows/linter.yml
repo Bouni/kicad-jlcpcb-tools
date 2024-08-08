@@ -30,3 +30,16 @@ jobs:
         run: pip install ruff
       - name: Run ruff
         run: ruff check $(git ls-files '*.py')
+  deadcode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deadcode
+        run: pip install deadcode
+      - name: Run deadcode
+        run: deadcode .

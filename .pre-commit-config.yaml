@@ -16,3 +16,7 @@ repos:
       - id: markdownlint
         args:
           - --fix
+  # - repo: https://github.com/albertas/deadcode
+  #   rev: 2706a6c1a4f3fd2d0c40daf066c681858cacd181
+  #   hooks:
+  #     - id: deadcode

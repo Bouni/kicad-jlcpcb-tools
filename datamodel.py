@@ -57,11 +57,11 @@ class PartListDataModel(dv.PyDataViewModel):
             for text in re.split("([0-9]+)", s)
         ]
 
-    def GetColumnCount(self):
+    def GetColumnCount(self):  # noqa: DC04
         """Get number of columns."""
         return len(self.columns)
 
-    def GetColumnType(self, col):
+    def GetColumnType(self, col):  # noqa: DC04
         """Get type of each column."""
         columntypes = (
             "string",
@@ -77,7 +77,7 @@ class PartListDataModel(dv.PyDataViewModel):
         )
         return columntypes[col]
 
-    def GetChildren(self, parent, children):
+    def GetChildren(self, parent, children):  # noqa: DC04
         """Get child items of a parent."""
         if not parent:
             for row in self.data:
@@ -85,11 +85,11 @@ class PartListDataModel(dv.PyDataViewModel):
             return len(self.data)
         return 0
 
-    def IsContainer(self, item):
+    def IsContainer(self, item):  # noqa: DC04
         """Check if tem is a container."""
         return not item
 
-    def GetParent(self, item):
+    def GetParent(self, item):  # noqa: DC04
         """Get parent item."""
         return dv.NullDataViewItem
 
@@ -117,7 +117,7 @@ class PartListDataModel(dv.PyDataViewModel):
         row[col] = value
         return True
 
-    def Compare(self, item1, item2, column, ascending):
+    def Compare(self, item1, item2, column, ascending):  # noqa: DC04
         """Override to implement natural sorting."""
         val1 = self.GetValue(item1, column)
         val2 = self.GetValue(item2, column)
@@ -158,28 +158,6 @@ class PartListDataModel(dv.PyDataViewModel):
         )
         self.data.append(data)
         self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
-
-    def UpdateEntry(self, data: list):
-        """Update an entry in the data model."""
-        if (index := self.find_index(data[0])) is None:
-            return
-        item = self.data[index]
-        for i in range(0, len(data)):
-            if i in [self.columns["BOM_COL"], self.columns["POS_COL"]]:
-                item[i] = self.get_bom_pos_icon(data[i])
-            elif i == self.columns["SIDE_COL"]:
-                item[i] = self.get_side_icon(data[i])
-            else:
-                item[i] = data[i]
-        self.ItemChanged(self.ObjectToItem(item))
-
-    def RemoveEntry(self, ref: str):
-        """Remove an entry from the data model."""
-        if (index := self.find_index(ref)) is None:
-            return
-        item = self.ObjectToItem(self.data[index])
-        self.data.remove(self.data[index])
-        self.ItemDeleted(dv.NullDataViewItem, item)
 
     def RemoveAll(self):
         """Remove all entries from the data model."""
