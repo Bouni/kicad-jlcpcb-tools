@@ -28,3 +28,16 @@ jobs:
           version: 0.5.6
           args: check 
           src: "."
+  deadcode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deadcode
+        run: pip install deadcode
+      - name: Run deadcode
+        run: deadcode .

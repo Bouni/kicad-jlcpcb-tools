@@ -86,7 +86,7 @@ class Store:
         """Read all parts from the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             con.create_collation("naturalsort", natural_sort_collation)
-            con.row_factory = dict_factory
+            con.row_factory = dict_factory  # noqa: DC05
             return cur.execute(
                 f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
             ).fetchall()
@@ -94,7 +94,7 @@ class Store:
     def read_bom_parts(self) -> dict:
         """Read all parts that should be included in the BOM."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            con.row_factory = dict_factory
+            con.row_factory = dict_factory  # noqa: DC05
             # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
             subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
             query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
@@ -125,7 +125,7 @@ class Store:
     def get_part(self, ref: str) -> dict:
         """Get a part from the database by its reference."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            con.row_factory = dict_factory
+            con.row_factory = dict_factory  # noqa: DC05
             return cur.execute(
                 "SELECT * FROM part_info WHERE reference = :reference",
                 {"reference": ref},

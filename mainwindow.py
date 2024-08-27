@@ -96,7 +96,6 @@ class JLCPCBTools(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
         self.pcbnew = kicad_provider.get_pcbnew()
-        self.KicadBuildVersion = self.pcbnew.GetBuildVersion()
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
@@ -105,8 +104,6 @@ class JLCPCBTools(wx.Dialog):
         self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
-        self.manufacturers = []
-        self.packages = []
         self.library: Library
         self.store: Store
         self.settings = {}
@@ -674,16 +671,6 @@ class JLCPCBTools(wx.Dialog):
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
             self.pcbnew.Refresh()
 
-    def enable_all_buttons(self, state):
-        """Control state of all the buttons."""
-        self.enable_top_buttons(state)
-        self.enable_part_specific_toolbar_buttons(state)
-
-    def enable_top_buttons(self, state):
-        """Control the state of all the buttons in the top section."""
-        for button in (ID_GENERATE, ID_DOWNLOAD, ID_LAYERS):
-            self.upper_toolbar.EnableTool(button, state)
-
     def enable_part_specific_toolbar_buttons(self, state):
         """Control the state of all the buttons that relate to parts in toolbar on the right side."""
         for button in (
@@ -754,20 +741,6 @@ class JLCPCBTools(wx.Dialog):
             if lcsc := self.partlist_data_model.get_lcsc(item):
                 self.show_part_details_dialog(lcsc)
 
-    def get_column_by_name(self, column_title_to_find):
-        """Lookup a column in our main footprint table by matching its title."""
-        for col in self.footprint_list.Columns:
-            if col.Title == column_title_to_find:
-                return col
-        return None
-
-    def get_column_position_by_name(self, column_title_to_find):
-        """Lookup the index of a column in our main footprint table by matching its title."""
-        col = self.get_column_by_name(column_title_to_find)
-        if not col:
-            return -1
-        return self.footprint_list.GetColumnPosition(col)
-
     def show_part_details_dialog(self, part):
         """Show the part details modal dialog."""
         wx.BeginBusyCursor()
@@ -815,9 +788,6 @@ class JLCPCBTools(wx.Dialog):
             os.path.join(PLUGIN_PATH, "settings.json"), "w", encoding="utf-8"
         ) as j:
             json.dump(self.settings, j)
-
-    def calculate_costs(self, *_):
-        """Hopefully we will be able to calculate the part costs in the future."""
 
     def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
@@ -1021,7 +991,7 @@ class LogBoxHandler(logging.StreamHandler):
         logging.StreamHandler.__init__(self)
         self.event_destination = event_destination
 
-    def emit(self, record):
+    def emit(self, record):  # noqa: DC04
         """Marshal the event over to the main thread."""
         msg = self.format(record)
         wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
