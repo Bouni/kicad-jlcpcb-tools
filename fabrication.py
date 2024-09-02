@@ -322,9 +322,8 @@ class Fabrication:
                             )
                 if not add_without_lcsc and not part["lcsc"]:
                     continue
-                component_count = len(components)   # Get the updated size of the component list 
                 writer.writerow(
-                    [part["value"], part["refs"], part["footprint"], part["lcsc"], component_count]
+                    [part["value"], part["refs"], part["footprint"], part["lcsc"], len(components)]
                 )
         self.logger.info(
             "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
