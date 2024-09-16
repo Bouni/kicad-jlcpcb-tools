@@ -613,7 +613,10 @@ class Library:
     def get_last_update(self) -> str:
         """Get last update from meta table."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
-            last_update = cur.execute("SELECT last_update FROM meta").fetchone()
-            if last_update:
-                return last_update[0]
-            return ""
+            try:
+                last_update = cur.execute("SELECT last_update FROM meta").fetchone()
+                if last_update:
+                    return last_update[0]
+                return ""
+            except sqlite3.OperationalError:
+                return ""
