@@ -317,10 +317,14 @@ class Fabrication:
                             components.remove(component)
                             part["refs"] = ",".join(components)
                             self.logger.info(
-                                "Component %s has 'Do not placed' enabled: removing from BOM",
+                                "Component %s has 'Do not place' enabled: removing from BOM",
                                 component,
                             )
                 if not add_without_lcsc and not part["lcsc"]:
+                    self.logger.info(
+                        "Component %s has no LCSC number assigned and the setting Add parts without LCSC is disabled: removing from BOM",
+                        component,
+                    )
                     continue
                 writer.writerow(
                     [part["value"], part["refs"], part["footprint"], part["lcsc"]]
