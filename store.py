@@ -100,7 +100,7 @@ class Store:
             query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
             a = cur.execute(query).fetchall()
             # Query all parts that are supposed to be in the BOM but have no lcsc number
-            query = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
+            query = "SELECT value, reference AS refs, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
             b = cur.execute(query).fetchall()
             return a + b
 
