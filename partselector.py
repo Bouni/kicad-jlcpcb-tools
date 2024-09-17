@@ -645,6 +645,8 @@ class PartSelectorDialog(wx.Dialog):
     def get_price(self, quantity, prices) -> float:
         """Find the price for the number of selected parts accordning to the price ranges."""
         price_ranges = prices.split(",")
+        if not price_ranges[0]:
+            return -1.0
         min_quantity = int(price_ranges[0].split("-")[0])
         if quantity <= min_quantity:
             range, price = price_ranges[0].split(":")
@@ -680,8 +682,13 @@ class PartSelectorDialog(wx.Dialog):
             item = [str(c) for c in p]
             pricecol = 8  # Must match order in library.py search function
             price = round(self.get_price(len(self.parts), item[pricecol]), 3)
-            sum = round(price * len(self.parts), 3)
-            item[pricecol] = f"{len(self.parts)} parts: ${price} each / ${sum} total"
+            if price > 0:
+                sum = round(price * len(self.parts), 3)
+                item[pricecol] = (
+                    f"{len(self.parts)} parts: ${price} each / ${sum} total"
+                )
+            else:
+                item[pricecol] = "Error in price data"
             self.part_list.AppendItem(item)
 
     def select_part(self, *_):
