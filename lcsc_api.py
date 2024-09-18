@@ -1,6 +1,7 @@
 """Unofficial LCSC API."""
 
 import io
+from typing import Union
 from pathlib import Path
 
 import requests  # pylint: disable=import-error
@@ -31,7 +32,7 @@ class LCSC_API:
             }
         return {"success": True, "data": data}
 
-    def download_bitmap(self, url: str) -> io.BytesIO | None:
+    def download_bitmap(self, url: str) -> Union[io.BytesIO, None]:
         """Download a picture of the part from the API."""
         content = requests.get(url, headers=self.headers, timeout=10).content
         return io.BytesIO(content)

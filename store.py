@@ -5,6 +5,7 @@ import csv
 import logging
 import os
 from pathlib import Path
+from typing import Union
 import sqlite3
 
 from .helpers import (
@@ -131,7 +132,7 @@ class Store:
                 {"reference": ref},
             ).fetchone()
 
-    def set_stock(self, ref: str, stock: int | None):
+    def set_stock(self, ref: str, stock: Union[int, None]):
         """Set the stock value for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
