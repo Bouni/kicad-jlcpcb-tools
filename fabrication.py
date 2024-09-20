@@ -313,7 +313,7 @@ class Fabrication:
                 components = part["refs"].split(",")
                 for component in components:
                     for fp in self.board.Footprints():
-                        if fp.GetReference() == component and fp.IsDNP():
+                        if fp.GetReference() == component and hasattr(fp, "IsDNP") and callable(fp.IsDNP) and fp.IsDNP():
                             components.remove(component)
                             part["refs"] = ",".join(components)
                             self.logger.info(
