@@ -308,7 +308,7 @@ class Fabrication:
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
-            writer.writerow(["Comment", "Designator", "Footprint", "LCSC"])
+            writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
             for part in self.parent.store.read_bom_parts():
                 components = part["refs"].split(",")
                 for component in components:
@@ -327,7 +327,7 @@ class Fabrication:
                     )
                     continue
                 writer.writerow(
-                    [part["value"], part["refs"], part["footprint"], part["lcsc"]]
+                    [part["value"], part["refs"], part["footprint"], part["lcsc"], len(components)]
                 )
         self.logger.info(
             "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
