@@ -5,8 +5,8 @@ import csv
 import logging
 import os
 from pathlib import Path
-from typing import Union
 import sqlite3
+from typing import Union
 
 from .helpers import (
     dict_factory,

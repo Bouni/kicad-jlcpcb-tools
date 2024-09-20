@@ -1,8 +1,8 @@
 """Unofficial LCSC API."""
 
 import io
-from typing import Union
 from pathlib import Path
+from typing import Union
 
 import requests  # pylint: disable=import-error
 
