@@ -802,8 +802,25 @@ class JLCPCBTools(wx.Dialog):
                 selection[ref] = value
         PartSelectorDialog(self, selection).ShowModal()
 
+    def check_order_number(self):
+        """Verify that the JLC order number placeholder is present."""
+        with open(self.pcbnew.GetBoard().GetFileName()) as f:
+            data = f.read()
+            return "JLCJLCJLCJLC" in data
+
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
+        if (
+            self.settings.get("general", {}).get("order_number")
+            and not self.check_order_number()
+        ):
+            result = wx.MessageBox(
+                "JLC order number placehodler not present! Continue?",
+                "JLC order number placeholder",
+                wx.OK | wx.CANCEL | wx.CENTER,
+            )
+            if result == wx.ID_CANCEL:
+                return
         self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
         number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))

@@ -1,1 +1,1 @@
-{"partselector": {"basic": true, "extended": true, "stock": false}, "gerber": {"tented_vias": true, "fill_zones": true, "plot_values": true, "plot_references": true, "lcsc_bom_cpl": true}, "general": {"lcsc_priority": true}}
+{"partselector": {"basic": true, "extended": true, "stock": false}, "gerber": {"tented_vias": true, "fill_zones": false, "plot_values": true, "plot_references": true, "lcsc_bom_cpl": true}, "general": {"lcsc_priority": true, "order_number": true}}

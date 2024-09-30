@@ -232,6 +232,37 @@ class SettingsDialog(wx.Dialog):
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Check if order number placeholder is present #####
+
+        self.order_number_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Check if order number placeholder is placed",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_order_number",
+        )
+
+        self.order_number_setting.SetToolTip(
+            wx.ToolTip("Is the order number placeholder placed")
+        )
+
+        self.order_number_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("order_number.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.order_number_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        order_number_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
+        order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -243,6 +274,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -355,6 +387,30 @@ class SettingsDialog(wx.Dialog):
                 loadBitmapScaled("no_bom.png", self.parent.scale_factor, static=True)
             )
 
+    def update_order_number(self, check):
+        """Update settings dialog according to the settings."""
+        self.logger.debug(check)
+        if check:
+            self.order_number_setting.SetValue(check)
+            self.order_number_setting.SetLabel(
+                "Check if order number placeholder is placed"
+            )
+            self.order_number_image.SetBitmap(
+                loadBitmapScaled(
+                    "order_number.png", self.parent.scale_factor, static=True
+                )
+            )
+        else:
+            self.order_number_setting.SetValue(check)
+            self.order_number_setting.SetLabel(
+                "Don't check if order number placeholder is placed"
+            )
+            self.order_number_image.SetBitmap(
+                loadBitmapScaled(
+                    "no_order_number.png", self.parent.scale_factor, static=True
+                )
+            )
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
@@ -375,11 +431,17 @@ class SettingsDialog(wx.Dialog):
         self.update_lcsc_bom_cpl(
             self.parent.settings.get("gerber", {}).get("lcsc_bom_cpl", True)
         )
+        self.update_order_number(
+            self.parent.settings.get("general", {}).get("order_number", True)
+        )
 
     def update_settings(self, event):
         """Update and persist a setting that was changed."""
         section, name = event.GetEventObject().GetName().split("_", 1)
         value = event.GetEventObject().GetValue()
+        self.logger.debug(section)
+        self.logger.debug(name)
+        self.logger.debug(value)
         getattr(self, f"update_{name}")(value)
 
         wx.PostEvent(
