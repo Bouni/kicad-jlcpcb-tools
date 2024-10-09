@@ -133,14 +133,19 @@ def get_lcsc_value(fp):
 
 def set_lcsc_value(fp, lcsc: str):
     """Set an lcsc number to the first matching propertie of the footprint, use LCSC as property name if not found."""
-    lcsc_field = "LCSC"
+    lcsc_field = None
     for field in fp.GetFields():
         if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and re.match(
             r"^C\d+$", field.GetText()
         ):
-            lcsc_field = field.GetName()
-    fp.SetField(lcsc_field, lcsc)
+            lcsc_field = field
 
+    if lcsc_field:
+        fp.SetField(lcsc_field.GetName(), lcsc)
+    else:
+        fp.SetField("LCSC", lcsc)
+        field = fp.GetFieldByName("LCSC")
+        field.SetVisible(False)
 
 def get_valid_footprints(board):
     """Get all footprints that have a valid reference (drop all REF**)."""
