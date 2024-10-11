@@ -32,6 +32,7 @@ class PartDetailsDialog(wx.Dialog):
         self.datasheet_path = Path(self.parent.project_path) / "datasheets"
         self.lcsc_api = LCSC_API()
         self.pdfurl = ""
+        self.pageurl = ""
         self.picture = None
 
         # ---------------------------------------------------------------------
@@ -99,8 +100,18 @@ class PartDetailsDialog(wx.Dialog):
             0,
         )
 
+        self.openpage_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Open LCSC page",
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
         self.savepdf_button.Bind(wx.EVT_BUTTON, self.savepdf)
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
+        self.openpage_button.Bind(wx.EVT_BUTTON, self.openpage)
 
         self.savepdf_button.SetBitmap(
             loadBitmapScaled(
@@ -118,6 +129,14 @@ class PartDetailsDialog(wx.Dialog):
         )
         self.openpdf_button.SetBitmapMargins((2, 0))
 
+        self.openpage_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-earth.png",
+                self.parent.scale_factor,
+            )
+        )
+        self.openpage_button.SetBitmapMargins((2, 0))
+
         # ---------------------------------------------------------------------
         # ------------------------ Layout and Sizers --------------------------
         # ---------------------------------------------------------------------
@@ -127,6 +146,9 @@ class PartDetailsDialog(wx.Dialog):
         right_side_layout.AddStretchSpacer(50)
         right_side_layout.Add(self.savepdf_button, 5, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
         right_side_layout.Add(self.openpdf_button, 5, wx.LEFT | wx.RIGHT | wx.EXPAND, 5)
+        right_side_layout.Add(
+            self.openpage_button, 5, wx.LEFT | wx.RIGHT | wx.EXPAND, 5
+        )
         layout = wx.BoxSizer(wx.HORIZONTAL)
         layout.Add(self.data_list, 30, wx.ALL | wx.EXPAND, 5)
         layout.Add(right_side_layout, 10, wx.ALL | wx.EXPAND, 5)
@@ -165,6 +187,11 @@ class PartDetailsDialog(wx.Dialog):
         """Open the linked datasheet PDF on button click."""
         self.logger.info("opening %s", str(self.pdfurl))
         webbrowser.open(str(self.pdfurl))
+
+    def openpage(self, *_):
+        """Open the linked LCSC page for the part on button click."""
+        self.logger.info("opening LCSC page for %s", str(self.part))
+        webbrowser.open(str(self.pageurl))
 
     def get_scaled_bitmap(self, url, width, height):
         """Download a picture from a URL and convert it into a wx Bitmap."""
@@ -263,6 +290,7 @@ class PartDetailsDialog(wx.Dialog):
                 )
             )
         self.pdfurl = result["data"].get("data", {}).get("dataManualUrl")
+        self.pageurl = result["data"].get("data", {}).get("lcscGoodsUrl")
 
     def report_part_data_fetch_error(self, reason):
         """Spawn a message box with an erro message if the fetch fails."""
