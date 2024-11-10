@@ -23,7 +23,7 @@ class PartDetailsDialog(wx.Dialog):
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
             size=HighResWxSize(parent.window, wx.Size(1000, 800)),
-            style=wx.DEFAULT_DIALOG_STYLE | wx.STAY_ON_TOP,
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.STAY_ON_TOP,
         )
 
         self.logger = logging.getLogger(__name__)
