@@ -14,6 +14,7 @@ from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
 from .datamodel import PartListDataModel
+from .derive_params import params_for_part
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
     EVT_LOGBOX_APPEND_EVENT,
@@ -369,10 +370,10 @@ class JLCPCBTools(wx.Dialog):
         )
 
         reference = self.footprint_list.AppendTextColumn(
-            "Reference", 0, width=50, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+            "Ref", 0, width=50, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         value = self.footprint_list.AppendTextColumn(
-            "Value", 1, width=250, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+            "Value", 1, width=150, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
@@ -380,6 +381,9 @@ class JLCPCBTools(wx.Dialog):
             width=250,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
+        )
+        params = self.footprint_list.AppendTextColumn(
+            "LCSC Params", 10, width=150, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
@@ -537,7 +541,8 @@ class JLCPCBTools(wx.Dialog):
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(reference)
             set_lcsc_value(fp, e.lcsc)
-            self.partlist_data_model.set_lcsc(reference, e.lcsc, e.type, e.stock)
+            params = params_for_part(self.library.get_part_details(e.lcsc))
+            self.partlist_data_model.set_lcsc(reference, e.lcsc, e.type, e.stock, params)
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -590,6 +595,7 @@ class JLCPCBTools(wx.Dialog):
                     part["exclude_from_pos"],
                     str(self.get_correction(part, corrections)),
                     str(fp.GetLayer()),
+                    params_for_part(details.get(part["lcsc"], {})),
                 ]
             )
 
@@ -860,9 +866,10 @@ class JLCPCBTools(wx.Dialog):
             if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
                 for item in self.footprint_list.GetSelections():
                     details = self.library.get_part_details(lcsc)
+                    params = params_for_part(details)
                     reference = self.partlist_data_model.get_reference(item)
                     self.partlist_data_model.set_lcsc(
-                        reference, lcsc, details["type"], details["stock"]
+                        reference, lcsc, details["type"], details["stock"], params
                     )
                     self.store.set_lcsc(reference, lcsc)
 
@@ -928,8 +935,9 @@ class JLCPCBTools(wx.Dialog):
                     self.store.set_lcsc(reference, lcsc)
                     self.logger.info("Found %s", lcsc)
                     details = self.library.get_part_details(lcsc)
+                    params = params_for_part(self.library.get_part_details(lcsc))
                     self.partlist_data_model.set_lcsc(
-                        reference, lcsc, details["type"], details["stock"]
+                        reference, lcsc, details["type"], details["stock"], params
                     )
 
     def sanitize_lcsc(self, lcsc_PN):

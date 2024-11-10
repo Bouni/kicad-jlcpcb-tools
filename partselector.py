@@ -6,6 +6,8 @@ import time
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
+from .derive_params import params_for_part  # pylint: disable=import-error
+
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
@@ -443,6 +445,13 @@ class PartSelectorDialog(wx.Dialog):
             flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
         ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
         self.part_list.AppendTextColumn(
+            "Params",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(parent.scale_factor * 150),
+            align=wx.ALIGN_CENTER,
+            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
+        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
+        self.part_list.AppendTextColumn(
             "Stock",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 50),
@@ -689,6 +698,8 @@ class PartSelectorDialog(wx.Dialog):
                 )
             else:
                 item[pricecol] = "Error in price data"
+            params = params_for_part({"description": item[7], "category": item[9], "package": item[2]})
+            item.insert(5, params)
             self.part_list.AppendItem(item)
 
     def select_part(self, *_):
@@ -699,7 +710,7 @@ class PartSelectorDialog(wx.Dialog):
             return
         selection = self.part_list.GetTextValue(row, 0)
         type = self.part_list.GetTextValue(row, 4)
-        stock = self.part_list.GetTextValue(row, 5)
+        stock = self.part_list.GetTextValue(row, 6)
         wx.PostEvent(
             self.parent,
             AssignPartsEvent(
