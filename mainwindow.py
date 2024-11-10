@@ -812,10 +812,13 @@ class JLCPCBTools(wx.Dialog):
             ref = self.partlist_data_model.get_reference(item)
             lcsc = self.partlist_data_model.get_lcsc(item)
             value = self.partlist_data_model.get_value(item)
-            if lcsc != "":
-                selection[ref] = lcsc
-            else:
-                selection[ref] = value
+            footprint = self.partlist_data_model.get_footprint(item)
+            if ref.startswith("R"):
+                value += "Ω"
+            m = re.search(r"_(\d+)_\d+Metric", footprint)
+            if m:
+                value += f" {m.group(1)}"
+            selection[ref] = value
         PartSelectorDialog(self, selection).ShowModal()
 
     def check_order_number(self):
