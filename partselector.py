@@ -490,6 +490,9 @@ class PartSelectorDialog(wx.Dialog):
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected
         )
 
+        self.part_list.Bind(wx.EVT_LEFT_DCLICK, self.select_part)
+
+
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(HighResWxSize(parent.window, wx.Size(-1, 400)))
         table_sizer.Add(self.part_list, 20, wx.ALL | wx.EXPAND, 5)

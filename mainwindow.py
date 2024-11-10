@@ -429,6 +429,8 @@ class JLCPCBTools(wx.Dialog):
             dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
         )
 
+        self.footprint_list.Bind(dv.EVT_DATAVIEW_ITEM_ACTIVATED, self.select_part)
+
         self.footprint_list.Bind(dv.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown)
 
         table_sizer.Add(self.right_toolbar, 1, wx.EXPAND, 5)
