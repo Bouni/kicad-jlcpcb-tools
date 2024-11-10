@@ -360,8 +360,11 @@ class JLCPCBTools(wx.Dialog):
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
 
+        table_scroller = wx.ScrolledWindow(self, style=wx.HSCROLL | wx.VSCROLL)
+        table_scroller.SetScrollRate(20, 20)
+
         self.footprint_list = dv.DataViewCtrl(
-            self,
+            table_scroller,
             style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_MULTIPLE,
         )
 
@@ -410,8 +413,13 @@ class JLCPCBTools(wx.Dialog):
         pos.SetSortable(False)
         rotation.SetSortable(True)
         side.SetSortable(True)
+        params.SetSortable(True)
 
-        table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
+        scrolled_sizer = wx.BoxSizer(wx.VERTICAL)
+        scrolled_sizer.Add(self.footprint_list, 1, wx.EXPAND)
+        table_scroller.SetSizer(scrolled_sizer)
+
+        table_sizer.Add(table_scroller, 20, wx.ALL | wx.EXPAND, 5)
 
         self.footprint_list.Bind(
             dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
