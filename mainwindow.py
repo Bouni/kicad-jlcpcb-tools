@@ -834,7 +834,7 @@ class JLCPCBTools(wx.Dialog):
             and not self.check_order_number()
         ):
             result = wx.MessageBox(
-                "JLC order number placehodler not present! Continue?",
+                "JLC order number placeholder not present! Continue?",
                 "JLC order number placeholder",
                 wx.OK | wx.CANCEL | wx.CENTER,
             )
