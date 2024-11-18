@@ -1,5 +1,5 @@
-# Derive parameters from the part description and package
-#
+"""Derive parameters from the part description and package."""
+
 # LCSC hides the critical parameters (like resistor values) in the middle of the
 # description field, which makes them invisible in the footprint list. This
 # makes it very tedious to double-check the part mappings, as the part details
@@ -9,10 +9,15 @@
 # significant parameters of the parts from the LCSC data so they can be displayed
 # separately in the footprint list.
 
+import logging
 import re
+
+logger = logging.getLogger()
+logging.basicConfig(encoding="utf-8", level=logging.DEBUG)
 
 
 def params_for_part(part) -> str:
+    """Derive parameters from the part description and package."""
     description = part.get("description", "")
     category = part.get("category", "")
     part_no = part.get("part_no", "")
@@ -72,6 +77,7 @@ def params_for_part(part) -> str:
 
     return " ".join(result)
 
+
 # Test cases from actual LCSC data
 #
 # Generate random samples from the parts DB with:
@@ -84,7 +90,9 @@ def params_for_part(part) -> str:
 #   ORDER BY RANDOM() LIMIT 10
 # )
 
+
 def test_params_for_part():
+    """Test cases from actual LCSC data."""
     test_cases = {
         "Resistors": [
             ("250mW Thin Film Resistor 200V ±0.1% ±25ppm/℃ 284kΩ", "284kΩ ±0.1%"),
@@ -155,7 +163,7 @@ def test_params_for_part():
             assert (
                 result == expected
             ), f"For {description}: expected {expected}, got {result}"
-    print("All tests passed.")
+    logger.info("All tests passed.")
 
 
 # Run the tests if this file was run as a script

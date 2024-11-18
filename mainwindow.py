@@ -810,7 +810,6 @@ class JLCPCBTools(wx.Dialog):
         selection = {}
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
-            lcsc = self.partlist_data_model.get_lcsc(item)
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
             if ref.startswith("R"):
