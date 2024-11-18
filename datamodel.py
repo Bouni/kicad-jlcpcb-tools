@@ -5,8 +5,6 @@ import re
 
 import wx.dataview as dv
 
-from .derive_params import params_for_part
-
 from .helpers import loadIconScaled
 
 

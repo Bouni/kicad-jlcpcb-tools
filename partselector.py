@@ -7,7 +7,6 @@ import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
 from .derive_params import params_for_part  # pylint: disable=import-error
-
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog

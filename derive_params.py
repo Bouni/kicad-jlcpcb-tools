@@ -9,9 +9,8 @@
 # significant parameters of the parts from the LCSC data so they can be displayed
 # separately in the footprint list.
 
-from math import exp
 import re
-from unicodedata import category
+
 
 def params_for_part(part) -> str:
     description = part.get("description", "")
@@ -65,9 +64,8 @@ def params_for_part(part) -> str:
 
     # For other types, just show the part number
 
-    else:
-        if part_no:
-            result.append(part_no)
+    elif part_no:
+        result.append(part_no)
 
     if package != "":
         result.append(package)
