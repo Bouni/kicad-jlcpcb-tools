@@ -804,9 +804,13 @@ class JLCPCBTools(wx.Dialog):
 
     def check_order_number(self):
         """Verify that the JLC order number placeholder is present."""
-        with open(self.pcbnew.GetBoard().GetFileName()) as f:
-            data = f.read()
-            return "JLCJLCJLCJLC" in data
+        try:
+            with open(self.pcbnew.GetBoard().GetFileName()) as f:
+                data = f.read()
+                return "JLCJLCJLCJLC" in data
+        except OSError:
+            pass
+        return True
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
