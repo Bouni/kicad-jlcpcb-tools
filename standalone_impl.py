@@ -11,6 +11,25 @@ class LIB_ID_Stub:
         """Item name."""
         return self.item_name
 
+class Field_Stub:
+    """Implementation of pcbnew.Field."""
+
+    def __init__(self, name, text):
+        self.name = name
+        self.text = text
+
+    def GetName(self) -> str:
+        """Field name."""
+        return self.name
+
+    def GetText(self) -> str:
+        """Field text."""
+        return self.text
+
+    def SetVisible(self, visible):
+        """Set the field visibility."""
+        pass
+
 
 class Footprint_Stub:
     """Implementation of pcbnew.Footprint."""
@@ -39,6 +58,18 @@ class Footprint_Stub:
     def GetAttributes(self) -> int:
         """Attributes."""
         return 0
+
+    def GetFields(self) -> list:
+        """Fields."""
+        return []
+
+    def SetField(self, name, text):
+        """Set a field."""
+        pass
+
+    def GetFieldByName(self, name) -> Field_Stub:
+        """Get a field by name."""
+        return Field_Stub(name, "stub")
 
     def GetLayer(self) -> int:
         """Layer number."""

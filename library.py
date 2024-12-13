@@ -120,6 +120,7 @@ class Library:
             "Manufacturer",
             "Description",
             "Price",
+            "First Category"
         ]
         s = ",".join(f'"{c}"' for c in columns)
         query = f"SELECT {s} FROM parts WHERE "
@@ -364,7 +365,10 @@ class Library:
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.row_factory = dict_factory  # noqa: DC05
             cur = con.cursor()
-            query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type FROM parts WHERE parts MATCH :number"""
+            query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type,
+                "MFR.Part" as part_no, "Description" as description, "Package" as package,
+                "First Category" as category
+                FROM parts WHERE parts MATCH :number"""
             cur.execute(query, {"number": number})
             return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
 

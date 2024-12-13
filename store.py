@@ -218,7 +218,7 @@ class Store:
                             "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
                             board_part["reference"],
                         )
-                        board_part["lcsc"] = None
+                        board_part["lcsc"] = db_part["lcsc"]
                     else:
                         self.logger.debug(
                             "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",

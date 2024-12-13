@@ -25,6 +25,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "POS_COL": 7,
             "ROT_COL": 8,
             "SIDE_COL": 9,
+            "PARAMS_COL": 10,
         }
 
         self.bom_pos_icons = [
@@ -74,6 +75,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "wxDataViewIconText",
             "string",
             "wxDataViewIconText",
+            "string",
         )
         return columntypes[col]
 
@@ -193,7 +195,7 @@ class PartListDataModel(dv.PyDataViewModel):
                 alike.append(self.ObjectToItem(data))
         return alike
 
-    def set_lcsc(self, ref, lcsc, type, stock):
+    def set_lcsc(self, ref, lcsc, type, stock, params):
         """Set an lcsc number, type and stock for given reference."""
         if (index := self.find_index(ref)) is None:
             return
@@ -201,6 +203,7 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["LCSC_COL"]] = lcsc
         item[self.columns["TYPE_COL"]] = type
         item[self.columns["STOCK_COL"]] = stock
+        item[self.columns["PARAMS_COL"]] = params
         self.ItemChanged(self.ObjectToItem(item))
 
     def remove_lcsc_number(self, item):
@@ -209,6 +212,7 @@ class PartListDataModel(dv.PyDataViewModel):
         obj[self.columns["LCSC_COL"]] = ""
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""
+        item[self.columns["PARAMS_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_bom(self, item):
