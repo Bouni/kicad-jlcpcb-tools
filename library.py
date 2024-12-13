@@ -12,7 +12,12 @@ import time
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
-from .events import MessageEvent, PopulateFootprintListEvent, ResetGaugeEvent, UpdateGaugeEvent
+from .events import (
+    MessageEvent,
+    PopulateFootprintListEvent,
+    ResetGaugeEvent,
+    UpdateGaugeEvent,
+)
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .unzip_parts import unzip_parts
 
