@@ -436,7 +436,7 @@ class Library:
                         expected_size = int(
                             requests.head(
                                 url_stub + chunk_file, timeout=300
-                            ).headers.get("Content-Length")
+                            ).headers.get("Content-Length", 0)
                         )
                         actual_size = os.path.getsize(chunk_path)
                         if actual_size == expected_size:
@@ -484,7 +484,7 @@ class Library:
                         self.state = LibraryState.INITIALIZED
                         return
 
-                    size = int(r.headers.get("Content-Length"))
+                    size = int(r.headers.get("Content-Length", 0))
                     self.logger.debug(
                         "Downloading chunk %d/%d (%.2f MB)",
                         chunk_index,
