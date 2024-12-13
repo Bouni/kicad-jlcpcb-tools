@@ -119,7 +119,7 @@ class Library:
             "Manufacturer",
             "Description",
             "Price",
-            "First Category"
+            "First Category",
         ]
         s = ",".join(f'"{c}"' for c in columns)
         query = f"SELECT {s} FROM parts WHERE "
@@ -518,13 +518,13 @@ class Library:
                 return
 
         # Delete progress file to indicate the download is complete
-        if os.path.exists(progress_file):
-            os.remove(progress_file)
+        # if os.path.exists(progress_file):
+        #     os.remove(progress_file)
 
         # Combine and extract downloaded files
         self.logger.debug("Combining and extracting zip part files...")
         try:
-            unzip_parts(self.datadir)
+            unzip_parts(self.parent, self.datadir)
         except Exception as e:
             wx.PostEvent(
                 self.parent,

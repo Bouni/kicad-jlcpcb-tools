@@ -1,12 +1,21 @@
 #!/bin/env python3
 """Module for unziping and merging split db zip file."""
 
+import logging
 import os
 from zipfile import ZipFile
 
+import wx  # pylint: disable=import-error
 
-def unzip_parts(path):
+from .events import ResetGaugeEvent, UpdateGaugeEvent
+
+
+def unzip_parts(parent, path):
     """Unzip and merge split zip file."""
+    logger = logging.getLogger(__name__)
+    logger.debug("Combine zip chunks")
+    # reset progress bar
+    wx.PostEvent(parent, ResetGaugeEvent())
     # unzip (needs to go into download function finally)
     # Set the name of the original file
     db_zip_file = os.path.join(path, "parts-fts5.db.zip")
@@ -22,7 +31,7 @@ def unzip_parts(path):
         split_files.sort(key=lambda f: int(f.split(".")[-1]))
 
         # Iterate over the split files and append their contents to the original file
-        for split_file_name in split_files:
+        for i, split_file_name in enumerate(split_files, 1):
             split_path = os.path.join(path, split_file_name)
             # Open the split file
             with open(split_path, "rb") as split_file:
@@ -33,8 +42,20 @@ def unzip_parts(path):
 
             # Delete the split file
             os.unlink(split_path)
+            progress = 100 / len(split_files) * i
+            wx.PostEvent(parent, UpdateGaugeEvent(value=progress))
 
     with ZipFile(db_zip_file, "r") as zf:
-        zf.extractall(path)
+        logger.debug("Extract zip file")
+        wx.PostEvent(parent, ResetGaugeEvent())
+        file_info = zf.infolist()[0]
+        file_size = file_info.file_size
+        with zf.open(file_info) as source, open(
+            os.path.join(path, file_info.filename), "wb"
+        ) as target:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                target.write(chunk)
+                progress = target.tell() / file_size * 100
+                wx.PostEvent(parent, UpdateGaugeEvent(value=progress))
 
     os.unlink(db_zip_file)
