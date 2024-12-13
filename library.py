@@ -2,7 +2,6 @@
 
 import contextlib
 from enum import Enum
-from glob import glob
 import logging
 import os
 from pathlib import Path
@@ -381,16 +380,26 @@ class Library:
         self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
-        # Download the zipped parts database
+
+        # Define basic variables
         url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
         cnt_file = "chunk_num_fts5.txt"
-        cnt = 0
+        progress_file = os.path.join(self.datadir, "progress.txt")
         chunk_file_stub = "parts-fts5.db.zip."
+        completed_chunks = set()
+
+        # Check if there is a progress file
+        if os.path.exists(progress_file):
+            with open(progress_file) as f:
+                # Read completed chunk indices from the progress file
+                completed_chunks = {int(line.strip()) for line in f.readlines()}
+
+        # Get the total number of chunks to download
         try:
             r = requests.get(
                 url_stub + cnt_file, allow_redirects=True, stream=True, timeout=300
             )
-            if r.status_code != requests.codes.ok:  # pylint: disable=no-member
+            if r.status_code != requests.codes.ok:
                 wx.PostEvent(
                     self.parent,
                     MessageEvent(
@@ -402,88 +411,121 @@ class Library:
                     ),
                 )
                 self.state = LibraryState.INITIALIZED
-                self.create_tables(["placeholder_invalid_column_fix_errors"])
                 return
 
-            self.logger.debug(
-                "Parts db is split into %s parts. Proceeding to download...", r.text
-            )
-            cnt = int(r.text)
-            self.logger.debug("Removing any spurious old zip part files...")
-            for p in glob(str(Path(self.datadir) / (chunk_file_stub + "*"))):
-                self.logger.debug("Removing %s.", p)
-                os.unlink(p)
-        except Exception as e:  # pylint: disable=broad-exception-caught
+            total_chunks = int(r.text)
+        except Exception as e:
             wx.PostEvent(
                 self.parent,
                 MessageEvent(
                     title="Download Error",
-                    text=f"Failed to download the JLCPCB database, {e}",
+                    text=f"Failed to fetch database chunk count, {e}",
                     style="error",
                 ),
             )
             self.state = LibraryState.INITIALIZED
-            self.create_tables(["placeholder_invalid_column_fix_errors"])
             return
 
-        for i in range(cnt):
-            chunk_file = chunk_file_stub + f"{i+1:03}"
-            with open(os.path.join(self.datadir, chunk_file), "wb") as f:
-                try:
+        # Re-download incomplete or missing chunks
+        for i in range(total_chunks):
+            chunk_index = i + 1
+            chunk_file = chunk_file_stub + f"{chunk_index:03}"
+            chunk_path = os.path.join(self.datadir, chunk_file)
+
+            # Check if the chunk is logged as completed but the file might be incomplete
+            if chunk_index in completed_chunks:
+                if os.path.exists(chunk_path):
+                    # Validate the size of the chunk file
+                    try:
+                        expected_size = int(
+                            requests.head(
+                                url_stub + chunk_file, timeout=300
+                            ).headers.get("Content-Length", 0)
+                        )
+                        actual_size = os.path.getsize(chunk_path)
+                        if actual_size == expected_size:
+                            self.logger.debug(
+                                "Skipping already downloaded and validated chunk %d.",
+                                chunk_index,
+                            )
+                            continue
+                        else:
+                            self.logger.warning(
+                                "Chunk %d is incomplete, re-downloading.", chunk_index
+                            )
+                    except Exception as e:
+                        self.logger.warning(
+                            "Unable to validate chunk %d, re-downloading. Error: %s",
+                            chunk_index,
+                            e,
+                        )
+                else:
+                    self.logger.warning(
+                        "Chunk %d marked as completed but file is missing, re-downloading.",
+                        chunk_index,
+                    )
+
+            # Download the chunk
+            try:
+                with open(chunk_path, "wb") as f:
                     r = requests.get(
                         url_stub + chunk_file,
                         allow_redirects=True,
                         stream=True,
                         timeout=300,
                     )
-                    if r.status_code != requests.codes.ok:  # pylint: disable=no-member
+                    if r.status_code != requests.codes.ok:
                         wx.PostEvent(
                             self.parent,
                             MessageEvent(
                                 title="Download Error",
-                                text=f"Failed to download the JLCPCB database, error code {r.status_code}\n"
+                                text=f"Failed to download chunk {chunk_index}, error code {r.status_code}\n"
                                 + "URL was:\n"
                                 f"'{url_stub + chunk_file}'",
                                 style="error",
                             ),
                         )
                         self.state = LibraryState.INITIALIZED
-                        self.create_tables(["placeholder_invalid_column_fix_errors"])
                         return
 
-                    size = int(r.headers.get("Content-Length"))
+                    size = int(r.headers.get("Content-Length", 0))
                     self.logger.debug(
-                        "Download parts db chunk %d of %d with a size of %.2fMB",
-                        i + 1,
-                        cnt,
+                        "Downloading chunk %d/%d (%.2f MB)",
+                        chunk_index,
+                        total_chunks,
                         size / 1024 / 1024,
                     )
                     for data in r.iter_content(chunk_size=4096):
                         f.write(data)
                         progress = f.tell() / size * 100
                         wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
-                except Exception as e:  # pylint: disable= broad-exception-caught
-                    wx.PostEvent(
-                        self.parent,
-                        MessageEvent(
-                            title="Download Error",
-                            text=f"Failed to download the JLCPCB database, {e}",
-                            style="error",
-                        ),
-                    )
-                    self.state = LibraryState.INITIALIZED
-                    self.create_tables(["placeholder_invalid_column_fix_errors"])
-                    return
-        # rename existing parts-fts5.db to parts-fts5.db.bak, delete already existing bak file if neccesary
-        if os.path.exists(self.partsdb_file):
-            if os.path.exists(f"{self.partsdb_file}.bak"):
-                os.remove(f"{self.partsdb_file}.bak")
-            os.rename(self.partsdb_file, f"{self.partsdb_file}.bak")
-        # unzip downloaded parts.zip
+                    self.logger.debug("Chunk %d downloaded successfully.", chunk_index)
+
+                # Update progress file after successful download
+                with open(progress_file, "a") as f:
+                    f.write(f"{chunk_index}\n")
+
+            except Exception as e:
+                wx.PostEvent(
+                    self.parent,
+                    MessageEvent(
+                        title="Download Error",
+                        text=f"Failed to download chunk {chunk_index}, {e}",
+                        style="error",
+                    ),
+                )
+                self.state = LibraryState.INITIALIZED
+                return
+
+        # Delete progress file to indicate the download is complete
+        if os.path.exists(progress_file):
+            os.remove(progress_file)
+
+        # Combine and extract downloaded files
         self.logger.debug("Combining and extracting zip part files...")
         try:
             unzip_parts(self.datadir)
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:
             wx.PostEvent(
                 self.parent,
                 MessageEvent(
@@ -493,36 +535,33 @@ class Library:
                 ),
             )
             self.state = LibraryState.INITIALIZED
-            self.create_tables(["placeholder_invalid_column_fix_errors"])
             return
-        # check if partsdb_file was successfully extracted
+
+        # Check if the database file was successfully extracted
         if not os.path.exists(self.partsdb_file):
-            if os.path.exists(f"{self.partsdb_file}.bak"):
-                os.rename(f"{self.partsdb_file}.bak", self.partsdb_file)
-                wx.PostEvent(
-                    self.parent,
-                    MessageEvent(
-                        title="Download Error",
-                        text="Failed to download the JLCPCB database, db was not extracted from zip",
-                        style="error",
-                    ),
-                )
-                self.state = LibraryState.INITIALIZED
-                self.create_tables(["placeholder_invalid_column_fix_errors"])
-                return
-        else:
-            wx.PostEvent(self.parent, ResetGaugeEvent())
-            end = time.time()
-            wx.PostEvent(self.parent, PopulateFootprintListEvent())
             wx.PostEvent(
                 self.parent,
                 MessageEvent(
-                    title="Success",
-                    text=f"Successfully downloaded and imported the JLCPCB database in {end-start:.2f} seconds!",
-                    style="info",
+                    title="Download Error",
+                    text="Failed to extract the database file from the downloaded zip.",
+                    style="error",
                 ),
             )
             self.state = LibraryState.INITIALIZED
+            return
+
+        wx.PostEvent(self.parent, ResetGaugeEvent())
+        end = time.time()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        wx.PostEvent(
+            self.parent,
+            MessageEvent(
+                title="Success",
+                text=f"Successfully downloaded and imported the JLCPCB database in {end - start:.2f} seconds!",
+                style="info",
+            ),
+        )
+        self.state = LibraryState.INITIALIZED
 
     def create_tables(self, headers):
         """Create all tables."""
