@@ -518,8 +518,8 @@ class Library:
                 return
 
         # Delete progress file to indicate the download is complete
-        # if os.path.exists(progress_file):
-        #     os.remove(progress_file)
+        if os.path.exists(progress_file):
+            os.remove(progress_file)
 
         # Combine and extract downloaded files
         self.logger.debug("Combining and extracting zip part files...")
