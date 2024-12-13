@@ -2,7 +2,6 @@
 
 import contextlib
 from enum import Enum
-from glob import glob
 import logging
 import os
 from pathlib import Path
@@ -13,12 +12,7 @@ import time
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
-from .events import (
-    MessageEvent,
-    PopulateFootprintListEvent,
-    ResetGaugeEvent,
-    UpdateGaugeEvent,
-)
+from .events import MessageEvent, PopulateFootprintListEvent, ResetGaugeEvent
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .unzip_parts import unzip_parts
 
@@ -377,7 +371,7 @@ class Library:
         self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
         wx.PostEvent(self.parent, ResetGaugeEvent())
-        
+
         # Define basic variables
         url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
         cnt_file = "chunk_num_fts5.txt"
@@ -387,9 +381,9 @@ class Library:
 
         # Check if there is a progress file
         if os.path.exists(progress_file):
-            with open(progress_file, "r") as f:
+            with open(progress_file) as f:
                 # Read completed chunk indices from the progress file
-                completed_chunks = set(int(line.strip()) for line in f.readlines())
+                completed_chunks = {int(line.strip()) for line in f.readlines()}
 
         # Get the total number of chunks to download
         try:
@@ -435,27 +429,31 @@ class Library:
                     # Validate the size of the chunk file
                     try:
                         expected_size = int(
-                            requests.head(url_stub + chunk_file, timeout=300).headers.get(
-                                "Content-Length"
-                            )
+                            requests.head(
+                                url_stub + chunk_file, timeout=300
+                            ).headers.get("Content-Length")
                         )
                         actual_size = os.path.getsize(chunk_path)
                         if actual_size == expected_size:
                             self.logger.debug(
-                                f"Skipping already downloaded and validated chunk {chunk_index}."
+                                "Skipping already downloaded and validated chunk %d.",
+                                chunk_index,
                             )
                             continue
                         else:
                             self.logger.warning(
-                                f"Chunk {chunk_index} is incomplete, re-downloading."
+                                "Chunk %d is incomplete, re-downloading.", chunk_index
                             )
                     except Exception as e:
                         self.logger.warning(
-                            f"Unable to validate chunk {chunk_index}, re-downloading. Error: {e}"
+                            "Unable to validate chunk %d, re-downloading. Error: %s",
+                            chunk_index,
+                            e,
                         )
                 else:
                     self.logger.warning(
-                        f"Chunk {chunk_index} marked as completed but file is missing, re-downloading."
+                        "Chunk %d marked as completed but file is missing, re-downloading.",
+                        chunk_index,
                     )
 
             # Download the chunk
@@ -483,11 +481,14 @@ class Library:
 
                     size = int(r.headers.get("Content-Length"))
                     self.logger.debug(
-                        "Downloading chunk %d/%d (%.2f MB)", chunk_index, total_chunks, size / 1024 / 1024
+                        "Downloading chunk %d/%d (%.2f MB)",
+                        chunk_index,
+                        total_chunks,
+                        size / 1024 / 1024,
                     )
                     for data in r.iter_content(chunk_size=4096):
                         f.write(data)
-                    self.logger.debug(f"Chunk {chunk_index} downloaded successfully.")
+                    self.logger.debug("Chunk %d downloaded successfully.", chunk_index)
 
                 # Update progress file after successful download
                 with open(progress_file, "a") as f:
@@ -550,8 +551,6 @@ class Library:
             ),
         )
         self.state = LibraryState.INITIALIZED
-
-
 
     def create_tables(self, headers):
         """Create all tables."""
