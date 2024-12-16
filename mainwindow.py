@@ -828,6 +828,8 @@ class JLCPCBTools(wx.Dialog):
                 return "JLCJLCJLCJLC" in data
         except OSError:
             pass
+        except UnicodeDecodeError:
+            self.logger.debug("Failed to check JLC order number due to UnicodeDecodeError")
         return True
 
     def generate_fabrication_data(self, *_):
