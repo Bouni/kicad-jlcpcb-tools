@@ -383,7 +383,11 @@ class JLCPCBTools(wx.Dialog):
             align=wx.ALIGN_CENTER,
         )
         params = self.footprint_list.AppendTextColumn(
-            "LCSC Params", 10, width=150, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+            "LCSC Params",
+            10,
+            width=150,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
         )
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
@@ -544,7 +548,9 @@ class JLCPCBTools(wx.Dialog):
             fp = board.FindFootprintByReference(reference)
             set_lcsc_value(fp, e.lcsc)
             params = params_for_part(self.library.get_part_details(e.lcsc))
-            self.partlist_data_model.set_lcsc(reference, e.lcsc, e.type, e.stock, params)
+            self.partlist_data_model.set_lcsc(
+                reference, e.lcsc, e.type, e.stock, params
+            )
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -823,11 +829,16 @@ class JLCPCBTools(wx.Dialog):
     def check_order_number(self):
         """Verify that the JLC order number placeholder is present."""
         try:
-            with open(self.pcbnew.GetBoard().GetFileName()) as f:
+            # We open with errors="replace because we're only interested in the occurance of the JLC magic string"
+            with open(self.pcbnew.GetBoard().GetFileName(), errors="replace") as f:
                 data = f.read()
                 return "JLCJLCJLCJLC" in data
         except OSError:
             pass
+        except UnicodeDecodeError:
+            self.logger.debug(
+                "Failed to check JLC order number due to UnicodeDecodeError"
+            )
         return True
 
     def generate_fabrication_data(self, *_):
