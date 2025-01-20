@@ -178,15 +178,12 @@ class Fabrication:
             ("CuTop", F_Cu, "Top layer"),
             ("SilkTop", F_SilkS, "Silk top"),
             ("MaskTop", F_Mask, "Mask top"),
-            ("PasteTop", F_Paste, "Paste top"),
         ]
         plot_plan_bottom = [
             ("CuBottom", B_Cu, "Bottom layer"),
             ("SilkBottom", B_SilkS, "Silk top"),
             ("MaskBottom", B_Mask, "Mask bottom"),
-            ("PasteBottom", B_Paste, "Paste bottom"),
             ("EdgeCuts", Edge_Cuts, "Edges"),
-            ("VScore", Cmts_User, "V score cut"),
         ]
 
         plot_plan = []
