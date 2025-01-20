@@ -17,13 +17,10 @@ from pcbnew import (  # pylint: disable=import-error
     ZONE_FILLER,
     B_Cu,
     B_Mask,
-    B_Paste,
     B_SilkS,
-    Cmts_User,
     Edge_Cuts,
     F_Cu,
     F_Mask,
-    F_Paste,
     F_SilkS,
     Refresh,
     ToMM,
@@ -310,7 +307,12 @@ class Fabrication:
                 components = part["refs"].split(",")
                 for component in components:
                     for fp in self.board.Footprints():
-                        if fp.GetReference() == component and hasattr(fp, "IsDNP") and callable(fp.IsDNP) and fp.IsDNP():
+                        if (
+                            fp.GetReference() == component
+                            and hasattr(fp, "IsDNP")
+                            and callable(fp.IsDNP)
+                            and fp.IsDNP()
+                        ):
                             components.remove(component)
                             part["refs"] = ",".join(components)
                             self.logger.info(
@@ -324,7 +326,13 @@ class Fabrication:
                     )
                     continue
                 writer.writerow(
-                    [part["value"], part["refs"], part["footprint"], part["lcsc"], len(components)]
+                    [
+                        part["value"],
+                        part["refs"],
+                        part["footprint"],
+                        part["lcsc"],
+                        len(components),
+                    ]
                 )
         self.logger.info(
             "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
