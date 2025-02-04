@@ -746,6 +746,9 @@ class JLCPCBTools(wx.Dialog):
             ref = self.partlist_data_model.get_reference(item)
             self.store.set_lcsc(ref, "")
             self.store.set_stock(ref, None)
+            board = self.pcbnew.GetBoard()
+            fp = board.FindFootprintByReference(ref)
+            set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
 
     def select_alike(self, *_):
