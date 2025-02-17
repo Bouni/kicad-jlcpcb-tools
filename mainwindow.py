@@ -746,6 +746,9 @@ class JLCPCBTools(wx.Dialog):
             ref = self.partlist_data_model.get_reference(item)
             self.store.set_lcsc(ref, "")
             self.store.set_stock(ref, None)
+            board = self.pcbnew.GetBoard()
+            fp = board.FindFootprintByReference(ref)
+            set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
 
     def select_alike(self, *_):
@@ -819,6 +822,9 @@ class JLCPCBTools(wx.Dialog):
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
             if ref.startswith("R"):
+                """ Auto remove alphabet unit if applicable """
+                if (value.endswith("R") or value.endswith("r") or value.endswith("o")):
+                    value = value[:-1]
                 value += "Ω"
             m = re.search(r"_(\d+)_\d+Metric", footprint)
             if m:
