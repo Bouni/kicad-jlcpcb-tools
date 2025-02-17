@@ -822,6 +822,9 @@ class JLCPCBTools(wx.Dialog):
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
             if ref.startswith("R"):
+                """ Auto remove alphabet unit if applicable """
+                if (value.endswith("R") or value.endswith("r") or value.endswith("o")):
+                    value = value[:-1]
                 value += "Ω"
             m = re.search(r"_(\d+)_\d+Metric", footprint)
             if m:
