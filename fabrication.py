@@ -1,6 +1,7 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
 import csv
+from importlib import import_module
 import logging
 import os
 from pathlib import Path
@@ -196,7 +197,7 @@ class Fabrication:
             plot_plan = (
                 plot_plan_top
                 + [
-                    (f"CuIn{layer}", layer, f"Inner layer {layer}")
+                    (f"CuIn{layer}", getattr(import_module("pcbnew"), f"In{layer}_Cu"), f"Inner layer {layer}")
                     for layer in range(1, layer_count - 1)
                 ]
                 + plot_plan_bottom
