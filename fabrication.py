@@ -178,7 +178,7 @@ class Fabrication:
         ]
         plot_plan_bottom = [
             ("CuBottom", B_Cu, "Bottom layer"),
-            ("SilkBottom", B_SilkS, "Silk top"),
+            ("SilkBottom", B_SilkS, "Silk bottom"),
             ("MaskBottom", B_Mask, "Mask bottom"),
             ("EdgeCuts", Edge_Cuts, "Edges"),
         ]
