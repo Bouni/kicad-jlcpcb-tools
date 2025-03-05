@@ -580,7 +580,7 @@ class Library:
         information from the on-disk database.
         """
         if not self.category_map:
-            self.category_map.setdefault("", "")
+            self.category_map.setdefault("", [])
 
             # Populate the cache.
             with contextlib.closing(
