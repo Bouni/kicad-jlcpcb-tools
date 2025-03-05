@@ -282,13 +282,17 @@ class PartDetailsDialog(wx.Dialog):
         if picture:
             # get the full resolution image instead of the thumbnail
             picture = picture.replace("96x96", "900x900")
-            self.image.SetBitmap(
-                self.get_scaled_bitmap(
-                    picture,
-                    int(200 * self.parent.scale_factor),
-                    int(200 * self.parent.scale_factor),
-                )
+        else:
+            imageId = result["data"].get("data", {}).get("productBigImageAccessId")
+            picture = f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{imageId}"
+        self.image.SetBitmap(
+            self.get_scaled_bitmap(
+                picture,
+                int(200 * self.parent.scale_factor),
+                int(200 * self.parent.scale_factor),
             )
+        )
+
         self.pdfurl = result["data"].get("data", {}).get("dataManualUrl")
         self.pageurl = result["data"].get("data", {}).get("lcscGoodsUrl")
 
