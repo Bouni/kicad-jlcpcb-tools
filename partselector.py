@@ -4,8 +4,9 @@ import logging
 import time
 
 import wx  # pylint: disable=import-error
-import wx.dataview  # pylint: disable=import-error
+import wx.dataview as dv  # pylint: disable=import-error
 
+from .datamodel import PartSelectorDataModel
 from .derive_params import params_for_part  # pylint: disable=import-error
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
@@ -22,7 +23,7 @@ class PartSelectorDialog(wx.Dialog):
             id=wx.ID_ANY,
             title="JLCPCB Library",
             pos=wx.DefaultPosition,
-            size=HighResWxSize(parent.window, wx.Size(1300, 800)),
+            size=HighResWxSize(parent.window, wx.Size(1400, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
@@ -400,101 +401,107 @@ class PartSelectorDialog(wx.Dialog):
         # ------------------------- Result Part list --------------------------
         # ---------------------------------------------------------------------
 
-        self.part_list = wx.dataview.DataViewListCtrl(
-            self,
-            wx.ID_ANY,
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            style=wx.dataview.DV_SINGLE,
-        )
-
-        self.part_list.AppendTextColumn(
-            "LCSC",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 60),
-            align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "MFR Number",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 140),
-            align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Package",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 100),
-            align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Pins",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 40),
-            align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        )
-        self.part_list.AppendTextColumn(
-            "Type",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 50),
-            align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Params",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 150),
-            align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Stock",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 50),
-            align=wx.ALIGN_CENTER,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Manufacturer",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 100),
-            align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Description",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 300),
-            align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-        self.part_list.AppendTextColumn(
-            "Price",
-            mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 100),
-            align=wx.ALIGN_LEFT,
-            flags=wx.dataview.DATAVIEW_COL_RESIZABLE,
-        ).GetRenderer().EnableEllipsize(wx.ELLIPSIZE_NONE)
-
-        self.part_list.SetMinSize(HighResWxSize(parent.window, wx.Size(1050, 500)))
-
-        self.part_list.Bind(
-            wx.dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK, self.OnSortPartList
-        )
-
-        self.part_list.Bind(
-            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected
-        )
-
-        self.part_list.Bind(wx.EVT_LEFT_DCLICK, self.select_part)
-
-
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        table_sizer.SetMinSize(HighResWxSize(parent.window, wx.Size(-1, 400)))
-        table_sizer.Add(self.part_list, 20, wx.ALL | wx.EXPAND, 5)
+
+        table_scroller = wx.ScrolledWindow(self, style=wx.HSCROLL | wx.VSCROLL)
+        table_scroller.SetScrollRate(20, 20)
+
+        self.part_list = dv.DataViewCtrl(
+            table_scroller,
+            style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_SINGLE,
+        )
+
+        lcsc = self.part_list.AppendTextColumn(
+            "LCSC",
+            0,
+            width=int(parent.scale_factor * 60),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
+        mfr_number = self.part_list.AppendTextColumn(
+            "MFR Number",
+            1,
+            width=int(parent.scale_factor * 140),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_LEFT,
+        )
+        package = self.part_list.AppendTextColumn(
+            "Package",
+            2,
+            width=int(parent.scale_factor * 100),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_LEFT,
+        )
+        pins = self.part_list.AppendTextColumn(
+            "Pins",
+            3,
+            width=int(parent.scale_factor * 40),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
+        parttype = self.part_list.AppendTextColumn(
+            "Type",
+            4,
+            width=int(parent.scale_factor * 50),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_LEFT,
+        )
+        params = self.part_list.AppendTextColumn(
+            "Params",
+            5,
+            width=int(parent.scale_factor * 150),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
+        stock = self.part_list.AppendTextColumn(
+            "Stock",
+            6,
+            width=int(parent.scale_factor * 50),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
+        mfr = self.part_list.AppendTextColumn(
+            "Manufacturer",
+            7,
+            width=int(parent.scale_factor * 100),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_LEFT,
+        )
+        description = self.part_list.AppendTextColumn(
+            "Description",
+            8,
+            width=int(parent.scale_factor * 300),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_LEFT,
+        )
+        price = self.part_list.AppendTextColumn(
+            "Price",
+            9,
+            width=int(parent.scale_factor * 100),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_LEFT,
+        )
+
+        lcsc.SetSortable(True)
+        mfr_number.SetSortable(True)
+        package.SetSortable(True)
+        pins.SetSortable(True)
+        parttype.SetSortable(True)
+        params.SetSortable(True)
+        stock.SetSortable(True)
+        mfr.SetSortable(True)
+        description.SetSortable(True)
+        price.SetSortable(True)
+
+        self.part_list.Bind(
+            dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected
+        )
+        self.part_list.Bind(dv.EVT_DATAVIEW_ITEM_ACTIVATED, self.select_part)
+        scrolled_sizer = wx.BoxSizer(wx.VERTICAL)
+        scrolled_sizer.Add(self.part_list, 1, wx.EXPAND)
+        table_scroller.SetSizer(scrolled_sizer)
+
+        table_sizer.Add(table_scroller, 20, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
         # ------------------------ Right side toolbar -------------------------
@@ -550,6 +557,9 @@ class PartSelectorDialog(wx.Dialog):
         # layout.Add(self.search_button, 5, wx.ALL, 5)
         layout.Add(result_sizer, 1, wx.LEFT, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
+
+        self.part_list_model = PartSelectorDataModel()
+        self.part_list.AssociateModel(self.part_list_model)
 
         self.SetSizer(layout)
         self.Layout()
@@ -671,6 +681,7 @@ class PartSelectorDialog(wx.Dialog):
             upper = int(upper)
             if lower <= quantity < upper:
                 return float(price)
+        return -1.0
 
     def populate_part_list(self, parts, search_duration):
         """Populate the list with the result of the search."""
@@ -679,7 +690,7 @@ class PartSelectorDialog(wx.Dialog):
             if search_duration > 1
             else f"{search_duration * 1000.0:.0f}ms"
         )
-        self.part_list.DeleteAllItems()
+        self.part_list_model.RemoveAll()
         if parts is None:
             return
         count = len(parts)
@@ -700,40 +711,33 @@ class PartSelectorDialog(wx.Dialog):
                 )
             else:
                 item[pricecol] = "Error in price data"
-            params = params_for_part({"description": item[7], "category": item[9], "package": item[2]})
+            params = params_for_part(
+                {"description": item[7], "category": item[9], "package": item[2]}
+            )
             item.insert(5, params)
-            self.part_list.AppendItem(item)
+            self.part_list_model.AddEntry(item)
 
     def select_part(self, *_):
         """Save the selected part number and close the modal."""
-        item = self.part_list.GetSelection()
-        row = self.part_list.ItemToRow(item)
-        if row == -1:
-            return
-        selection = self.part_list.GetTextValue(row, 0)
-        type = self.part_list.GetTextValue(row, 4)
-        stock = self.part_list.GetTextValue(row, 6)
-        wx.PostEvent(
-            self.parent,
-            AssignPartsEvent(
-                lcsc=selection,
-                type=type,
-                stock=stock,
-                references=self.parts.keys(),
-            ),
-        )
-        self.EndModal(wx.ID_OK)
+        if self.part_list.GetSelectedItemsCount() > 0:
+            item = self.part_list.GetSelection()
+            wx.PostEvent(
+                self.parent,
+                AssignPartsEvent(
+                    lcsc=self.part_list_model.get_lcsc(item),
+                    type=self.part_list_model.get_type(item),
+                    stock=self.part_list_model.get_stock(item),
+                    references=self.parts.keys(),
+                ),
+            )
+            self.EndModal(wx.ID_OK)
 
     def get_part_details(self, *_):
         """Fetch part details from LCSC and show them in a modal."""
-        item = self.part_list.GetSelection()
-        row = self.part_list.ItemToRow(item)
-        if row == -1:
-            return
-        part = self.part_list.GetTextValue(row, 0)
-        if part != "":
+        if self.part_list.GetSelectedItemsCount() > 0:
+            item = self.part_list.GetSelection()
             busy_cursor = wx.BusyCursor()
-            dialog = PartDetailsDialog(self.parent, part)
+            dialog = PartDetailsDialog(self.parent, self.part_list_model.get_lcsc(item))
             del busy_cursor
             dialog.ShowModal()
 

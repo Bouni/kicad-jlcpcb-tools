@@ -237,3 +237,125 @@ class PartListDataModel(dv.PyDataViewModel):
         """Toggle BOM and POS for a given item."""
         self.toggle_bom(item)
         self.toggle_pos(item)
+
+
+class PartSelectorDataModel(dv.PyDataViewModel):
+    """Datamodel for use with the DataViewCtrl of the partselector modal window."""
+
+    def __init__(self):
+        super().__init__()
+        self.data = []
+        self.columns = {
+            "LCSC_COL": 0,
+            "MFR_NUMBER_COL": 1,
+            "PACKAGE_COL": 2,
+            "PIN_COL": 3,
+            "TYPE_COL": 4,
+            "PARAMS_COL": 5,
+            "STOCK_COL": 6,
+            "MFR_COL": 7,
+            "DESCR_COL": 8,
+            "PRICE_COL": 9,
+        }
+
+        self.logger = logging.getLogger(__name__)
+
+    @staticmethod
+    def natural_sort_key(s):
+        """Return a tuple that can be used for natural sorting."""
+        return [
+            int(text) if text.isdigit() else text.lower()
+            for text in re.split("([0-9]+)", s)
+        ]
+
+    def GetColumnCount(self):  # noqa: DC04
+        """Get number of columns."""
+        return len(self.columns)
+
+    def GetColumnType(self, col):  # noqa: DC04
+        """Get type of each column."""
+        columntypes = (
+            "string",
+            "string",
+            "string",
+            "string",
+            "string",
+            "string",
+            "string",
+            "string",
+            "string",
+        )
+        return columntypes[col]
+
+    def GetChildren(self, parent, children):  # noqa: DC04
+        """Get child items of a parent."""
+        if not parent:
+            for row in self.data:
+                children.append(self.ObjectToItem(row))
+            return len(self.data)
+        return 0
+
+    def IsContainer(self, item):  # noqa: DC04
+        """Check if tem is a container."""
+        return not item
+
+    def GetParent(self, item):  # noqa: DC04
+        """Get parent item."""
+        return dv.NullDataViewItem
+
+    def GetValue(self, item, col):
+        """Get value of an item."""
+        row = self.ItemToObject(item)
+        return row[col]
+
+    def SetValue(self, value, item, col):
+        """Set value of an item."""
+        row = self.ItemToObject(item)
+        row[col] = value
+        return True
+
+    def Compare(self, item1, item2, column, ascending):  # noqa: DC04
+        """Override to implement natural sorting."""
+        val1 = self.GetValue(item1, column)
+        val2 = self.GetValue(item2, column)
+
+        key1 = self.natural_sort_key(val1)
+        key2 = self.natural_sort_key(val2)
+
+        if ascending:
+            return (key1 > key2) - (key1 < key2)
+        else:
+            return (key2 > key1) - (key2 < key1)
+
+    def find_index(self, ref):
+        """Get the index of a part within the data list by its reference."""
+        try:
+            return self.data.index([x for x in self.data if x[0] == ref].pop())
+        except (ValueError, IndexError):
+            return None
+
+    def AddEntry(self, data: list):
+        """Add a new entry to the data model."""
+        self.data.append(data)
+        self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
+
+    def RemoveAll(self):
+        """Remove all entries from the data model."""
+        self.data.clear()
+        self.Cleared()
+
+    def get_all(self):
+        """Get tall items."""
+        return self.data
+
+    def get_lcsc(self, item):
+        """Get the reference of an item."""
+        return self.ItemToObject(item)[self.columns["LCSC_COL"]]
+
+    def get_type(self, item):
+        """Get the reference of an item."""
+        return self.ItemToObject(item)[self.columns["TYPE_COL"]]
+
+    def get_stock(self, item):
+        """Get the reference of an item."""
+        return self.ItemToObject(item)[self.columns["STOCK_COL"]]

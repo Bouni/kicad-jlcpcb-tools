@@ -284,7 +284,9 @@ class PartDetailsDialog(wx.Dialog):
             picture = picture.replace("96x96", "900x900")
         else:
             imageId = result["data"].get("data", {}).get("productBigImageAccessId")
-            picture = f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{imageId}"
+            picture = (
+                f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{imageId}"
+            )
         self.image.SetBitmap(
             self.get_scaled_bitmap(
                 picture,
