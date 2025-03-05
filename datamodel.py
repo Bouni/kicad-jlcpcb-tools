@@ -212,7 +212,7 @@ class PartListDataModel(dv.PyDataViewModel):
         obj[self.columns["LCSC_COL"]] = ""
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""
-        item[self.columns["PARAMS_COL"]] = ""
+        obj[self.columns["PARAMS_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_bom(self, item):
