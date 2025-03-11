@@ -1,5 +1,6 @@
 """Contains helper function used all over the plugin."""
 
+from distutils.version import LooseVersion
 import os
 import re
 
@@ -12,19 +13,20 @@ EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 
 
-def is_version8(version: str) -> bool:
-    """Check if version is 8 or 8 Nightly build."""
-    return any(v in version for v in ("8.0", "8.99"))
+def _is_version_in_range(version: str, min_version: str, max_version: str) -> bool:
+    """Check if version is in range."""
+    ver = LooseVersion(version)
+    return LooseVersion(min_version) <= ver < LooseVersion(max_version)
 
 
 def is_version7(version: str) -> bool:
     """Check if version is 7."""
-    return any(v in version for v in ("7.0"))
+    return _is_version_in_range(version, "6.99", "8.0")
 
 
 def is_version6(version: str) -> bool:
     """Check if version is 6."""
-    return any(v in version for v in ("6.0"))
+    return _is_version_in_range(version, "5.99", "7.0")
 
 
 def getWxWidgetsVersion():
@@ -146,6 +148,7 @@ def set_lcsc_value(fp, lcsc: str):
         fp.SetField("LCSC", lcsc)
         field = fp.GetFieldByName("LCSC")
         field.SetVisible(False)
+
 
 def get_valid_footprints(board):
     """Get all footprints that have a valid reference (drop all REF**)."""

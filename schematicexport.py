@@ -7,7 +7,7 @@ import re
 
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
-from .helpers import is_version6, is_version7, is_version8
+from .helpers import is_version6, is_version7
 
 
 class SchematicExport:
@@ -21,20 +21,20 @@ class SchematicExport:
 
     def load_schematic(self, paths):
         """Load schematic file."""
-        if is_version8(GetBuildVersion()):
-            self.logger.info("Kicad 8+...")
+        if is_version6(GetBuildVersion()):
+            self.logger.info("Kicad 6...")
             for path in paths:
-                self._update_schematic8(path)
+                self._update_schematic6(path)
         elif is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")
             for path in paths:
                 self._update_schematic7(path)
-        elif is_version6(GetBuildVersion()):
-            self.logger.info("Kicad 6...")
+        else:
+            self.logger.info("Kicad 8+...")
             for path in paths:
                 self._update_schematic(path)
 
-    def _update_schematic(self, path):
+    def _update_schematic6(self, path):
         """Only works with KiCad V6 files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
@@ -185,8 +185,8 @@ class SchematicExport:
                 f.write(line + "\n")
         self.logger.info("Added LCSC's to %s (maybe?)", path)
 
-    def _update_schematic8(self, path):
-        """Only works with KiCad V8 files."""
+    def _update_schematic(self, path):
+        """Only works with KiCad V8+ files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
@@ -250,7 +250,7 @@ class SchematicExport:
                     if file_name not in files_seen:
                         files_seen.add(file_name)
                         dir_name = os.path.dirname(path)
-                        self._update_schematic8(os.path.join(dir_name, file_name))
+                        self._update_schematic(os.path.join(dir_name, file_name))
             # if we hit the pin section without finding a LCSC property, add it
             m3 = pinRx.search(inLine)
             if m3 and partSection:
