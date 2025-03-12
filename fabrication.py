@@ -151,8 +151,7 @@ class Fabrication:
         # In KiCAD 8.99 this must be set in the layer settings of KiCAD
         if hasattr(PCB_VIA, "SetPlotViaOnMaskLayer"):
             popt.SetPlotViaOnMaskLayer(
-                not self.parent.settings.get(
-                    "gerber", {}).get("tented_vias", True)
+                not self.parent.settings.get("gerber", {}).get("tented_vias", True)
             )
 
         popt.SetUseGerberX2format(True)
@@ -198,8 +197,7 @@ class Fabrication:
             plot_plan = (
                 plot_plan_top
                 + [
-                    (f"CuIn{layer}", getattr(import_module("pcbnew"),
-                     f"In{layer}_Cu"), f"Inner layer {layer}")
+                    (f"CuIn{layer}", getattr(import_module("pcbnew"), f"In{layer}_Cu"), f"Inner layer {layer}")
                     for layer in range(1, layer_count - 1)
                 ]
                 + plot_plan_bottom
@@ -259,8 +257,7 @@ class Fabrication:
                     filePath = os.path.join(folderName, filename)
                     zipfile.write(filePath, os.path.basename(filePath))
         self.logger.info(
-            "Finished generating ZIP file %s", os.path.join(
-                self.outputdir, zipname)
+            "Finished generating ZIP file %s", os.path.join(self.outputdir, zipname)
         )
 
     def generate_cpl(self):
@@ -276,11 +273,9 @@ class Fabrication:
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
-                ["Designator", "Val", "Package", "Mid X",
-                    "Mid Y", "Rotation", "Layer"]
+                ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
-            footprints = sorted(self.board.Footprints(),
-                                key=lambda x: x.GetReference())
+            footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
             for fp in footprints:
                 part = self.parent.store.get_part(fp.GetReference())
                 if not part:  # No matching part in the database, continue
@@ -307,8 +302,7 @@ class Fabrication:
                     ]
                 )
         self.logger.info(
-            "Finished generating CPL file %s", os.path.join(
-                self.outputdir, cplname)
+            "Finished generating CPL file %s", os.path.join(self.outputdir, cplname)
         )
 
     def generate_bom(self):
@@ -321,8 +315,7 @@ class Fabrication:
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
-            writer.writerow(
-                ["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
+            writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
             for part in self.parent.store.read_bom_parts():
                 components = part["refs"].split(",")
                 for component in components:
@@ -355,6 +348,5 @@ class Fabrication:
                     ]
                 )
         self.logger.info(
-            "Finished generating BOM file %s", os.path.join(
-                self.outputdir, bomname)
+            "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
         )
