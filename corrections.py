@@ -1,4 +1,4 @@
-"""Contains the rotations manager."""
+"""Contains the corrections manager."""
 
 import csv
 import logging
@@ -12,15 +12,15 @@ from .events import PopulateFootprintListEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
 
-class RotationManagerDialog(wx.Dialog):
-    """Dialog for managing part rotations."""
+class CorrectionManagerDialog(wx.Dialog):
+    """Dialog for managing part corrections."""
 
     def __init__(self, parent, footprint):
         wx.Dialog.__init__(
             self,
             parent,
             id=wx.ID_ANY,
-            title="Rotations Manager",
+            title="Corrections Manager",
             pos=wx.DefaultPosition,
             size=HighResWxSize(parent.window, wx.Size(800, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
@@ -29,7 +29,9 @@ class RotationManagerDialog(wx.Dialog):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.selection_regex = None
-        self.selection_correction = None
+        self.selection_rotation = None
+        self.selection_offset_x = None
+        self.selection_offset_y = None
         self.import_legacy_corrections()
 
         # ---------------------------------------------------------------------
@@ -62,50 +64,100 @@ class RotationManagerDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(200, 24)),
         )
 
-        sizer_left = wx.BoxSizer(wx.VERTICAL)
-        sizer_left.Add(regex_label, 0, wx.ALL, 5)
-        sizer_left.Add(
+        sizer_regex = wx.BoxSizer(wx.VERTICAL)
+        sizer_regex.Add(regex_label, 0, wx.ALL, 5)
+        sizer_regex.Add(
             self.regex,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
-        correction_label = wx.StaticText(
+        rotation_label = wx.StaticText(
             self,
             wx.ID_ANY,
-            "Correction",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            "Rotation",
+            size=HighResWxSize(parent.window, wx.Size(100, 15)),
         )
-        self.correction = wx.TextCtrl(
+        self.rotation = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(150, 24)),
         )
 
-        sizer_right = wx.BoxSizer(wx.VERTICAL)
-        sizer_right.Add(correction_label, 0, wx.ALL, 5)
-        sizer_right.Add(
-            self.correction,
+        sizer_rotation = wx.BoxSizer(wx.VERTICAL)
+        sizer_rotation.Add(rotation_label, 0, wx.ALL, 5)
+        sizer_rotation.Add(
+            self.rotation,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            5,
+        )
+
+        offset_x_label = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Offset X",
+            size=HighResWxSize(parent.window, wx.Size(100, 15)),
+        )
+        self.offset_x = wx.TextCtrl(
+            self,
+            wx.ID_ANY,
+            "",
+            wx.DefaultPosition,
+            HighResWxSize(parent.window, wx.Size(150, 24)),
+        )
+
+        sizer_offset_x = wx.BoxSizer(wx.VERTICAL)
+        sizer_offset_x.Add(offset_x_label, 0, wx.ALL, 5)
+        sizer_offset_x.Add(
+            self.offset_x,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            5,
+        )
+
+        offset_y_label = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Offset Y",
+            size=HighResWxSize(parent.window, wx.Size(100, 15)),
+        )
+        self.offset_y = wx.TextCtrl(
+            self,
+            wx.ID_ANY,
+            "",
+            wx.DefaultPosition,
+            HighResWxSize(parent.window, wx.Size(150, 24)),
+        )
+
+        sizer_offset_y = wx.BoxSizer(wx.VERTICAL)
+        sizer_offset_y.Add(offset_y_label, 0, wx.ALL, 5)
+        sizer_offset_y.Add(
+            self.offset_y,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
         )
 
         self.regex.Bind(wx.EVT_TEXT, self.on_textfield_change)
-        self.correction.Bind(wx.EVT_TEXT, self.on_textfield_change)
+        self.rotation.Bind(wx.EVT_TEXT, self.on_textfield_change)
+        self.offset_x.Bind(wx.EVT_TEXT, self.on_textfield_change)
+        self.offset_y.Bind(wx.EVT_TEXT, self.on_textfield_change)
 
         add_edit_sizer = wx.StaticBoxSizer(wx.HORIZONTAL, self, "Add / Edit")
-        add_edit_sizer.Add(sizer_left, 0, wx.RIGHT, 20)
-        add_edit_sizer.Add(sizer_right, 0, wx.RIGHT, 20)
+        add_edit_sizer.Add(sizer_regex, 0, wx.RIGHT, 20)
+        add_edit_sizer.Add(sizer_rotation, 0, wx.RIGHT, 20)
+        add_edit_sizer.Add(sizer_offset_x, 0, wx.RIGHT, 20)
+        add_edit_sizer.Add(sizer_offset_y, 0, wx.RIGHT, 20)
 
         # ---------------------------------------------------------------------
-        # ------------------------- Rotations list ----------------------------
+        # ------------------------ Corrections list ---------------------------
         # ---------------------------------------------------------------------
 
-        self.rotations_list = wx.dataview.DataViewListCtrl(
+        self.corrections_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
             wx.DefaultPosition,
@@ -113,28 +165,40 @@ class RotationManagerDialog(wx.Dialog):
             style=wx.dataview.DV_SINGLE,
         )
 
-        self.rotations_list.AppendTextColumn(
+        self.corrections_list.AppendTextColumn(
             "Regex",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(parent.scale_factor * 480),
+            width=int(parent.scale_factor * 280),
             align=wx.ALIGN_LEFT,
         )
-        self.rotations_list.AppendTextColumn(
-            "Correction",
+        self.corrections_list.AppendTextColumn(
+            "Rotation",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(parent.scale_factor * 100),
+            align=wx.ALIGN_LEFT,
+        )
+        self.corrections_list.AppendTextColumn(
+            "Offset X",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(parent.scale_factor * 100),
+            align=wx.ALIGN_LEFT,
+        )
+        self.corrections_list.AppendTextColumn(
+            "Offset Y",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
         )
 
-        self.rotations_list.SetMinSize(HighResWxSize(parent.window, wx.Size(600, 500)))
+        self.corrections_list.SetMinSize(HighResWxSize(parent.window, wx.Size(600, 500)))
 
-        self.rotations_list.Bind(
+        self.corrections_list.Bind(
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.on_correction_selected
         )
 
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(HighResWxSize(parent.window, wx.Size(-1, 400)))
-        table_sizer.Add(self.rotations_list, 20, wx.ALL | wx.EXPAND, 5)
+        table_sizer.Add(self.corrections_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
         # ------------------------ Right side toolbar -------------------------
@@ -247,7 +311,7 @@ class RotationManagerDialog(wx.Dialog):
         self.Layout()
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
-        self.populate_rotations_list()
+        self.populate_corrections_list()
 
     def quit_dialog(self, *_):
         """Close this dialog."""
@@ -262,65 +326,78 @@ class RotationManagerDialog(wx.Dialog):
         ]:
             b.Enable(bool(state))
 
-    def populate_rotations_list(self):
+    def populate_corrections_list(self):
         """Populate the list with the result of the search."""
-        self.rotations_list.DeleteAllItems()
-        for corrections in self.parent.library.get_all_correction_data():
-            self.rotations_list.AppendItem([str(c) for c in corrections])
+        self.corrections_list.DeleteAllItems()
+        for regex, rotation, offset in self.parent.library.get_all_correction_data():
+            self.corrections_list.AppendItem([str(regex), str(rotation), str(offset[0]), str(offset[1])])
 
     def save_correction(self, *_):
         """Add/Update a correction in the database."""
         regex = self.regex.GetValue()
-        correction = self.correction.GetValue()
+        rotation = self.rotation.GetValue()
+        try:
+            offset_x = float(self.offset_x.GetValue())
+        except ValueError:
+            offset_x = 0
+        try:
+            offset_y = float(self.offset_y.GetValue())
+        except ValueError:
+            offset_y = 0
+        offset = (offset_x, offset_y)
         if regex == self.selection_regex:
-            self.parent.library.update_correction_data(regex, correction)
+            self.parent.library.update_correction_data(regex, rotation, offset)
             self.selection_regex = None
         elif self.selection_regex is None:
-            self.parent.library.insert_correction_data(regex, correction)
+            self.parent.library.insert_correction_data(regex, rotation, offset)
         else:
             self.parent.library.delete_correction_data(self.selection_regex)
-            self.parent.library.insert_correction_data(regex, correction)
+            self.parent.library.insert_correction_data(regex, rotation, offset)
             self.selection_regex = None
-        self.populate_rotations_list()
+        self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def delete_correction(self, *_):
         """Delete a correction from the database."""
-        item = self.rotations_list.GetSelection()
-        row = self.rotations_list.ItemToRow(item)
+        item = self.corrections_list.GetSelection()
+        row = self.corrections_list.ItemToRow(item)
         if row == -1:
             return
-        regex = self.rotations_list.GetTextValue(row, 0)
+        regex = self.corrections_list.GetTextValue(row, 0)
         self.parent.library.delete_correction_data(regex)
-        self.populate_rotations_list()
+        self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def on_correction_selected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
-        if self.rotations_list.GetSelectedItemsCount() > 0:
+        if self.corrections_list.GetSelectedItemsCount() > 0:
             self.enable_toolbar_buttons(True)
-            item = self.rotations_list.GetSelection()
-            row = self.rotations_list.ItemToRow(item)
+            item = self.corrections_list.GetSelection()
+            row = self.corrections_list.ItemToRow(item)
             if row == -1:
                 return
-            self.selection_regex = self.rotations_list.GetTextValue(row, 0)
-            self.selection_correction = self.rotations_list.GetTextValue(row, 1)
+            self.selection_regex = self.corrections_list.GetTextValue(row, 0)
+            self.selection_rotation = self.corrections_list.GetTextValue(row, 1)
+            self.selection_offset_x = self.corrections_list.GetTextValue(row, 2)
+            self.selection_offset_y = self.corrections_list.GetTextValue(row, 3)
             self.regex.SetValue(self.selection_regex)
-            self.correction.SetValue(self.selection_correction)
+            self.rotation.SetValue(self.selection_rotation)
+            self.offset_x.SetValue(self.selection_offset_x)
+            self.offset_y.SetValue(self.selection_offset_y)
         else:
             self.selection_regex = None
             self.enable_toolbar_buttons(False)
 
     def on_textfield_change(self, *_):
         """Check if the Add button should be activated."""
-        if self.regex.GetValue() and self.correction.GetValue():
+        if self.regex.GetValue() and self.rotation.GetValue() and self.offset_x.GetValue() and self.offset_y.GetValue():
             self.enable_toolbar_buttons(True)
         else:
             self.enable_toolbar_buttons(False)
 
     def download_correction_data(self, *_):
         """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo."""
-        self.parent.library.create_rotation_table()
+        self.parent.library.create_correction_table()
         try:
             r = requests.get(
                 "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv",
@@ -330,16 +407,18 @@ class RotationManagerDialog(wx.Dialog):
             next(corrections)
             for row in corrections:
                 if not self.parent.library.get_correction_data(row[0]):
-                    self.parent.library.insert_correction_data(row[0], row[1])
+                    if len(row) >= 4:
+                        self.parent.library.insert_correction_data(row[0], row[1], (row[2], row[3]))
+                    else:
+                        self.parent.library.insert_correction_data(row[0], row[1], (0, 0))
                 else:
                     self.logger.info(
-                        "Correction '%s' exists already in database with correction value {%s}. Leaving this one out.",
+                        "Correction '%s' exists already in database. Leaving this one out.",
                         row[0],
-                        row[1],
                     )
         except Exception as err:  # pylint: disable=broad-exception-caught
             self.logger.debug(err)
-        self.populate_rotations_list()
+        self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def import_legacy_corrections(self):
@@ -383,34 +462,47 @@ class RotationManagerDialog(wx.Dialog):
         """Corrections import logic."""
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
-                csvreader = csv.DictReader(f, fieldnames=("regex", "correction"))
+                csvreader = csv.DictReader(f, fieldnames=("regex", "rotation", "offset_x", "offset_y"))
                 next(csvreader)
                 for row in csvreader:
-                    if self.parent.library.get_correction_data(row["regex"]):
-                        self.parent.library.update_correction_data(
-                            row["regex"], row["correction"]
-                        )
-                        self.logger.info(
-                            "Correction '%s' exists already in database with correction value '%s'. Overwrite it with local values from CSV.",
-                            row["regex"],
-                            row["correction"],
-                        )
-                    else:
-                        self.parent.library.insert_correction_data(
-                            row["regex"], row["correction"]
-                        )
-                        self.logger.info(
-                            "Correction '%s' with correction value '%s' is added to the database from local CSV.",
-                            row["regex"],
-                            row["correction"],
-                        )
-            self.populate_rotations_list()
+                    if "regex" in row and row["regex"] is not None:
+                        regex = row["regex"]
+                        rotation = row["rotation"] if row["rotation"] is not None else 0
+                        offset_x = row["offset_x"] if row["offset_x"] is not None else 0
+                        offset_y = row["offset_y"] if row["offset_y"] is not None else 0
+                        existing_data = self.parent.library.get_correction_data(regex)
+                        if existing_data:
+                            self.parent.library.update_correction_data(
+                                regex, rotation, (offset_x, offset_y)
+                            )
+                            self.logger.info(
+                                "Correction '%s' exists already in database with correction value '%s, %s/%s'. Overwrite it with local values from CSV (%s, %s/%s).",
+                                regex,
+                                existing_data[1],
+                                existing_data[2],
+                                existing_data[3],
+                                rotation,
+                                offset_x,
+                                offset_y,
+                            )
+                        else:
+                            self.parent.library.insert_correction_data(
+                                regex, rotation, (offset_x, offset_y)
+                            )
+                            self.logger.info(
+                                "Correction '%s' with correction value '%s, %s/%s' is added to the database from local CSV.",
+                                regex,
+                                rotation,
+                                offset_x,
+                                offset_y,
+                            )
+            self.populate_corrections_list()
             wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
     def _export_corrections(self, path):
         """Corrections export logic."""
         with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
-            csvwriter.writerow(["Footprint pattern", "Correction"])
-            for c in self.parent.library.get_all_correction_data():
-                csvwriter.writerow([c[0], c[1]])
+            csvwriter.writerow(["Pattern", "Rotation", "Offset X", "Offset Y"])
+            for regex, rotation, offset in self.parent.library.get_all_correction_data():
+                csvwriter.writerow([regex, rotation, offset[0], offset[1]])

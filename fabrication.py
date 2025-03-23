@@ -25,6 +25,8 @@ from pcbnew import (  # pylint: disable=import-error
     F_SilkS,
     Refresh,
     ToMM,
+    FromMM,
+    wxPoint
 )
 
 # Compatibility hack for V6 / V7 / V7.99
@@ -76,11 +78,11 @@ class Fabrication:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
         # First check if the value aka part name matches
-        for regex, correction in self.corrections:
+        for regex, correction, _ in self.corrections:
             if re.search(regex, str(footprint.GetValue())):
                 return self.rotate(footprint, rotation, correction)
         # Then if the package matches
-        for regex, correction in self.corrections:
+        for regex, correction, _ in self.corrections:
             if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
                 return self.rotate(footprint, rotation, correction)
         # If no correction matches, return the original rotation
@@ -90,13 +92,41 @@ class Fabrication:
         """Calculate the actual correction."""
         rotation = (rotation + int(correction)) % 360
         self.logger.info(
-            "Fixed rotation of %s (%s / %s) on Top Layer by %d degrees",
+            "Fixed rotation of %s (%s / %s) on %s Layer by %d degrees",
             footprint.GetReference(),
             footprint.GetValue(),
             footprint.GetFPID().GetLibItemName(),
+            "Top" if footprint.GetLayer() == 0 else "Bottom",
             correction,
         )
         return rotation
+
+    def reposition(self, footprint, position, offset):
+        if offset[0] != 0 or offset[1] != 0:
+            self.logger.info(
+                "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
+                footprint.GetReference(),
+                footprint.GetValue(),
+                footprint.GetFPID().GetLibItemName(),
+                "Top" if footprint.GetLayer() == 0 else "Bottom",
+                offset[0], offset[1],
+            )
+            return wxPoint(position.x + FromMM(offset[0]), position.y + FromMM(offset[1]))
+        return position
+
+    def fix_position(self, footprint, position):
+        """Fix the position of footprints in order to be correct for JLCPCB."""
+
+        # First check if the value aka part name matches
+        for regex, _, correction in self.corrections:
+            if re.search(regex, str(footprint.GetValue())):
+                return self.reposition(footprint, position, correction)
+        # Then if the package matches
+        for regex, _, correction in self.corrections:
+            if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
+                return self.reposition(footprint, position, correction)
+        # If no correction matches, return the original position
+        return position
 
     def get_position(self, footprint):
         """Calculate position based on center of bounding box."""
@@ -278,6 +308,7 @@ class Fabrication:
                     x1, y1 = self.get_position(fp)
                     x2, y2 = aux_orgin
                     position = VECTOR2I(x1 - x2, y1 - y2)
+                position = self.fix_position(fp, position)
                 writer.writerow(
                     [
                         part["reference"],
