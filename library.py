@@ -44,6 +44,9 @@ class Library:
         self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
         self.state = None
         self.category_map = {}
+
+        self.logger.debug("partsdb_file %s", self.partsdb_file)
+
         self.setup()
         self.check_library()
 
@@ -212,6 +215,8 @@ class Library:
 
         query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
         query += " LIMIT 1000"
+
+        self.logger.debug("query '%s'", query)
 
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
