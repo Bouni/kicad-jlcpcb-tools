@@ -648,6 +648,7 @@ class PartSelectorDialog(wx.Dialog):
         }
         start = time.time()
         result = self.parent.library.search(parameters)
+        self.logger.debug("len(result) %d", len(result))
         search_duration = time.time() - start
         self.populate_part_list(result, search_duration)
 
