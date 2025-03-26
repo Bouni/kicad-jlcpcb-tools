@@ -46,6 +46,7 @@ class Library:
         self.category_map = {}
 
         self.logger.debug("partsdb_file %s", self.partsdb_file)
+        self.logger.debug("sqlite.sqlite_version %s", sqlite3.sqlite_version)
 
         self.setup()
         self.check_library()
