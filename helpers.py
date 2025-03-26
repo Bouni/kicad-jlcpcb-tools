@@ -2,12 +2,13 @@
 
 from distutils.version import LooseVersion
 import os
+from pathlib import Path
 import re
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
-PLUGIN_PATH = os.path.split(os.path.abspath(__file__))[0]
+PLUGIN_PATH = Path(__file__).resolve().parent
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
