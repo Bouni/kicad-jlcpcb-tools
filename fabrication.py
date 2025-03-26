@@ -203,6 +203,18 @@ class Fabrication:
                 + plot_plan_bottom
             )
 
+        # Add all JLC prefixed layers - layers must have "JLC_" in their name
+        jlc_layers_to_plot = []
+        enabled_layer_ids = list(self.board.GetEnabledLayers().Seq())
+        for enabled_layer_id in enabled_layer_ids:
+            layer_name_string = str(
+                self.board.GetLayerName(enabled_layer_id)).upper()
+            if "JLC_" in layer_name_string:
+                plotter_info = (layer_name_string,
+                                enabled_layer_id, layer_name_string)
+                jlc_layers_to_plot.append(plotter_info)
+        plot_plan += jlc_layers_to_plot
+
         for layer_info in plot_plan:
             if layer_info[1] <= B_Cu:
                 popt.SetSkipPlotNPTH_Pads(True)
