@@ -127,6 +127,16 @@ Footprints are included into the BOM and CPL files according to their `exclude f
 
 ![The fabrication files](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/fabrication_files.png)
 
+### Export Additional JLC Specific Layers
+
+Some boards you have manufactured will require additional layers in your Gerber. For example, when manufacturing flex PCBs with a stiffener, JLC requires a layer outlining the stiffener layer (top/bottom), dimensions and the stiffener material properties (material, thickness etc). Export these additional JLC speciific layers in your production files with a simple modification.
+
+Additional layers can be exported by creating layers with `JLC_` as the prefix of the layer name. You can access and edit the layer names in _Board Setup/Board Stackup/Board Editor Layers_
+
+This tool will automatically export all additional layers with the JLC_ prefix and add them to the production files in `GERBER-<projectname>.zip`
+
+![Export Additional JLC Specific Layers](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/additional_jlc_layers.png)
+
 ## Footprint rotation correction
 
 JLCPCB seems to need corrected rotation information. @matthewlai implemented that in his [JLCKicadTools](https://github.com/matthewlai/JLCKicadTools) and I adopted his work in this plugin as well.
