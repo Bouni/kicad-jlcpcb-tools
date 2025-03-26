@@ -1,4 +1,4 @@
-"""Init file for pligin."""
+"""Init file for plugin."""
 
 from .plugin import JLCPCBPlugin
 
