@@ -244,15 +244,6 @@ class Jlcpcb(Generate):
             """
         )
 
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rotation (
-                'regex',
-                'correction'
-            )
-            """
-        )
-
     def build(self):
         """Run all of the steps to generate the database files for upload."""
         self.remove_original()
@@ -313,15 +304,6 @@ class JlcpcbFTS5(Generate):
                 'partcount',
                 'date',
                 'last_update'
-            )
-            """
-        )
-
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rotation (
-                'regex',
-                'correction'
             )
             """
         )
