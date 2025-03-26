@@ -131,7 +131,7 @@ Footprints are included into the BOM and CPL files according to their `exclude f
 
 Some boards you have manufactured will require additional layers in your Gerber. For example, when manufacturing flex PCBs with a stiffener, JLC requires a layer outlining the stiffener layer (top/bottom), dimensions and the stiffener material properties (material, thickness etc). Export these additional JLC speciific layers in your production files with a simple modification.
 
-Additional layers can be exported by creating layers with `JLC_` as the prefix of the layer name. You can access and edit the layer names in _Board Setup/Board Stackup/Board Editor Layers_
+Additional layers can be exported by creating layers with `JLC_` as the prefix of the layer name. You can access and edit the layer names in *Board Setup/Board Stackup/Board Editor Layers*
 
 This tool will automatically export all additional layers with the JLC_ prefix and add them to the production files in `GERBER-<projectname>.zip`
 
