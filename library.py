@@ -13,10 +13,10 @@ import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
 from .events import (
+    DownloadCompletedEvent,
+    DownloadProgressEvent,
+    DownloadStartedEvent,
     MessageEvent,
-    PopulateFootprintListEvent,
-    ResetGaugeEvent,
-    UpdateGaugeEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .unzip_parts import unzip_parts
@@ -379,7 +379,7 @@ class Library:
         """Actual worker thread that downloads and imports the parts data."""
         self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
-        wx.PostEvent(self.parent, ResetGaugeEvent())
+        wx.PostEvent(self.parent, DownloadStartedEvent())
 
         # Define basic variables
         url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
@@ -498,7 +498,7 @@ class Library:
                     for data in r.iter_content(chunk_size=4096):
                         f.write(data)
                         progress = f.tell() / size * 100
-                        wx.PostEvent(self.parent, UpdateGaugeEvent(value=progress))
+                        wx.PostEvent(self.parent, DownloadProgressEvent(value=progress))
                     self.logger.debug("Chunk %d downloaded successfully.", chunk_index)
 
                 # Update progress file after successful download
@@ -550,9 +550,8 @@ class Library:
             self.state = LibraryState.INITIALIZED
             return
 
-        wx.PostEvent(self.parent, ResetGaugeEvent())
+        wx.PostEvent(self.parent, DownloadCompletedEvent())
         end = time.time()
-        wx.PostEvent(self.parent, PopulateFootprintListEvent())
         wx.PostEvent(
             self.parent,
             MessageEvent(
