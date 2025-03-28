@@ -17,11 +17,17 @@ from .datamodel import PartListDataModel
 from .derive_params import params_for_part
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
+    EVT_DOWNLOAD_COMPLETED_EVENT,
+    EVT_DOWNLOAD_PROGRESS_EVENT,
+    EVT_DOWNLOAD_STARTED_EVENT,
     EVT_LOGBOX_APPEND_EVENT,
     EVT_MESSAGE_EVENT,
     EVT_POPULATE_FOOTPRINT_LIST_EVENT,
-    EVT_RESET_GAUGE_EVENT,
-    EVT_UPDATE_GAUGE_EVENT,
+    EVT_UNZIP_COMBINING_PROGRESS_EVENT,
+    EVT_UNZIP_COMBINING_STARTED_EVENT,
+    EVT_UNZIP_EXTRACTING_COMPLETED_EVENT,
+    EVT_UNZIP_EXTRACTING_PROGRESS_EVENT,
+    EVT_UNZIP_EXTRACTING_STARTED_EVENT,
     EVT_UPDATE_SETTING,
     LogboxAppendEvent,
 )
@@ -480,12 +486,21 @@ class JLCPCBTools(wx.Dialog):
         # ------------------------ Custom Events ------------------------------
         # ---------------------------------------------------------------------
 
-        self.Bind(EVT_RESET_GAUGE_EVENT, self.reset_gauge)
-        self.Bind(EVT_UPDATE_GAUGE_EVENT, self.update_gauge)
         self.Bind(EVT_MESSAGE_EVENT, self.display_message)
         self.Bind(EVT_ASSIGN_PARTS_EVENT, self.assign_parts)
         self.Bind(EVT_POPULATE_FOOTPRINT_LIST_EVENT, self.populate_footprint_list)
         self.Bind(EVT_UPDATE_SETTING, self.update_settings)
+
+        self.Bind(EVT_DOWNLOAD_STARTED_EVENT, self.download_started)
+        self.Bind(EVT_DOWNLOAD_PROGRESS_EVENT, self.download_progress)
+        self.Bind(EVT_DOWNLOAD_COMPLETED_EVENT, self.download_completed)
+
+        self.Bind(EVT_UNZIP_COMBINING_STARTED_EVENT, self.unzip_combining_started)
+        self.Bind(EVT_UNZIP_COMBINING_PROGRESS_EVENT, self.unzip_combining_progress)
+        self.Bind(EVT_UNZIP_EXTRACTING_STARTED_EVENT, self.unzip_extracting_started)
+        self.Bind(EVT_UNZIP_EXTRACTING_PROGRESS_EVENT, self.unzip_extracting_progress)
+        self.Bind(EVT_UNZIP_EXTRACTING_COMPLETED_EVENT, self.unzip_extracting_completed)
+
         self.Bind(EVT_LOGBOX_APPEND_EVENT, self.logbox_append)
 
         self.enable_part_specific_toolbar_buttons(False)
@@ -535,9 +550,37 @@ class JLCPCBTools(wx.Dialog):
         self.gauge.SetRange(100)
         self.gauge.SetValue(0)
 
-    def update_gauge(self, e):
+    def download_started(self, *_):
+        """Initialize the gauge."""
+        self.reset_gauge()
+
+    def download_progress(self, e):
         """Update the gauge."""
         self.gauge.SetValue(int(e.value))
+
+    def download_completed(self, *_):
+        """Populate the footprint list."""
+        self.populate_footprint_list()
+
+    def unzip_combining_started(self, *_):
+        """Initialize the gauge."""
+        self.reset_gauge()
+
+    def unzip_combining_progress(self, e):
+        """Update the gauge."""
+        self.gauge.SetValue(int(e.value))
+
+    def unzip_extracting_started(self, *_):
+        """Initialize the gauge."""
+        self.reset_gauge()
+
+    def unzip_extracting_progress(self, e):
+        """Update the gauge."""
+        self.gauge.SetValue(int(e.value))
+
+    def unzip_extracting_completed(self, *_):
+        """Update the gauge."""
+        self.reset_gauge()
 
     def assign_parts(self, e):
         """Assign a selected LCSC number to parts."""
@@ -823,7 +866,7 @@ class JLCPCBTools(wx.Dialog):
             footprint = self.partlist_data_model.get_footprint(item)
             if ref.startswith("R"):
                 """ Auto remove alphabet unit if applicable """
-                if (value.endswith("R") or value.endswith("r") or value.endswith("o")):
+                if value.endswith("R") or value.endswith("r") or value.endswith("o"):
                     value = value[:-1]
                 value += "Ω"
             m = re.search(r"_(\d+)_\d+Metric", footprint)
