@@ -197,7 +197,11 @@ class Fabrication:
             plot_plan = (
                 plot_plan_top
                 + [
-                    (f"CuIn{layer}", getattr(import_module("pcbnew"), f"In{layer}_Cu"), f"Inner layer {layer}")
+                    (
+                        f"CuIn{layer}",
+                        getattr(import_module("pcbnew"), f"In{layer}_Cu"),
+                        f"Inner layer {layer}",
+                    )
                     for layer in range(1, layer_count - 1)
                 ]
                 + plot_plan_bottom
@@ -207,11 +211,9 @@ class Fabrication:
         jlc_layers_to_plot = []
         enabled_layer_ids = list(self.board.GetEnabledLayers().Seq())
         for enabled_layer_id in enabled_layer_ids:
-            layer_name_string = str(
-                self.board.GetLayerName(enabled_layer_id)).upper()
+            layer_name_string = str(self.board.GetLayerName(enabled_layer_id)).upper()
             if "JLC_" in layer_name_string:
-                plotter_info = (layer_name_string,
-                                enabled_layer_id, layer_name_string)
+                plotter_info = (layer_name_string, enabled_layer_id, layer_name_string)
                 jlc_layers_to_plot.append(plotter_info)
         plot_plan += jlc_layers_to_plot
 
