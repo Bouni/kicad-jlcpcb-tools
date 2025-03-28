@@ -40,7 +40,7 @@ from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
-from .rotations import RotationManagerDialog
+from .corrections import CorrectionManagerDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
@@ -50,7 +50,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 ID_GENERATE = 0
 ID_LAYERS = 1
-ID_ROTATIONS = 2
+ID_CORRECTIONS = 2
 ID_MAPPINGS = 3
 ID_DOWNLOAD = 4
 ID_SETTINGS = 5
@@ -178,11 +178,11 @@ class JLCPCBTools(wx.Dialog):
 
         self.upper_toolbar.AddStretchableSpace()
 
-        self.rotation_button = self.upper_toolbar.AddTool(
-            ID_ROTATIONS,
-            "Rotations",
+        self.correction_button = self.upper_toolbar.AddTool(
+            ID_CORRECTIONS,
+            "Corrections",
             loadBitmapScaled("mdi-format-rotate-90.png", self.scale_factor),
-            "Manage part rotations",
+            "Manage part corrections",
         )
 
         self.mapping_button = self.upper_toolbar.AddTool(
@@ -211,7 +211,7 @@ class JLCPCBTools(wx.Dialog):
         self.upper_toolbar.Realize()
 
         self.Bind(wx.EVT_TOOL, self.generate_fabrication_data, self.generate_button)
-        self.Bind(wx.EVT_TOOL, self.manage_rotations, self.rotation_button)
+        self.Bind(wx.EVT_TOOL, self.manage_corrections, self.correction_button)
         self.Bind(wx.EVT_TOOL, self.manage_mappings, self.mapping_button)
         self.Bind(wx.EVT_TOOL, self.update_library, self.download_button)
         self.Bind(wx.EVT_TOOL, self.manage_settings, self.settings_button)
@@ -387,7 +387,7 @@ class JLCPCBTools(wx.Dialog):
             10,
             width=150,
             mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
+            align=wx.ALIGN_CENTER
         )
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
@@ -404,8 +404,8 @@ class JLCPCBTools(wx.Dialog):
         pos = self.footprint_list.AppendIconTextColumn(
             "POS", 7, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
-        rotation = self.footprint_list.AppendTextColumn(
-            "Rotation", 8, width=70, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+        correction = self.footprint_list.AppendTextColumn(
+            "Correction", 8, width=70, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         side = self.footprint_list.AppendIconTextColumn(
             "Side", 9, width=50, mode=dv.DATAVIEW_CELL_INERT
@@ -419,7 +419,7 @@ class JLCPCBTools(wx.Dialog):
         stock.SetSortable(True)
         bom.SetSortable(True)
         pos.SetSortable(False)
-        rotation.SetSortable(True)
+        correction.SetSortable(True)
         side.SetSortable(True)
         params.SetSortable(True)
 
@@ -564,14 +564,14 @@ class JLCPCBTools(wx.Dialog):
     def get_correction(self, part: dict, corrections: list) -> str:
         """Try to find correction data for a given part."""
         # First check if the part name matches
-        for regex, correction in corrections:
+        for regex, rotation, offset in corrections:
             if re.search(regex, str(part["reference"])):
-                return str(correction)
+                return "{}°, {}/{}".format(str(rotation), str(offset[0]), str(offset[1]))
         # If there was no match for the part name, check if the package matches
-        for regex, correction in corrections:
+        for regex, rotation, offset in corrections:
             if re.search(regex, str(part["footprint"])):
-                return str(correction)
-        return "0"
+                return "{}°, {}/{}".format(str(rotation), str(offset[0]), str(offset[1]))
+        return "0°, 0.0/0.0"
 
     def populate_footprint_list(self, *_):
         """Populate list of footprints."""
@@ -779,9 +779,9 @@ class JLCPCBTools(wx.Dialog):
         """Update the library from the JLCPCB CSV file."""
         self.library.update()
 
-    def manage_rotations(self, *_):
-        """Manage rotation corrections."""
-        RotationManagerDialog(self, "").ShowModal()
+    def manage_corrections(self, *_):
+        """Manage corrections."""
+        CorrectionManagerDialog(self, "").ShowModal()
 
     def manage_mappings(self, *_):
         """Manage footprint mappings."""
@@ -898,15 +898,15 @@ class JLCPCBTools(wx.Dialog):
                     )
                     self.store.set_lcsc(reference, lcsc)
 
-    def add_rotation(self, e):
-        """Add part rotation for the current part."""
+    def add_correction(self, e):
+        """Add part correction for the current part."""
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
                 if footprint := self.partlist_data_model.get_footprint(item):
-                    RotationManagerDialog(self, "^" + re.escape(footprint)).ShowModal()
+                    CorrectionManagerDialog(self, "^" + re.escape(footprint)).ShowModal()
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
-                    RotationManagerDialog(self, re.escape(value)).ShowModal()
+                    CorrectionManagerDialog(self, re.escape(value)).ShowModal()
 
     def save_all_mappings(self, *_):
         """Save all mappings."""
@@ -988,19 +988,19 @@ class JLCPCBTools(wx.Dialog):
         right_click_menu.Append(paste_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
-        rotation_by_package = wx.MenuItem(
+        correction_by_package = wx.MenuItem(
             right_click_menu,
             ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE,
-            "Add Rotation by package",
+            "Add Correction by package",
         )
-        right_click_menu.Append(rotation_by_package)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_rotation, rotation_by_package)
+        right_click_menu.Append(correction_by_package)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_package)
 
-        rotation_by_name = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name"
+        correction_by_name = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Correction by name"
         )
-        right_click_menu.Append(rotation_by_name)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_rotation, rotation_by_name)
+        right_click_menu.Append(correction_by_name)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
 
         find_mapping = wx.MenuItem(
             right_click_menu, ID_CONTEXT_MENU_FIND_MAPPING, "Find LCSC from Mappings"
