@@ -521,6 +521,8 @@ class JLCPCBTools(wx.Dialog):
             self.init_store()
         self.library.create_mapping_table()
 
+        self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
+
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
         self.logger.info("quit_dialog()")
