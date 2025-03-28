@@ -133,7 +133,6 @@ class Fabrication:
         popt.SetPlotReference(
             self.parent.settings.get("gerber", {}).get("plot_references", True)
         )
-        popt.SetPlotInvisibleText(False)
 
         popt.SetSketchPadsOnFabLayers(False)
 
