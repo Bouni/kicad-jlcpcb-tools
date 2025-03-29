@@ -134,6 +134,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
             choices=parent.library.categories,
+            style=wx.CB_READONLY,
         )
         self.category.SetHint("e.g. Resistors")
 
@@ -181,6 +182,7 @@ class PartSelectorDialog(wx.Dialog):
             "",
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
+            style=wx.CB_READONLY,
         )
         self.subcategory.SetHint("e.g. Variable Resistors")
 
