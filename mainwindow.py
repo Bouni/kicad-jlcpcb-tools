@@ -508,6 +508,11 @@ class JLCPCBTools(wx.Dialog):
         self.init_logger()
         self.partlist_data_model = PartListDataModel(self.scale_factor)
         self.footprint_list.AssociateModel(self.partlist_data_model)
+
+        self.init_data()
+
+    def init_data(self):
+        """Initialize the library and populate the main window."""
         self.init_library()
         self.init_fabrication()
         if self.library.state == LibraryState.UPDATE_NEEDED:
@@ -581,6 +586,7 @@ class JLCPCBTools(wx.Dialog):
     def unzip_extracting_completed(self, *_):
         """Update the gauge."""
         self.reset_gauge()
+        self.init_data()
 
     def assign_parts(self, e):
         """Assign a selected LCSC number to parts."""
