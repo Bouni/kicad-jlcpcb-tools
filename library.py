@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 from threading import Thread
 import time
+from typing import NamedTuple, Optional
 
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
@@ -20,6 +21,14 @@ from .events import (
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .unzip_parts import unzip_parts
+
+
+class PartsDatabaseInfo(NamedTuple):
+    """Information about the parts database."""
+
+    last_update: str
+    size: int
+    part_count: int
 
 
 class LibraryState(Enum):
@@ -661,13 +670,15 @@ class Library:
             except sqlite3.OperationalError:
                 return
 
-    def get_last_update(self) -> str:
-        """Get last update from meta table."""
+    def get_parts_db_info(self) -> Optional[PartsDatabaseInfo]:
+        """Retrieve the database information."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
             try:
-                last_update = cur.execute("SELECT last_update FROM meta").fetchone()
-                if last_update:
-                    return last_update[0]
-                return ""
+                meta = cur.execute(
+                    "SELECT last_update, size, partcount FROM meta"
+                ).fetchone()
+                if meta:
+                    return PartsDatabaseInfo(meta[0], meta[1], meta[2])
+                return None
             except sqlite3.OperationalError:
-                return ""
+                return None
