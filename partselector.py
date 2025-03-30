@@ -493,9 +493,7 @@ class PartSelectorDialog(wx.Dialog):
         description.SetSortable(True)
         price.SetSortable(True)
 
-        self.part_list.Bind(
-            dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected
-        )
+        self.part_list.Bind(dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected)
         self.part_list.Bind(dv.EVT_DATAVIEW_ITEM_ACTIVATED, self.select_part)
         scrolled_sizer = wx.BoxSizer(wx.VERTICAL)
         scrolled_sizer.Add(self.part_list, 1, wx.EXPAND)
