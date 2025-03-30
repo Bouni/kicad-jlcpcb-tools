@@ -536,12 +536,24 @@ class JLCPCBTools(wx.Dialog):
     def init_library(self):
         """Initialize the parts library."""
         self.library = Library(self)
-        last_update = self.library.get_last_update()
-        if last_update:
-            last_update = dt.fromisoformat(last_update).strftime("%Y-%m-%d %H:%M")
-        self.SetTitle(
-            f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",
-        )
+        meta = self.library.get_parts_db_info()
+        if meta is not None:
+            last_update = dt.fromisoformat(meta.last_update).strftime("%Y-%m-%d %H:%M")
+            self.SetTitle(
+                f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",
+            )
+            self.logger.debug(
+                "JLCPCB version %s, last database update %s, part count %d, size (bytes) %d",
+                getVersion(),
+                meta.last_update,
+                meta.part_count,
+                meta.size,
+            )
+        else:
+            self.SetTitle(
+                f"JLCPCB Tools [ {getVersion()} ] | Last database update: No DB found",
+            )
+            self.logger.debug("JLCPCB version %s, no parts db info found", getVersion())
 
     def init_store(self):
         """Initialize the store of part assignments."""
