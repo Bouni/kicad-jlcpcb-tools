@@ -27,17 +27,6 @@ Furthermore it lets you search the JLCPCB parts database and assign parts direct
 
 ![The parts details dialog](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_details.png)
 
-## Warning 🔥
-
-We try to keep the plugin working with KiCAD nightly builds, however there may be changes to the KiCAD API that
-this plugin uses. These changes can break the plugin until we've had a chance to resolve.
-
-If you run into any issues with nightly builds please report the issues so we can attempt to resolve them.
-
-**This is under a lot of developments, so consider this README out of date all the time 😏**
-
-If you find any sort of problems, please create an issue so that I can hopefully fix it!
-
 ## Installation 💾
 
 ### KiCAD PCM
