@@ -4,7 +4,7 @@
 
 ***
 
-<img src="https://img.shields.io/badge/KiCAD-v7-green"/> <img src="https://img.shields.io/badge/KiCAD-v8-purple"/> <img src="https://img.shields.io/badge/KiCAD-v8.99-ff69b4"/>
+<img src="https://img.shields.io/badge/KiCAD-v7-green"/> <img src="https://img.shields.io/badge/KiCAD-v8-purple"/> <img src="https://img.shields.io/badge/KiCAD-v9-ff69b4"/>
 
 ***
 
