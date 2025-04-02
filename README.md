@@ -256,3 +256,21 @@ If using PyCharm or Jetbrains IDEs, set the interpreter to Kicad's python, <i><b
 
 Click on 'script path' and change instead to 'module name',
 entering the name of the kicad-jlcpcb-tools folder, <i><b>{kicad-jlcpcb-tools folder name}</b></i>.
+
+## How to release new vesions of this plugin
+
+[bouni-kicad-repository](https://raw.githubusercontent.com/Bouni/bouni-kicad-repository/main/repository.json) contains the
+files for the latest version of the plugin, in the format KiCAD expects from external plugins.
+
+To release a new version of this plugin:
+
+1. In the <b>kicad-jlcpcb-plugin</b> repository, create a new tag, eg. 2025.04.02
+1. In the <b>kicad-jlcpcb-plugin</b> repository, create a new release based on the new tag.
+1. In the <b>kicad-jlcpcb-plugin</b> repository the 'kicad-pcm' workflow will automatically run and:
+   1. Pull the latest plugin tag
+   1. Create the appropriate pcm archive
+   1. Upload the zip as an asset to a new GitHub release
+   1. benc-uk/workflow-dispatch@v1 is used to trigger the 'Rebuild repository' workflow in [bouni-kicad-repository](https://github.com/Bouni/bouni-kicad-repository)
+1. In the <b>bouni-kicad-repository</b>, the 'Rebuild repository' (rebuild.yml) workflow runs 'generate.py'
+   1. generate.py updates .json and the latest .zip file using the release assets from the kicad-jlcpcb-plugin repository
+1. The plugin should now be visible to users via the plugin manager.
