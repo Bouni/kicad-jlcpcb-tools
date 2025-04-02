@@ -29,7 +29,10 @@ Furthermore it lets you search the JLCPCB parts database and assign parts direct
 
 ## Warning 🔥
 
-I try to keep it working with 8.99 nightly builds but there are massive API changes on the horizon and I'm not sure if I can keep up with them.
+We try to keep the plugin working with KiCAD nightly builds, however there may be changes to the KiCAD API that
+this plugin uses. These changes can break the plugin until we've had a chance to resolve.
+
+If you run into any issues with nightly builds please report the issues so we can attempt to resolve them.
 
 **This is under a lot of developments, so consider this README out of date all the time 😏**
 
@@ -56,14 +59,14 @@ Simply clone this repo into your `scripting/plugins` folder.
 **Windows**
 
 ```sh
-cd C:\users\<username>\Documents\kicad\<version>\scripting\plugins\  # <username> is your username, <version> can be 7.0, 8.0, or 8.99 depending on the version you use
+cd C:\users\<username>\Documents\kicad\<version>\scripting\plugins\  # <username> is your username, <version> can be 7.0, 8.0, or X.YY depending on the version you use
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
 **Linux**
 
 ```sh
-cd /home/<username>/.local/share/kicad/<version>/scripting/plugins  # <version> can be 7.0, 8.0, or 8.99 depending on the version you use
+cd /home/<username>/.local/share/kicad/<version>/scripting/plugins  # <version> can be 7.0, 8.0, or X.YY depending on the version you use
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
@@ -202,7 +205,7 @@ The <i><b>{working directory}</b></i> should be your plugins directory, ie:
 |Windows| %USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\ |
 
 > [!NOTE]  
-> <version> can be 7.0, 8.0, or 8.99 depending on the version you use
+> <version> can be 7.0, 8.0, or X.YY depending on the version you use
 
 #### Plugin folder name
 
