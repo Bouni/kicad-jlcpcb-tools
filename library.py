@@ -50,6 +50,7 @@ class Library:
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.partsdb_file = os.path.join(self.datadir, "parts-fts5.db")
         self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
+        self.correctionsdb_file = os.path.join(self.datadir, "corrections.db")
         self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
         self.state = None
         self.category_map = {}
@@ -80,11 +81,11 @@ class Library:
         else:
             self.state = LibraryState.INITIALIZED
         if (
-            not os.path.isfile(self.rotationsdb_file)
-            or os.path.getsize(self.rotationsdb_file) == 0
+            not os.path.isfile(self.correctionsdb_file)
+            or os.path.getsize(self.correctionsdb_file) == 0
         ):
-            self.create_rotation_table()
-            self.migrate_rotations()
+            self.create_correction_table()
+            self.migrate_corrections()
         if (
             not os.path.isfile(self.mappingsdb_file)
             or os.path.getsize(self.mappingsdb_file) == 0
@@ -247,63 +248,63 @@ class Library:
             )
             cur.commit()
 
-    def create_rotation_table(self):
-        """Create the rotation table."""
-        self.logger.debug("Create SQLite table for rotations")
+    def create_correction_table(self):
+        """Create the correction table."""
+        self.logger.debug("Create SQLite table for corrections")
         with contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
+            sqlite3.connect(self.correctionsdb_file)
         ) as con, con as cur:
-            cur.execute("CREATE TABLE IF NOT EXISTS rotation ('regex', 'correction')")
+            cur.execute("CREATE TABLE IF NOT EXISTS correction ('regex', 'rotation', 'offset_x', 'offset_y')")
             cur.commit()
 
     def get_correction_data(self, regex):
         """Get the correction data by its regex."""
         with contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
+            sqlite3.connect(self.correctionsdb_file)
         ) as con, con as cur:
             return cur.execute(
-                f"SELECT * FROM rotation WHERE regex = '{regex}'"
+                f"SELECT * FROM correction WHERE regex = '{regex}'"
             ).fetchone()
 
     def delete_correction_data(self, regex):
         """Delete a correction from the database."""
         with contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
+            sqlite3.connect(self.correctionsdb_file)
         ) as con, con as cur:
-            cur.execute(f"DELETE FROM rotation WHERE regex = '{regex}'")
+            cur.execute(f"DELETE FROM correction WHERE regex = '{regex}'")
             cur.commit()
 
-    def update_correction_data(self, regex, rotation):
+    def update_correction_data(self, regex, rotation, offset):
         """Update a correction in the database."""
         with contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
+            sqlite3.connect(self.correctionsdb_file)
         ) as con, con as cur:
             cur.execute(
-                f"UPDATE rotation SET correction = '{rotation}' WHERE regex = '{regex}'"
+                f"UPDATE correction SET rotation = '{rotation}', offset_x = '{offset[0]}', offset_y = '{offset[1]}' WHERE regex = '{regex}'"
             )
             cur.commit()
 
-    def insert_correction_data(self, regex, rotation):
+    def insert_correction_data(self, regex, rotation, offset):
         """Insert a correction into the database."""
         with contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
+            sqlite3.connect(self.correctionsdb_file)
         ) as con, con as cur:
             cur.execute(
-                "INSERT INTO rotation VALUES (?, ?)",
-                (regex, rotation),
+                "INSERT INTO correction VALUES (?, ?, ?, ?)",
+                (regex, rotation, offset[0], offset[1]),
             )
             cur.commit()
 
     def get_all_correction_data(self):
         """Get all corrections from the database."""
         with contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
+            sqlite3.connect(self.correctionsdb_file)
         ) as con, con as cur:
             try:
                 result = cur.execute(
-                    "SELECT * FROM rotation ORDER BY regex ASC"
+                    "SELECT * FROM correction ORDER BY regex ASC"
                 ).fetchall()
-                return [(c[0], int(c[1])) for c in result]
+                return [(c[0], int(c[1]), (float(c[2]), float(c[3]))) for c in result]
             except sqlite3.OperationalError:
                 return []
 
@@ -584,7 +585,7 @@ class Library:
         self.create_meta_table()
         self.delete_parts_table()
         self.create_parts_table(headers)
-        self.create_rotation_table()
+        self.create_correction_table()
         self.create_mapping_table()
 
     @property
@@ -614,12 +615,43 @@ class Library:
         """Get the subcategories associated with the given category."""
         return self.category_map[category]
 
-    def migrate_rotations(self):
-        """Migrate existing rotations from parts db to rotations db."""
+    def migrate_corrections_from_rotation(self):
+        """Migrate existing rotations from rotation db to correction db."""
+        if not os.path.exists(self.rotationsdb_file):
+            return
+        with contextlib.closing(
+            sqlite3.connect(self.rotationsdb_file)
+        ) as rdb, contextlib.closing(
+            sqlite3.connect(self.correctionsdb_file)
+        ) as cdb, rdb as rcur, cdb as ccur:
+            try:
+                result = rcur.execute(
+                    "SELECT * FROM rotation ORDER BY regex ASC"
+                ).fetchall()
+                if not result:
+                    return
+                for r in result:
+                    ccur.execute(
+                        "INSERT INTO correction VALUES (?, ?, 0, 0)",
+                        (r[0], r[1]),
+                    )
+                    ccur.commit()
+                self.logger.debug(
+                    "Migrated %d rotations to corrections database.", len(result)
+                )
+                os.remove(self.rotationsdb_file)
+                self.logger.debug("Deleted rotations database.")
+            except sqlite3.OperationalError:
+                return
+            except OSError:
+                return
+
+    def migrate_corrections_from_parts(self):
+        """Migrate existing rotations from parts db to correction db."""
         with contextlib.closing(
             sqlite3.connect(self.partsdb_file)
         ) as pdb, contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
+            sqlite3.connect(self.correctionsdb_file)
         ) as rdb, pdb as pcur, rdb as rcur:
             try:
                 result = pcur.execute(
@@ -629,18 +661,23 @@ class Library:
                     return
                 for r in result:
                     rcur.execute(
-                        "INSERT INTO rotation VALUES (?, ?)",
+                        "INSERT INTO correction VALUES (?, ?, 0, 0)",
                         (r[0], r[1]),
                     )
                     rcur.commit()
                 self.logger.debug(
-                    "Migrated %d rotations to sepetrate database.", len(result)
+                    "Migrated %d rotations to separate database.", len(result)
                 )
                 pcur.execute("DROP TABLE IF EXISTS rotation")
                 pcur.commit()
                 self.logger.debug("Droped rotations table from parts database.")
             except sqlite3.OperationalError:
                 return
+
+    def migrate_corrections(self):
+        """Migrate existing rotations from old rotation db and parts db to correction db."""
+        self.migrate_corrections_from_rotation()
+        self.migrate_corrections_from_parts()
 
     def migrate_mappings(self):
         """Migrate existing mappings from parts db to mappings db."""
