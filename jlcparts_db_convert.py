@@ -446,33 +446,32 @@ class JlcpcbFTS5(Generate):
         self.cleanup()
 
 
-output_directory = "db_build"
-os.chdir(output_directory)
+if __name__ == "__main__":
+    output_directory = "db_build"
+    os.chdir(output_directory)
 
+    # sqlite database
+    start = datetime.now()
+    output_name = "parts.db"
+    partsdb = Path(output_name)
 
-# sqlite database
-start = datetime.now()
-output_name = "parts.db"
-partsdb = Path(output_name)
+    print(f"Generating {output_name} in {output_directory} directory")
+    generator = Jlcpcb(partsdb)
+    generator.build()
 
-print(f"Generating {output_name} in {output_directory} directory")
-generator = Jlcpcb(partsdb)
-generator.build()
+    end = datetime.now()
+    deltatime = end - start
+    print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
 
-end = datetime.now()
-deltatime = end - start
-print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
+    # sqlite fts5 database
+    start = datetime.now()
+    output_name = "parts-fts5.db"
+    partsdb = Path(output_name)
 
+    print(f"Generating {output_name} in {output_directory} directory")
+    generator = JlcpcbFTS5(partsdb)
+    generator.build()
 
-# sqlite fts5 database
-start = datetime.now()
-output_name = "parts-fts5.db"
-partsdb = Path(output_name)
-
-print(f"Generating {output_name} in {output_directory} directory")
-generator = JlcpcbFTS5(partsdb)
-generator.build()
-
-end = datetime.now()
-deltatime = end - start
-print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
+    end = datetime.now()
+    deltatime = end - start
+    print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
