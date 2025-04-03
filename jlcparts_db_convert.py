@@ -267,6 +267,12 @@ class JlcpcbFTS5(Generate):
 
     def create_tables(self):
         """Create tables."""
+
+        # Columns are unindexed to save space in the FTS5 index (and overall database)
+        #
+        # Solder Joint is unindexed as it contains a numerical count that isn't particular helpful for token searching
+        # Price is unindexed as it isn't helpful for token searching
+        # Stock is unindexed as it isn't helpful for token searching
         self.conn.execute(
             """
             CREATE virtual TABLE IF NOT EXISTS parts using fts5 (
