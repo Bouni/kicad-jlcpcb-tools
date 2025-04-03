@@ -170,6 +170,7 @@ class Generate:
         """Print out some stats."""
         jlcparts_db_size = humanize.naturalsize(os.path.getsize(self.jlcparts_db_name))
         print(f"jlcparts database ({self.jlcparts_db_name}): {jlcparts_db_size}")
+        print(f"part count: {humanize.intcomma(self.part_count)}")
         print(
             f"output db: {humanize.naturalsize(os.path.getsize(self.output_db.name))}"
         )
