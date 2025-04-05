@@ -12,15 +12,137 @@ https://github.com/yaqwsx/jlcparts/blob/1a07e1ff42fef2d35419cfb9ba47df090037cc7b
 by @markusdd
 """
 
+import copy
 from datetime import date, datetime
 import json
 import os
 from pathlib import Path
 import sqlite3
+from typing import Dict, List, Optional
 import zipfile
 from zipfile import ZipFile
 
 import humanize
+
+
+class PriceEntry:
+    """Price for a quantity range."""
+
+    def __init__(
+        self, min_quantity: int, max_quantity: Optional[int], price_dollars: str
+    ):
+        self.min_quantity = min_quantity
+        self.max_quantity = max_quantity
+        self.price_dollars_str = price_dollars
+        self.price_dollars = float(self.price_dollars_str)
+
+    @classmethod
+    def Parse(cls, price_entry: Dict[str, str]):
+        """Parse an individual price entry."""
+
+        price_dollars_str = price_entry["price"]
+
+        min_quantity = int(price_entry["qFrom"])
+        max_quantity = (
+            int(price_entry["qTo"]) if price_entry.get("qTo") is not None else None
+        )
+
+        return cls(min_quantity, max_quantity, price_dollars_str)
+
+    def __repr__(self):
+        """Conversion to string function."""
+        return f"{self.min_quantity}-{self.max_quantity if self.max_quantity is not None else ''}:{self.price_dollars_str}"
+
+    min_quantity: int
+    max_quantity: Optional[int]
+    price_dollars_str: str  # to avoid rounding due to float conversion
+    price_dollars: float
+
+
+class Price:
+    """Price parsing and management functions."""
+
+    def __init__(self, part_price: List[Dict[str, str]]):
+        """Format of part_price is determined by json.loads()."""
+        self.price_entries = []
+        for price in part_price:
+            self.price_entries.append(PriceEntry.Parse(price))
+
+    price_entries: List[PriceEntry]
+
+    @staticmethod
+    def reduce_precision(entries: List[PriceEntry]) -> List[PriceEntry]:
+        """Reduce the precision of price entries to 3 significant digits."""
+
+        """Values after this are not particularly helpful unless many thousands
+        of the part is used, and at those quantities of boards and parts
+        the contract manufacturer is likely to have special deals."""
+
+        pe = entries
+        for i in range(len(pe)):
+            pe[i].price_dollars_str = f"{pe[i].price_dollars:.3f}"
+            pe[i].price_dollars = round(pe[i].price_dollars, 3)
+
+        return entries
+
+    @staticmethod
+    def filter_below_cutoff(
+        entries: List[PriceEntry], cutoff_price_dollars: float
+    ) -> List[PriceEntry]:
+        """Remove PriceEntry values with a price_dollars below cutoff_price_dollars. Keep the first entry if one exists. Assumes order is highest price to lowest price."""
+
+        filtered_entries: List[PriceEntry] = []
+
+        # some components have no price entries
+        if len(entries) >= 1:
+            # always include the first entry.
+            filtered_entries.append(entries[0])
+            for entry in entries[1:]:
+                # add the entries with a price greater than the cutoff
+                if entry.price_dollars >= cutoff_price_dollars:
+                    filtered_entries.append(entry)
+
+        if len(filtered_entries) > 0:
+            # ensure the last entry in the list has a max_quantity of None
+            # as that price continues out indefinitely
+            filtered_entries[len(filtered_entries) - 1].max_quantity = None
+
+        return filtered_entries
+
+    @staticmethod
+    def filter_duplicate_prices(entries: List[PriceEntry]) -> List[PriceEntry]:
+        """Remove entries with duplicate price_dollar_str values, merging quantities so there aren't gaps."""
+
+        # copy.deepcopy() is used to value modifications from altering the original values.
+        price_entries_unique: List[PriceEntry] = []
+        if len(entries) > 1:
+            first = 0
+            second = 1
+            f: Optional[PriceEntry] = None
+            while True:
+                if f is None:
+                    f = copy.deepcopy(entries[first])
+
+                # stop when the second element is at the end of the list
+                if second >= len(entries):
+                    break
+
+                # if match, copy over the quantity and advance the second, keep searching for a mismatch
+                if f.price_dollars_str == entries[second].price_dollars_str:
+                    f.max_quantity = entries[second].max_quantity
+                    second += 1
+                else:  # if no match, add the first and then start looking at the second
+                    price_entries_unique.append(f)
+                    first = second
+                    second = first + 1
+                    f = None
+
+            # always add the final first entry when we run out of elements to process
+            price_entries_unique.append(f)
+        else:  # only a single entry, nothing to de-duplicate
+            price_entries_unique = entries
+
+        return price_entries_unique
 
 
 class Generate:
@@ -340,6 +462,10 @@ class JlcpcbFTS5(Generate):
         results = res.fetchone()
         print(f"{humanize.intcomma(results[0])} parts to import")
 
+        price_entries_total = 0
+        price_entries_deleted_total = 0
+        price_entries_duplicates_deleted_total = 0
+
         self.part_count = 0
         print("Reading components")
         res = self.conn_jp.execute("SELECT * FROM components")
@@ -359,11 +485,42 @@ class JlcpcbFTS5(Generate):
             print("Building parts rows to insert")
             rows = []
             for c in comps:
-                price = json.loads(c[10])
+                priceInput = json.loads(c[10])
+
+                # parse the price field
+                price = Price(priceInput)
+
+                price_entries = Price.reduce_precision(price.price_entries)
+                price_entries_total += len(price_entries)
+
+                price_str: str = ""
+
+                # filter parts priced below the cutoff value
+                price_entries_cutoff = Price.filter_below_cutoff(price_entries, 0.01)
+                price_entries_deleted_total += len(price_entries) - len(
+                    price_entries_cutoff
+                )
+
+                # alias the variable for the next step
+                price_entries = price_entries_cutoff
+
+                # remove duplicates
+                price_entries_unique = Price.filter_duplicate_prices(price_entries)
+                price_entries_duplicates_deleted_total += len(price_entries) - len(
+                    price_entries_unique
+                )
+                price_entries_deleted_total += len(price_entries) - len(
+                    price_entries_unique
+                )
+
+                # alias over the variable for the next step
+                price_entries = price_entries_unique
+
+                # build the output string that is stored into the parts database
                 price_str = ",".join(
                     [
-                        f"{entry.get('qFrom')}-{entry.get('qTo') if entry.get('qTo') is not None else ''}:{entry.get('price')}"
-                        for entry in price
+                        f"{entry.min_quantity}-{entry.max_quantity if entry.max_quantity is not None else ''}:{entry.price_dollars_str}"
+                        for entry in price_entries
                     ]
                 )
 
@@ -416,6 +573,9 @@ class JlcpcbFTS5(Generate):
             )
             self.conn.commit()
 
+        print(
+            f"Price value filtering trimmed {price_entries_deleted_total} (including {price_entries_duplicates_deleted_total} duplicates) out of {price_entries_total} entries {(price_entries_deleted_total / price_entries_total) * 100 if price_entries_total != 0 else 0:.2f}%"
+        )
         print("Done importing parts")
 
     def populate_categories(self):
@@ -444,6 +604,69 @@ class JlcpcbFTS5(Generate):
         self.split()
         self.display_stats()
         self.cleanup()
+
+
+def test_price_precision_reduce():
+    """Price precision reduction works as expected."""
+
+    # build high precision price entries
+    prices: List[PriceEntry] = []
+    initial_price = "0.123456789"
+    prices.append(PriceEntry(1, 100, initial_price))
+
+    # run through precision change
+    lower_precision_prices = Price.reduce_precision(prices)
+
+    # confirm 3 digits of precision remain
+    expected_price_str = "0.123"
+    expected_price_val = 0.123
+
+    print(f"{lower_precision_prices[0]}")
+
+    assert lower_precision_prices[0].price_dollars_str == expected_price_str
+    assert lower_precision_prices[0].price_dollars == expected_price_val
+
+
+def test_price_filter_below_cutoff():
+    """Price filter below cutoff works as expected."""
+
+    # build price list with some prices lower than the cutoff
+    prices: List[PriceEntry] = []
+    prices.append(PriceEntry(1, 100, "0.4"))
+    prices.append(PriceEntry(101, 200, "0.3"))
+    prices.append(PriceEntry(201, 300, "0.2"))
+    prices.append(PriceEntry(301, 400, "0.1"))
+
+    # run through cutoff deletion filter
+    filtered_prices = Price.filter_below_cutoff(prices, 0.3)
+
+    # confirm prices lower than cutoff were deleted
+    assert len(filtered_prices) == 2
+    assert filtered_prices[0].price_dollars == 0.4
+    assert filtered_prices[1].price_dollars == 0.3
+
+
+def test_price_duplicate_price_filter():
+    """Price duplicates are removed."""
+    # build price list with duplicates
+    prices: List[PriceEntry] = []
+    prices.append(PriceEntry(1, 100, "0.4"))
+    prices.append(PriceEntry(101, 200, "0.3"))
+    prices.append(PriceEntry(201, 300, "0.2"))
+    prices.append(PriceEntry(301, 400, "0.1"))
+    prices.append(PriceEntry(401, 500, "0.1"))
+    prices.append(PriceEntry(501, 600, "0.1"))
+    prices.append(PriceEntry(601, None, "0.1"))
+
+    # run duplicate filter
+    unique = Price.filter_duplicate_prices(prices)
+
+    # confirm duplicates were removed
+    assert len(unique) == 4
+    assert unique[len(unique) - 1].price_dollars_str == "0.1"
+
+    # last value max_quantity is None
+    assert unique[len(unique) - 1].max_quantity is None
 
 
 if __name__ == "__main__":
