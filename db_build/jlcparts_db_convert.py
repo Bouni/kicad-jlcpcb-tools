@@ -408,7 +408,7 @@ class JlcpcbFTS5(Generate):
                 'Manufacturer',
                 'Library Type',
                 'Description',
-                'Datasheet',
+                'Datasheet' unindexed,
                 'Price' unindexed,
                 'Stock' unindexed
             , tokenize="trigram")
