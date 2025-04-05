@@ -5,7 +5,7 @@
 This replaces the old .csv based database creation that JLCPCB no longer supports.
 
 Before this script can run, the cache.sqlite3 file has to be
-present in db_build folder. Download and reassemble it like
+present in db_working folder. Download and reassemble it like
 jlcparts does it in their build pipeline:
 https://github.com/yaqwsx/jlcparts/blob/1a07e1ff42fef2d35419cfb9ba47df090037cc7b/.github/workflows/update_components.yaml#L45-L50
 
@@ -447,7 +447,7 @@ class JlcpcbFTS5(Generate):
 
 
 if __name__ == "__main__":
-    output_directory = "db_build"
+    output_directory = "db_working"
     os.chdir(output_directory)
 
     # sqlite database
