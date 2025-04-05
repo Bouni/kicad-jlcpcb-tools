@@ -46,8 +46,9 @@ jobs:
           df -h
           echo "============================================================================================================================="
 
-          mkdir -p db_build
           cd db_build
+          mkdir -p db_working
+          cd db_working
 
           wget -q https://yaqwsx.github.io/jlcparts/data/cache.zip
 
@@ -69,13 +70,13 @@ jobs:
           df -h
           echo "============================================================================================================================="
 
-          # creates the converted database in 80M split-zip files in folder db_build
+          # creates the converted database in 80M split-zip files in folder db_working
           python3 jlcparts_db_convert.py
           # remove the source db, as we don't want to package that one
-          rm db_build/cache.sqlite3
+          rm db_working/cache.sqlite3
           # some info output for sanity check
-          ls -lah db_build
-          du -cslh db_build
+          ls -lah db_working
+          du -cslh db_working
 
           # Print the current disk usage, might help with future "no disk space left" issues
           echo "============================================================================================================================="
@@ -86,7 +87,7 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build
+          path: db_build/db_working
   deploy:
     name: "Deploy"
     runs-on: ubuntu-20.04
