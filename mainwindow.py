@@ -13,6 +13,7 @@ import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
+from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
 from .derive_params import params_for_part
 from .events import (
@@ -46,7 +47,6 @@ from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
-from .corrections import CorrectionManagerDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
@@ -393,7 +393,7 @@ class JLCPCBTools(wx.Dialog):
             10,
             width=150,
             mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER
+            align=wx.ALIGN_CENTER,
         )
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
@@ -411,7 +411,11 @@ class JLCPCBTools(wx.Dialog):
             "POS", 7, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
         correction = self.footprint_list.AppendTextColumn(
-            "Correction", 8, width=70, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+            "Correction",
+            8,
+            width=70,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
         )
         side = self.footprint_list.AppendIconTextColumn(
             "Side", 9, width=50, mode=dv.DATAVIEW_CELL_INERT
@@ -630,11 +634,11 @@ class JLCPCBTools(wx.Dialog):
         # First check if the part name matches
         for regex, rotation, offset in corrections:
             if re.search(regex, str(part["reference"])):
-                return "{}°, {}/{}".format(str(rotation), str(offset[0]), str(offset[1]))
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])}"
         # If there was no match for the part name, check if the package matches
         for regex, rotation, offset in corrections:
             if re.search(regex, str(part["footprint"])):
-                return "{}°, {}/{}".format(str(rotation), str(offset[0]), str(offset[1]))
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])}"
         return "0°, 0.0/0.0"
 
     def populate_footprint_list(self, *_):
@@ -967,7 +971,9 @@ class JLCPCBTools(wx.Dialog):
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
                 if footprint := self.partlist_data_model.get_footprint(item):
-                    CorrectionManagerDialog(self, "^" + re.escape(footprint)).ShowModal()
+                    CorrectionManagerDialog(
+                        self, "^" + re.escape(footprint)
+                    ).ShowModal()
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
