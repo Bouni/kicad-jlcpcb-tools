@@ -23,10 +23,10 @@ from pcbnew import (  # pylint: disable=import-error
     F_Cu,
     F_Mask,
     F_SilkS,
+    FromMM,
     Refresh,
     ToMM,
-    FromMM,
-    wxPoint
+    wxPoint,
 )
 
 # Compatibility hack for V6 / V7 / V7.99
@@ -102,6 +102,7 @@ class Fabrication:
         return rotation
 
     def reposition(self, footprint, position, offset):
+        """Adjust the position of the footprint, returning the new position as a wxPoint."""
         if offset[0] != 0 or offset[1] != 0:
             self.logger.info(
                 "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
@@ -109,9 +110,12 @@ class Fabrication:
                 footprint.GetValue(),
                 footprint.GetFPID().GetLibItemName(),
                 "Top" if footprint.GetLayer() == 0 else "Bottom",
-                offset[0], offset[1],
+                offset[0],
+                offset[1],
             )
-            return wxPoint(position.x + FromMM(offset[0]), position.y + FromMM(offset[1]))
+            return wxPoint(
+                position.x + FromMM(offset[0]), position.y + FromMM(offset[1])
+            )
         return position
 
     def fix_position(self, footprint, position):
