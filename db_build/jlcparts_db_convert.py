@@ -20,6 +20,7 @@ from typing import Dict, List, Optional
 import zipfile
 from zipfile import ZipFile
 
+import click
 import humanize
 
 
@@ -311,8 +312,9 @@ class Generate:
 class Jlcpcb(Generate):
     """Sqlite parts database generator."""
 
-    def __init__(self, output_db: Path):
+    def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num.txt")
+        self.skip_cleanup = skip_cleanup
         super().__init__(output_db, chunk_num)
 
     def create_tables(self):
@@ -376,14 +378,18 @@ class Jlcpcb(Generate):
         self.compress()
         self.split()
         self.display_stats()
-        self.cleanup()
+        if self.skip_cleanup:
+            print("Skipping cleanup")
+        else:
+            self.cleanup()
 
 
 class JlcpcbFTS5(Generate):
     """FTS5 specific database generation."""
 
-    def __init__(self, output_db: Path):
+    def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num_fts5.txt")
+        self.skip_cleanup = skip_cleanup
         super().__init__(output_db, chunk_num)
 
     def create_tables(self):
@@ -601,7 +607,10 @@ class JlcpcbFTS5(Generate):
         self.compress()
         self.split()
         self.display_stats()
-        self.cleanup()
+        if self.skip_cleanup:
+            print("Skipping cleanup")
+        else:
+            self.cleanup()
 
 
 def test_price_precision_reduce():
@@ -667,7 +676,17 @@ def test_price_duplicate_price_filter():
     assert unique[len(unique) - 1].max_quantity is None
 
 
-if __name__ == "__main__":
+@click.command()
+@click.option(
+    "--skip-cleanup",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Disable cleanup, intermediate database files will not be deleted",
+)
+def main(skip_cleanup: bool):
+    """Generate the databases."""
+
     output_directory = "db_working"
     os.chdir(output_directory)
 
@@ -677,7 +696,7 @@ if __name__ == "__main__":
     partsdb = Path(output_name)
 
     print(f"Generating {output_name} in {output_directory} directory")
-    generator = Jlcpcb(partsdb)
+    generator = Jlcpcb(partsdb, skip_cleanup)
     generator.build()
 
     end = datetime.now()
@@ -690,9 +709,13 @@ if __name__ == "__main__":
     partsdb = Path(output_name)
 
     print(f"Generating {output_name} in {output_directory} directory")
-    generator = JlcpcbFTS5(partsdb)
+    generator = JlcpcbFTS5(partsdb, skip_cleanup)
     generator.build()
 
     end = datetime.now()
     deltatime = end - start
     print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
+
+
+if __name__ == "__main__":
+    main()
