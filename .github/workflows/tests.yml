@@ -1,0 +1,18 @@
+---
+name: Tests
+on:  # yamllint disable-line rule:truthy
+  push:
+    branches:
+      - main
+  pull_request:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: pip install pytest humanize
+      - name: Run tests
+        working-directory: db_build
+        run: pytest jlcparts_db_convert.py
