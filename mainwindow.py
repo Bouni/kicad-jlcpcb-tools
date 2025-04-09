@@ -1119,7 +1119,7 @@ class LogBoxHandler(logging.StreamHandler):
         logging.StreamHandler.__init__(self)
         self.event_destination = event_destination
 
-    def emit(self, record):  # noqa: DC04
+    def emit(self, record):
         """Marshal the event over to the main thread."""
         msg = self.format(record)
         wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))

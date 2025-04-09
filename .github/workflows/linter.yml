@@ -25,7 +25,7 @@ jobs:
       - name: Check code with ruff
         uses: chartboost/ruff-action@v1
         with:
-          version: 0.5.6
+          version: 0.11.4
           args: check 
           src: "."
   deadcode:

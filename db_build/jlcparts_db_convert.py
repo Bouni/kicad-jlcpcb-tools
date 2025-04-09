@@ -16,7 +16,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Dict, List, Optional
+from typing import Optional
 import zipfile
 from zipfile import ZipFile
 
@@ -36,7 +36,7 @@ class PriceEntry:
         self.price_dollars = float(self.price_dollars_str)
 
     @classmethod
-    def Parse(cls, price_entry: Dict[str, str]):
+    def Parse(cls, price_entry: dict[str, str]):
         """Parse an individual price entry."""
 
         price_dollars_str = price_entry["price"]
@@ -61,16 +61,16 @@ class PriceEntry:
 class Price:
     """Price parsing and management functions."""
 
-    def __init__(self, part_price: List[Dict[str, str]]):
+    def __init__(self, part_price: list[dict[str, str]]):
         """Format of part_price is determined by json.loads()."""
         self.price_entries = []
         for price in part_price:
             self.price_entries.append(PriceEntry.Parse(price))
 
-    price_entries: List[PriceEntry]
+    price_entries: list[PriceEntry]
 
     @staticmethod
-    def reduce_precision(entries: List[PriceEntry]) -> List[PriceEntry]:
+    def reduce_precision(entries: list[PriceEntry]) -> list[PriceEntry]:
         """Reduce the precision of price entries to 3 significant digits."""
 
         """Values after this are not particularly helpful unless many thousands
@@ -86,11 +86,11 @@ class Price:
 
     @staticmethod
     def filter_below_cutoff(
-        entries: List[PriceEntry], cutoff_price_dollars: float
-    ) -> List[PriceEntry]:
+        entries: list[PriceEntry], cutoff_price_dollars: float
+    ) -> list[PriceEntry]:
         """Remove PriceEntry values with a price_dollars below cutoff_price_dollars. Keep the first entry if one exists. Assumes order is highest price to lowest price."""
 
-        filtered_entries: List[PriceEntry] = []
+        filtered_entries: list[PriceEntry] = []
 
         # some components have no price entries
         if len(entries) >= 1:
@@ -109,11 +109,11 @@ class Price:
         return filtered_entries
 
     @staticmethod
-    def filter_duplicate_prices(entries: List[PriceEntry]) -> List[PriceEntry]:
+    def filter_duplicate_prices(entries: list[PriceEntry]) -> list[PriceEntry]:
         """Remove entries with duplicate price_dollar_str values, merging quantities so there aren't gaps."""
 
         # copy.deepcopy() is used to value modifications from altering the original values.
-        price_entries_unique: List[PriceEntry] = []
+        price_entries_unique: list[PriceEntry] = []
         if len(entries) > 1:
             first = 0
             second = 1
@@ -617,7 +617,7 @@ def test_price_precision_reduce():
     """Price precision reduction works as expected."""
 
     # build high precision price entries
-    prices: List[PriceEntry] = []
+    prices: list[PriceEntry] = []
     initial_price = "0.123456789"
     prices.append(PriceEntry(1, 100, initial_price))
 
@@ -638,7 +638,7 @@ def test_price_filter_below_cutoff():
     """Price filter below cutoff works as expected."""
 
     # build price list with some prices lower than the cutoff
-    prices: List[PriceEntry] = []
+    prices: list[PriceEntry] = []
     prices.append(PriceEntry(1, 100, "0.4"))
     prices.append(PriceEntry(101, 200, "0.3"))
     prices.append(PriceEntry(201, 300, "0.2"))
@@ -656,7 +656,7 @@ def test_price_filter_below_cutoff():
 def test_price_duplicate_price_filter():
     """Price duplicates are removed."""
     # build price list with duplicates
-    prices: List[PriceEntry] = []
+    prices: list[PriceEntry] = []
     prices.append(PriceEntry(1, 100, "0.4"))
     prices.append(PriceEntry(101, 200, "0.3"))
     prices.append(PriceEntry(201, 300, "0.2"))

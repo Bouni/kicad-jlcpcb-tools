@@ -55,9 +55,10 @@ def unzip_parts(parent, path):
         wx.PostEvent(parent, UnzipExtractingStartedEvent())
         file_info = zf.infolist()[0]
         file_size = file_info.file_size
-        with zf.open(file_info) as source, open(
-            os.path.join(path, file_info.filename), "wb"
-        ) as target:
+        with (
+            zf.open(file_info) as source,
+            open(os.path.join(path, file_info.filename), "wb") as target,
+        ):
             for chunk in iter(lambda: source.read(1024 * 1024), b""):
                 target.write(chunk)
                 progress = target.tell() / file_size * 100
