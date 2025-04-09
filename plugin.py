@@ -10,7 +10,7 @@ from .mainwindow import JLCPCBTools
 class JLCPCBPlugin(ActionPlugin):
     """JLCPCBPlugin instance of ActionPlugin."""
 
-    def defaults(self):  # noqa: DC04
+    def defaults(self):
         """Define defaults."""
         # pylint: disable=attribute-defined-outside-init
         self.name = "JLCPCB Tools"
@@ -18,12 +18,12 @@ class JLCPCBPlugin(ActionPlugin):
         self.description = (
             "Generate JLCPCB-compatible Gerber, Excellon, BOM and CPL files"
         )
-        self.show_toolbar_button = True  # noqa: DC05
+        self.show_toolbar_button = True
         path, _ = os.path.split(os.path.abspath(__file__))
-        self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")  # noqa: DC05
-        self._pcbnew_frame = None  # noqa: DC05
+        self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
+        self._pcbnew_frame = None
 
-    def Run(self):  # noqa: DC04
+    def Run(self):
         """Overwrite Run."""
         dialog = JLCPCBTools(None)
         dialog.Center()

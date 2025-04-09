@@ -11,6 +11,7 @@ class LIB_ID_Stub:
         """Item name."""
         return self.item_name
 
+
 class Field_Stub:
     """Implementation of pcbnew.Field."""
 

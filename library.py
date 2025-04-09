@@ -251,34 +251,40 @@ class Library:
     def create_correction_table(self):
         """Create the correction table."""
         self.logger.debug("Create SQLite table for corrections")
-        with contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as con, con as cur:
-            cur.execute("CREATE TABLE IF NOT EXISTS correction ('regex', 'rotation', 'offset_x', 'offset_y')")
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS correction ('regex', 'rotation', 'offset_x', 'offset_y')"
+            )
             cur.commit()
 
     def get_correction_data(self, regex):
         """Get the correction data by its regex."""
-        with contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
             return cur.execute(
                 f"SELECT * FROM correction WHERE regex = '{regex}'"
             ).fetchone()
 
     def delete_correction_data(self, regex):
         """Delete a correction from the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
             cur.execute(f"DELETE FROM correction WHERE regex = '{regex}'")
             cur.commit()
 
     def update_correction_data(self, regex, rotation, offset):
         """Update a correction in the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
             cur.execute(
                 f"UPDATE correction SET rotation = '{rotation}', offset_x = '{offset[0]}', offset_y = '{offset[1]}' WHERE regex = '{regex}'"
             )
@@ -286,9 +292,10 @@ class Library:
 
     def insert_correction_data(self, regex, rotation, offset):
         """Insert a correction into the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
             cur.execute(
                 "INSERT INTO correction VALUES (?, ?, ?, ?)",
                 (regex, rotation, offset[0], offset[1]),
@@ -297,9 +304,10 @@ class Library:
 
     def get_all_correction_data(self):
         """Get all corrections from the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
             try:
                 result = cur.execute(
                     "SELECT * FROM correction ORDER BY regex ASC"
@@ -310,9 +318,10 @@ class Library:
 
     def create_mapping_table(self):
         """Create the mapping table."""
-        with contextlib.closing(
-            sqlite3.connect(self.mappingsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            con as cur,
+        ):
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS mapping ('footprint', 'value', 'LCSC')"
             )
@@ -320,18 +329,20 @@ class Library:
 
     def get_mapping_data(self, footprint, value):
         """Get the mapping data by its regex."""
-        with contextlib.closing(
-            sqlite3.connect(self.mappingsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            con as cur,
+        ):
             return cur.execute(
                 f"SELECT * FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
             ).fetchone()
 
     def delete_mapping_data(self, footprint, value):
         """Delete a mapping from the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.mappingsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            con as cur,
+        ):
             cur.execute(
                 f"DELETE FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
             )
@@ -339,9 +350,10 @@ class Library:
 
     def update_mapping_data(self, footprint, value, LCSC):
         """Update a mapping in the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.mappingsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            con as cur,
+        ):
             cur.execute(
                 f"UPDATE mapping SET LCSC = '{LCSC}' WHERE footprint = '{footprint}' AND value = '{value}'"
             )
@@ -349,9 +361,10 @@ class Library:
 
     def insert_mapping_data(self, footprint, value, LCSC):
         """Insert a mapping into the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.mappingsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            con as cur,
+        ):
             cur.execute(
                 "INSERT INTO mapping VALUES (?, ?, ?)",
                 (footprint, value, LCSC),
@@ -360,9 +373,10 @@ class Library:
 
     def get_all_mapping_data(self):
         """Get all mapping from the database."""
-        with contextlib.closing(
-            sqlite3.connect(self.mappingsdb_file)
-        ) as con, con as cur:
+        with (
+            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            con as cur,
+        ):
             return [
                 list(c)
                 for c in cur.execute(
@@ -380,7 +394,7 @@ class Library:
     def get_part_details(self, number: str) -> dict:
         """Get the part details for a LCSC number using optimized FTS5 querying."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
-            con.row_factory = dict_factory  # noqa: DC05
+            con.row_factory = dict_factory
             cur = con.cursor()
             query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type,
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
@@ -600,9 +614,10 @@ class Library:
             self.category_map.setdefault("", [])
 
             # Populate the cache.
-            with contextlib.closing(
-                sqlite3.connect(self.partsdb_file)
-            ) as con, con as cur:
+            with (
+                contextlib.closing(sqlite3.connect(self.partsdb_file)) as con,
+                con as cur,
+            ):
                 for row in cur.execute(
                     'SELECT * from categories ORDER BY UPPER("First Category"), UPPER("Second Category")'
                 ):
@@ -619,11 +634,12 @@ class Library:
         """Migrate existing rotations from rotation db to correction db."""
         if not os.path.exists(self.rotationsdb_file):
             return
-        with contextlib.closing(
-            sqlite3.connect(self.rotationsdb_file)
-        ) as rdb, contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as cdb, rdb as rcur, cdb as ccur:
+        with (
+            contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as rdb,
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as cdb,
+            rdb as rcur,
+            cdb as ccur,
+        ):
             try:
                 result = rcur.execute(
                     "SELECT * FROM rotation ORDER BY regex ASC"
@@ -648,11 +664,12 @@ class Library:
 
     def migrate_corrections_from_parts(self):
         """Migrate existing rotations from parts db to correction db."""
-        with contextlib.closing(
-            sqlite3.connect(self.partsdb_file)
-        ) as pdb, contextlib.closing(
-            sqlite3.connect(self.correctionsdb_file)
-        ) as rdb, pdb as pcur, rdb as rcur:
+        with (
+            contextlib.closing(sqlite3.connect(self.partsdb_file)) as pdb,
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as rdb,
+            pdb as pcur,
+            rdb as rcur,
+        ):
             try:
                 result = pcur.execute(
                     "SELECT * FROM rotation ORDER BY regex ASC"
@@ -681,11 +698,12 @@ class Library:
 
     def migrate_mappings(self):
         """Migrate existing mappings from parts db to mappings db."""
-        with contextlib.closing(
-            sqlite3.connect(self.partsdb_file)
-        ) as pdb, contextlib.closing(
-            sqlite3.connect(self.mappingsdb_file)
-        ) as mdb, pdb as pcur, mdb as mcur:
+        with (
+            contextlib.closing(sqlite3.connect(self.partsdb_file)) as pdb,
+            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as mdb,
+            pdb as pcur,
+            mdb as mcur,
+        ):
             try:
                 result = pcur.execute(
                     "SELECT * FROM mapping ORDER BY footprint ASC"

@@ -160,9 +160,9 @@ def test_params_for_part():
                 {"description": description, "category": category, "package": "thepkg"}
             )
             expected = f"{parsed_params} thepkg" if parsed_params else "thepkg"
-            assert (
-                result == expected
-            ), f"For {description}: expected {expected}, got {result}"
+            assert result == expected, (
+                f"For {description}: expected {expected}, got {result}"
+            )
     logger.info("All tests passed.")
 
 

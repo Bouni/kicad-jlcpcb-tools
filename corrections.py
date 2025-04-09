@@ -190,7 +190,9 @@ class CorrectionManagerDialog(wx.Dialog):
             align=wx.ALIGN_LEFT,
         )
 
-        self.corrections_list.SetMinSize(HighResWxSize(parent.window, wx.Size(600, 500)))
+        self.corrections_list.SetMinSize(
+            HighResWxSize(parent.window, wx.Size(600, 500))
+        )
 
         self.corrections_list.Bind(
             wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.on_correction_selected
@@ -330,7 +332,9 @@ class CorrectionManagerDialog(wx.Dialog):
         """Populate the list with the result of the search."""
         self.corrections_list.DeleteAllItems()
         for regex, rotation, offset in self.parent.library.get_all_correction_data():
-            self.corrections_list.AppendItem([str(regex), str(rotation), str(offset[0]), str(offset[1])])
+            self.corrections_list.AppendItem(
+                [str(regex), str(rotation), str(offset[0]), str(offset[1])]
+            )
 
     def save_correction(self, *_):
         """Add/Update a correction in the database."""
@@ -390,7 +394,12 @@ class CorrectionManagerDialog(wx.Dialog):
 
     def on_textfield_change(self, *_):
         """Check if the Add button should be activated."""
-        if self.regex.GetValue() and self.rotation.GetValue() and self.offset_x.GetValue() and self.offset_y.GetValue():
+        if (
+            self.regex.GetValue()
+            and self.rotation.GetValue()
+            and self.offset_x.GetValue()
+            and self.offset_y.GetValue()
+        ):
             self.enable_toolbar_buttons(True)
         else:
             self.enable_toolbar_buttons(False)
@@ -408,9 +417,13 @@ class CorrectionManagerDialog(wx.Dialog):
             for row in corrections:
                 if not self.parent.library.get_correction_data(row[0]):
                     if len(row) >= 4:
-                        self.parent.library.insert_correction_data(row[0], row[1], (row[2], row[3]))
+                        self.parent.library.insert_correction_data(
+                            row[0], row[1], (row[2], row[3])
+                        )
                     else:
-                        self.parent.library.insert_correction_data(row[0], row[1], (0, 0))
+                        self.parent.library.insert_correction_data(
+                            row[0], row[1], (0, 0)
+                        )
                 else:
                     self.logger.info(
                         "Correction '%s' exists already in database. Leaving this one out.",
@@ -462,7 +475,9 @@ class CorrectionManagerDialog(wx.Dialog):
         """Corrections import logic."""
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
-                csvreader = csv.DictReader(f, fieldnames=("regex", "rotation", "offset_x", "offset_y"))
+                csvreader = csv.DictReader(
+                    f, fieldnames=("regex", "rotation", "offset_x", "offset_y")
+                )
                 next(csvreader)
                 for row in csvreader:
                     if "regex" in row and row["regex"] is not None:
@@ -504,5 +519,9 @@ class CorrectionManagerDialog(wx.Dialog):
         with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
             csvwriter.writerow(["Pattern", "Rotation", "Offset X", "Offset Y"])
-            for regex, rotation, offset in self.parent.library.get_all_correction_data():
+            for (
+                regex,
+                rotation,
+                offset,
+            ) in self.parent.library.get_all_correction_data():
                 csvwriter.writerow([regex, rotation, offset[0], offset[1]])
