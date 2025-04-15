@@ -96,7 +96,10 @@ class Library:
             self.migrate_mappings()
 
     def uses_global_correction_database(self):
-        """Checks if there is a board specific corrections database or not. Returns True if the global database is used."""
+        """Check if there is a board specific corrections database or not.
+
+        Returns True if the global database is used.
+        """
 
         try:
             with contextlib.closing(
@@ -111,7 +114,7 @@ class Library:
                 return result[0] != 1
         except sqlite3.OperationalError:
             return True
-            
+
         return True
 
     def switch_to_global_correction_database(self, use_global):

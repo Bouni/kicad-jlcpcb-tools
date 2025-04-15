@@ -441,7 +441,7 @@ class CorrectionManagerDialog(wx.Dialog):
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING
             )
         result = dialog.ShowModal()
-        
+
         if result == wx.ID_NO:
             self.global_corrections.SetValue(self.parent.library.uses_global_correction_database())
             return
