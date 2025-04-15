@@ -329,12 +329,18 @@ class CorrectionManagerDialog(wx.Dialog):
             b.Enable(bool(state))
 
     def to_float(self, value):
+        """Convert the given value to a float, return 0 if convertion fails."""
         try:
             return float(value)
         except ValueError:
             return 0
 
     def str_from_float(self, value):
+        """Convert the given floating point value to a string.
+
+        Us as many decimal digits as required but for small numbers
+        at least two decimal digits are used.
+        """
         s = str(value)
         return (f"{value:.2f}" if len(s) < 4 else s)
 
