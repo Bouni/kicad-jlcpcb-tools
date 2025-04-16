@@ -3,11 +3,6 @@
 """Use the amazing work of https://github.com/yaqwsx/jlcparts and convert their database into something we can conveniently use for this plugin.
 
 This replaces the old .csv based database creation that JLCPCB no longer supports.
-
-Before this script can run, the cache.sqlite3 file has to be
-present in db_working folder. Download and reassemble it like
-jlcparts does it in their build pipeline:
-https://github.com/yaqwsx/jlcparts/blob/1a07e1ff42fef2d35419cfb9ba47df090037cc7b/.github/workflows/update_components.yaml#L45-L50
 """
 
 import copy
@@ -15,8 +10,13 @@ from datetime import date, datetime
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
+import subprocess
+import sys
+import time
 from typing import Optional
+import urllib.request
 import zipfile
 from zipfile import ZipFile
 
@@ -613,6 +613,37 @@ class JlcpcbFTS5(Generate):
             self.cleanup()
 
 
+class DownloadProgress:
+    """Display the download status during the download process."""
+
+    def __init__(self):
+        self.last_download_progress_print_time = 0
+
+    def progress_hook(self, count, block_size, total_size):
+        """Pass to reporthook."""
+        downloaded = count * block_size
+
+        # print at most twice a second
+        max_time_between_prints_seconds = 0.5
+
+        now = time.monotonic()
+        if (
+            now - self.last_download_progress_print_time
+            >= max_time_between_prints_seconds
+            or count * block_size >= total_size
+        ):
+            percent = int(downloaded * 100 / total_size) if total_size > 0 else 0
+
+            sys.stdout.write(
+                f"\rDownloading: {percent}% ({downloaded}/{total_size} bytes)"
+            )
+            sys.stdout.flush()
+            self.last_download_progress_print_time = now
+
+        if downloaded >= total_size:
+            print()  # Finish line
+
+
 def test_price_precision_reduce():
     """Price precision reduction works as expected."""
 
@@ -685,19 +716,125 @@ def test_price_duplicate_price_filter():
     help="Disable cleanup, intermediate database files will not be deleted",
 )
 @click.option(
+    "--fetch-parts-db",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Fetch the upstream parts db from yaqwsx",
+)
+@click.option(
     "--skip-generate",
     is_flag=True,
     show_default=True,
     default=False,
     help="Skip the DB generation phase",
 )
-def main(skip_cleanup: bool, skip_generate: bool):
+def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
     """Perform the database steps."""
 
     output_directory = "db_working"
     if not os.path.exists(output_directory):
         os.mkdir(output_directory)
     os.chdir(output_directory)
+
+    if fetch_parts_db:
+        base_url = "https://yaqwsx.github.io/jlcparts/data"
+        first_file = "cache.zip"
+
+        # discover which tool is available
+        # it can be 7z (Linux) or 7zz (brew on OSX, see https://github.com/orgs/Homebrew/discussions/6072)
+        seven_zip_tools = ["7z", "7zz"]
+
+        seven_zip_tool = None
+
+        for tool in seven_zip_tools:
+            if shutil.which(tool) is not None:
+                seven_zip_tool = tool
+                break
+
+        if seven_zip_tool is None:
+            print(
+                f"Unable to find any seven zip tool {seven_zip_tools}, install one to use the fetch db feature"
+            )
+            sys.exit(1)
+        else:
+            print(f"Using seven zip tool '{seven_zip_tool}'")
+
+        print(f"Fetching upstream parts database from {base_url}")
+
+        download_progress = DownloadProgress()
+        print(f"Fetching first file {first_file}")
+        urllib.request.urlretrieve(
+            f"{base_url}/{first_file}",
+            first_file,
+            reporthook=download_progress.progress_hook,
+        )
+
+        command = [seven_zip_tool, "l", first_file]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        # NOTE: 'l' lists the contents of the archive and if any of the zip volumes
+        # are missing 7-zip will report non-zero. Only error if the exit code is non-zero
+        # AND the error text isn't present.
+        if result.returncode != 0 and "ERROR = Missing volume" not in result.stdout:
+            print(
+                f"Error running command '{' '.join(command)}': {result.stdout} {result.stderr}"
+            )
+            sys.exit(1)
+
+        try:
+            # extract the file count by parsing the command output (stdout)
+            file_count = None
+            for line in result.stdout.splitlines():
+                if "Volume Index =" in line:
+                    try:
+                        file_count = int(line.split("=")[-1].strip())
+                        print(f"File count {file_count}")
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Failed to parse file count as an integer from line: '{line}'."
+                        ) from exc
+            if file_count is None:
+                raise ValueError(
+                    "No 'Volume Index =' line found in the command output."
+                )
+        except ValueError as e:
+            print(
+                "Unable to retrieve file count from the 7z output. "
+                f"Error: {e} "
+                "Expected format: 'Volume Index = <number>'. "
+                "Please ensure the 7z tool is installed and the archive is valid."
+            )
+            sys.exit(1)
+
+        # retrieve each file
+        # NOTE: Files start with '1'
+        for part in range(1, file_count + 1):
+            part_file = f"cache.z{part:02d}"
+            print(f"\nGetting file {part_file}")
+            download_progress = DownloadProgress()
+            urllib.request.urlretrieve(
+                f"{base_url}/{part_file}",
+                part_file,
+                reporthook=download_progress.progress_hook,
+            )
+
+        # extract the database file
+        print(f"\nExtracting {first_file}")
+        # pass '-y' that indicates yes to all questions, such as overwriting
+        # NOTE: Python's zipfile (https://docs.python.org/3/library/zipfile.html)
+        # cannot be used as as of 2025-07-22 "This module does not currently handle multi-disk ZIP files."
+        # and that's exactly what we have here
+        command = [seven_zip_tool, "x", "-y", first_file]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            print(f"Error extracting {first_file} with command '{' '.join(command)}':")
+            print(result.stderr)
+            sys.exit(1)
+
+        # remove the intermediate individual zip files now that the database file
+        # has been extracted
+        for file in Path(".").glob("cache.z*"):
+            file.unlink()
 
     if not skip_generate:
         # sqlite database
