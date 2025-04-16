@@ -684,37 +684,49 @@ def test_price_duplicate_price_filter():
     default=False,
     help="Disable cleanup, intermediate database files will not be deleted",
 )
-def main(skip_cleanup: bool):
-    """Generate the databases."""
+@click.option(
+    "--skip-generate",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Skip the DB generation phase",
+)
+def main(skip_cleanup: bool, skip_generate: bool):
+    """Perform the database steps."""
 
     output_directory = "db_working"
     os.chdir(output_directory)
 
-    # sqlite database
-    start = datetime.now()
-    output_name = "parts.db"
-    partsdb = Path(output_name)
+    if not skip_generate:
+        # sqlite database
+        start = datetime.now()
+        output_name = "parts.db"
+        partsdb = Path(output_name)
 
-    print(f"Generating {output_name} in {output_directory} directory")
-    generator = Jlcpcb(partsdb, skip_cleanup)
-    generator.build()
+        print(f"Generating {output_name} in {output_directory} directory")
+        generator = Jlcpcb(partsdb, skip_cleanup)
+        generator.build()
 
-    end = datetime.now()
-    deltatime = end - start
-    print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
+        end = datetime.now()
+        deltatime = end - start
+        print(
+            f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}"
+        )
 
-    # sqlite fts5 database
-    start = datetime.now()
-    output_name = "parts-fts5.db"
-    partsdb = Path(output_name)
+        # sqlite fts5 database
+        start = datetime.now()
+        output_name = "parts-fts5.db"
+        partsdb = Path(output_name)
 
-    print(f"Generating {output_name} in {output_directory} directory")
-    generator = JlcpcbFTS5(partsdb, skip_cleanup)
-    generator.build()
+        print(f"Generating {output_name} in {output_directory} directory")
+        generator = JlcpcbFTS5(partsdb, skip_cleanup)
+        generator.build()
 
-    end = datetime.now()
-    deltatime = end - start
-    print(f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}")
+        end = datetime.now()
+        deltatime = end - start
+        print(
+            f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}"
+        )
 
 
 if __name__ == "__main__":
