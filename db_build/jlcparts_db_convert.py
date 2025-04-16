@@ -695,6 +695,8 @@ def main(skip_cleanup: bool, skip_generate: bool):
     """Perform the database steps."""
 
     output_directory = "db_working"
+    if not os.path.exists(output_directory):
+        os.mkdir(output_directory)
     os.chdir(output_directory)
 
     if not skip_generate:
