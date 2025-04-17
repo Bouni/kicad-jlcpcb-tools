@@ -50,7 +50,9 @@ class Library:
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.partsdb_file = os.path.join(self.datadir, "parts-fts5.db")
         self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
-        self.correctionsdb_file = os.path.join(self.datadir, "corrections.db")
+        self.localcorrectionsdb_file = os.path.join(self.parent.project_path, "jlcpcb", "project.db")
+        self.globalcorrectionsdb_file = os.path.join(self.datadir, "corrections.db")
+        self.correctionsdb_file = self.globalcorrectionsdb_file if self.uses_global_correction_database() else self.localcorrectionsdb_file
         self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
         self.state = None
         self.category_map = {}
@@ -92,6 +94,54 @@ class Library:
         ):
             self.create_mapping_table()
             self.migrate_mappings()
+
+    def uses_global_correction_database(self):
+        """Check if there is a board specific corrections database or not.
+
+        Returns True if the global database is used.
+        """
+
+        try:
+            with contextlib.closing(
+                sqlite3.connect(self.localcorrectionsdb_file)
+            ) as ldb, ldb as lcur:
+                result = lcur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='correction')"
+                ).fetchone()
+                if not result:
+                    return True
+
+                return result[0] != 1
+        except sqlite3.OperationalError:
+            return True
+
+        return True
+
+    def switch_to_global_correction_database(self, use_global):
+        """Switches to global or board local database."""
+
+        currently_using_global = self.correctionsdb_file == self.globalcorrectionsdb_file
+        if currently_using_global == use_global:
+            return
+
+        if use_global:
+            try:
+                with contextlib.closing(
+                    sqlite3.connect(self.localcorrectionsdb_file)
+                ) as con, con as cur:
+                    cur.execute("DROP TABLE IF EXISTS correction")
+                    cur.commit()
+                self.correctionsdb_file = self.globalcorrectionsdb_file
+            except OSError:
+                self.logger.warning(
+                    "Failed to remove board local corrections file."
+                )
+        else:
+            global_corrections = self.get_all_correction_data()
+            self.correctionsdb_file = self.localcorrectionsdb_file
+            self.create_correction_table()
+            for regex, rotation, offset in global_corrections:
+                self.insert_correction_data(regex, rotation, offset)
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database."""

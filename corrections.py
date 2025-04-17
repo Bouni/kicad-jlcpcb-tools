@@ -293,12 +293,31 @@ class CorrectionManagerDialog(wx.Dialog):
         )
         self.export_button.SetBitmapMargins((2, 0))
 
+        self.global_corrections = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Use global corrections",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="corrections_global_corrections",
+        )
+
+        self.global_corrections.SetToolTip(
+            wx.ToolTip("Whether the global corrections database is used or a project local one")
+        )
+        self.global_corrections.Bind(wx.EVT_CHECKBOX, self.on_global_corrections_changed)
+        self.global_corrections.SetValue(self.parent.library.uses_global_correction_database())
+
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.delete_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.update_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.import_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.export_button, 0, wx.ALL, 5)
+        tool_sizer.AddStretchSpacer()
+        tool_sizer.Add(self.global_corrections, 0, wx.ALL, 5)
+
         table_sizer.Add(tool_sizer, 3, wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -416,6 +435,34 @@ class CorrectionManagerDialog(wx.Dialog):
             self.enable_toolbar_buttons(True)
         else:
             self.enable_toolbar_buttons(False)
+
+    def on_global_corrections_changed(self, use_global):
+        """Switch between global or local correction database file."""
+        if self.parent.library.uses_global_correction_database():
+            dialog = wx.MessageDialog(
+                self,
+                "Do you want to switch to the local corrections database?",
+                "Switching corrections database",
+                wx.YES_NO | wx.YES_DEFAULT | wx.ICON_QUESTION
+            )
+            dialog.ExtendedMessage = "Switching to a board local database copies the current global database."
+        else:
+            dialog = wx.MessageDialog(
+                self,
+                "Do you want to switch to the global corrections database?",
+                "Switching corrections database",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING
+            )
+        result = dialog.ShowModal()
+
+        if result == wx.ID_NO:
+            self.global_corrections.SetValue(self.parent.library.uses_global_correction_database())
+            return
+
+        self.parent.library.switch_to_global_correction_database(not self.parent.library.uses_global_correction_database())
+        self.populate_corrections_list()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        self.global_corrections.SetValue(self.parent.library.uses_global_correction_database())
 
     def download_correction_data(self, *_):
         """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo."""
