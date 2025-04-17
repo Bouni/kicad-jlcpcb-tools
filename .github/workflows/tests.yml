@@ -13,6 +13,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Install dependencies
         run: pip install pytest humanize
-      - name: Run tests
+      - name: Run db_build tests
         working-directory: db_build
         run: pytest jlcparts_db_convert.py
+      - name: Run core tests
+        working-directory: core
+        run: pytest version.py

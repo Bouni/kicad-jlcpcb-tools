@@ -1,6 +1,5 @@
 """Contains helper function used all over the plugin."""
 
-from distutils.version import LooseVersion
 import os
 from pathlib import Path
 import re
@@ -12,22 +11,6 @@ PLUGIN_PATH = Path(__file__).resolve().parent
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
-
-
-def _is_version_in_range(version: str, min_version: str, max_version: str) -> bool:
-    """Check if version is in range."""
-    ver = LooseVersion(version)
-    return LooseVersion(min_version) <= ver < LooseVersion(max_version)
-
-
-def is_version7(version: str) -> bool:
-    """Check if version is 7."""
-    return _is_version_in_range(version, "6.99", "8.0")
-
-
-def is_version6(version: str) -> bool:
-    """Check if version is 6."""
-    return _is_version_in_range(version, "5.99", "7.0")
 
 
 def getWxWidgetsVersion():
