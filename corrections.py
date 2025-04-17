@@ -82,7 +82,7 @@ class CorrectionManagerDialog(wx.Dialog):
         self.rotation = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            "",
+            "0",
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(150, 24)),
         )
@@ -105,7 +105,7 @@ class CorrectionManagerDialog(wx.Dialog):
         self.offset_x = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            "",
+            "0.00",
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(150, 24)),
         )
@@ -128,7 +128,7 @@ class CorrectionManagerDialog(wx.Dialog):
         self.offset_y = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            "",
+            "0.00",
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(150, 24)),
         )
@@ -328,6 +328,22 @@ class CorrectionManagerDialog(wx.Dialog):
         ]:
             b.Enable(bool(state))
 
+    def to_float(self, value):
+        """Convert the given value to a float, return 0 if convertion fails."""
+        try:
+            return float(value)
+        except ValueError:
+            return 0
+
+    def str_from_float(self, value):
+        """Convert the given floating point value to a string.
+
+        Us as many decimal digits as required but for small numbers
+        at least two decimal digits are used.
+        """
+        s = str(value)
+        return (f"{value:.2f}" if len(s) < 4 else s)
+
     def populate_corrections_list(self):
         """Populate the list with the result of the search."""
         self.corrections_list.DeleteAllItems()
@@ -339,15 +355,9 @@ class CorrectionManagerDialog(wx.Dialog):
     def save_correction(self, *_):
         """Add/Update a correction in the database."""
         regex = self.regex.GetValue()
-        rotation = self.rotation.GetValue()
-        try:
-            offset_x = float(self.offset_x.GetValue())
-        except ValueError:
-            offset_x = 0
-        try:
-            offset_y = float(self.offset_y.GetValue())
-        except ValueError:
-            offset_y = 0
+        rotation = int(self.to_float(self.rotation.GetValue()))
+        offset_x = self.to_float(self.offset_x.GetValue())
+        offset_y = self.to_float(self.offset_y.GetValue())
         offset = (offset_x, offset_y)
         if regex == self.selection_regex:
             self.parent.library.update_correction_data(regex, rotation, offset)
@@ -358,6 +368,9 @@ class CorrectionManagerDialog(wx.Dialog):
             self.parent.library.delete_correction_data(self.selection_regex)
             self.parent.library.insert_correction_data(regex, rotation, offset)
             self.selection_regex = None
+        self.rotation.SetValue(str(rotation))
+        self.offset_x.SetValue(self.str_from_float(offset_x))
+        self.offset_y.SetValue(self.str_from_float(offset_y))
         self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
@@ -381,13 +394,13 @@ class CorrectionManagerDialog(wx.Dialog):
             if row == -1:
                 return
             self.selection_regex = self.corrections_list.GetTextValue(row, 0)
-            self.selection_rotation = self.corrections_list.GetTextValue(row, 1)
-            self.selection_offset_x = self.corrections_list.GetTextValue(row, 2)
-            self.selection_offset_y = self.corrections_list.GetTextValue(row, 3)
+            self.selection_rotation = int(self.to_float(self.corrections_list.GetTextValue(row, 1)))
+            self.selection_offset_x = self.to_float(self.corrections_list.GetTextValue(row, 2))
+            self.selection_offset_y = self.to_float(self.corrections_list.GetTextValue(row, 3))
             self.regex.SetValue(self.selection_regex)
-            self.rotation.SetValue(self.selection_rotation)
-            self.offset_x.SetValue(self.selection_offset_x)
-            self.offset_y.SetValue(self.selection_offset_y)
+            self.rotation.SetValue(str(self.selection_rotation))
+            self.offset_x.SetValue(self.str_from_float(self.selection_offset_x))
+            self.offset_y.SetValue(self.str_from_float(self.selection_offset_y))
         else:
             self.selection_regex = None
             self.enable_toolbar_buttons(False)
