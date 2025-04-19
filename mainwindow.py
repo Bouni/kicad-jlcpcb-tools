@@ -901,7 +901,7 @@ class JLCPCBTools(wx.Dialog):
         PartSelectorDialog(self, selection).ShowModal()
 
     def count_order_number_placeholders(self):
-        """Counts the JLC order/serial number placeholders."""
+        """Count the JLC order/serial number placeholders."""
         count = 0
         for drawing in self.pcbnew.GetBoard().GetDrawings():
             if (
@@ -924,10 +924,10 @@ class JLCPCBTools(wx.Dialog):
                 ):
                     corners = drawing.GetRectCorners()
 
-                    top_left_x = min(map(lambda p: p.x, corners), default=0)
-                    top_left_y = min(map(lambda p: p.y, corners), default=0)
-                    bottom_right_x = max(map(lambda p: p.x, corners), default=0)
-                    bottom_right_y = max(map(lambda p: p.y, corners), default=0)
+                    top_left_x = min([p.x for p in corners], default=0)
+                    top_left_y = min([p.y for p in corners], default=0)
+                    bottom_right_x = max([p.x for p in corners], default=0)
+                    bottom_right_y = max([p.y for p in corners], default=0)
                     width = kicad_pcbnew.ToMM(bottom_right_x - top_left_x)
                     height = kicad_pcbnew.ToMM(bottom_right_y - top_left_y)
 
