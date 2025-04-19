@@ -232,12 +232,12 @@ class SettingsDialog(wx.Dialog):
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
 
-        ##### Check if order number placeholder is present #####
+        ##### Check if order/serial number placeholder is present #####
 
         self.order_number_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Check if order number placeholder is placed",
+            label="Check if an order/serial number placeholder is placed",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
@@ -245,7 +245,7 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.order_number_setting.SetToolTip(
-            wx.ToolTip("Is the order number placeholder placed")
+            wx.ToolTip("Is an order/serial number placeholder placed")
         )
 
         self.order_number_image = wx.StaticBitmap(
@@ -393,7 +393,7 @@ class SettingsDialog(wx.Dialog):
         if check:
             self.order_number_setting.SetValue(check)
             self.order_number_setting.SetLabel(
-                "Check if order number placeholder is placed"
+                "Check if an order/serial number placeholder is placed"
             )
             self.order_number_image.SetBitmap(
                 loadBitmapScaled(
@@ -403,7 +403,7 @@ class SettingsDialog(wx.Dialog):
         else:
             self.order_number_setting.SetValue(check)
             self.order_number_setting.SetLabel(
-                "Don't check if order number placeholder is placed"
+                "Don't check if an order/serial number placeholder is placed"
             )
             self.order_number_image.SetBitmap(
                 loadBitmapScaled(
