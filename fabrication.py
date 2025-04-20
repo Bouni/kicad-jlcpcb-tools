@@ -77,7 +77,11 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
-        # First check if the value aka part name matches
+        # First check if the part name matches
+        for regex, correction, _ in self.corrections:
+            if re.search(regex, str(footprint.GetReference())):
+                return self.rotate(footprint, rotation, correction)
+        # Then try to match by value
         for regex, correction, _ in self.corrections:
             if re.search(regex, str(footprint.GetValue())):
                 return self.rotate(footprint, rotation, correction)
@@ -120,8 +124,11 @@ class Fabrication:
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
-
-        # First check if the value aka part name matches
+        # First check if the part name matches
+        for regex, _, correction in self.corrections:
+            if re.search(regex, str(footprint.GetReference())):
+                return self.reposition(footprint, position, correction)
+        # Then try to match by value
         for regex, _, correction in self.corrections:
             if re.search(regex, str(footprint.GetValue())):
                 return self.reposition(footprint, position, correction)

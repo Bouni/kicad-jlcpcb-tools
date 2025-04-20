@@ -413,7 +413,7 @@ class JLCPCBTools(wx.Dialog):
         correction = self.footprint_list.AppendTextColumn(
             "Correction",
             8,
-            width=70,
+            width=120,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
@@ -634,11 +634,15 @@ class JLCPCBTools(wx.Dialog):
         # First check if the part name matches
         for regex, rotation, offset in corrections:
             if re.search(regex, str(part["reference"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])}"
-        # If there was no match for the part name, check if the package matches
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (ref)"
+        # Then try to match by value
+        for regex, rotation, offset in corrections:
+            if re.search(regex, str(part["value"])):
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (val)"
+        # If there was no match for the part name or value, check if the package matches
         for regex, rotation, offset in corrections:
             if re.search(regex, str(part["footprint"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])}"
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (fpt)"
         return "0°, 0.0/0.0"
 
     def populate_footprint_list(self, *_):
