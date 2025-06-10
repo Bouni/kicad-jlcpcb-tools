@@ -380,7 +380,11 @@ class JLCPCBTools(wx.Dialog):
             "Ref", 0, width=50, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         value = self.footprint_list.AppendTextColumn(
-            "Value (Name)", 1, width=150, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+            "Value (Name)",
+            1,
+            width=150,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
         )
         footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
@@ -909,23 +913,22 @@ class JLCPCBTools(wx.Dialog):
         """Count the JLC order/serial number placeholders."""
         count = 0
         for drawing in self.pcbnew.GetBoard().GetDrawings():
-            if (
-                drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or
-                drawing.IsOnLayer(kicad_pcbnew.B_SilkS)
+            if drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or drawing.IsOnLayer(
+                kicad_pcbnew.B_SilkS
             ):
                 if isinstance(drawing, kicad_pcbnew.PCB_TEXT):
                     if drawing.GetText().strip() == "JLCJLCJLCJLC":
                         self.logger.info(
                             "Found placeholder for order number at %.1f/%.1f.",
                             kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y)
+                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
                         )
                         count += 1
 
                 if (
-                    isinstance(drawing, kicad_pcbnew.PCB_SHAPE) and
-                    drawing.GetShape() == kicad_pcbnew.S_RECT and
-                    drawing.IsFilled()
+                    isinstance(drawing, kicad_pcbnew.PCB_SHAPE)
+                    and drawing.GetShape() == kicad_pcbnew.S_RECT
+                    and drawing.IsFilled()
                 ):
                     corners = drawing.GetRectCorners()
 
@@ -937,27 +940,24 @@ class JLCPCBTools(wx.Dialog):
                     height = kicad_pcbnew.ToMM(bottom_right_y - top_left_y)
 
                     if (
-                        (width == 5  and height == 5 ) or
-                        (width == 8  and height == 8 ) or
-                        (width == 10 and height == 10)
+                        (width == 5 and height == 5)
+                        or (width == 8 and height == 8)
+                        or (width == 10 and height == 10)
                     ):
                         self.logger.info(
                             "Found placeholder for 2D barcode (%dmm x %dmm) at %.1f/%.1f.",
                             width,
                             height,
                             kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y)
+                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
                         )
                         count += 1
 
-                    if (
-                        (width == 10 and height == 2) or
-                        (width == 2 and height == 10)
-                    ):
+                    if (width == 10 and height == 2) or (width == 2 and height == 10):
                         self.logger.info(
                             "Found placeholder for serial number at %.1f/%.1f.",
                             kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y)
+                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
                         )
                         count += 1
 
@@ -1158,21 +1158,26 @@ class JLCPCBTools(wx.Dialog):
     def init_logger(self):
         """Initialize logger to log into textbox."""
         root = logging.getLogger()
+        # Clear any existing handlers that might be problematic
+        root.handlers.clear()
         root.setLevel(logging.DEBUG)
-        # Log to stderr
-        self.logging_handler1 = logging.StreamHandler(sys.stderr)
-        self.logging_handler1.setLevel(logging.DEBUG)
-        # and to our GUI
-        self.logging_handler2 = LogBoxHandler(self)
-        self.logging_handler2.setLevel(logging.DEBUG)
+
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(funcName)s -  %(message)s",
             datefmt="%Y.%m.%d %H:%M:%S",
         )
-        self.logging_handler1.setFormatter(formatter)
+        # Only add stderr handler if stderr is available
+        if sys.stderr is not None:
+            self.logging_handler1 = logging.StreamHandler(sys.stderr)
+            self.logging_handler1.setLevel(logging.DEBUG)
+            self.logging_handler1.setFormatter(formatter)
+            root.addHandler(self.logging_handler1)
+
+        self.logging_handler2 = LogBoxHandler(self)
+        self.logging_handler2.setLevel(logging.DEBUG)
         self.logging_handler2.setFormatter(formatter)
-        root.addHandler(self.logging_handler1)
         root.addHandler(self.logging_handler2)
+
         self.logger = logging.getLogger(__name__)
 
     def __del__(self):
