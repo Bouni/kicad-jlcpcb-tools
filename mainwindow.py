@@ -73,6 +73,7 @@ ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
+ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 ID_CONTEXT_MENU_FIND_MAPPING = wx.NewIdRef()
@@ -379,7 +380,7 @@ class JLCPCBTools(wx.Dialog):
             "Ref", 0, width=50, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         value = self.footprint_list.AppendTextColumn(
-            "Value", 1, width=150, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
+            "Value (Name)", 1, width=150, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
@@ -413,7 +414,7 @@ class JLCPCBTools(wx.Dialog):
         correction = self.footprint_list.AppendTextColumn(
             "Correction",
             8,
-            width=70,
+            width=120,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
@@ -634,11 +635,15 @@ class JLCPCBTools(wx.Dialog):
         # First check if the part name matches
         for regex, rotation, offset in corrections:
             if re.search(regex, str(part["reference"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])}"
-        # If there was no match for the part name, check if the package matches
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (ref)"
+        # Then try to match by value
+        for regex, rotation, offset in corrections:
+            if re.search(regex, str(part["value"])):
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (val)"
+        # If there was no match for the part name or value, check if the package matches
         for regex, rotation, offset in corrections:
             if re.search(regex, str(part["footprint"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])}"
+                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (fpt)"
         return "0°, 0.0/0.0"
 
     def populate_footprint_list(self, *_):
@@ -1019,7 +1024,12 @@ class JLCPCBTools(wx.Dialog):
     def add_correction(self, e):
         """Add part correction for the current part."""
         for item in self.footprint_list.GetSelections():
-            if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
+            if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
+                if reference := self.partlist_data_model.get_reference(item):
+                    CorrectionManagerDialog(
+                        self, "^" + re.escape(reference) + "$"
+                    ).ShowModal()
+            elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
                 if footprint := self.partlist_data_model.get_footprint(item):
                     CorrectionManagerDialog(
                         self, "^" + re.escape(footprint)
@@ -1107,6 +1117,14 @@ class JLCPCBTools(wx.Dialog):
         )
         right_click_menu.Append(paste_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
+
+        correction_by_reference = wx.MenuItem(
+            right_click_menu,
+            ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE,
+            "Add Correction by reference",
+        )
+        right_click_menu.Append(correction_by_reference)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_reference)
 
         correction_by_package = wx.MenuItem(
             right_click_menu,
