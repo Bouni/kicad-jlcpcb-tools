@@ -1158,21 +1158,26 @@ class JLCPCBTools(wx.Dialog):
     def init_logger(self):
         """Initialize logger to log into textbox."""
         root = logging.getLogger()
+        # Clear any existing handlers that might be problematic
+        root.handlers.clear()
         root.setLevel(logging.DEBUG)
-        # Log to stderr
-        self.logging_handler1 = logging.StreamHandler(sys.stderr)
-        self.logging_handler1.setLevel(logging.DEBUG)
-        # and to our GUI
-        self.logging_handler2 = LogBoxHandler(self)
-        self.logging_handler2.setLevel(logging.DEBUG)
+
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(funcName)s -  %(message)s",
             datefmt="%Y.%m.%d %H:%M:%S",
         )
-        self.logging_handler1.setFormatter(formatter)
+        # Only add stderr handler if stderr is available
+        if sys.stderr is not None:
+            self.logging_handler1 = logging.StreamHandler(sys.stderr)
+            self.logging_handler1.setLevel(logging.DEBUG)
+            self.logging_handler1.setFormatter(formatter)
+            root.addHandler(self.logging_handler1)
+
+        self.logging_handler2 = LogBoxHandler(self)
+        self.logging_handler2.setLevel(logging.DEBUG)
         self.logging_handler2.setFormatter(formatter)
-        root.addHandler(self.logging_handler1)
         root.addHandler(self.logging_handler2)
+
         self.logger = logging.getLogger(__name__)
 
     def __del__(self):
