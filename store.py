@@ -98,7 +98,7 @@ class Store:
             con.row_factory = dict_factory
             # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
             subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
-            query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY lcsc"
+            query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY value, lcsc"
             a = cur.execute(query).fetchall()
             # Query all parts that are supposed to be in the BOM but have no lcsc number
             query = "SELECT value, reference AS refs, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
