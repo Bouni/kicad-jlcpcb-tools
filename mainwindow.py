@@ -900,34 +900,84 @@ class JLCPCBTools(wx.Dialog):
             selection[ref] = value
         PartSelectorDialog(self, selection).ShowModal()
 
-    def check_order_number(self):
-        """Verify that the JLC order number placeholder is present."""
-        try:
-            # We open with errors="replace because we're only interested in the occurance of the JLC magic string"
-            with open(self.pcbnew.GetBoard().GetFileName(), errors="replace") as f:
-                data = f.read()
-                return "JLCJLCJLCJLC" in data
-        except OSError:
-            pass
-        except UnicodeDecodeError:
-            self.logger.debug(
-                "Failed to check JLC order number due to UnicodeDecodeError"
-            )
-        return True
+    def count_order_number_placeholders(self):
+        """Count the JLC order/serial number placeholders."""
+        count = 0
+        for drawing in self.pcbnew.GetBoard().GetDrawings():
+            if (
+                drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or
+                drawing.IsOnLayer(kicad_pcbnew.B_SilkS)
+            ):
+                if isinstance(drawing, kicad_pcbnew.PCB_TEXT):
+                    if drawing.GetText().strip() == "JLCJLCJLCJLC":
+                        self.logger.info(
+                            "Found placeholder for order number at %.1f/%.1f.",
+                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
+                            kicad_pcbnew.ToMM(drawing.GetCenter().y)
+                        )
+                        count += 1
+
+                if (
+                    isinstance(drawing, kicad_pcbnew.PCB_SHAPE) and
+                    drawing.GetShape() == kicad_pcbnew.S_RECT and
+                    drawing.IsFilled()
+                ):
+                    corners = drawing.GetRectCorners()
+
+                    top_left_x = min([p.x for p in corners], default=0)
+                    top_left_y = min([p.y for p in corners], default=0)
+                    bottom_right_x = max([p.x for p in corners], default=0)
+                    bottom_right_y = max([p.y for p in corners], default=0)
+                    width = kicad_pcbnew.ToMM(bottom_right_x - top_left_x)
+                    height = kicad_pcbnew.ToMM(bottom_right_y - top_left_y)
+
+                    if (
+                        (width == 5  and height == 5 ) or
+                        (width == 8  and height == 8 ) or
+                        (width == 10 and height == 10)
+                    ):
+                        self.logger.info(
+                            "Found placeholder for 2D barcode (%dmm x %dmm) at %.1f/%.1f.",
+                            width,
+                            height,
+                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
+                            kicad_pcbnew.ToMM(drawing.GetCenter().y)
+                        )
+                        count += 1
+
+                    if (
+                        (width == 10 and height == 2) or
+                        (width == 2 and height == 10)
+                    ):
+                        self.logger.info(
+                            "Found placeholder for serial number at %.1f/%.1f.",
+                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
+                            kicad_pcbnew.ToMM(drawing.GetCenter().y)
+                        )
+                        count += 1
+
+        return count
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
-        if (
-            self.settings.get("general", {}).get("order_number")
-            and not self.check_order_number()
-        ):
-            result = wx.MessageBox(
-                "JLC order number placeholder not present! Continue?",
-                "JLC order number placeholder",
-                wx.OK | wx.CANCEL | wx.CENTER,
-            )
-            if result == wx.ID_CANCEL:
-                return
+        if self.settings.get("general", {}).get("order_number"):
+            count = self.count_order_number_placeholders()
+            if count == 0:
+                result = wx.MessageBox(
+                    "JLC order/serial number placeholder not present! Continue?",
+                    "JLC order/serial number placeholder",
+                    wx.OK | wx.CANCEL | wx.CENTER,
+                )
+                if result == wx.ID_CANCEL:
+                    return
+            elif count > 1:
+                result = wx.MessageBox(
+                    "Multiple order/serial number placeholders present! Continue?",
+                    "JLC order/serial number placeholder",
+                    wx.OK | wx.CANCEL | wx.CENTER,
+                )
+                if result == wx.ID_CANCEL:
+                    return
         self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
         number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
