@@ -985,7 +985,7 @@ class JLCPCBTools(wx.Dialog):
                     "JLC order/serial number placeholder",
                     wx.OK | wx.CANCEL | wx.CENTER,
                 )
-                if result == wx.ID_CANCEL:
+                if result == wx.CANCEL:
                     return
             elif count > 1:
                 result = wx.MessageBox(
@@ -993,7 +993,7 @@ class JLCPCBTools(wx.Dialog):
                     "JLC order/serial number placeholder",
                     wx.OK | wx.CANCEL | wx.CENTER,
                 )
-                if result == wx.ID_CANCEL:
+                if result == wx.CANCEL:
                     return
         self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
@@ -1073,7 +1073,7 @@ class JLCPCBTools(wx.Dialog):
             "KiCad V6 Schematics (*.kicad_sch)|*.kicad_sch",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
         ) as openFileDialog:
-            if openFileDialog.ShowModal() == wx.ID_CANCEL:
+            if openFileDialog.ShowModal() == wx.CANCEL:
                 return
             paths = openFileDialog.GetPaths()
             SchematicExport(self).load_schematic(paths)
