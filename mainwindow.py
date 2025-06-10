@@ -965,6 +965,18 @@ class JLCPCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
+        warnings = self.fabrication.check_plausibility()
+        if warnings:
+            result = wx.MessageBox(
+                "There are items with identical LCSC number but different values in the list:\n"
+                + warnings
+                + "Continue?",
+                "Plausibility check",
+                wx.OK | wx.CANCEL | wx.CENTER,
+            )
+            if result == wx.CANCEL:
+                return
+
         if self.settings.get("general", {}).get("order_number"):
             count = self.count_order_number_placeholders()
             if count == 0:
