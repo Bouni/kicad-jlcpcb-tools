@@ -4,12 +4,16 @@ repos:
     rev: v0.6.8
     hooks:
       - id: ruff
-        args: [ --fix ]
+        args:
+          - --fix
+          - --extend-exclude=lib
       - id: ruff-format
+        exclude: '(^|/)lib'
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.17.0
     hooks:
       - id: pyupgrade
+        exclude: ^.lib/
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.42.0
     hooks:
