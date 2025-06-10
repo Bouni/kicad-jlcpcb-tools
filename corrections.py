@@ -304,10 +304,16 @@ class CorrectionManagerDialog(wx.Dialog):
         )
 
         self.global_corrections.SetToolTip(
-            wx.ToolTip("Whether the global corrections database is used or a project local one")
+            wx.ToolTip(
+                "Whether the global corrections database is used or a project local one"
+            )
         )
-        self.global_corrections.Bind(wx.EVT_CHECKBOX, self.on_global_corrections_changed)
-        self.global_corrections.SetValue(self.parent.library.uses_global_correction_database())
+        self.global_corrections.Bind(
+            wx.EVT_CHECKBOX, self.on_global_corrections_changed
+        )
+        self.global_corrections.SetValue(
+            self.parent.library.uses_global_correction_database()
+        )
 
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
@@ -361,7 +367,7 @@ class CorrectionManagerDialog(wx.Dialog):
         at least two decimal digits are used.
         """
         s = str(value)
-        return (f"{value:.2f}" if len(s) < 4 else s)
+        return f"{value:.2f}" if len(s) < 4 else s
 
     def populate_corrections_list(self):
         """Populate the list with the result of the search."""
@@ -413,9 +419,15 @@ class CorrectionManagerDialog(wx.Dialog):
             if row == -1:
                 return
             self.selection_regex = self.corrections_list.GetTextValue(row, 0)
-            self.selection_rotation = int(self.to_float(self.corrections_list.GetTextValue(row, 1)))
-            self.selection_offset_x = self.to_float(self.corrections_list.GetTextValue(row, 2))
-            self.selection_offset_y = self.to_float(self.corrections_list.GetTextValue(row, 3))
+            self.selection_rotation = int(
+                self.to_float(self.corrections_list.GetTextValue(row, 1))
+            )
+            self.selection_offset_x = self.to_float(
+                self.corrections_list.GetTextValue(row, 2)
+            )
+            self.selection_offset_y = self.to_float(
+                self.corrections_list.GetTextValue(row, 3)
+            )
             self.regex.SetValue(self.selection_regex)
             self.rotation.SetValue(str(self.selection_rotation))
             self.offset_x.SetValue(self.str_from_float(self.selection_offset_x))
@@ -443,7 +455,7 @@ class CorrectionManagerDialog(wx.Dialog):
                 self,
                 "Do you want to switch to the local corrections database?",
                 "Switching corrections database",
-                wx.YES_NO | wx.YES_DEFAULT | wx.ICON_QUESTION
+                wx.YES_NO | wx.YES_DEFAULT | wx.ICON_QUESTION,
             )
             dialog.ExtendedMessage = "Switching to a board local database copies the current global database."
         else:
@@ -451,18 +463,24 @@ class CorrectionManagerDialog(wx.Dialog):
                 self,
                 "Do you want to switch to the global corrections database?",
                 "Switching corrections database",
-                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
             )
         result = dialog.ShowModal()
 
         if result == wx.ID_NO:
-            self.global_corrections.SetValue(self.parent.library.uses_global_correction_database())
+            self.global_corrections.SetValue(
+                self.parent.library.uses_global_correction_database()
+            )
             return
 
-        self.parent.library.switch_to_global_correction_database(not self.parent.library.uses_global_correction_database())
+        self.parent.library.switch_to_global_correction_database(
+            not self.parent.library.uses_global_correction_database()
+        )
         self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
-        self.global_corrections.SetValue(self.parent.library.uses_global_correction_database())
+        self.global_corrections.SetValue(
+            self.parent.library.uses_global_correction_database()
+        )
 
     def download_correction_data(self, *_):
         """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo."""
