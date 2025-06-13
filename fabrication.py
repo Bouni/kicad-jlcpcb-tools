@@ -393,3 +393,25 @@ class Fabrication:
         self.logger.info(
             "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
         )
+
+    def check_plausibility(self) -> str:
+        """Check the plausibility of the parts, there should be just one value per LCSC number."""
+        lcsc_numbers = {}
+        for item in self.parent.store.read_bom_parts():
+            if not item["lcsc"]:
+                continue
+            if item["lcsc"] not in lcsc_numbers:
+                lcsc_numbers[item["lcsc"]] = [
+                    {"refs": item["refs"], "values": item["value"]}
+                ]
+            else:
+                lcsc_numbers[item["lcsc"]].append(
+                    {"refs": item["refs"], "values": item["value"]}
+                )
+        filtered = {key: value for key, value in lcsc_numbers.items() if len(value) > 1}
+        result = ""
+        for lcsc, items in filtered.items():
+            result += f"{lcsc}:\n"
+            for item in items:
+                result += f"  - {item['refs']} -> {item['values']}\n"
+        return result
