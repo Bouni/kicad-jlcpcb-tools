@@ -536,8 +536,11 @@ class JLCPCBTools(wx.Dialog):
         """Destroy dialog on close."""
         self.logger.info("quit_dialog()")
         root = logging.getLogger()
-        root.removeHandler(self.logging_handler1)
-        root.removeHandler(self.logging_handler2)
+        try:
+            root.removeHandler(self.logging_handler1)
+            root.removeHandler(self.logging_handler2)
+        except AttributeError:
+            pass
 
         self.Destroy()
         self.EndModal(0)
