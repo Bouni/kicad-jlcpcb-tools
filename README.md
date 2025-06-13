@@ -159,6 +159,28 @@ The parts database is rebuilt by the [update_parts_database.yml GitHub workflow]
 
 You can reference the steps in the 'Update database' section for the commands to run locally.
 
+## python libraries
+
+lib/ contains the necessary python packages that may not be a part of the KiCad python distribution.
+
+These packages include:
+
+- packaging
+
+To install a package, such as 'packaging':
+
+```python
+pip install packaging --target ./lib
+```
+
+To update these packages:
+
+```python
+pip install packaging --upgrade --target ./lib
+```
+
+Future versions of KiCad may have support for a requires.txt to automate this process.
+
 ## Standalone mode
 
 Allows the plugin UI to be started without KiCAD, enabling debugging with an IDE like pycharm / vscode.
