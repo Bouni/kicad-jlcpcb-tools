@@ -162,7 +162,7 @@ class CorrectionManagerDialog(wx.Dialog):
             wx.ID_ANY,
             wx.DefaultPosition,
             wx.DefaultSize,
-            style=wx.dataview.DV_SINGLE,
+            style=wx.dataview.DV_MULTIPLE,
         )
 
         self.corrections_list.AppendTextColumn(
@@ -318,10 +318,10 @@ class CorrectionManagerDialog(wx.Dialog):
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.delete_button, 0, wx.ALL, 5)
+        tool_sizer.AddStretchSpacer()
         tool_sizer.Add(self.update_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.import_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.export_button, 0, wx.ALL, 5)
-        tool_sizer.AddStretchSpacer()
         tool_sizer.Add(self.global_corrections, 0, wx.ALL, 5)
 
         table_sizer.Add(tool_sizer, 3, wx.EXPAND, 5)
@@ -337,7 +337,7 @@ class CorrectionManagerDialog(wx.Dialog):
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
-        self.enable_toolbar_buttons(False)
+        self.enable_toolbar_buttons()
         self.populate_corrections_list()
 
     def quit_dialog(self, *_):
@@ -345,13 +345,22 @@ class CorrectionManagerDialog(wx.Dialog):
         self.Destroy()
         self.EndModal(0)
 
-    def enable_toolbar_buttons(self, state):
+    def enable_toolbar_buttons(self):
         """Control the state of all the buttons in toolbar on the right side."""
-        for b in [
-            self.save_button,
-            self.delete_button,
-        ]:
-            b.Enable(bool(state))
+        if (
+            self.regex.GetValue()
+            and self.rotation.GetValue()
+            and self.offset_x.GetValue()
+            and self.offset_y.GetValue()
+        ):
+            self.save_button.Enable(True)
+        else:
+            self.save_button.Enable(False)
+
+        if self.corrections_list.GetSelectedRow() != wx.NOT_FOUND:
+            self.delete_button.Enable(True)
+        else:
+            self.delete_button.Enable(False)
 
     def to_float(self, value):
         """Convert the given value to a float, return 0 if convertion fails."""
@@ -374,8 +383,21 @@ class CorrectionManagerDialog(wx.Dialog):
         self.corrections_list.DeleteAllItems()
         for regex, rotation, offset in self.parent.library.get_all_correction_data():
             self.corrections_list.AppendItem(
-                [str(regex), str(rotation), str(offset[0]), str(offset[1])]
+                [
+                    str(regex),
+                    str(rotation),
+                    self.str_from_float(offset[0]),
+                    self.str_from_float(offset[1])
+                ]
             )
+        selected_row = None
+        if self.selection_regex is not None:
+            for row in range(self.corrections_list.GetItemCount()):
+                row_regex = self.corrections_list.GetTextValue(row, 0)
+                if row_regex == self.selection_regex:
+                    selected_row = row
+            if selected_row is not None:
+                self.corrections_list.SelectRow(selected_row)
 
     def save_correction(self, *_):
         """Add/Update a correction in the database."""
@@ -385,14 +407,90 @@ class CorrectionManagerDialog(wx.Dialog):
         offset_y = self.to_float(self.offset_y.GetValue())
         offset = (offset_x, offset_y)
         if regex == self.selection_regex:
+            # the regex of the selection was not changed, just update values.
             self.parent.library.update_correction_data(regex, rotation, offset)
-            self.selection_regex = None
-        elif self.selection_regex is None:
-            self.parent.library.insert_correction_data(regex, rotation, offset)
         else:
-            self.parent.library.delete_correction_data(self.selection_regex)
-            self.parent.library.insert_correction_data(regex, rotation, offset)
-            self.selection_regex = None
+            # regex was modified or nothing was selected.
+            # Check if there is a existing rule for that regex
+            row_of_that_regex = None
+            for row in range(self.corrections_list.GetItemCount()):
+                row_regex = self.corrections_list.GetTextValue(row, 0)
+                if row_regex == regex:
+                    row_of_that_regex = row
+
+            if row_of_that_regex is None:
+                # the regex is a new one, just create it or update the selected entry
+
+                if self.selection_regex is not None:
+                    # remove old line, if one existed
+                    self.parent.library.delete_correction_data(self.selection_regex)
+
+                # Add the modified regex and values
+                self.parent.library.insert_correction_data(regex, rotation, offset)
+                self.selection_regex = regex
+            else:
+                # The regex already exists.
+                existing_rotation = int(
+                    self.to_float(self.corrections_list.GetTextValue(row, 1))
+                )
+                existing_offset_x = self.to_float(
+                    self.corrections_list.GetTextValue(row, 2)
+                )
+                existing_offset_y = self.to_float(
+                    self.corrections_list.GetTextValue(row, 3)
+                )
+
+                if (
+                    rotation == existing_rotation
+                    and offset_x == existing_offset_x
+                    and offset_y == existing_offset_y
+                ):
+                    # User entered a regex that already exists, just select that one
+                    self.selection_regex = regex
+                else:
+                    # The regex exists with different values, ask the user what to do.
+                    existing_correction = "({0}°, {1}/{2})".format(
+                        str(existing_rotation),
+                        self.str_from_float(existing_offset_x),
+                        self.str_from_float(existing_offset_y)
+                    )
+                    new_correction = "({0}°, {1}/{2})".format(
+                        str(rotation),
+                        str(offset_x),
+                        str(offset_y)
+                    )
+
+                    dialog = wx.MessageDialog(
+                        self,
+                        "A rule for '{0}' already exists!".format(regex),
+                        "Regex exists!",
+                        wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                    )
+                    if self.selection_regex is None:
+                        # The user entered a regex that already exists with different values.
+                        dialog.ExtendedMessage = \
+                            "Do you want to update the corrections {0} to {1}?".format(
+                                existing_correction,
+                                new_correction
+                            )
+                    else:
+                        # The user has selected regex_a, changed it to regex_b
+                        # (but regex_b exists).
+                        dialog.ExtendedMessage = \
+                            "Do you want to replace the corrections {0} with {1},\n" \
+                            "removing the rule for '{2}'?".format(
+                                existing_correction,
+                                new_correction,
+                                self.selection_regex
+                            )
+                    result = dialog.ShowModal()
+
+                    if result == wx.ID_YES:
+                        if self.selection_regex is not None:
+                            self.parent.library.delete_correction_data(self.selection_regex)
+                        self.parent.library.update_correction_data(regex, rotation, offset)
+                        self.selection_regex = regex
+
         self.rotation.SetValue(str(rotation))
         self.offset_x.SetValue(self.str_from_float(offset_x))
         self.offset_y.SetValue(self.str_from_float(offset_y))
@@ -410,14 +508,20 @@ class CorrectionManagerDialog(wx.Dialog):
         self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
-    def on_correction_selected(self, *_):
+    def on_correction_selected(self, event):
         """Enable the toolbar buttons when a selection was made."""
+        if len(self.corrections_list.GetSelections()) > 1:
+            items = [self.corrections_list.GetCurrentItem()]
+            for item in self.corrections_list.GetSelections():
+                if item != event.GetItem():
+                    self.corrections_list.Unselect(item)
+
         if self.corrections_list.GetSelectedItemsCount() > 0:
-            self.enable_toolbar_buttons(True)
             item = self.corrections_list.GetSelection()
             row = self.corrections_list.ItemToRow(item)
             if row == -1:
                 return
+
             self.selection_regex = self.corrections_list.GetTextValue(row, 0)
             self.selection_rotation = int(
                 self.to_float(self.corrections_list.GetTextValue(row, 1))
@@ -433,20 +537,14 @@ class CorrectionManagerDialog(wx.Dialog):
             self.offset_x.SetValue(self.str_from_float(self.selection_offset_x))
             self.offset_y.SetValue(self.str_from_float(self.selection_offset_y))
         else:
+            self.selection_row = None
             self.selection_regex = None
-            self.enable_toolbar_buttons(False)
+
+        self.enable_toolbar_buttons()
 
     def on_textfield_change(self, *_):
-        """Check if the Add button should be activated."""
-        if (
-            self.regex.GetValue()
-            and self.rotation.GetValue()
-            and self.offset_x.GetValue()
-            and self.offset_y.GetValue()
-        ):
-            self.enable_toolbar_buttons(True)
-        else:
-            self.enable_toolbar_buttons(False)
+        """Check if the texfield change affects toolbars."""
+        self.enable_toolbar_buttons()
 
     def on_global_corrections_changed(self, use_global):
         """Switch between global or local correction database file."""
