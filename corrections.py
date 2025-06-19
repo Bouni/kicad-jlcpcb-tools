@@ -449,40 +449,38 @@ class CorrectionManagerDialog(wx.Dialog):
                     self.selection_regex = regex
                 else:
                     # The regex exists with different values, ask the user what to do.
-                    existing_correction = "({0}°, {1}/{2})".format(
-                        str(existing_rotation),
-                        self.str_from_float(existing_offset_x),
-                        self.str_from_float(existing_offset_y)
-                    )
-                    new_correction = "({0}°, {1}/{2})".format(
-                        str(rotation),
-                        str(offset_x),
-                        str(offset_y)
-                    )
+                    existing_correction = "(" + \
+                        str(existing_rotation) + "°, " + \
+                        self.str_from_float(existing_offset_x) + "/" + \
+                        self.str_from_float(existing_offset_y) + \
+                        ")"
+                    new_correction = "(" + \
+                        str(rotation) + "°, " + \
+                        self.str_from_float(offset_x) + "/" + \
+                        self.str_from_float(offset_y) + \
+                        ")"
 
                     dialog = wx.MessageDialog(
                         self,
-                        "A rule for '{0}' already exists!".format(regex),
+                        f"A rule for '{regex}' already exists!",
                         "Regex exists!",
                         wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
                     )
                     if self.selection_regex is None:
                         # The user entered a regex that already exists with different values.
-                        dialog.ExtendedMessage = \
-                            "Do you want to update the corrections {0} to {1}?".format(
-                                existing_correction,
-                                new_correction
-                            )
+                        dialog.ExtendedMessage = "Do you want to update the corrections " + \
+                           existing_correction + \
+                           " to " + \
+                           new_correction
                     else:
                         # The user has selected regex_a, changed it to regex_b
                         # (but regex_b exists).
-                        dialog.ExtendedMessage = \
-                            "Do you want to replace the corrections {0} with {1},\n" \
-                            "removing the rule for '{2}'?".format(
-                                existing_correction,
-                                new_correction,
-                                self.selection_regex
-                            )
+                        dialog.ExtendedMessage = "Do you want to replace the corrections " + \
+                           existing_correction + \
+                           " with " + \
+                           new_correction + \
+                           ",\n" + \
+                           f"removing the rule for '{self.selection_regex}'?"
                     result = dialog.ShowModal()
 
                     if result == wx.ID_YES:
@@ -511,7 +509,6 @@ class CorrectionManagerDialog(wx.Dialog):
     def on_correction_selected(self, event):
         """Enable the toolbar buttons when a selection was made."""
         if len(self.corrections_list.GetSelections()) > 1:
-            items = [self.corrections_list.GetCurrentItem()]
             for item in self.corrections_list.GetSelections():
                 if item != event.GetItem():
                     self.corrections_list.Unselect(item)
