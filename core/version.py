@@ -1,11 +1,14 @@
 """Contains helper function used all over the plugin."""
 
+import re
+
 from packaging.version import Version
 
 
 def _is_version_in_range(version: str, min_version: str, max_version: str) -> bool:
     """Check if version is in range. Must comply with https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers."""
-    ver = Version(version)
+    # Remove any trailing '.fc42', '+gXXXX', or similar after the first long segment
+    ver = Version(re.sub(r"([^-]+(?:-[^-]+)*)-.*", r"\1", version))
     return Version(min_version) <= ver < Version(max_version)
 
 
