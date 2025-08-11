@@ -166,16 +166,16 @@ class PartDetailsDialog(wx.Dialog):
 
     def savepdf(self, *_):
         """Download a datasheet from The LCSC API."""
-        if self.pdfurl != None:
-           filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
-           self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
-           self.datasheet_path.mkdir(parents=True, exist_ok=True)
-           result = self.lcsc_api.download_datasheet(
-               self.pdfurl, self.datasheet_path / filename
-           )
-           title = "Success" if result["success"] else "Error"
-           style = "info" if result["success"] else "error"
-           resultMsg = result["msg"]
+        if self.pdfurl is not None:
+            filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
+            self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
+            self.datasheet_path.mkdir(parents=True, exist_ok=True)
+            result = self.lcsc_api.download_datasheet(
+                self.pdfurl, self.datasheet_path / filename
+            )
+            title = "Success" if result["success"] else "Error"
+            style = "info" if result["success"] else "error"
+            resultMsg = result["msg"]
         else:
             title = "Error"
             style = "error"
