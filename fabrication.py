@@ -395,8 +395,8 @@ class Fabrication:
         )
 
     def get_part_consistency_warnings(self) -> str:
-        """
-        Check the plausibility of the parts, there should be just one value per LCSC number.
+        """Check the plausibility of the parts, there should be just one value per LCSC number.
+
         Returns an empty sting if all parts are ok, otherwise a otherwise a overview of parts that share a LCSC number but have different values.
         """
         lcsc_numbers = {}
