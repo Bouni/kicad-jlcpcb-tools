@@ -166,19 +166,25 @@ class PartDetailsDialog(wx.Dialog):
 
     def savepdf(self, *_):
         """Download a datasheet from The LCSC API."""
-        filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
-        self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
-        self.datasheet_path.mkdir(parents=True, exist_ok=True)
-        result = self.lcsc_api.download_datasheet(
-            self.pdfurl, self.datasheet_path / filename
-        )
-        title = "Success" if result["success"] else "Error"
-        style = "info" if result["success"] else "error"
+        if self.pdfurl is not None:
+            filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
+            self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
+            self.datasheet_path.mkdir(parents=True, exist_ok=True)
+            result = self.lcsc_api.download_datasheet(
+                self.pdfurl, self.datasheet_path / filename
+            )
+            title = "Success" if result["success"] else "Error"
+            style = "info" if result["success"] else "error"
+            resultMsg = result["msg"]
+        else:
+            title = "Error"
+            style = "error"
+            resultMsg = "Undefined URL for datasheet download"
         wx.PostEvent(
             self.parent,
             MessageEvent(
                 title=title,
-                text=result["msg"],
+                text=resultMsg,
                 style=style,
             ),
         )
