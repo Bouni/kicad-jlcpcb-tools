@@ -394,8 +394,11 @@ class Fabrication:
             "Finished generating BOM file %s", os.path.join(self.outputdir, bomname)
         )
 
-    def check_plausibility(self) -> str:
-        """Check the plausibility of the parts, there should be just one value per LCSC number."""
+    def get_part_consistency_warnings(self) -> str:
+        """
+        Check the plausibility of the parts, there should be just one value per LCSC number.
+        Returns an empty sting if all parts are ok, otherwise a otherwise a overview of parts that share a LCSC number but have different values.
+        """
         lcsc_numbers = {}
         for item in self.parent.store.read_bom_parts():
             if not item["lcsc"]:

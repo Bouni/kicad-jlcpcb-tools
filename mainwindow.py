@@ -965,7 +965,7 @@ class JLCPCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
-        warnings = self.fabrication.check_plausibility()
+        warnings = self.fabrication.get_part_consistency_warnings()
         if warnings:
             result = wx.MessageBox(
                 "There are items with identical LCSC number but different values in the list:\n"
