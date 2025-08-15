@@ -135,10 +135,14 @@ def set_lcsc_value(fp, lcsc: str):
 
 
 def get_valid_footprints(board):
-    """Get all footprints that have a valid reference (drop all REF**)."""
+    """Get all footprints that have a valid reference.
+
+    Drop all REF** for example
+    Drop kibuzzard footprints (length check)
+    """
     footprints = []
     for fp in board.GetFootprints():
-        if re.match(r"\w+\d+", fp.GetReference()):
+        if re.match(r"[\w\d-]+", fp.GetReference()) and len(fp.GetReference()) < 8:
             footprints.append(fp)
     return footprints
 
