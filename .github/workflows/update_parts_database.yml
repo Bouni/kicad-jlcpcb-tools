@@ -47,23 +47,11 @@ jobs:
           echo "============================================================================================================================="
 
           cd db_build
-          mkdir -p db_working
-          cd db_working
 
-          wget -q https://yaqwsx.github.io/jlcparts/data/cache.zip
+          # fetch the cached database
+          python3 jlcparts_db_convert.py --fetch-parts-db --skip-generate
 
-          VOLUMES=$(7z l cache.zip | grep "Volume Index = " | grep -Eoh "[0-9]+")
-
-          for seq in $(seq 1 $VOLUMES); do
-            CACHE=$(printf '%02d' $seq)
-            wget -q https://yaqwsx.github.io/jlcparts/data/cache.z$CACHE || true
-          done
-
-          7z x cache.zip
-          rm -rf cache.z*
-
-          ls -lah
-          cd ..
+          ls -lah db_working/
 
           # Print the current disk usage, might help with future "no disk space left" issues
           echo "============================================================================================================================="
