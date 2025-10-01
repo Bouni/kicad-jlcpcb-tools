@@ -15,6 +15,8 @@ from .helpers import (
     get_lcsc_value,
     get_valid_footprints,
     natural_sort_collation,
+    get_dnp_value,
+    should_exclude_from_bom_or_pos,
 )
 
 
@@ -171,14 +173,26 @@ class Store:
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
         for fp in get_valid_footprints(self.board):
+            # Check DNP parameter and auto-set exclude flags
+            dnp_detected = get_dnp_value(fp)
+            exclude_from_bom = get_exclude_from_bom(fp) or dnp_detected
+            exclude_from_pos = get_exclude_from_pos(fp) or dnp_detected
+            
             board_part = {
                 "reference": fp.GetReference(),
                 "value": fp.GetValue(),
                 "footprint": str(fp.GetFPID().GetLibItemName()),
                 "lcsc": get_lcsc_value(fp),
-                "exclude_from_bom": get_exclude_from_bom(fp),
-                "exclude_from_pos": get_exclude_from_pos(fp),
+                "exclude_from_bom": exclude_from_bom,
+                "exclude_from_pos": exclude_from_pos,
             }
+            
+            # Log DNP detection for user awareness
+            if dnp_detected:
+                self.logger.info(
+                    "Component %s has DNP parameter set - automatically excluding from BOM and POS",
+                    fp.GetReference()
+                )
             db_part = self.get_part(board_part["reference"])
             # if part is not in the database yet, create it
             if not db_part:
