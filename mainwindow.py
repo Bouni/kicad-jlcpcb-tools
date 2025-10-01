@@ -13,7 +13,6 @@ import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
-from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
 from .derive_params import params_for_part
 from .events import (
@@ -47,6 +46,7 @@ from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
+from .rotations import RotationManagerDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
@@ -56,7 +56,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 ID_GENERATE = 0
 ID_LAYERS = 1
-ID_CORRECTIONS = 2
+ID_ROTATIONS = 2
 ID_MAPPINGS = 3
 ID_DOWNLOAD = 4
 ID_SETTINGS = 5
@@ -73,7 +73,6 @@ ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
-ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 ID_CONTEXT_MENU_FIND_MAPPING = wx.NewIdRef()
@@ -185,11 +184,11 @@ class JLCPCBTools(wx.Dialog):
 
         self.upper_toolbar.AddStretchableSpace()
 
-        self.correction_button = self.upper_toolbar.AddTool(
-            ID_CORRECTIONS,
-            "Corrections",
+        self.rotation_button = self.upper_toolbar.AddTool(
+            ID_ROTATIONS,
+            "Rotations",
             loadBitmapScaled("mdi-format-rotate-90.png", self.scale_factor),
-            "Manage part corrections",
+            "Manage part rotations",
         )
 
         self.mapping_button = self.upper_toolbar.AddTool(
@@ -218,7 +217,7 @@ class JLCPCBTools(wx.Dialog):
         self.upper_toolbar.Realize()
 
         self.Bind(wx.EVT_TOOL, self.generate_fabrication_data, self.generate_button)
-        self.Bind(wx.EVT_TOOL, self.manage_corrections, self.correction_button)
+        self.Bind(wx.EVT_TOOL, self.manage_rotations, self.rotation_button)
         self.Bind(wx.EVT_TOOL, self.manage_mappings, self.mapping_button)
         self.Bind(wx.EVT_TOOL, self.update_library, self.download_button)
         self.Bind(wx.EVT_TOOL, self.manage_settings, self.settings_button)
@@ -380,11 +379,7 @@ class JLCPCBTools(wx.Dialog):
             "Ref", 0, width=50, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         value = self.footprint_list.AppendTextColumn(
-            "Value (Name)",
-            1,
-            width=150,
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
+            "Value", 1, width=150, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         footprint = self.footprint_list.AppendTextColumn(
             "Footprint",
@@ -415,12 +410,8 @@ class JLCPCBTools(wx.Dialog):
         pos = self.footprint_list.AppendIconTextColumn(
             "POS", 7, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
-        correction = self.footprint_list.AppendTextColumn(
-            "Correction",
-            8,
-            width=120,
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
+        rotation = self.footprint_list.AppendTextColumn(
+            "Rotation", 8, width=70, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
         side = self.footprint_list.AppendIconTextColumn(
             "Side", 9, width=50, mode=dv.DATAVIEW_CELL_INERT
@@ -434,7 +425,7 @@ class JLCPCBTools(wx.Dialog):
         stock.SetSortable(True)
         bom.SetSortable(True)
         pos.SetSortable(False)
-        correction.SetSortable(True)
+        rotation.SetSortable(True)
         side.SetSortable(True)
         params.SetSortable(True)
 
@@ -536,11 +527,8 @@ class JLCPCBTools(wx.Dialog):
         """Destroy dialog on close."""
         self.logger.info("quit_dialog()")
         root = logging.getLogger()
-        try:
-            root.removeHandler(self.logging_handler1)
-            root.removeHandler(self.logging_handler2)
-        except AttributeError:
-            pass
+        root.removeHandler(self.logging_handler1)
+        root.removeHandler(self.logging_handler2)
 
         self.Destroy()
         self.EndModal(0)
@@ -640,18 +628,14 @@ class JLCPCBTools(wx.Dialog):
     def get_correction(self, part: dict, corrections: list) -> str:
         """Try to find correction data for a given part."""
         # First check if the part name matches
-        for regex, rotation, offset in corrections:
+        for regex, correction in corrections:
             if re.search(regex, str(part["reference"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (ref)"
-        # Then try to match by value
-        for regex, rotation, offset in corrections:
-            if re.search(regex, str(part["value"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (val)"
-        # If there was no match for the part name or value, check if the package matches
-        for regex, rotation, offset in corrections:
+                return str(correction)
+        # If there was no match for the part name, check if the package matches
+        for regex, correction in corrections:
             if re.search(regex, str(part["footprint"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (fpt)"
-        return "0°, 0.0/0.0"
+                return str(correction)
+        return "0"
 
     def populate_footprint_list(self, *_):
         """Populate list of footprints."""
@@ -859,9 +843,9 @@ class JLCPCBTools(wx.Dialog):
         """Update the library from the JLCPCB CSV file."""
         self.library.update()
 
-    def manage_corrections(self, *_):
-        """Manage corrections."""
-        CorrectionManagerDialog(self, "").ShowModal()
+    def manage_rotations(self, *_):
+        """Manage rotation corrections."""
+        RotationManagerDialog(self, "").ShowModal()
 
     def manage_mappings(self, *_):
         """Manage footprint mappings."""
@@ -909,95 +893,112 @@ class JLCPCBTools(wx.Dialog):
             m = re.search(r"_(\d+)_\d+Metric", footprint)
             if m:
                 value += f" {m.group(1)}"
-            selection[ref] = value
+            #Update    
+            #selection[ref] = value
+            #Added so that PART NUMBER - MPN - LCSC are the default in the search 
+            selection[ref] = self._keyword_from_part_number(ref, value)
         PartSelectorDialog(self, selection).ShowModal()
+#Update        
+#Added so that PART NUMBER - MPN - LCSC are the default in the search       
+    def _keyword_from_part_number(self, ref: str, fallback: str) -> str:
+        """
+        Pré-remplit la recherche avec (priorité) :
+        1) PART NUMBER
+        2) MPN (Manufacturer Part Number)
+        3) LCSC (Cxxxxx)
+        4) fallback (Value)
+        """
 
-    def count_order_number_placeholders(self):
-        """Count the JLC order/serial number placeholders."""
-        count = 0
-        for drawing in self.pcbnew.GetBoard().GetDrawings():
-            if drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or drawing.IsOnLayer(
-                kicad_pcbnew.B_SilkS
-            ):
-                if isinstance(drawing, kicad_pcbnew.PCB_TEXT):
-                    if drawing.GetText().strip() == "JLCJLCJLCJLC":
-                        self.logger.info(
-                            "Found placeholder for order number at %.1f/%.1f.",
-                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
-                        )
-                        count += 1
+        import re
 
-                if (
-                    isinstance(drawing, kicad_pcbnew.PCB_SHAPE)
-                    and drawing.GetShape() == kicad_pcbnew.S_RECT
-                    and drawing.IsFilled()
-                ):
-                    corners = drawing.GetRectCorners()
+        board = self.pcbnew.GetBoard()
+        fp = board.FindFootprintByReference(ref)
+        if not fp:
+            return fallback
 
-                    top_left_x = min([p.x for p in corners], default=0)
-                    top_left_y = min([p.y for p in corners], default=0)
-                    bottom_right_x = max([p.x for p in corners], default=0)
-                    bottom_right_y = max([p.y for p in corners], default=0)
-                    width = kicad_pcbnew.ToMM(bottom_right_x - top_left_x)
-                    height = kicad_pcbnew.ToMM(bottom_right_y - top_left_y)
+        # --- utilitaire : lecture d’un champ footprint, insensible à la casse ---
+        def get_field(fp_obj, keys_lower):
+            # KiCad 8/9 : champs structurés
+            try:
+                for field in fp_obj.GetFields():
+                    name = (field.GetName() or "").strip().lower()
+                    if name in keys_lower:
+                        txt = (field.GetText() or "").strip()
+                        if txt:
+                            return txt
+            except AttributeError:
+                # KiCad ≤7 : propriétés key/value
+                props = getattr(fp_obj, "GetProperties", lambda: {})()
+                for k, v in props.items():
+                    name = (k or "").strip().lower()
+                    if name in keys_lower:
+                        txt = (v or "").strip()
+                        if txt:
+                            return txt
+            return ""
 
-                    if (
-                        (width == 5 and height == 5)
-                        or (width == 8 and height == 8)
-                        or (width == 10 and height == 10)
-                    ):
-                        self.logger.info(
-                            "Found placeholder for 2D barcode (%dmm x %dmm) at %.1f/%.1f.",
-                            width,
-                            height,
-                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
-                        )
-                        count += 1
+        # Listes de noms de champs possibles (ajoutez vos variantes si besoin)
+        keys_partnumber = {"part number", "part_number", "pn"}
+        keys_mpn        = {"mpn", "mfr_part_number", "manufacturer_part_number"}
+        keys_lcsc       = {"lcsc", "jlc", "jlcpcb", "jlc_part", "lcsc_part", "lcsc#"}
 
-                    if (width == 10 and height == 2) or (width == 2 and height == 10):
-                        self.logger.info(
-                            "Found placeholder for serial number at %.1f/%.1f.",
-                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
-                        )
-                        count += 1
+        # 1) PART NUMBER (prioritaire)
+        pn = get_field(fp, keys_partnumber)
+        if pn:
+            # Si le champ contient plusieurs infos, essaye d’en extraire MPN ou un LCSC
+            m = re.search(r"\bMPN\s*[:=]?\s*([A-Za-z0-9._/\-]+)\b", pn, flags=re.IGNORECASE)
+            if m and m.group(1):
+                return m.group(1).strip()
+            m = re.search(r"\bC\d+\b", pn, flags=re.IGNORECASE)  # LCSC au milieu du texte
+            if m:
+                return m.group(0).upper()
+            # Sinon renvoyer tel quel
+            return pn
 
-        return count
+        # 2) MPN
+        mpn = get_field(fp, keys_mpn)
+        if mpn:
+            return mpn
+
+        # 3) LCSC (normaliser en Cxxxxx si possible)
+        lcsc = get_field(fp, keys_lcsc)
+        if lcsc:
+            m = re.search(r"\bC\d+\b", lcsc, flags=re.IGNORECASE)
+            return m.group(0).upper() if m else lcsc
+
+        # 4) fallback = Value
+        return fallback
+
+    
+
+    def check_order_number(self):
+        """Verify that the JLC order number placeholder is present."""
+        try:
+            # We open with errors="replace because we're only interested in the occurance of the JLC magic string"
+            with open(self.pcbnew.GetBoard().GetFileName(), errors="replace") as f:
+                data = f.read()
+                return "JLCJLCJLCJLC" in data
+        except OSError:
+            pass
+        except UnicodeDecodeError:
+            self.logger.debug(
+                "Failed to check JLC order number due to UnicodeDecodeError"
+            )
+        return True
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
-        warnings = self.fabrication.get_part_consistency_warnings()
-        if warnings:
+        if (
+            self.settings.get("general", {}).get("order_number")
+            and not self.check_order_number()
+        ):
             result = wx.MessageBox(
-                "There are items with identical LCSC number but different values in the list:\n"
-                + warnings
-                + "Continue?",
-                "Plausibility check",
+                "JLC order number placeholder not present! Continue?",
+                "JLC order number placeholder",
                 wx.OK | wx.CANCEL | wx.CENTER,
             )
-            if result == wx.CANCEL:
+            if result == wx.ID_CANCEL:
                 return
-
-        if self.settings.get("general", {}).get("order_number"):
-            count = self.count_order_number_placeholders()
-            if count == 0:
-                result = wx.MessageBox(
-                    "JLC order/serial number placeholder not present! Continue?",
-                    "JLC order/serial number placeholder",
-                    wx.OK | wx.CANCEL | wx.CENTER,
-                )
-                if result == wx.CANCEL:
-                    return
-            elif count > 1:
-                result = wx.MessageBox(
-                    "Multiple order/serial number placeholders present! Continue?",
-                    "JLC order/serial number placeholder",
-                    wx.OK | wx.CANCEL | wx.CENTER,
-                )
-                if result == wx.CANCEL:
-                    return
         self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
         number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
@@ -1036,22 +1037,15 @@ class JLCPCBTools(wx.Dialog):
                     )
                     self.store.set_lcsc(reference, lcsc)
 
-    def add_correction(self, e):
-        """Add part correction for the current part."""
+    def add_rotation(self, e):
+        """Add part rotation for the current part."""
         for item in self.footprint_list.GetSelections():
-            if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
-                if reference := self.partlist_data_model.get_reference(item):
-                    CorrectionManagerDialog(
-                        self, "^" + re.escape(reference) + "$"
-                    ).ShowModal()
-            elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
+            if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
                 if footprint := self.partlist_data_model.get_footprint(item):
-                    CorrectionManagerDialog(
-                        self, "^" + re.escape(footprint)
-                    ).ShowModal()
+                    RotationManagerDialog(self, "^" + re.escape(footprint)).ShowModal()
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
-                    CorrectionManagerDialog(self, re.escape(value)).ShowModal()
+                    RotationManagerDialog(self, re.escape(value)).ShowModal()
 
     def save_all_mappings(self, *_):
         """Save all mappings."""
@@ -1076,7 +1070,7 @@ class JLCPCBTools(wx.Dialog):
             "KiCad V6 Schematics (*.kicad_sch)|*.kicad_sch",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
         ) as openFileDialog:
-            if openFileDialog.ShowModal() == wx.CANCEL:
+            if openFileDialog.ShowModal() == wx.ID_CANCEL:
                 return
             paths = openFileDialog.GetPaths()
             SchematicExport(self).load_schematic(paths)
@@ -1133,27 +1127,19 @@ class JLCPCBTools(wx.Dialog):
         right_click_menu.Append(paste_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
-        correction_by_reference = wx.MenuItem(
-            right_click_menu,
-            ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE,
-            "Add Correction by reference",
-        )
-        right_click_menu.Append(correction_by_reference)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_reference)
-
-        correction_by_package = wx.MenuItem(
+        rotation_by_package = wx.MenuItem(
             right_click_menu,
             ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE,
-            "Add Correction by package",
+            "Add Rotation by package",
         )
-        right_click_menu.Append(correction_by_package)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_package)
+        right_click_menu.Append(rotation_by_package)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_rotation, rotation_by_package)
 
-        correction_by_name = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Correction by name"
+        rotation_by_name = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_NAME, "Add Rotation by name"
         )
-        right_click_menu.Append(correction_by_name)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
+        right_click_menu.Append(rotation_by_name)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_rotation, rotation_by_name)
 
         find_mapping = wx.MenuItem(
             right_click_menu, ID_CONTEXT_MENU_FIND_MAPPING, "Find LCSC from Mappings"
@@ -1173,26 +1159,21 @@ class JLCPCBTools(wx.Dialog):
     def init_logger(self):
         """Initialize logger to log into textbox."""
         root = logging.getLogger()
-        # Clear any existing handlers that might be problematic
-        root.handlers.clear()
         root.setLevel(logging.DEBUG)
-
+        # Log to stderr
+        self.logging_handler1 = logging.StreamHandler(sys.stderr)
+        self.logging_handler1.setLevel(logging.DEBUG)
+        # and to our GUI
+        self.logging_handler2 = LogBoxHandler(self)
+        self.logging_handler2.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(funcName)s -  %(message)s",
             datefmt="%Y.%m.%d %H:%M:%S",
         )
-        # Only add stderr handler if stderr is available
-        if sys.stderr is not None:
-            self.logging_handler1 = logging.StreamHandler(sys.stderr)
-            self.logging_handler1.setLevel(logging.DEBUG)
-            self.logging_handler1.setFormatter(formatter)
-            root.addHandler(self.logging_handler1)
-
-        self.logging_handler2 = LogBoxHandler(self)
-        self.logging_handler2.setLevel(logging.DEBUG)
+        self.logging_handler1.setFormatter(formatter)
         self.logging_handler2.setFormatter(formatter)
+        root.addHandler(self.logging_handler1)
         root.addHandler(self.logging_handler2)
-
         self.logger = logging.getLogger(__name__)
 
     def __del__(self):
@@ -1207,7 +1188,7 @@ class LogBoxHandler(logging.StreamHandler):
         logging.StreamHandler.__init__(self)
         self.event_destination = event_destination
 
-    def emit(self, record):
+    def emit(self, record):  # noqa: DC04
         """Marshal the event over to the main thread."""
         msg = self.format(record)
         wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
