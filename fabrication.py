@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 from zipfile import ZIP_DEFLATED, ZipFile
+from .library import Library
 
 from pcbnew import (  # pylint: disable=import-error
     EXCELLON_WRITER,
@@ -354,11 +355,13 @@ class Fabrication:
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
+        library = Library(self)
+
         with open(
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
-            writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
+            writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity","MRFPart"])
             for part in self.parent.store.read_bom_parts():
                 components = part["refs"].split(",")
                 for component in components:
@@ -387,6 +390,7 @@ class Fabrication:
                         part["refs"],
                         part["footprint"],
                         part["lcsc"],
+                        library.get_part_details(part["lcsc"]).get("MFR.Part","UNKNOWN") if part["lcsc"] else "UNKNOWN",
                         len(components),
                     ]
                 )
