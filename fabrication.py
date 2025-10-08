@@ -349,13 +349,12 @@ class Fabrication:
             "Finished generating CPL file %s", os.path.join(self.outputdir, cplname)
         )
 
-    def generate_bom(self):
+    def generate_bom(self,library):
         """Generate BOM file."""
         bomname = f"BOM-{Path(self.filename).stem}.csv"
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
-        library = Library(self)
 
         with open(
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
@@ -384,13 +383,19 @@ class Fabrication:
                         component,
                     )
                     continue
+                if not part["lcsc"]:
+                    self.logger.warning(
+                        "Component %s has no LCSC number assigned: removing from BOM",
+                        component,
+                    )
+                    continue
                 writer.writerow(
                     [
                         part["value"],
                         part["refs"],
                         part["footprint"],
                         part["lcsc"],
-                        library.get_part_details(part["lcsc"]).get("MFR.Part","UNKNOWN") if part["lcsc"] else "UNKNOWN",
+                        library.get_part_details(part["lcsc"]).get("part_no", ""),  # MRFPart
                         len(components),
                     ]
                 )
