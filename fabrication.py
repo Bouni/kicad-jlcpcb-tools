@@ -119,9 +119,12 @@ class Fabrication:
                 rotation = original / 10
             if footprint.GetLayer() != 0:
                 # bottom angles need to be mirrored on Y-axis
-                rotation = (rotation - 180) % 360
+                rotation = (180 - rotation) % 360
             offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(offset[1]) * math.sin(math.radians(rotation))
-            offset_y = FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
+            offset_y = - FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
+            if footprint.GetLayer() != 0:
+                # mirrored coordinate system needs to be taken into account on the bottom
+                offset_x = -offset_x
             self.logger.info(
                 "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
                 footprint.GetReference(),
