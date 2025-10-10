@@ -538,6 +538,9 @@ class JLCPCBTools(wx.Dialog):
         root = logging.getLogger()
         try:
             root.removeHandler(self.logging_handler1)
+        except AttributeError:
+            pass
+        try:
             root.removeHandler(self.logging_handler2)
         except AttributeError:
             pass
