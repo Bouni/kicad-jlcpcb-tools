@@ -3,8 +3,8 @@
 import csv
 from importlib import import_module
 import logging
-import os
 import math
+import os
 from pathlib import Path
 import re
 from zipfile import ZIP_DEFLATED, ZipFile
