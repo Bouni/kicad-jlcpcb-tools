@@ -185,7 +185,9 @@ class Generate:
 
         self.part_count = 0
         print("Reading components")
-        res = self.conn_jp.execute("SELECT * FROM components")
+        res = self.conn_jp.execute(
+            "SELECT lcsc, category_id, mfr, package, joints, manufacturer_id, basic, description, datasheet, stock, price, extra FROM components"
+        )
         while True:
             comps = res.fetchmany(size=100000)
 
@@ -209,6 +211,17 @@ class Generate:
                         for entry in price
                     ]
                 )
+                
+                # Try to get description from extra field first
+                description = c[7]
+                if c[11]:
+                    try:
+                        extra = json.loads(c[11])
+                        if "description" in extra:
+                            description = extra["description"]
+                    except Exception:
+                        pass
+
                 row = (
                     f"C{c[0]}",  # LCSC Part
                     cats[c[1]][0],  # First Category
@@ -218,7 +231,7 @@ class Generate:
                     int(c[4]),  # Solder Joint
                     mans[c[5]],  # Manufacturer
                     "Basic" if c[6] else "Extended",  # Library Type
-                    c[7],  # Description
+                    description,  # Description
                     c[8],  # Datasheet
                     price_str,  # Price
                     str(c[9]),  # Stock
@@ -466,13 +479,14 @@ class JlcpcbFTS5(Generate):
         results = res.fetchone()
         print(f"{humanize.intcomma(results[0])} parts to import")
 
+        self.part_count = 0
+        print("Reading components")
+        res = self.conn_jp.execute(
+            "SELECT lcsc, category_id, mfr, package, joints, manufacturer_id, basic, description, datasheet, stock, price, extra FROM components"
+        )
         price_entries_total = 0
         price_entries_deleted_total = 0
         price_entries_duplicates_deleted_total = 0
-
-        self.part_count = 0
-        print("Reading components")
-        res = self.conn_jp.execute("SELECT * FROM components")
         while True:
             comps = res.fetchmany(size=100000)
 
@@ -528,7 +542,15 @@ class JlcpcbFTS5(Generate):
                     ]
                 )
 
+                # Try to get description from extra field first
                 description = c[7]
+                if c[11]:
+                    try:
+                        extra = json.loads(c[11])
+                        if "description" in extra:
+                            description = extra["description"]
+                    except Exception:
+                        pass
 
                 # strip ROHS out of descriptions where present
                 # and add 'not ROHS' where ROHS is not present
