@@ -3,6 +3,7 @@
 import csv
 from importlib import import_module
 import logging
+import math
 import os
 from pathlib import Path
 import re
@@ -108,6 +109,22 @@ class Fabrication:
     def reposition(self, footprint, position, offset):
         """Adjust the position of the footprint, returning the new position as a wxPoint."""
         if offset[0] != 0 or offset[1] != 0:
+            original = footprint.GetOrientation()
+            # `.AsRadians()` added in KiCAD 6.99
+            try:
+                rotation = original.AsDegrees()
+            except AttributeError:
+                # we need to divide by 10 to get 180 out of 1800 for example.
+                # This might be a bug in 5.99 / 6.0 RC
+                rotation = original / 10
+            if footprint.GetLayer() != 0:
+                # bottom angles need to be mirrored on Y-axis
+                rotation = (180 - rotation) % 360
+            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(offset[1]) * math.sin(math.radians(rotation))
+            offset_y = - FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
+            if footprint.GetLayer() != 0:
+                # mirrored coordinate system needs to be taken into account on the bottom
+                offset_x = -offset_x
             self.logger.info(
                 "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
                 footprint.GetReference(),
@@ -118,7 +135,7 @@ class Fabrication:
                 offset[1],
             )
             return wxPoint(
-                position.x + FromMM(offset[0]), position.y + FromMM(offset[1])
+                position.x + offset_x, position.y + offset_y
             )
         return position
 
