@@ -1,5 +1,6 @@
 """Contains the main window of the plugin."""
 
+from contextlib import suppress
 from datetime import datetime as dt
 import json
 import logging
@@ -536,14 +537,10 @@ class JLCPCBTools(wx.Dialog):
         """Destroy dialog on close."""
         self.logger.info("quit_dialog()")
         root = logging.getLogger()
-        try:
+        with suppress(AttributeError):
             root.removeHandler(self.logging_handler1)
-        except AttributeError:
-            pass
-        try:
+        with suppress(AttributeError):
             root.removeHandler(self.logging_handler2)
-        except AttributeError:
-            pass
 
         self.Destroy()
         self.EndModal(0)
