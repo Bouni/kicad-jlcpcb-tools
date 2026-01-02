@@ -199,21 +199,21 @@ To use the plugin in standlone mode you'll need to identify three pieces of info
 
 The <i><b>{KiCad python}</b></i> should be used, this can be found at different locations depending on your system:
 
-| OS | Kicad python |
-|---|---|
-|Mac| /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 |
-|Linux| /usr/bin/python3 |
-|Windows | C:\Program Files\KiCad\8.0\bin\python.exe |
+| OS     | Kicad python                                                                                |
+|--------|---------------------------------------------------------------------------------------------|
+|Mac     | /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 |
+|Linux   | /usr/bin/python3                                                                            |
+|Windows | C:\Program Files\KiCad\8.0\bin\python.exe                                                   |
 
 #### Working directory
 
 The <i><b>{working directory}</b></i> should be your plugins directory, ie:
 
-| OS | Working dir |
-|---|---|
-|Mac| ~/Documents/KiCad/<version>/scripting/plugins/ |
-|Linux| ~/.local/share/kicad/<version>/scripting/plugins/ |
-|Windows| %USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\ |
+| OS     | Working dir                                                |
+|--------|------------------------------------------------------------|
+|Mac     | ~/Documents/KiCad/<version>/scripting/plugins/             |
+|Linux   | ~/.local/share/kicad/<version>/scripting/plugins/          |
+|Windows | %USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\ |
 
 > [!NOTE]  
 > <version> can be 7.0, 8.0, or X.YY depending on the version you use
