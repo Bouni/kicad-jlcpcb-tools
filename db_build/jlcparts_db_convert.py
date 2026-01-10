@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from typing import Any
 import urllib.request
 import zipfile
 from zipfile import ZipFile
@@ -144,11 +145,33 @@ class Price:
 class Generate:
     """Base class for database generation."""
 
-    def __init__(self, output_db: Path, chunk_num: Path):
+    def __init__(self, output_db: Path, chunk_num: Path, skip_cleanup: bool = False):
         self.output_db = output_db
         self.jlcparts_db_name = "cache.sqlite3"
         self.compressed_output_db = f"{self.output_db}.zip"
         self.chunk_num = chunk_num
+        self.skip_cleanup = skip_cleanup
+
+    @staticmethod
+    def fix_description(row: sqlite3.Row) -> str:
+        """Fix description field."""
+        description = row["description"]
+        if row["extra"]:
+            try:
+                extra = json.loads(row["extra"])
+                if "description" in extra:
+                    description = extra["description"]
+            except Exception:
+                pass
+        return description
+
+    def create_tables(self):
+        """Create the tables in the output database."""
+        raise NotImplementedError("Subclasses must implement create_tables method")
+
+    def translate_row(self, c: sqlite3.Row) -> dict[str, any]:
+        """Translate a row from the jlcparts db into the plugin db format."""
+        raise NotImplementedError("Subclasses must implement translate_row method")
 
     def remove_original(self):
         """Remove the original output database."""
@@ -164,23 +187,26 @@ class Generate:
         # connection to the plugin db we want to write
         self.conn = sqlite3.connect(self.output_db)
 
-    def load_tables(self):
-        """Load the input data into the output database."""
-
-        # load the tables into memory
-        print("Reading manufacturers")
-        res = self.conn_jp.execute("SELECT * FROM manufacturers")
-        mans = dict(res.fetchall())
-
-        print("Reading categories")
+    def load_categories(self):
+        """Load categories from jlcparts db into memory."""
         res = self.conn_jp.execute("SELECT * FROM categories")
-        cats = {i: (c, sc) for i, c, sc in res.fetchall()}
+        self.categories = {i: (c, sc) for i, c, sc in res.fetchall()}
+
+    def load_manufacturers(self):
+        """Load manufacturers from jlcparts db into memory."""
+        res = self.conn_jp.execute("SELECT * FROM manufacturers")
+        self.manufacturers = dict(res.fetchall())
+
+    def load_components(self):
+        """Load the input data into the output database."""
 
         res = self.conn_jp.execute("select count(*) from components")
         results = res.fetchone()
         print(f"{humanize.intcomma(results[0])} parts to import")
 
         self.part_count = 0
+        self.conn_jp.row_factory = sqlite3.Row
+        self.conn.row_factory = sqlite3.Row
         print("Reading components")
         res = self.conn_jp.execute("""
             SELECT
@@ -197,62 +223,36 @@ class Generate:
                 price,
                 extra
             FROM components""")
-        while True:
-            comps = res.fetchmany(size=100000)
+        with click.progressbar(length=results[0], label="Importing parts") as bar:
+            while True:
+                comps = res.fetchmany(size=100000)
+                bar.update(len(comps))
 
-            print(f"Read {humanize.intcomma(len(comps))} parts")
+                # if we have no more parts exit out of the loop
+                if len(comps) == 0:
+                    break
 
-            # if we have no more parts exit out of the loop
-            if len(comps) == 0:
-                break
+                self.part_count += len(comps)
 
-            self.part_count += len(comps)
+                rows = []
+                for c in comps:
+                    row = self.translate_row(c)
+                    rows.append(row)
 
-            # now extract the data from the jlcparts db and fill
-            # it into the plugin database
-            print("Building parts rows to insert")
-            rows = []
-            for c in comps:
-                price = json.loads(c[10])
-                price_str = ",".join(
-                    [
-                        f"{entry.get('qFrom')}-{entry.get('qTo') if entry.get('qTo') is not None else ''}:{entry.get('price')}"
-                        for entry in price
-                    ]
+                # The column names have spaces, so map them to placeholders without spaces
+                data = rows[0]
+                columns = ", ".join([f'"{k}"' for k in data.keys()])
+                placeholders = ", ".join(
+                    [f":{k.replace(' ', '_').replace('.', '_')}" for k in data.keys()]
                 )
-
-                # default to 'description', override it with the 'description' property from
-                # 'extra' if it exists
-                description = c[7]
-                if c[11]:
-                    try:
-                        extra = json.loads(c[11])
-                        if "description" in extra:
-                            description = extra["description"]
-                    except Exception:
-                        pass
-
-                row = (
-                    f"C{c[0]}",  # LCSC Part
-                    cats[c[1]][0],  # First Category
-                    cats[c[1]][1],  # Second Category
-                    c[2],  # MFR.Part
-                    c[3],  # Package
-                    int(c[4]),  # Solder Joint
-                    mans[c[5]],  # Manufacturer
-                    "Basic" if c[6] else "Extended",  # Library Type
-                    description,  # Description
-                    c[8],  # Datasheet
-                    price_str,  # Price
-                    str(c[9]),  # Stock
+                newrows = [
+                    {k.replace(" ", "_").replace(".", "_"): v for k, v in row.items()}
+                    for row in rows
+                ]
+                self.conn.executemany(
+                    f"INSERT INTO parts ({columns}) VALUES ({placeholders})", newrows
                 )
-                rows.append(row)
-
-            print("Inserting into parts table")
-            self.conn.executemany(
-                "INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
-            )
-            self.conn.commit()
+                self.conn.commit()
 
         print("Done importing parts")
 
@@ -276,6 +276,29 @@ class Generate:
         """Close sqlite connections."""
         self.conn_jp.close()
         self.conn.close()
+
+    def post_build(self):
+        """Post build steps."""
+        pass
+
+    def build(self):
+        """Run all of the steps to generate the database files for upload."""
+        self.remove_original()
+        self.connect_sqlite()
+        self.create_tables()
+        self.load_categories()
+        self.load_manufacturers()
+        self.load_components()
+        self.post_build()
+        self.meta_data()
+        self.close_sqlite()
+        self.compress()
+        self.split()
+        self.display_stats()
+        if self.skip_cleanup:
+            print("Skipping cleanup")
+        else:
+            self.cleanup()
 
     def compress(self):
         """Compress the output database into a new compressed file."""
@@ -338,7 +361,52 @@ class Jlcpcb(Generate):
     def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db=output_db, chunk_num=chunk_num)
+        super().__init__(
+            output_db=output_db, chunk_num=chunk_num, skip_cleanup=skip_cleanup
+        )
+
+    def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
+        """Translate a row from the jlcparts db into the plugin db format."""
+        priceInput = json.loads(c["price"])
+
+        # parse the price field
+        price = Price(priceInput)
+
+        price_entries = Price.reduce_precision(price.price_entries)
+
+        price_str: str = ",".join(
+            [
+                f"{entry.min_quantity}-{entry.max_quantity if entry.max_quantity is not None else ''}:{entry.price_dollars_str}"
+                for entry in price_entries
+            ]
+        )
+
+        # default to 'description', override it with the 'description' property from
+        # 'extra' if it exists
+        description = c["description"]
+        if c["extra"]:
+            try:
+                extra = json.loads(c["extra"])
+                if "description" in extra:
+                    description = extra["description"]
+            except Exception:
+                pass
+
+        row = {
+            "LCSC Part": f"C{c['lcsc']}",  # LCSC Part
+            "First Category": self.categories[c["category_id"]][0],  # First Category
+            "Second Category": self.categories[c["category_id"]][1],  # Second Category
+            "MFR.Part": c["mfr"],  # MFR.Part
+            "Package": c["package"],  # Package
+            "Solder Joint": int(c["joints"]),  # Solder Joint
+            "Manufacturer": self.manufacturers[c["manufacturer_id"]],  # Manufacturer
+            "Library Type": "Basic" if c["basic"] else "Extended",  # Library Type
+            "Description": description,  # Description
+            "Datasheet": c["datasheet"],  # Datasheet
+            "Price": price_str,  # Price
+            "Stock": str(c["stock"]),  # Stock
+        }
+        return row
 
     def create_tables(self):
         """Create the tables in the output database."""
@@ -390,22 +458,6 @@ class Jlcpcb(Generate):
             """
         )
 
-    def build(self):
-        """Run all of the steps to generate the database files for upload."""
-        self.remove_original()
-        self.connect_sqlite()
-        self.create_tables()
-        self.load_tables()
-        self.meta_data()
-        self.close_sqlite()
-        self.compress()
-        self.split()
-        self.display_stats()
-        if self.skip_cleanup:
-            print("Skipping cleanup")
-        else:
-            self.cleanup()
-
 
 class JlcpcbFTS5(Generate):
     """FTS5 specific database generation."""
@@ -413,7 +465,14 @@ class JlcpcbFTS5(Generate):
     def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num_fts5.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db=output_db, chunk_num=chunk_num)
+        super().__init__(
+            output_db=output_db, chunk_num=chunk_num, skip_cleanup=skip_cleanup
+        )
+        self.stats = {
+            "price_entries_total": 0,
+            "price_entries_deleted_total": 0,
+            "price_entries_duplicates_deleted_total": 0,
+        }
 
     def create_tables(self):
         """Create tables."""
@@ -473,160 +532,92 @@ class JlcpcbFTS5(Generate):
             """
         )
 
-    def load_tables(self):
-        """Load the input data into the output database."""
+    def price_entry_to_str(self, price: Price) -> str:
+        price_entries = Price.reduce_precision(price.price_entries)
+        self.stats["price_entries_total"] += len(price_entries)
+        price_str: str = ""
 
-        # load the tables into memory
-        print("Reading manufacturers")
-        res = self.conn_jp.execute("SELECT * FROM manufacturers")
-        mans = dict(res.fetchall())
+        # filter parts priced below the cutoff value
+        price_entries_cutoff = Price.filter_below_cutoff(price_entries, 0.01)
+        self.stats["price_entries_deleted_total"] += len(price_entries) - len(
+            price_entries_cutoff
+        )
 
-        print("Reading categories")
-        res = self.conn_jp.execute("SELECT * FROM categories")
-        cats = {i: (c, sc) for i, c, sc in res.fetchall()}
+        # alias the variable for the next step
+        price_entries = price_entries_cutoff
 
-        res = self.conn_jp.execute("select count(*) from components")
-        results = res.fetchone()
-        print(f"{humanize.intcomma(results[0])} parts to import")
+        # remove duplicates
+        price_entries_unique = Price.filter_duplicate_prices(price_entries)
+        self.stats["price_entries_duplicates_deleted_total"] += len(
+            price_entries
+        ) - len(price_entries_unique)
+        self.stats["price_entries_deleted_total"] += len(price_entries) - len(
+            price_entries_unique
+        )
+        # alias over the variable for the next step
+        price_entries = price_entries_unique
+        # build the output string that is stored into the parts database
+        price_str = ",".join(
+            [
+                f"{entry.min_quantity}-{entry.max_quantity if entry.max_quantity is not None else ''}:{entry.price_dollars_str}"
+                for entry in price_entries
+            ]
+        )
+        return price_str
 
-        price_entries_total = 0
-        price_entries_deleted_total = 0
-        price_entries_duplicates_deleted_total = 0
+    def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
+        price_str = self.price_entry_to_str(Price(json.loads(c["price"])))
+        # default to 'description', override it with the 'description' property from
+        # 'extra' if it exists
+        description = self.fix_description(c)
+        # strip ROHS out of descriptions where present
+        # and add 'not ROHS' where ROHS is not present
+        # as 99% of parts are ROHS at this point
+        if " ROHS".lower() not in description.lower():
+            description += " not ROHS"
+        else:
+            description = description.replace(" ROHS", "")
 
-        self.part_count = 0
-        print("Reading components")
-        res = self.conn_jp.execute("""
-            SELECT
-                lcsc,
-                category_id,
-                mfr,
-                package,
-                joints,
-                manufacturer_id,
-                basic,
-                description,
-                datasheet,
-                stock,
-                price,
-                extra
-            FROM components""")
-        while True:
-            comps = res.fetchmany(size=100000)
+        second_category = self.categories[c["category_id"]][1]
+        # strip the 'Second category' out of the description if it
+        # is duplicated there
+        description = description.replace(second_category, "")
+        package = c["package"]
 
-            print(f"Read {humanize.intcomma(len(comps))} parts")
+        # remove 'Package' from the description if it is duplicated there
+        description = description.replace(package, "")
 
-            # if we have no more parts exit out of the loop
-            if len(comps) == 0:
-                break
+        # replace double spaces with single spaces in description
+        description = description.replace("  ", " ")
+        # remove trailing spaces from description
+        description = description.strip()
 
-            self.part_count += len(comps)
+        row = {
+            "LCSC Part": f"C{c['lcsc']}",
+            "First Category": self.categories[c["category_id"]][0],
+            "Second Category": self.categories[c["category_id"]][1],
+            "MFR.Part": c["mfr"],
+            "Package": package,
+            "Solder Joint": int(c["joints"]),
+            "Manufacturer": self.manufacturers[c["manufacturer_id"]],
+            "Library Type": "Basic" if c["basic"] else "Extended",
+            "Description": description,
+            "Datasheet": c["datasheet"],
+            "Price": price_str,
+            "Stock": str(c["stock"]),
+        }
+        return row
 
-            # now extract the data from the jlcparts db and fill
-            # it into the plugin database
-            print("Building parts rows to insert")
-            rows = []
-            for c in comps:
-                priceInput = json.loads(c[10])
-
-                # parse the price field
-                price = Price(priceInput)
-
-                price_entries = Price.reduce_precision(price.price_entries)
-                price_entries_total += len(price_entries)
-
-                price_str: str = ""
-
-                # filter parts priced below the cutoff value
-                price_entries_cutoff = Price.filter_below_cutoff(price_entries, 0.01)
-                price_entries_deleted_total += len(price_entries) - len(
-                    price_entries_cutoff
-                )
-
-                # alias the variable for the next step
-                price_entries = price_entries_cutoff
-
-                # remove duplicates
-                price_entries_unique = Price.filter_duplicate_prices(price_entries)
-                price_entries_duplicates_deleted_total += len(price_entries) - len(
-                    price_entries_unique
-                )
-                price_entries_deleted_total += len(price_entries) - len(
-                    price_entries_unique
-                )
-
-                # alias over the variable for the next step
-                price_entries = price_entries_unique
-
-                # build the output string that is stored into the parts database
-                price_str = ",".join(
-                    [
-                        f"{entry.min_quantity}-{entry.max_quantity if entry.max_quantity is not None else ''}:{entry.price_dollars_str}"
-                        for entry in price_entries
-                    ]
-                )
-
-                # default to 'description', override it with the 'description' property from
-                # 'extra' if it exists
-                description = c[7]
-                if c[11]:
-                    try:
-                        extra = json.loads(c[11])
-                        if "description" in extra:
-                            description = extra["description"]
-                    except Exception:
-                        pass
-
-                # strip ROHS out of descriptions where present
-                # and add 'not ROHS' where ROHS is not present
-                # as 99% of parts are ROHS at this point
-                if " ROHS".lower() not in description.lower():
-                    description += " not ROHS"
-                else:
-                    description = description.replace(" ROHS", "")
-
-                second_category = cats[c[1]][1]
-
-                # strip the 'Second category' out of the description if it
-                # is duplicated there
-                description = description.replace(second_category, "")
-
-                package = c[3]
-
-                # remove 'Package' from the description if it is duplicated there
-                description = description.replace(package, "")
-
-                # replace double spaces with single spaces in description
-                description.replace("  ", " ")
-
-                # remove trailing spaces from description
-                description = description.strip()
-
-                row = (
-                    f"C{c[0]}",  # LCSC Part
-                    cats[c[1]][0],  # First Category
-                    cats[c[1]][1],  # Second Category
-                    c[2],  # MFR.Part
-                    package,  # Package
-                    int(c[4]),  # Solder Joint
-                    mans[c[5]],  # Manufacturer
-                    "Basic" if c[6] else "Extended",  # Library Type
-                    description,  # Description
-                    c[8],  # Datasheet
-                    price_str,  # Price
-                    str(c[9]),  # Stock
-                )
-                rows.append(row)
-
-            print("Inserting into parts table")
-            self.conn.executemany(
-                "INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
-            )
-            self.conn.commit()
-
+    def display_stats(self):
+        price_entries_total = self.stats["price_entries_total"]
+        price_entries_deleted_total = self.stats["price_entries_deleted_total"]
+        price_entries_duplicates_deleted_total = self.stats[
+            "price_entries_duplicates_deleted_total"
+        ]
         print(
             f"Price value filtering trimmed {price_entries_deleted_total} (including {price_entries_duplicates_deleted_total} duplicates) out of {price_entries_total} entries {(price_entries_deleted_total / price_entries_total) * 100 if price_entries_total != 0 else 0:.2f}%"
         )
-        print("Done importing parts")
+        super().display_stats()
 
     def populate_categories(self):
         """Populate the categories table."""
@@ -640,23 +631,9 @@ class JlcpcbFTS5(Generate):
         self.conn.execute("insert into parts(parts) values('optimize')")
         print("Done optimizing fts5 parts table")
 
-    def build(self):
-        """Run all of the steps to generate the database files for upload."""
-        self.remove_original()
-        self.connect_sqlite()
-        self.create_tables()
-        self.load_tables()
+    def post_build(self):
         self.populate_categories()
         self.optimize()
-        self.meta_data()
-        self.close_sqlite()
-        self.compress()
-        self.split()
-        self.display_stats()
-        if self.skip_cleanup:
-            print("Skipping cleanup")
-        else:
-            self.cleanup()
 
 
 class DownloadProgress:
