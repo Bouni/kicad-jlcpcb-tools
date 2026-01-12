@@ -241,9 +241,9 @@ class Generate:
 
                 # The column names have spaces, so map them to placeholders without spaces
                 data = rows[0]
-                columns = ", ".join([f'"{k}"' for k in data.keys()])
+                columns = ", ".join([f'"{k}"' for k in data])
                 placeholders = ", ".join(
-                    [f":{k.replace(' ', '_').replace('.', '_')}" for k in data.keys()]
+                    [f":{k.replace(' ', '_').replace('.', '_')}" for k in data]
                 )
                 newrows = [
                     {k.replace(" ", "_").replace(".", "_"): v for k, v in row.items()}
@@ -533,6 +533,7 @@ class JlcpcbFTS5(Generate):
         )
 
     def price_entry_to_str(self, price: Price) -> str:
+        """Convert Price object to string for storage in the database."""
         price_entries = Price.reduce_precision(price.price_entries)
         self.stats["price_entries_total"] += len(price_entries)
         price_str: str = ""
@@ -566,6 +567,7 @@ class JlcpcbFTS5(Generate):
         return price_str
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
+        """Translate a row from the jlcparts db into the plugin db format."""
         price_str = self.price_entry_to_str(Price(json.loads(c["price"])))
         # default to 'description', override it with the 'description' property from
         # 'extra' if it exists
@@ -609,6 +611,7 @@ class JlcpcbFTS5(Generate):
         return row
 
     def display_stats(self):
+        """Print out some stats."""
         price_entries_total = self.stats["price_entries_total"]
         price_entries_deleted_total = self.stats["price_entries_deleted_total"]
         price_entries_duplicates_deleted_total = self.stats[
@@ -632,6 +635,7 @@ class JlcpcbFTS5(Generate):
         print("Done optimizing fts5 parts table")
 
     def post_build(self):
+        """Post build steps."""
         self.populate_categories()
         self.optimize()
 
