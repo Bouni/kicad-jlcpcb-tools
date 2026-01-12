@@ -670,7 +670,7 @@ class PartSelectorDialog(wx.Dialog):
             "solder_joints": self.solder_joints.GetValue(),
             "basic": self.basic_checkbox.GetValue(),
             "extended": self.extended_checkbox.GetValue(),
-            "preferred": self.preferred_checkbox.GetValue(), 
+            "preferred": self.preferred_checkbox.GetValue(),
             "stock": self.assert_stock_checkbox.GetValue(),
         }
         start = time.time()
