@@ -325,6 +325,8 @@ class Generate:
 
         self.part_count = 0
         print("Reading components")
+        self.conn_jp.row_factory = sqlite3.Row
+        self.conn.row_factory = sqlite3.Row
         res = self.conn_jp.execute("""
             SELECT
                 lcsc,
@@ -356,7 +358,7 @@ class Generate:
             print("Building parts rows to insert")
             rows = []
             for c in comps:
-                priceInput = json.loads(c[10])
+                priceInput = json.loads(c["price"])
 
                 # parse the price field
                 price = Price(priceInput)
@@ -397,10 +399,11 @@ class Generate:
 
                 # default to 'description', override it with the 'description' property from
                 # 'extra' if it exists
-                description = c[7]
-                if c[11]:
+                description = c["description"]
+                extra = {}
+                if c["extra"] is not None:
                     try:
-                        extra = json.loads(c[11])
+                        extra = json.loads(c["extra"])
                         if "description" in extra:
                             description = extra["description"]
                     except Exception:
@@ -414,13 +417,13 @@ class Generate:
                 else:
                     description = description.replace(" ROHS", "")
 
-                second_category = cats[c[1]][1]
+                second_category = cats[c["category_id"]][1]
 
                 # strip the 'Second category' out of the description if it
                 # is duplicated there
                 description = description.replace(second_category, "")
 
-                package = c[3]
+                package = c["package"]
 
                 # remove 'Package' from the description if it is duplicated there
                 description = description.replace(package, "")
@@ -431,25 +434,37 @@ class Generate:
                 # remove trailing spaces from description
                 description = description.strip()
 
-                row = (
-                    f"C{c[0]}",  # LCSC Part
-                    cats[c[1]][0],  # First Category
-                    cats[c[1]][1],  # Second Category
-                    c[2],  # MFR.Part
-                    package,  # Package
-                    int(c[4]),  # Solder Joint
-                    mans[c[5]],  # Manufacturer
-                    "Basic" if c[6] else "Extended",  # Library Type
-                    description,  # Description
-                    c[8],  # Datasheet
-                    price_str,  # Price
-                    str(c[9]),  # Stock
-                )
+                libType = "Basic" if c["basic"] else "Extended"
+
+                row = {
+                    "LCSC Part": f"C{c['lcsc']}",
+                    "First Category": cats[c["category_id"]][0],
+                    "Second Category": cats[c["category_id"]][1],
+                    "MFR.Part": c["mfr"],
+                    "Package": c["package"],
+                    "Solder Joint": int(c["joints"]),
+                    "Manufacturer": mans[c["manufacturer_id"]],
+                    "Library Type": libType,
+                    "Description": description,
+                    "Datasheet": c["datasheet"],
+                    "Price": price_str,
+                    "Stock": str(c["stock"]),
+                }
                 rows.append(row)
 
             print("Inserting into parts table")
+            # The column names have spaces, so map them to placeholders without spaces
+            data = rows[0]
+            columns = ", ".join([f'"{k}"' for k in data])
+            placeholders = ", ".join(
+                [f":{k.replace(' ', '_').replace('.', '_')}" for k in data]
+            )
+            newrows = [
+                {k.replace(" ", "_").replace(".", "_"): v for k, v in row.items()}
+                for row in rows
+            ]
             self.conn.executemany(
-                "INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
+                f"INSERT INTO parts ({columns}) VALUES ({placeholders})", newrows
             )
             self.conn.commit()
 
