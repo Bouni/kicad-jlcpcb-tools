@@ -148,6 +148,7 @@ class Generate:
         self,
         output_db: Path,
         chunk_num: Path = Path("chunk_num_fts5.txt"),
+        obsolete_parts_threshold_days: int = 0,
         skip_cleanup: bool = False,
     ):
         self.output_db = output_db
@@ -155,6 +156,7 @@ class Generate:
         self.compressed_output_db = f"{self.output_db}.zip"
         self.chunk_num = chunk_num
         self.skip_cleanup = skip_cleanup
+        self.obsolete_parts_threshold_days = obsolete_parts_threshold_days
 
     def remove_original(self):
         """Remove the original output database."""
@@ -245,6 +247,17 @@ class Generate:
         print(f"Deleting {self.output_db}")
         os.unlink(self.output_db)
 
+    def component_where_clause(self) -> str:
+        """Return the WHERE clause for filtering components."""
+        if self.obsolete_parts_threshold_days > 0:
+            # filter out parts that have been obsolete for longer than the threshold
+            filter_seconds = (
+                int(time.time()) - self.obsolete_parts_threshold_days * 24 * 60 * 60
+            )
+            return f" WHERE NOT (stock = 0 AND last_on_stock < {filter_seconds})"
+        else:
+            return ""
+
     def create_tables(self):
         """Create tables."""
 
@@ -315,7 +328,9 @@ class Generate:
         res = self.conn_jp.execute("SELECT * FROM categories")
         cats = {i: (c, sc) for i, c, sc in res.fetchall()}
 
-        res = self.conn_jp.execute("select count(*) from components")
+        res = self.conn_jp.execute(
+            f"select count(*) from components {self.component_where_clause()}"
+        )
         results = res.fetchone()
         print(f"{humanize.intcomma(results[0])} parts to import")
 
@@ -327,7 +342,7 @@ class Generate:
         print("Reading components")
         self.conn_jp.row_factory = sqlite3.Row
         self.conn.row_factory = sqlite3.Row
-        res = self.conn_jp.execute("""
+        res = self.conn_jp.execute(f"""
             SELECT
                 lcsc,
                 category_id,
@@ -341,7 +356,7 @@ class Generate:
                 stock,
                 price,
                 extra
-            FROM components""")
+            FROM components {self.component_where_clause()}""")
         while True:
             comps = res.fetchmany(size=100000)
 
@@ -620,7 +635,22 @@ def test_price_duplicate_price_filter():
     default=False,
     help="Skip the DB generation phase",
 )
-def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
+@click.option(
+    "--obsolete-parts-threshold-days",
+    show_default=True,
+    default=0,
+    type=int,
+    help="""
+        Setting this to > 0 will filter out parts that have a stock level of zero
+        in the source parts database for at least this many days.
+    """,
+)
+def main(
+    skip_cleanup: bool,
+    fetch_parts_db: bool,
+    skip_generate: bool,
+    obsolete_parts_threshold_days: int,
+):
     """Perform the database steps."""
 
     output_directory = "db_working"
@@ -734,7 +764,11 @@ def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
         partsdb = Path(output_name)
 
         print(f"Generating {output_name} in {output_directory} directory")
-        generator = Generate(output_db=partsdb, skip_cleanup=skip_cleanup)
+        generator = Generate(
+            output_db=partsdb,
+            skip_cleanup=skip_cleanup,
+            obsolete_parts_threshold_days=obsolete_parts_threshold_days,
+        )
         generator.build()
 
         end = datetime.now()
