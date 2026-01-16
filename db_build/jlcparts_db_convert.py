@@ -303,6 +303,15 @@ class Generate:
             """
         )
 
+    @staticmethod
+    def library_type(row: sqlite3.Row) -> str:
+        """Return library type string."""
+        if row["basic"]:
+            return "Basic"
+        if row["preferred"]:
+            return "Preferred"
+        return "Extended"
+
     def load_tables(self):
         """Load the input data into the output database."""
 
@@ -336,6 +345,7 @@ class Generate:
                 joints,
                 manufacturer_id,
                 basic,
+                preferred,
                 description,
                 datasheet,
                 stock,
@@ -434,7 +444,7 @@ class Generate:
                 # remove trailing spaces from description
                 description = description.strip()
 
-                libType = "Basic" if c["basic"] else "Extended"
+                libType = self.library_type(c)
 
                 row = {
                     "LCSC Part": f"C{c['lcsc']}",
