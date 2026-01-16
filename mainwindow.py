@@ -43,6 +43,8 @@ from .helpers import (
     set_lcsc_value,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
+    get_dnp_value,
+    should_exclude_from_bom_or_pos,
 )
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
