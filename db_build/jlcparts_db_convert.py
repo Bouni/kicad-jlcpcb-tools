@@ -149,6 +149,7 @@ class Generate:
         output_db: Path,
         chunk_num: Path = Path("chunk_num_fts5.txt"),
         obsolete_parts_threshold_days: int = 0,
+        populate_preferred_extended: bool = False,
         skip_cleanup: bool = False,
     ):
         self.output_db = output_db
@@ -157,6 +158,7 @@ class Generate:
         self.chunk_num = chunk_num
         self.skip_cleanup = skip_cleanup
         self.obsolete_parts_threshold_days = obsolete_parts_threshold_days
+        self.populate_preferred_extended = populate_preferred_extended
 
     def remove_original(self):
         """Remove the original output database."""
@@ -316,12 +318,11 @@ class Generate:
             """
         )
 
-    @staticmethod
-    def library_type(row: sqlite3.Row) -> str:
+    def library_type(self, row: sqlite3.Row) -> str:
         """Return library type string."""
         if row["basic"]:
             return "Basic"
-        if row["preferred"]:
+        if row["preferred"] and self.populate_preferred_extended:
             return "Preferred"
         return "Extended"
 
@@ -655,11 +656,19 @@ def test_price_duplicate_price_filter():
         in the source parts database for at least this many days.
     """,
 )
+@click.option(
+    "--populate-preferred-extended",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Populate 'Preferred' parts as 'Preferred' library type instead of 'Extended'",
+)
 def main(
     skip_cleanup: bool,
     fetch_parts_db: bool,
     skip_generate: bool,
     obsolete_parts_threshold_days: int,
+    populate_preferred_extended: bool,
 ):
     """Perform the database steps."""
 
@@ -778,6 +787,7 @@ def main(
             output_db=partsdb,
             skip_cleanup=skip_cleanup,
             obsolete_parts_threshold_days=obsolete_parts_threshold_days,
+            populate_preferred_extended=populate_preferred_extended,
         )
         generator.build()
 
