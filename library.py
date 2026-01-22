@@ -262,6 +262,8 @@ class Library:
             library_types.append('"Basic"')
         if parameters["extended"]:
             library_types.append('"Extended"')
+        if parameters["preferred"]:
+            library_types.append('"Preferred"')
         if library_types:
             query_chunks.append(f'"Library Type" IN ({",".join(library_types)})')
 
