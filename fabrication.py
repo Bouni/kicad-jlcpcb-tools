@@ -19,10 +19,12 @@ from pcbnew import (  # pylint: disable=import-error
     ZONE_FILLER,
     B_Cu,
     B_Mask,
+    B_Paste,
     B_SilkS,
     Edge_Cuts,
     F_Cu,
     F_Mask,
+    F_Paste,
     F_SilkS,
     FromMM,
     Refresh,
@@ -233,12 +235,14 @@ class Fabrication:
             ("CuTop", F_Cu, "Top layer"),
             ("SilkTop", F_SilkS, "Silk top"),
             ("MaskTop", F_Mask, "Mask top"),
+            ("PasteTop", F_Paste, "Paste top"),
         ]
         plot_plan_bottom = [
             ("CuBottom", B_Cu, "Bottom layer"),
             ("SilkBottom", B_SilkS, "Silk bottom"),
             ("MaskBottom", B_Mask, "Mask bottom"),
             ("EdgeCuts", Edge_Cuts, "Edges"),
+            ("PasteBottom", B_Paste, "Paste bottom"),
         ]
 
         plot_plan = []
