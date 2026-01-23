@@ -1,0 +1,101 @@
+---
+name: "Bootstrap the initial component database"
+on:
+  workflow_dispatch:  # allow for manually trigger workflow
+jobs:
+  bootstrap_database:
+    name: "Bootstrap component database"
+    runs-on: ubuntu-latest
+    environment: github-pages
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 python3-pip wget zip unzip p7zip-full sqlite3
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+      - name: Free more Space, Found in https://github.com/actions/runner-images/issues/2840#issuecomment-790492173
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Show versions
+        run: |
+          sqlite3 --version
+          python3 --version
+          python3 -c "import sqlite3; import pprint; db = sqlite3.connect(':memory:'); cursor = db.execute('PRAGMA COMPILE_OPTIONS'); pprint.pprint(cursor.fetchall())"
+      - name: Install python dependencies
+        run: |
+          pip install humanize
+          pip install -e .
+      - name: Update database
+        run: |
+          set -x
+
+          # Print the current disk usage, might help with future "no disk space left" issues
+          echo "============================================================================================================================="
+          df -h
+          echo "============================================================================================================================="
+
+          cd db_build
+
+          mkdir db_working
+          cd db_working
+          wget -q https://yaqwsx.github.io/jlcparts/data/cache.zip
+          for seq in $(seq -w 01 30); do
+            wget -q https://yaqwsx.github.io/jlcparts/data/cache.z$seq || true
+          done
+          7z x cache.zip
+          for seq in $(seq -w 01 30); do
+            rm cache.z$seq || true
+          done
+
+          cd ..
+          
+          python3 jlcparts_db_convert.py --skip-generate --fix-components-db-descriptions --clean-components-db --archive-components-db
+
+          ls -lah db_working/
+
+          rm db_working/cache.sqlite3
+
+          # Print the current disk usage, might help with future "no disk space left" issues
+          echo "============================================================================================================================="
+          df -h
+          echo "============================================================================================================================="
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: github-pages
+          path: db_build/archive
+  deploy:
+    name: "Deploy"
+    runs-on: ubuntu-latest
+    needs: bootstrap_database
+    permissions:
+      actions: write
+      contents: write
+      pages: write
+      id-token: write
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+      # delete-artifact
+      - name: Clean
+        uses: geekyeggo/delete-artifact@v4
+        with:
+          name: github-pages
