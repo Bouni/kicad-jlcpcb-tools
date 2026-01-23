@@ -164,15 +164,6 @@ class Price:
         return price_str, entries_total, entries_deleted, duplicates_deleted
 
 
-def library_type(row: sqlite3.Row) -> str:
-    """Return library type string."""
-    if row["basic"]:
-        return "Basic"
-    if row["preferred"]:
-        return "Preferred"
-    return "Extended"
-
-
 def process_description(
     description: str, extra_json: str | None, category: str, package: str
 ) -> str:
@@ -229,12 +220,16 @@ class ComponentTranslator:
         self,
         manufacturers: dict[int, str],
         categories: dict[int, tuple[str, str]],
+        populate_preferred: bool = False,
     ):
         """Initialize the translator.
 
         Args:
-            manufacturers: Dict mapping manufacturer_id to manufacturer name
-            categories: Dict mapping category_id to (first_category, second_category) tuple
+            manufacturers:      Dict mapping manufacturer_id to manufacturer name
+            categories:         Dict mapping category_id to (first_category, second_category)
+                                tuple.
+            populate_preferred: Whether to populate preferred parts as 'Preferred'
+                                or the backwards-compatible 'Extended'.
 
         """
         self.manufacturers = manufacturers
@@ -242,6 +237,15 @@ class ComponentTranslator:
         self.price_entries_total = 0
         self.price_entries_deleted = 0
         self.price_entries_duplicates_deleted = 0
+        self.populate_preferred = populate_preferred
+
+    def library_type(self, row: sqlite3.Row) -> str:
+        """Return library type string."""
+        if row["basic"]:
+            return "Basic"
+        if row["preferred"] and self.populate_preferred:
+            return "Preferred"
+        return "Extended"
 
     def translate(self, component_row: sqlite3.Row) -> dict[str, str | int]:
         """Convert a component database row to a parts database row.
@@ -269,7 +273,7 @@ class ComponentTranslator:
             component_row["package"],
         )
 
-        libType = library_type(component_row)
+        libType = self.library_type(component_row)
 
         row = {
             "LCSC Part": f"C{lcsc}",
