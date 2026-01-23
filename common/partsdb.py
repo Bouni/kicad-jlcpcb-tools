@@ -310,8 +310,9 @@ class PartsDatabase:
         print(
             f"Generated parts database with {humanize.intcomma(self.part_count)} parts"
         )
+        self.populate_categories()
+        self.meta_data()
         self.optimize()
-        self.meta_data
         self.close_sqlite()
         self.split()
         if self.skip_cleanup:

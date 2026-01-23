@@ -428,6 +428,74 @@ class TestPartsDatabase:
         assert db.skip_cleanup is True
         db.close_sqlite()
 
+    @patch("common.partsdb.os.unlink")
+    @patch("common.partsdb.FileManager")
+    def test_parts_database_post_build_builds_categories(
+        self, mock_fm, mock_unlink, parts_database
+    ):
+        """PartsDatabase post_build calls populate_categories."""
+        db, _ = parts_database
+
+        # Insert some parts with different categories
+        rows = [
+            {
+                "LCSC Part": "C1",
+                "First Category": "Resistors",
+                "Second Category": "Fixed",
+                "MFR.Part": "T1",
+                "Package": "0805",
+                "Solder Joint": 2,
+                "Manufacturer": "M1",
+                "Library Type": "Basic",
+                "Description": "D1",
+                "Datasheet": "D",
+                "Price": "1",
+                "Stock": "1000",
+            },
+            {
+                "LCSC Part": "C2",
+                "First Category": "Capacitors",
+                "Second Category": "Ceramic",
+                "MFR.Part": "T2",
+                "Package": "0805",
+                "Solder Joint": 2,
+                "Manufacturer": "M2",
+                "Library Type": "Basic",
+                "Description": "D2",
+                "Datasheet": "D",
+                "Price": "1",
+                "Stock": "1000",
+            },
+            {
+                "LCSC Part": "C3",
+                "First Category": "Resistors",
+                "Second Category": "Variable",
+                "MFR.Part": "T3",
+                "Package": "0603",
+                "Solder Joint": 2,
+                "Manufacturer": "M3",
+                "Library Type": "Basic",
+                "Description": "D3",
+                "Datasheet": "D",
+                "Price": "1",
+                "Stock": "1000",
+            },
+        ]
+        db.update_parts(rows)
+
+        # Mock methods that would fail in test environment
+        with (
+            patch.object(db, "close_sqlite"),
+            patch.object(db, "split"),
+            patch.object(
+                db, "populate_categories", wraps=db.populate_categories
+            ) as mock_populate,
+        ):
+            db.post_build()
+
+            # Verify populate_categories was called
+            mock_populate.assert_called_once()
+
 
 # ============================================================================
 # Generate Class Tests
