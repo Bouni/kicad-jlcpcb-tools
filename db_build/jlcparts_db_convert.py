@@ -21,7 +21,6 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import click
-
 from common.componentdb import ComponentsDatabase
 from common.filemgr import FileManager
 from common.jlcapi import CategoryFetch, Component, JlcApi
@@ -163,7 +162,7 @@ def update_components_db_from_api() -> None:
 )
 @click.option(
     "--components-db-base-url",
-    default="http://yaqwsx.github.io/jlcparts/data",
+    default="http://bouni.github.io/jlcparts/data",
     show_default=True,
     help="Base URL to fetch the components database from",
 )

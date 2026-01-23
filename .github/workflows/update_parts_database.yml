@@ -1,6 +1,8 @@
 ---
 name: "Update parts database"
 on:
+  schedule:
+    - cron: "0 5 * * *"
   workflow_dispatch:  # allow for manually trigger workflow
 jobs:
   build_and_update:
