@@ -85,6 +85,7 @@ class Generate:
         partsdb: "PartsDatabase",
         progress: "NestedProgressBar",
         translator: ComponentTranslator | None = None,
+        populate_preferred: bool = False,
     ):
         """Initialize the generator.
 
@@ -95,12 +96,16 @@ class Generate:
                        one will be created from the componentdb lookup tables.
             progress: Optional NestedProgressBar for progress reporting. If not provided,
                      progress will be printed to console.
+            populate_preferred: Whether to populate preferred parts as 'Preferred'
+                                or the backwards-compatible 'Extended'.
+
 
         """
         self.componentdb = componentdb
         self.partsdb = partsdb
         self.translator = translator
         self.progress = progress
+        self.populate_preferred = populate_preferred
         self.total_components = 0
         self.loaded_components = 0
 
@@ -118,7 +123,9 @@ class Generate:
         if self.translator is None:
             manufacturers = self.componentdb.get_manufacturers()
             categories = self.componentdb.get_categories()
-            self.translator = ComponentTranslator(manufacturers, categories)
+            self.translator = ComponentTranslator(
+                manufacturers, categories, populate_preferred=self.populate_preferred
+            )
 
         total_components = self.componentdb.count_components(where_clause=where_clause)
         self.total_components = total_components
