@@ -111,6 +111,7 @@ split-on-trailing-comma = false
 
 [tool.ruff.lint.per-file-ignores]
 "jlcparts_db_convert.py" = ["T201"]
+"common/*" = ["T201"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25
