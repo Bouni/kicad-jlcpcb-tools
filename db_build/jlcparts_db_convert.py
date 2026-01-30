@@ -14,11 +14,6 @@ from typing import NamedTuple
 # Add parent directory to path so we can import common module
 # TODO(z2amiller):  Use proper packaging
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from typing import NamedTuple
-
-# Add parent directory to path so we can import common module
-# TODO(z2amiller):  Use proper packaging
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import click
 from common.componentdb import ComponentsDatabase
