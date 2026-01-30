@@ -10,8 +10,16 @@ from .progress import (
     ProgressCallback,
     TqdmNestedProgressBar,
 )
+from .componentdb import ComponentsDatabase
+from .jlcapi import ApiCategory, CategoryFetch, Component, JlcApi, LcscId
 
 __all__ = [
+    "ApiCategory",
+    "CategoryFetch",
+    "Component",
+    "ComponentsDatabase",
+    "JlcApi",
+    "LcscId",
     "NestedProgressBar",
     "NoOpProgressBar",
     "PrintNestedProgressBar",
