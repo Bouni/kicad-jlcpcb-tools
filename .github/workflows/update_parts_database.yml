@@ -1,7 +1,7 @@
 ---
 name: "Update parts database"
 on:
-  schedule:  # 2 hours after jlcparts updates their database
+  schedule:
     - cron: "0 5 * * *"
   workflow_dispatch:  # allow for manually trigger workflow
 jobs:
@@ -37,6 +37,7 @@ jobs:
       - name: Install python dependencies
         run: |
           pip install humanize
+          pip install -e .
       - name: Update database
         run: |
           set -x
@@ -49,18 +50,15 @@ jobs:
           cd db_build
 
           # fetch the cached database
-          python3 jlcparts_db_convert.py --fetch-parts-db --skip-generate
+          python3 jlcparts_db_convert.py \
+              --fetch-components-db \
+              --update-components-db \
+              --clean-components-db \
+              --components-db-base-url=http://z2amiller.github.io/kicad-jlcpcb-tools \
+              --archive-components-db \
+              --obsolete-parts-threshold-days=365
 
-          ls -lah db_working/
-
-          # Print the current disk usage, might help with future "no disk space left" issues
-          echo "============================================================================================================================="
-          df -h
-          echo "============================================================================================================================="
-
-          # creates the converted database in 80M split-zip files in folder db_working
-          python3 jlcparts_db_convert.py
-          # remove the source db, as we don't want to package that one
+          # remove the raw source db, as we don't want to package that one
           rm db_working/cache.sqlite3
           # some info output for sanity check
           ls -lah db_working
@@ -71,11 +69,11 @@ jobs:
           df -h
           echo "============================================================================================================================="
 
-      - name: Upload pages artifact
+      - name: Upload all-item parts db
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build/db_working
+          path: db_build/archive
   deploy:
     name: "Deploy"
     runs-on: ubuntu-latest
