@@ -84,44 +84,6 @@ class DatabaseConfig:
             where_clause="FALSE",
         )
 
-
-def update_components_db_from_api() -> None:
-    """Update the component cache database."""
-    db = ComponentsDatabase("db_working/cache.sqlite3")
-    print("Fetching categories...")
-    initial_categories = JlcApi.fetchCategories(instockOnly=True)
-    categories = JlcApi.collapseCategories(initial_categories, limit=50000)
-    print(f"Found {len(initial_categories)} categories, collaped to {len(categories)}.")
-
-    progress = (
-        TqdmNestedProgressBar()
-        if sys.stdout.isatty()
-        else PrintNestedProgressBar(outer_threshold=1, inner_threshold=2000)
-    )
-
-    with progress.outer(len(categories), "Fetching categories") as outer_pbar:
-        for category in categories:
-            fetcher = CategoryFetch(category)
-
-            with progress.inner(category.count, f"{category}") as inner_pbar:
-                for components in fetcher.fetchAll():
-                    comp_objs = [Component(comp) for comp in components]
-                    db.update_cache(comp_objs)
-                    inner_pbar.update(len(components))
-
-            outer_pbar.update()
-
-    db.cleanup_stock()
-    db.close()
-    def emptyParts() -> PartDatabaseConfig:
-        """Select no parts."""
-        return PartDatabaseConfig(
-            name="empty-parts-fts5.db",
-            chunk_file_name="chunk_num_empty_parts_fts5.txt",
-            where_clause="FALSE",
-        )
-
-
 def update_components_db_from_api() -> None:
     """Update the component cache database."""
     db = ComponentsDatabase("db_working/cache.sqlite3")
@@ -196,45 +158,9 @@ def update_components_db_from_api() -> None:
 )
 @click.option(
     "--archive-components-db",
-    "--components-db-base-url",
-    default="http://yaqwsx.github.io/jlcparts/data",
-    show_default=True,
-    help="Base URL to fetch the components database from",
-)
-@click.option(
-    "--fetch-components-db",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Fetch the components db from the remote server",
-)
-@click.option(
-    "--fix-components-db-descriptions",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Fix descriptions in the components db by pulling from the 'extra' field",
-)
-@click.option(
-    "--update-components-db",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Update the local components db using LCSC API data",
-)
-@click.option(
-    "--clean-components-db",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Clean the local components db by removing old and out-of-stock parts",
-)
-@click.option(
-    "--archive-components-db",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Archive the components db after updating from the API",
     help="Archive the components db after updating from the API",
 )
 @click.option(
@@ -254,6 +180,13 @@ def update_components_db_from_api() -> None:
         that have been out of stock for more than the specified number of days.
     """,
 )
+@click.option(
+    "--populate-preferred-extended",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Populate 'Preferred' parts as 'Preferred' library type instead of 'Extended'",
+)
 def main(
     skip_cleanup: bool,
     fetch_components_db: bool,
@@ -262,14 +195,9 @@ def main(
     update_components_db: bool,
     clean_components_db: bool,
     archive_components_db: bool,
-    fetch_components_db: bool,
-    components_db_base_url: str,
-    fix_components_db_descriptions: bool,
-    update_components_db: bool,
-    clean_components_db: bool,
-    archive_components_db: bool,
     skip_generate: bool,
     obsolete_parts_threshold_days: int,
+    populate_preferred_extended: bool,
 ):
     """Perform the database steps."""
 
@@ -349,10 +277,7 @@ def main(
             sentinel_filename="cache_chunk_num.txt",
         )
         fm.compress_and_split(
-            output_dir=Path(archive_dir), delete_original=skip_cleanup
-        fm.compress_and_split(
-            output_dir=Path(archive_dir), delete_original=skip_cleanup
-        )
+            output_dir=Path(archive_dir), delete_original=skip_cleanup)
 
 
 if __name__ == "__main__":
