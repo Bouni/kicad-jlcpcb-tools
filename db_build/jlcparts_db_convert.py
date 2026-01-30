@@ -16,6 +16,7 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import click
+
 from common.componentdb import ComponentsDatabase
 from common.filemgr import FileManager
 from common.jlcapi import CategoryFetch, Component, JlcApi
