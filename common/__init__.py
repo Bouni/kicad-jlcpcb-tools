@@ -3,6 +3,8 @@
 Provides reusable components for file management and database operations.
 """
 
+from .componentdb import ComponentsDatabase
+from .jlcapi import ApiCategory, CategoryFetch, Component, JlcApi, LcscId
 from .progress import (
     NestedProgressBar,
     NoOpProgressBar,
@@ -10,8 +12,6 @@ from .progress import (
     ProgressCallback,
     TqdmNestedProgressBar,
 )
-from .componentdb import ComponentsDatabase
-from .jlcapi import ApiCategory, CategoryFetch, Component, JlcApi, LcscId
 
 __all__ = [
     "ApiCategory",
