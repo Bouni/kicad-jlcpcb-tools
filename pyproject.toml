@@ -1,8 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name        = "Kicad-jlcpcb-tools"
-license     = {text = "MIT"}
+name = "Kicad-jlcpcb-tools"
+version = "2025.09.02"
+license = "MIT"
 description = "Plugin to generate BOM + CPL files for JLCPCB."
-readme      = "README.md"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["kicad", "jlcpcb", "electronics", "pcb", "bom", "cpl"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "click>=8.0",
+    "humanize>=4.0",
+    "requests>=2.28",
+    "cachetools>=5.0",
+    "ratelimit>=2.2.1",
+    "tqdm>=4.0",
+    "retry>=0.9.2",
+    "split_file_reader>=0.1.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/bouni/kicad-jlcpcb-tools"
+Repository = "https://github.com/bouni/kicad-jlcpcb-tools.git"
+Issues = "https://github.com/bouni/kicad-jlcpcb-tools/issues"
+
+[tool.setuptools]
+packages = ["db_build", "common"]
 
 [tool.ruff.lint]
 
@@ -110,7 +149,10 @@ combine-as-imports = true
 split-on-trailing-comma = false
 
 [tool.ruff.lint.per-file-ignores]
-"jlcparts_db_convert.py" = ["T201"]
+"db_build/jlcparts_db_convert.py" = ["T201"]
+"common/filemgr.py" = ["T201"]
+"common/partsdb.py" = ["T201"]
+"common/progress.py" = ["T201"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25
