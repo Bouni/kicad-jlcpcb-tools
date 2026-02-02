@@ -1,19 +1,8 @@
 """Tests for the translate module."""
 
 import json
-from pathlib import Path
-import sys
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from common.translate import (
-    ComponentTranslator,
-    Price,
-    PriceEntry,
-    library_type,
-    process_description,
-)
+from common.translate import ComponentTranslator, Price, PriceEntry, process_description
 
 # ============================================================================
 # PriceEntry Tests
@@ -303,10 +292,11 @@ class TestPrice:
 
 
 class TestLibraryType:
-    """Tests for library_type function."""
+    """Tests for library_type method in ComponentTranslator."""
 
     def test_library_type_basic(self):
         """library_type returns 'Basic' for basic parts."""
+        translator = ComponentTranslator({}, {})
 
         # Mock the row by creating a simple dict-like object
         class MockRow:
@@ -315,11 +305,12 @@ class TestLibraryType:
                     return True
                 return False
 
-        result = library_type(MockRow()) # type: ignore
+        result = translator.library_type(MockRow())  # type: ignore
         assert result == "Basic"
 
-    def test_library_type_preferred(self):
-        """library_type returns 'Preferred' for preferred parts."""
+    def test_library_type_preferred_when_populate_preferred_true(self):
+        """library_type returns 'Preferred' when populate_preferred=True."""
+        translator = ComponentTranslator({}, {}, populate_preferred=True)
 
         class MockRow:
             def __getitem__(self, key):
@@ -329,17 +320,33 @@ class TestLibraryType:
                     return True
                 return False
 
-        result = library_type(MockRow()) # type: ignore
+        result = translator.library_type(MockRow())  # type: ignore
         assert result == "Preferred"
 
-    def test_library_type_extended(self):
-        """library_type returns 'Extended' for extended parts."""
+    def test_library_type_extended_when_populate_preferred_false(self):
+        """library_type returns 'Extended' for preferred parts when populate_preferred=False."""
+        translator = ComponentTranslator({}, {}, populate_preferred=False)
+
+        class MockRow:
+            def __getitem__(self, key):
+                if key == "basic":
+                    return False
+                if key == "preferred":
+                    return True
+                return False
+
+        result = translator.library_type(MockRow())  # type: ignore
+        assert result == "Extended"
+
+    def test_library_type_extended_default(self):
+        """library_type returns 'Extended' for extended parts (default behavior)."""
+        translator = ComponentTranslator({}, {})
 
         class MockRow:
             def __getitem__(self, key):
                 return False
 
-        result = library_type(MockRow()) # type: ignore
+        result = translator.library_type(MockRow())  # type: ignore
         assert result == "Extended"
 
 
@@ -435,6 +442,17 @@ class TestComponentTranslator:
         assert translator.price_entries_total == 0
         assert translator.price_entries_deleted == 0
         assert translator.price_entries_duplicates_deleted == 0
+        assert translator.populate_preferred is False  # default value
+
+    def test_translator_init_with_populate_preferred(self):
+        """ComponentTranslator initializes with populate_preferred flag."""
+        manufacturers = {1: "Samsung"}
+        categories = {1: ("Resistors", "Fixed Resistors")}
+        translator = ComponentTranslator(
+            manufacturers, categories, populate_preferred=True
+        )
+
+        assert translator.populate_preferred is True
 
     def test_translator_get_statistics_initial(self):
         """get_statistics returns zeros initially."""
@@ -473,7 +491,7 @@ class TestComponentTranslator:
                 }
                 return data[key]
 
-        result = translator.translate(MockRow()) # type: ignore
+        result = translator.translate(MockRow())  # type: ignore
 
         assert result["LCSC Part"] == "C123456"
         assert result["First Category"] == "Resistors"
@@ -538,3 +556,67 @@ class TestComponentTranslator:
         total, deleted, duplicates = translator.get_statistics()
         assert total == 5
         assert deleted >= 1  # At least the below-cutoff entry
+
+    def test_translator_translate_preferred_with_populate_preferred_true(self):
+        """Translate uses 'Preferred' library type when populate_preferred=True."""
+        manufacturers = {1: "Samsung"}
+        categories = {1: ("Resistors", "Fixed Resistors")}
+        translator = ComponentTranslator(
+            manufacturers, categories, populate_preferred=True
+        )
+
+        class MockRow:
+            def __getitem__(self, key):
+                data = {
+                    "lcsc": "123456",
+                    "category_id": 1,
+                    "manufacturer_id": 1,
+                    "price": json.dumps(
+                        [{"qFrom": "1", "qTo": "100", "price": "5.00"}]
+                    ),
+                    "description": "Test Resistor ROHS",
+                    "extra": None,
+                    "package": "0805",
+                    "mfr": "TESTMFR001",
+                    "joints": "2",
+                    "datasheet": "http://example.com/ds.pdf",
+                    "stock": "1000",
+                    "basic": False,
+                    "preferred": True,
+                }
+                return data[key]
+
+        result = translator.translate(MockRow())  # type: ignore
+        assert result["Library Type"] == "Preferred"
+
+    def test_translator_translate_preferred_with_populate_preferred_false(self):
+        """Translate uses 'Extended' library type for preferred when populate_preferred=False."""
+        manufacturers = {1: "Samsung"}
+        categories = {1: ("Resistors", "Fixed Resistors")}
+        translator = ComponentTranslator(
+            manufacturers, categories, populate_preferred=False
+        )
+
+        class MockRow:
+            def __getitem__(self, key):
+                data = {
+                    "lcsc": "123456",
+                    "category_id": 1,
+                    "manufacturer_id": 1,
+                    "price": json.dumps(
+                        [{"qFrom": "1", "qTo": "100", "price": "5.00"}]
+                    ),
+                    "description": "Test Resistor ROHS",
+                    "extra": None,
+                    "package": "0805",
+                    "mfr": "TESTMFR001",
+                    "joints": "2",
+                    "datasheet": "http://example.com/ds.pdf",
+                    "stock": "1000",
+                    "basic": False,
+                    "preferred": True,
+                }
+                return data[key]
+
+        result = translator.translate(MockRow())  # type: ignore
+        assert result["Library Type"] == "Extended"

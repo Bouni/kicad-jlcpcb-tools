@@ -11,11 +11,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install dependencies
-        run: pip install pytest humanize
-      - name: Run db_build tests
-        working-directory: db_build
-        run: pytest jlcparts_db_convert.py
+      - name: Install pytest
+        run: pip install pytest
+      - name: Install python packages
+        run: pip install .
       - name: Run core tests
         working-directory: core
         run: pytest version.py
+      - name: Run common tests
+        working-directory: common
+        run: pytest
