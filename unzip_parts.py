@@ -16,21 +16,19 @@ from .events import (
 )
 
 
-def unzip_parts(parent, path):
+def unzip_parts(parent, path, zipfile: str) -> None:
     """Unzip and merge split zip file."""
     logger = logging.getLogger(__name__)
     logger.debug("Combine zip chunks")
     wx.PostEvent(parent, UnzipCombiningStartedEvent())
     # unzip (needs to go into download function finally)
     # Set the name of the original file
-    db_zip_file = os.path.join(path, "parts-fts5.db.zip")
+    db_zip_file = os.path.join(path, zipfile)
 
     # Open the original file for writing
     with open(db_zip_file, "wb") as db:
         # Get a list of the split files in the split directory
-        split_files = [
-            f for f in os.listdir(path) if f.startswith("parts-fts5.db.zip.")
-        ]
+        split_files = [f for f in os.listdir(path) if f.startswith(f"{zipfile}.")]
 
         # Sort the split files by their index
         split_files.sort(key=lambda f: int(f.split(".")[-1]))
