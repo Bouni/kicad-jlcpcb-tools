@@ -72,7 +72,7 @@ jobs:
           echo "============================================================================================================================="
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           name: github-pages
           path: db_build/archive
