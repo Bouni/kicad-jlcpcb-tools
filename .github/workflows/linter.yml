@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
       - name: Setup NodeJS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
       - name: Install markdownlint
         run: npm install -g markdownlint-cli
       - name: Run markdownlint
