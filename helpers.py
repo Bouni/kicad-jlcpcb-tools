@@ -117,6 +117,32 @@ def get_lcsc_value(fp):
     return ""
 
 
+def get_dnp_value(fp):
+    """Get DNP (Do Not Populate) parameter from footprint fields or properties."""
+    # Check ${DNP} parameter in KiCad 7.99+
+    try:
+        for field in fp.GetFields():
+            if field.GetName().upper() == "DNP":
+                text = field.GetText().strip()
+                return text.lower() in ("true", "1", "yes", "on")
+    # KiCad <= V7
+    except AttributeError:
+        for key, value in fp.GetProperties().items():
+            if key.upper() == "DNP":
+                return value.strip().lower() in ("true", "1", "yes", "on")
+    
+    # Fallback to native DNP flag if available
+    if hasattr(fp, "IsDNP") and callable(fp.IsDNP):
+        return fp.IsDNP()
+    
+    return False
+
+
+def should_exclude_from_bom_or_pos(fp):
+    """Check if footprint should be excluded from BOM/POS based on DNP parameter."""
+    return get_dnp_value(fp)
+
+
 def set_lcsc_value(fp, lcsc: str):
     """Set an lcsc number to the first matching propertie of the footprint, use LCSC as property name if not found."""
     lcsc_field = None
