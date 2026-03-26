@@ -130,8 +130,9 @@ def set_lcsc_value(fp, lcsc: str):
         fp.SetField(lcsc_field.GetName(), lcsc)
     else:
         fp.SetField("LCSC", lcsc)
-        field = fp.GetFieldByName("LCSC")
-        field.SetVisible(False)
+        if hasattr(fp, "GetFieldByName"):
+            field = fp.GetFieldByName("LCSC")
+            field.SetVisible(False)
 
 
 def get_valid_footprints(board):
