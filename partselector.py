@@ -16,7 +16,7 @@ from .partdetails import PartDetailsDialog
 class PartSelectorDialog(wx.Dialog):
     """The part selector window."""
 
-    def __init__(self, parent, parts):
+    def __init__(self, parent, parts: dict[str, str]):
         wx.Dialog.__init__(
             self,
             parent,

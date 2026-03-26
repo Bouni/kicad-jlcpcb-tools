@@ -628,7 +628,7 @@ class JLCPCBTools(wx.Dialog):
                 reference, e.lcsc, e.type, e.stock, params
             )
 
-    def display_message(self, e):
+    def display_message(self, e: wx.PyEvent) -> None:
         """Dispaly a message with the data from the event."""
         styles = {
             "info": wx.ICON_INFORMATION,
@@ -906,10 +906,11 @@ class JLCPCBTools(wx.Dialog):
                 if value.endswith("R") or value.endswith("r") or value.endswith("o"):
                     value = value[:-1]
                 value += "Ω"
-            m = re.search(r"_(\d+)_\d+Metric", footprint)
+            m = re.search(r"(R|L|C|LED|D)_(\d{4})", footprint)
             if m:
-                value += f" {m.group(1)}"
+                value += f" {m.group(2)}"
             selection[ref] = value
+        print(selection)
         PartSelectorDialog(self, selection).ShowModal()
 
     def count_order_number_placeholders(self):

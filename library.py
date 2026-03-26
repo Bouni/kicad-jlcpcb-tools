@@ -45,8 +45,8 @@ class Library:
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.order_by = "LCSC Part"
-        self.order_dir = "ASC"
+        self.order_by = "Stock"
+        self.order_dir = "DESC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
         self.partsdb_file = os.path.join(self.datadir, "parts-fts5.db")
         self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
