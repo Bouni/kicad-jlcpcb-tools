@@ -910,7 +910,6 @@ class JLCPCBTools(wx.Dialog):
             if m:
                 value += f" {m.group(2)}"
             selection[ref] = value
-        print(selection)
         PartSelectorDialog(self, selection).ShowModal()
 
     def count_order_number_placeholders(self):
