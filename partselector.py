@@ -11,7 +11,7 @@ from .derive_params import params_for_part  # pylint: disable=import-error
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
-from .partselector_columns import DB_FIELDS, PARTSELECTOR_COLUMNS
+from .partselector_columns import DB_FIELDS, PARAMS_COLUMN_KEY, PARTSELECTOR_COLUMNS
 
 
 class PartSelectorDialog(wx.Dialog):
@@ -665,9 +665,9 @@ class PartSelectorDialog(wx.Dialog):
             db_row = {field: str(value) for field, value in zip(DB_FIELDS, p)}
             price = round(self.get_price(len(self.parts), db_row.get("Price", "")), 3)
             if price > 0:
-                sum = round(price * len(self.parts), 3)
+                total_cost = round(price * len(self.parts), 3)
                 db_row["Price"] = (
-                    f"{len(self.parts)} parts: ${price} each / ${sum} total"
+                    f"{len(self.parts)} parts: ${price} each / ${total_cost} total"
                 )
             else:
                 db_row["Price"] = "Error in price data"
@@ -680,7 +680,7 @@ class PartSelectorDialog(wx.Dialog):
             )
             item = []
             for column in PARTSELECTOR_COLUMNS:
-                if column.key == "params":
+                if column.key == PARAMS_COLUMN_KEY:
                     item.append(params)
                 elif column.db_field:
                     item.append(db_row.get(column.db_field, ""))
