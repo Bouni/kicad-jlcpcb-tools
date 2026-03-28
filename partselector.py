@@ -11,6 +11,7 @@ from .derive_params import params_for_part  # pylint: disable=import-error
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
+from .partselector_columns import DB_FIELDS, PARTSELECTOR_COLUMNS
 
 
 class PartSelectorDialog(wx.Dialog):
@@ -438,88 +439,20 @@ class PartSelectorDialog(wx.Dialog):
             table_scroller,
             style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_SINGLE,
         )
-
-        lcsc = self.part_list.AppendTextColumn(
-            "LCSC",
-            0,
-            width=int(parent.scale_factor * 60),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
-        )
-        mfr_number = self.part_list.AppendTextColumn(
-            "MFR Number",
-            1,
-            width=int(parent.scale_factor * 140),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_LEFT,
-        )
-        package = self.part_list.AppendTextColumn(
-            "Package",
-            2,
-            width=int(parent.scale_factor * 100),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_LEFT,
-        )
-        pins = self.part_list.AppendTextColumn(
-            "Pins",
-            3,
-            width=int(parent.scale_factor * 40),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
-        )
-        parttype = self.part_list.AppendTextColumn(
-            "Type",
-            4,
-            width=int(parent.scale_factor * 50),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_LEFT,
-        )
-        params = self.part_list.AppendTextColumn(
-            "Params",
-            5,
-            width=int(parent.scale_factor * 150),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
-        )
-        stock = self.part_list.AppendTextColumn(
-            "Stock",
-            6,
-            width=int(parent.scale_factor * 50),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
-        )
-        mfr = self.part_list.AppendTextColumn(
-            "Manufacturer",
-            7,
-            width=int(parent.scale_factor * 100),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_LEFT,
-        )
-        description = self.part_list.AppendTextColumn(
-            "Description",
-            8,
-            width=int(parent.scale_factor * 300),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_LEFT,
-        )
-        price = self.part_list.AppendTextColumn(
-            "Price",
-            9,
-            width=int(parent.scale_factor * 100),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_LEFT,
-        )
-
-        lcsc.SetSortable(True)
-        mfr_number.SetSortable(True)
-        package.SetSortable(True)
-        pins.SetSortable(True)
-        parttype.SetSortable(True)
-        params.SetSortable(True)
-        stock.SetSortable(True)
-        mfr.SetSortable(True)
-        description.SetSortable(True)
-        price.SetSortable(True)
+        align_map = {
+            "left": wx.ALIGN_LEFT,
+            "center": wx.ALIGN_CENTER,
+        }
+        for idx, column in enumerate(PARTSELECTOR_COLUMNS):
+            view_col = self.part_list.AppendTextColumn(
+                column.label,
+                idx,
+                width=int(parent.scale_factor * column.width),
+                mode=dv.DATAVIEW_CELL_INERT,
+                align=align_map[column.align],
+            )
+            if column.sortable:
+                view_col.SetSortable(True)
 
         self.part_list.Bind(dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected)
         self.part_list.Bind(dv.EVT_DATAVIEW_ITEM_ACTIVATED, self.select_part)
@@ -729,20 +662,30 @@ class PartSelectorDialog(wx.Dialog):
         else:
             self.result_count.SetLabel(f"{count} Results in {search_duration_text}")
         for p in parts:
-            item = [str(c) for c in p]
-            pricecol = 8  # Must match order in library.py search function
-            price = round(self.get_price(len(self.parts), item[pricecol]), 3)
+            db_row = {field: str(value) for field, value in zip(DB_FIELDS, p)}
+            price = round(self.get_price(len(self.parts), db_row.get("Price", "")), 3)
             if price > 0:
                 sum = round(price * len(self.parts), 3)
-                item[pricecol] = (
+                db_row["Price"] = (
                     f"{len(self.parts)} parts: ${price} each / ${sum} total"
                 )
             else:
-                item[pricecol] = "Error in price data"
+                db_row["Price"] = "Error in price data"
             params = params_for_part(
-                {"description": item[7], "category": item[9], "package": item[2]}
+                {
+                    "description": db_row.get("Description", ""),
+                    "category": db_row.get("First Category", ""),
+                    "package": db_row.get("Package", ""),
+                }
             )
-            item.insert(5, params)
+            item = []
+            for column in PARTSELECTOR_COLUMNS:
+                if column.key == "params":
+                    item.append(params)
+                elif column.db_field:
+                    item.append(db_row.get(column.db_field, ""))
+                else:
+                    item.append("")
             self.part_list_model.AddEntry(item)
 
     def select_part(self, *_):
