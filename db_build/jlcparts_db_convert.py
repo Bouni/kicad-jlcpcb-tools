@@ -13,14 +13,14 @@ import sys
 # TODO(z2amiller):  Use proper packaging
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import click
+import click  # noqa: E402
 
-from common.componentdb import ComponentsDatabase
-from dblib import DatabaseConfig
-from common.filemgr import FileManager
-from common.jlcapi import CategoryFetch, Component, JlcApi
-from common.partsdb import Generate, PartsDatabase
-from common.progress import PrintNestedProgressBar, TqdmNestedProgressBar
+from common.componentdb import ComponentsDatabase  # noqa: E402
+from common.filemgr import FileManager  # noqa: E402
+from common.jlcapi import CategoryFetch, Component, JlcApi  # noqa: E402
+from common.partsdb import Generate, PartsDatabase  # noqa: E402
+from common.progress import PrintNestedProgressBar, TqdmNestedProgressBar  # noqa: E402
+from dblib import DatabaseConfig  # noqa: E402
 
 
 def update_components_db_from_api() -> None:

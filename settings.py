@@ -494,7 +494,7 @@ class SettingsDialog(wx.Dialog):
             # Find the key for this display name
             for key, config in LIBRARY_CONFIGS.items():
                 if config.display_name == value:
-                    self.logger.debug(f"Selected library key: {key}")
+                    self.logger.debug("Selected library key: %s", key)
                     value = key
                     break
 
