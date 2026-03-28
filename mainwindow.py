@@ -117,6 +117,10 @@ class JLCPCBTools(wx.Dialog):
         self.store: Store
         self.settings = {}
         self.load_settings()
+        self.auto_select_alike = bool(
+            self.settings.get("general", {}).get("select_alike_auto", False)
+        )
+        self.select_alike_in_progress = False
         self.Bind(wx.EVT_CLOSE, self.quit_dialog)
 
         # ---------------------------------------------------------------------
@@ -256,14 +260,15 @@ class JLCPCBTools(wx.Dialog):
             "Remove a LCSC number from a footprint",
         )
 
-        self.select_alike_button = self.right_toolbar.AddTool(
+        self.select_alike_button = self.right_toolbar.AddCheckTool(
             ID_SELECT_ALIKE,
-            "Select alike parts",
+            "Auto-select alike",
             loadBitmapScaled(
                 "mdi-checkbox-multiple-marked.png",
                 self.scale_factor,
             ),
-            "Select footprint that are alike",
+            wx.NullBitmap,
+            "Automatically select footprints with the same value and footprint",
         )
 
         self.toggle_bom_pos_button = self.right_toolbar.AddTool(
@@ -350,7 +355,7 @@ class JLCPCBTools(wx.Dialog):
 
         self.Bind(wx.EVT_TOOL, self.select_part, self.select_part_button)
         self.Bind(wx.EVT_TOOL, self.remove_lcsc_number, self.remove_lcsc_number_button)
-        self.Bind(wx.EVT_TOOL, self.select_alike, self.select_alike_button)
+        self.Bind(wx.EVT_TOOL, self.toggle_select_alike, self.select_alike_button)
         self.Bind(wx.EVT_TOOL, self.toggle_bom_pos, self.toggle_bom_pos_button)
         self.Bind(wx.EVT_TOOL, self.toggle_bom, self.toggle_bom_button)
         self.Bind(wx.EVT_TOOL, self.toggle_pos, self.toggle_pos_button)
@@ -359,6 +364,8 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(wx.EVT_TOOL, self.OnPosHide, self.hide_pos_button)
         self.Bind(wx.EVT_TOOL, self.save_all_mappings, self.save_all_button)
         self.Bind(wx.EVT_TOOL, self.export_to_schematic, self.export_schematic_button)
+
+        self.right_toolbar.ToggleTool(ID_SELECT_ALIKE, self.auto_select_alike)
 
         self.right_toolbar.Realize()
 
@@ -755,9 +762,15 @@ class JLCPCBTools(wx.Dialog):
 
     def OnFootprintSelected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
+        if self.select_alike_in_progress:
+            return
+
         self.enable_part_specific_toolbar_buttons(
             self.footprint_list.GetSelectedItemsCount() > 0
         )
+
+        if self.auto_select_alike and self.footprint_list.GetSelectedItemsCount() == 1:
+            self.select_alike_parts()
 
         # clear the present selections
         selection = self.pcbnew.GetCurrentSelection()
@@ -778,7 +791,6 @@ class JLCPCBTools(wx.Dialog):
         for button in (
             ID_SELECT_PART,
             ID_REMOVE_LCSC_NUMBER,
-            ID_SELECT_ALIKE,
             ID_TOGGLE_BOM_POS,
             ID_TOGGLE_BOM,
             ID_TOGGLE_POS,
@@ -831,14 +843,29 @@ class JLCPCBTools(wx.Dialog):
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
 
-    def select_alike(self, *_):
-        """Select all parts that have the same value and footprint."""
+    def select_alike_parts(self, *_):
+        """Select all alike parts, starting from a single selected part."""
         if self.footprint_list.GetSelectedItemsCount() > 1:
             self.logger.warning("Select only one component, please.")
             return
-        item = self.footprint_list.GetSelection()
-        for item in self.partlist_data_model.select_alike(item):
-            self.footprint_list.Select(item)
+        selected_item = self.footprint_list.GetSelection()
+        self.select_alike_in_progress = True
+        try:
+            for alike_item in self.partlist_data_model.select_alike(selected_item):
+                if not self.footprint_list.IsSelected(alike_item):
+                    self.footprint_list.Select(alike_item)
+        finally:
+            self.select_alike_in_progress = False
+
+    def toggle_select_alike(self, e):
+        """Toggle auto-selecting alike parts on selection."""
+        self.auto_select_alike = bool(e.IsChecked())
+        self.settings.setdefault("general", {})["select_alike_auto"] = (
+            self.auto_select_alike
+        )
+        self.save_settings()
+        if self.auto_select_alike and self.footprint_list.GetSelectedItemsCount() == 1:
+            self.select_alike_parts()
 
     def get_part_details(self, *_):
         """Fetch part details from LCSC and show them one after another each in a modal."""
