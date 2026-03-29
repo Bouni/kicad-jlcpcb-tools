@@ -931,7 +931,8 @@ class JLCPCBTools(wx.Dialog):
                 if (
                     isinstance(drawing, kicad_pcbnew.PCB_SHAPE)
                     and drawing.GetShape() == kicad_pcbnew.S_RECT
-                    and drawing.IsFilled()
+                    and ((hasattr(drawing, "IsFilled") and drawing.IsFilled())
+                    or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill()))
                 ):
                     corners = drawing.GetRectCorners()
 
