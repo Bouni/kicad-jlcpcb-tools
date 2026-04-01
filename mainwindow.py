@@ -1,6 +1,5 @@
 """Contains the main window of the plugin."""
 
-from contextlib import suppress
 from datetime import datetime as dt
 import json
 import logging
@@ -72,8 +71,11 @@ ID_HIDE_BOM = 13
 ID_HIDE_POS = 14
 ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
+ID_COPY_LCSC_SHORTCUT = 17
+ID_PASTE_LCSC_SHORTCUT = 18
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
+ID_CONTEXT_MENU_ASSIGN_SAME_VALUE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
@@ -124,11 +126,21 @@ class JLCPCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
         quitid = wx.NewId()
         self.Bind(wx.EVT_MENU, self.quit_dialog, id=quitid)
+        self.Bind(wx.EVT_MENU, self.copy_part_lcsc, id=ID_COPY_LCSC_SHORTCUT)
+        self.Bind(wx.EVT_MENU, self.paste_part_lcsc, id=ID_PASTE_LCSC_SHORTCUT)
 
-        entries = [wx.AcceleratorEntry(), wx.AcceleratorEntry(), wx.AcceleratorEntry()]
+        entries = [
+            wx.AcceleratorEntry(),
+            wx.AcceleratorEntry(),
+            wx.AcceleratorEntry(),
+            wx.AcceleratorEntry(),
+            wx.AcceleratorEntry(),
+        ]
         entries[0].Set(wx.ACCEL_CTRL, ord("W"), quitid)
         entries[1].Set(wx.ACCEL_CTRL, ord("Q"), quitid)
         entries[2].Set(wx.ACCEL_SHIFT, wx.WXK_ESCAPE, quitid)
+        entries[3].Set(wx.ACCEL_CTRL, ord("C"), ID_COPY_LCSC_SHORTCUT)
+        entries[4].Set(wx.ACCEL_CTRL, ord("V"), ID_PASTE_LCSC_SHORTCUT)
         accel = wx.AcceleratorTable(entries)
         self.SetAcceleratorTable(accel)
 
@@ -477,6 +489,23 @@ class JLCPCBTools(wx.Dialog):
         self.gauge.SetValue(0)
         self.gauge.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 5)))
 
+        # Cost display label
+        self.cost_label = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Total: $0.00 (0 parts) | Missing LCSC: 0 | Out of stock: 0",
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            wx.ALIGN_LEFT,
+        )
+        font = wx.Font(
+            int(10 * self.scale_factor),
+            wx.FONTFAMILY_DEFAULT,
+            wx.FONTSTYLE_NORMAL,
+            wx.FONTWEIGHT_BOLD,
+        )
+        self.cost_label.SetFont(font)
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -485,6 +514,7 @@ class JLCPCBTools(wx.Dialog):
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(self.upper_toolbar, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
+        layout.Add(self.cost_label, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -537,10 +567,11 @@ class JLCPCBTools(wx.Dialog):
         """Destroy dialog on close."""
         self.logger.info("quit_dialog()")
         root = logging.getLogger()
-        with suppress(AttributeError):
+        try:
             root.removeHandler(self.logging_handler1)
-        with suppress(AttributeError):
             root.removeHandler(self.logging_handler2)
+        except AttributeError:
+            pass
 
         self.Destroy()
         self.EndModal(0)
@@ -627,6 +658,8 @@ class JLCPCBTools(wx.Dialog):
             self.partlist_data_model.set_lcsc(
                 reference, e.lcsc, e.type, e.stock, params
             )
+        # Update cost display after assignments
+        self.update_bom_cost()
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -686,6 +719,8 @@ class JLCPCBTools(wx.Dialog):
                     params_for_part(details.get(part["lcsc"], {})),
                 ]
             )
+        # Update cost display after populating list
+        self.update_bom_cost()
 
     def OnBomHide(self, *_):
         """Hide all parts from the list that have 'in BOM' set to No."""
@@ -809,6 +844,8 @@ class JLCPCBTools(wx.Dialog):
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, int(bom))
             self.partlist_data_model.toggle_bom(item)
+        # Update cost display after toggling BOM status
+        self.update_bom_cost()
 
     def toggle_pos(self, *_):
         """Toggle the exclude from POS attribute of a footprint."""
@@ -830,6 +867,8 @@ class JLCPCBTools(wx.Dialog):
             fp = board.FindFootprintByReference(ref)
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
+        # Update cost display after removing LCSC
+        self.update_bom_cost()
 
     def select_alike(self, *_):
         """Select all parts that have the same value and footprint."""
@@ -894,23 +933,138 @@ class JLCPCBTools(wx.Dialog):
         ) as j:
             json.dump(self.settings, j)
 
+    def extract_package_size(self, footprint):
+        """Extract package size from footprint name using various common patterns."""
+        # Try multiple patterns commonly used in KiCad footprint libraries
+        patterns = [
+            r"_(\d{4})_\d{4}Metric",     # _0603_1608Metric (most common)
+            r"[_-](\d{4})[_-]",           # _0603_ or -0603-
+            r"[_:](\d{4})(?:Metric)?$",   # _0603 or :0603 at end
+            r"SMD[_-]?(\d{4})",           # SMD_0603 or SMD-0603
+            r"^(\d{4})[_-]",              # 0603_ at start
+            r"[_-](\d{4})Metric",         # _0603Metric
+            r"[_-](\d{4})Imperial",       # _0603Imperial
+            r"Chip[_-]?(\d{4})",          # Chip_0603 or Chip-0603
+        ]
+        
+        for pattern in patterns:
+            m = re.search(pattern, footprint)
+            if m:
+                return m.group(1)
+        
+        # Try to extract metric size from metric footprints (e.g., 1608 from _1608_)
+        m = re.search(r"_(\d{4})_", footprint)
+        if m:
+            # Check if it might be a metric size (typically 4 digits)
+            size = m.group(1)
+            if len(size) == 4:
+                return size
+        
+        return None
+
+    def get_component_category(self, ref_prefix):
+        """Map reference designator to JLCPCB component category."""
+        category_map = {
+            "R": "Resistors",
+            "RV": "Resistors",
+            "POT": "Resistors",
+            "C": "Capacitors",
+            "L": "Inductors & Transformers",
+            "D": "Diodes",
+            "Q": "Transistors",
+            "U": "Integrated Circuits (ICs)",
+            "IC": "Integrated Circuits (ICs)",
+            "Y": "Crystals & Oscillators",
+            "FB": "Inductors & Transformers",
+            "F": "Fuses",
+            "LED": "Optoelectronics",
+            "J": "Connectors",
+            "P": "Connectors",
+            "SW": "Switches",
+            "BT": "Battery Products",
+        }
+        return category_map.get(ref_prefix, None)
+
     def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
         selection = {}
+        auto_keywords = self.settings.get("general", {}).get("auto_search_keywords", True)
+        detected_category = None
+        
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
-            if ref.startswith("R"):
-                """ Auto remove alphabet unit if applicable """
-                if value.endswith("R") or value.endswith("r") or value.endswith("o"):
-                    value = value[:-1]
-                value += "Ω"
-            m = re.search(r"_(\d+)_\d+Metric", footprint)
-            if m:
-                value += f" {m.group(1)}"
+            
+            if auto_keywords:
+                # Extract the component type from reference designator
+                ref_prefix = ref.rstrip("0123456789")
+                
+                # Detect category for auto-filtering (use first selection's category)
+                if detected_category is None:
+                    detected_category = self.get_component_category(ref_prefix)
+                
+                # Process based on component type
+                if ref_prefix in ["R", "RV", "POT"]:  # Resistors
+                    # Remove unit suffix if present
+                    if value.endswith(("R", "r", "o", "Ω")):
+                        value = value[:-1]
+                    value += "Ω"
+                elif ref_prefix in ["C"]:  # Capacitors
+                    # Add common capacitor units if not present
+                    if not any(value.endswith(unit) for unit in ["pF", "nF", "uF", "µF", "mF", "F"]):
+                        # Check if value is just a number
+                        try:
+                            float(value.replace(",", "."))
+                            value += "µF"  # Default to µF for bare numbers
+                        except ValueError:
+                            pass  # Keep original value if not a number
+                elif ref_prefix in ["D"]:  # Diodes
+                    # Keep value as-is for diodes (usually part numbers)
+                    pass
+                elif ref_prefix in ["Q"]:  # Transistors
+                    # Keep value as-is for transistors (usually part numbers)
+                    pass
+                elif ref_prefix in ["U", "IC"]:  # ICs
+                    # Keep value as-is for ICs (usually IC names/part numbers)
+                    pass
+                elif ref_prefix in ["L"]:  # Inductors
+                    # Add common inductor units if not present
+                    if not any(value.endswith(unit) for unit in ["nH", "µH", "uH", "mH", "H"]):
+                        try:
+                            float(value.replace(",", "."))
+                            value += "µH"  # Default to µH for bare numbers
+                        except ValueError:
+                            pass
+                elif ref_prefix in ["Y"]:  # Crystals/Oscillators
+                    # Add MHz/kHz if just a number
+                    if not any(value.endswith(unit) for unit in ["MHz", "KHz", "kHz", "Hz", "GHz"]):
+                        try:
+                            freq = float(value.replace(",", "."))
+                            if freq < 1000:
+                                value += "kHz"
+                            else:
+                                value += "MHz"
+                        except ValueError:
+                            pass
+                
+                # Extract package size from footprint (if available) for all component types
+                package_size = self.extract_package_size(footprint)
+                if package_size:
+                    value += f" {package_size}"
+            else:
+                # Legacy behavior - only process resistors
+                if ref.startswith("R"):
+                    if value.endswith("R") or value.endswith("r") or value.endswith("o"):
+                        value = value[:-1]
+                    value += "Ω"
+                # Extract package size even in legacy mode
+                package_size = self.extract_package_size(footprint)
+                if package_size:
+                    value += f" {package_size}"
+            
             selection[ref] = value
-        PartSelectorDialog(self, selection).ShowModal()
+        PartSelectorDialog(self, selection, auto_category=detected_category).ShowModal()
 
     def count_order_number_placeholders(self):
         """Count the JLC order/serial number placeholders."""
@@ -1010,6 +1164,8 @@ class JLCPCBTools(wx.Dialog):
         self.fabrication.zip_gerber_excellon()
         self.fabrication.generate_cpl()
         self.fabrication.generate_bom()
+        self.fabrication.generate_pcb_pdf(layer_count)
+        self.fabrication.generate_schematic_pdf()
 
     def copy_part_lcsc(self, *_):
         """Fetch part details from LCSC and show them in a modal."""
@@ -1035,6 +1191,8 @@ class JLCPCBTools(wx.Dialog):
                         reference, lcsc, details["type"], details["stock"], params
                     )
                     self.store.set_lcsc(reference, lcsc)
+                # Update cost display after paste
+                self.update_bom_cost()
 
     def add_correction(self, e):
         """Add part correction for the current part."""
@@ -1117,21 +1275,207 @@ class JLCPCBTools(wx.Dialog):
             return m.group(0)
         return ""
 
+    def assign_to_all_same_value(self, *_):
+        """Assign LCSC number to all components with the same value and footprint."""
+        selections = self.footprint_list.GetSelections()
+        if not selections:
+            return
+        
+        # Get the first selected item as the source
+        source_item = selections[0]
+        source_ref = self.partlist_data_model.get_reference(source_item)
+        source_value = self.partlist_data_model.get_value(source_item)
+        source_footprint = self.partlist_data_model.get_footprint(source_item)
+        source_lcsc = self.partlist_data_model.get_lcsc(source_item)
+        
+        # Check if source has an LCSC number
+        if not source_lcsc or source_lcsc == "":
+            wx.MessageBox(
+                "Selected component has no LCSC number assigned.",
+                "No LCSC Number",
+                wx.OK | wx.ICON_WARNING,
+            )
+            return
+        
+        # Find all components with same value and footprint
+        matching_parts = []
+        for data in self.partlist_data_model.get_all():
+            ref = data[self.partlist_data_model.columns["REF_COL"]]
+            value = data[self.partlist_data_model.columns["VALUE_COL"]]
+            footprint = data[self.partlist_data_model.columns["FP_COL"]]
+            lcsc = data[self.partlist_data_model.columns["LCSC_COL"]]
+            
+            # Match value and footprint, skip if already has same LCSC
+            if value == source_value and footprint == source_footprint and lcsc != source_lcsc:
+                matching_parts.append(ref)
+        
+        if not matching_parts:
+            wx.MessageBox(
+                f"No other components found with value '{source_value}' and footprint '{source_footprint}'.",
+                "No Matches",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+        
+        # Confirm with user
+        result = wx.MessageBox(
+            f"Assign {source_lcsc} to {len(matching_parts)} component(s) with value '{source_value}'?\n\n"
+            f"Components: {', '.join(matching_parts[:10])}{'...' if len(matching_parts) > 10 else ''}",
+            "Bulk Assignment",
+            wx.YES_NO | wx.ICON_QUESTION,
+        )
+        
+        if result == wx.YES:
+            # Get part details once
+            details = self.library.get_part_details(source_lcsc)
+            params = params_for_part(details)
+            
+            # Assign to all matching parts
+            for ref in matching_parts:
+                self.store.set_lcsc(ref, source_lcsc)
+                self.partlist_data_model.set_lcsc(
+                    ref, source_lcsc, details["type"], details["stock"], params
+                )
+            
+            self.logger.info(
+                "Bulk assigned %s to %d components with value %s",
+                source_lcsc,
+                len(matching_parts),
+                source_value,
+            )
+            # Update cost display after bulk assignment
+            self.update_bom_cost()
+
+    def parse_price(self, price_str, quantity=1):
+        """Parse JLCPCB price tier string and return price for given quantity.
+        
+        Price format: "1-9:0.0012,10-49:0.0010,50-999:0.0008"
+        Returns the appropriate unit price based on quantity.
+        """
+        if not price_str:
+            return 0.0
+        
+        try:
+            # Split into tiers
+            tiers = price_str.split(",")
+            
+            # Parse each tier and find the one matching the quantity
+            best_price = None
+            for tier in tiers:
+                range_part, price_part = tier.split(":")
+                price = float(price_part)
+                
+                # Parse range (e.g., "1-9" or "1000+")
+                if "+" in range_part:
+                    min_qty = int(range_part.replace("+", ""))
+                    if quantity >= min_qty:
+                        best_price = price
+                else:
+                    parts = range_part.split("-")
+                    if len(parts) == 2:
+                        min_qty = int(parts[0])
+                        max_qty = int(parts[1])
+                        if min_qty <= quantity <= max_qty:
+                            return price
+                        # Keep track of the highest tier we've seen for quantities above it
+                        if quantity > max_qty:
+                            best_price = price
+            
+            return best_price if best_price is not None else 0.0
+        except (ValueError, AttributeError, IndexError):
+            return 0.0
+
+    def calculate_bom_cost(self):
+        """Calculate total BOM cost based on assigned LCSC parts and their quantities.
+        
+        Returns tuple: (total_cost, part_count, missing_count, out_of_stock_count)
+        """
+        total_cost = 0.0
+        part_count = 0
+        missing_count = 0
+        out_of_stock_count = 0
+        
+        # Count quantities for each unique LCSC + footprint + value combination
+        part_quantities = {}
+        
+        for data in self.partlist_data_model.get_all():
+            # Skip excluded parts
+            if data[self.partlist_data_model.columns["BOM_COL"]] is False:
+                continue
+            
+            lcsc = data[self.partlist_data_model.columns["LCSC_COL"]]
+            stock = data[self.partlist_data_model.columns["STOCK_COL"]]
+            
+            part_count += 1
+            
+            # Track missing LCSC
+            if not lcsc or lcsc == "":
+                missing_count += 1
+                continue
+            
+            # Track out of stock
+            try:
+                stock_val = int(stock) if stock else 0
+                if stock_val == 0:
+                    out_of_stock_count += 1
+            except (ValueError, TypeError):
+                pass
+            
+            # Count quantities for unique parts
+            key = lcsc
+            if key not in part_quantities:
+                part_quantities[key] = 0
+            part_quantities[key] += 1
+        
+        # Calculate cost for each unique part
+        for lcsc, quantity in part_quantities.items():
+            details = self.library.get_part_details(lcsc)
+            price_str = details.get("price", "")
+            unit_price = self.parse_price(price_str, quantity)
+            total_cost += unit_price * quantity
+        
+        return total_cost, part_count, missing_count, out_of_stock_count
+
+    def update_bom_cost(self):
+        """Update the cost display label with current BOM cost."""
+        total_cost, part_count, missing_count, out_of_stock_count = self.calculate_bom_cost()
+        
+        # Format the display string
+        cost_str = f"Total: ${total_cost:.2f} ({part_count} parts)"
+        
+        if missing_count > 0:
+            cost_str += f" | Missing LCSC: {missing_count}"
+        
+        if out_of_stock_count > 0:
+            cost_str += f" | Out of stock: {out_of_stock_count}"
+        
+        self.cost_label.SetLabel(cost_str)
+
     def OnRightDown(self, *_):
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
 
         copy_lcsc = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_COPY_LCSC, "Copy LCSC"
+            right_click_menu, ID_CONTEXT_MENU_COPY_LCSC, "Copy LCSC\tCtrl+C"
         )
         right_click_menu.Append(copy_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
 
         paste_lcsc = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_PASTE_LCSC, "Paste LCSC"
+            right_click_menu, ID_CONTEXT_MENU_PASTE_LCSC, "Paste LCSC\tCtrl+V"
         )
         right_click_menu.Append(paste_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
+        
+        right_click_menu.AppendSeparator()
+        
+        assign_same_value = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_ASSIGN_SAME_VALUE, "Assign to all with same value"
+        )
+        right_click_menu.Append(assign_same_value)
+        right_click_menu.Bind(wx.EVT_MENU, self.assign_to_all_same_value, assign_same_value)
+        
+        right_click_menu.AppendSeparator()
 
         correction_by_reference = wx.MenuItem(
             right_click_menu,
