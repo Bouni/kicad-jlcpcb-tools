@@ -195,6 +195,36 @@ class PartListDataModel(dv.PyDataViewModel):
                 alike.append(self.ObjectToItem(data))
         return alike
 
+    def GetAttr(self, item, col, attr):
+        """Override to provide row coloring based on LCSC status."""
+        row = self.ItemToObject(item)
+        lcsc = row[self.columns["LCSC_COL"]]
+        exclude_bom = row[self.columns["BOM_COL"]]
+        stock = row[self.columns["STOCK_COL"]]
+        
+        # Check if excluded from BOM (use icon object comparison)
+        is_excluded = (exclude_bom == self.bom_pos_icons[1])
+        
+        if is_excluded:
+            # Grey for excluded parts
+            attr.SetColour((180, 180, 180))
+            return True
+        elif not lcsc or lcsc == "":
+            # Red for missing LCSC
+            attr.SetColour((255, 200, 200))
+            attr.SetBold(True)
+            return True
+        elif stock and stock.isdigit() and int(stock) < 100:
+            # Yellow for low stock
+            attr.SetColour((255, 255, 200))
+            return True
+        elif stock and stock.isdigit() and int(stock) > 10000:
+            # Light green for high stock
+            attr.SetColour((220, 255, 220))
+            return True
+        
+        return False
+
     def set_lcsc(self, ref, lcsc, type, stock, params):
         """Set an lcsc number, type and stock for given reference."""
         if (index := self.find_index(ref)) is None:

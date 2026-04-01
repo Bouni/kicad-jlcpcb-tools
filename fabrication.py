@@ -1,12 +1,13 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
 import csv
+import glob
 from importlib import import_module
 import logging
-import math
 import os
 from pathlib import Path
 import re
+import subprocess
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from pcbnew import (  # pylint: disable=import-error
@@ -15,16 +16,15 @@ from pcbnew import (  # pylint: disable=import-error
     PCB_VIA,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
+    PLOT_FORMAT_PDF,
     VECTOR2I,
     ZONE_FILLER,
     B_Cu,
     B_Mask,
-    B_Paste,
     B_SilkS,
     Edge_Cuts,
     F_Cu,
     F_Mask,
-    F_Paste,
     F_SilkS,
     FromMM,
     Refresh,
@@ -58,6 +58,8 @@ class Fabrication:
         Path(self.outputdir).mkdir(parents=True, exist_ok=True)
         self.gerberdir = os.path.join(self.path, "jlcpcb", "gerber")
         Path(self.gerberdir).mkdir(parents=True, exist_ok=True)
+        self.docdir = os.path.join(self.path, "jlcpcb", "documentation")
+        Path(self.docdir).mkdir(parents=True, exist_ok=True)
 
     def fill_zones(self):
         """Refill copper zones following user prompt."""
@@ -111,22 +113,6 @@ class Fabrication:
     def reposition(self, footprint, position, offset):
         """Adjust the position of the footprint, returning the new position as a wxPoint."""
         if offset[0] != 0 or offset[1] != 0:
-            original = footprint.GetOrientation()
-            # `.AsRadians()` added in KiCAD 6.99
-            try:
-                rotation = original.AsDegrees()
-            except AttributeError:
-                # we need to divide by 10 to get 180 out of 1800 for example.
-                # This might be a bug in 5.99 / 6.0 RC
-                rotation = original / 10
-            if footprint.GetLayer() != 0:
-                # bottom angles need to be mirrored on Y-axis
-                rotation = (180 - rotation) % 360
-            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(offset[1]) * math.sin(math.radians(rotation))
-            offset_y = - FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
-            if footprint.GetLayer() != 0:
-                # mirrored coordinate system needs to be taken into account on the bottom
-                offset_x = -offset_x
             self.logger.info(
                 "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
                 footprint.GetReference(),
@@ -137,7 +123,7 @@ class Fabrication:
                 offset[1],
             )
             return wxPoint(
-                position.x + offset_x, position.y + offset_y
+                position.x + FromMM(offset[0]), position.y + FromMM(offset[1])
             )
         return position
 
@@ -235,14 +221,12 @@ class Fabrication:
             ("CuTop", F_Cu, "Top layer"),
             ("SilkTop", F_SilkS, "Silk top"),
             ("MaskTop", F_Mask, "Mask top"),
-            ("PasteTop", F_Paste, "Paste top"),
         ]
         plot_plan_bottom = [
             ("CuBottom", B_Cu, "Bottom layer"),
             ("SilkBottom", B_SilkS, "Silk bottom"),
             ("MaskBottom", B_Mask, "Mask bottom"),
             ("EdgeCuts", Edge_Cuts, "Edges"),
-            ("PasteBottom", B_Paste, "Paste bottom"),
         ]
 
         plot_plan = []
@@ -277,6 +261,21 @@ class Fabrication:
                 plotter_info = (layer_name_string, enabled_layer_id, layer_name_string)
                 jlc_layers_to_plot.append(plotter_info)
         plot_plan += jlc_layers_to_plot
+
+        # Add any *.Cuts* layers (e.g. User.Cuts) not already in the plot plan
+        already_plotted_ids = {layer_info[1] for layer_info in plot_plan}
+        for enabled_layer_id in enabled_layer_ids:
+            if enabled_layer_id in already_plotted_ids:
+                continue
+            layer_name_string = str(self.board.GetLayerName(enabled_layer_id))
+            if "Cuts" in layer_name_string:
+                plotter_info = (
+                    layer_name_string.replace(".", ""),
+                    enabled_layer_id,
+                    layer_name_string,
+                )
+                plot_plan.append(plotter_info)
+                self.logger.info("Added Cuts layer: %s", layer_name_string)
 
         for layer_info in plot_plan:
             if layer_info[1] <= B_Cu:
@@ -322,6 +321,220 @@ class Fabrication:
         self.logger.info(
             "Finished generating ZIP file %s", os.path.join(self.outputdir, zipname)
         )
+
+    def generate_pcb_pdf(self, layer_count=None):
+        """Generate a multi-page PDF with each PCB layer on a separate page."""
+        # Build the same plot plan as generate_geber()
+        if not layer_count:
+            layer_count = self.board.GetCopperLayerCount()
+
+        plot_plan_top = [
+            ("CuTop", F_Cu, "Top layer"),
+            ("SilkTop", F_SilkS, "Silk top"),
+            ("MaskTop", F_Mask, "Mask top"),
+        ]
+        plot_plan_bottom = [
+            ("CuBottom", B_Cu, "Bottom layer"),
+            ("SilkBottom", B_SilkS, "Silk bottom"),
+            ("MaskBottom", B_Mask, "Mask bottom"),
+            ("EdgeCuts", Edge_Cuts, "Edges"),
+        ]
+
+        if layer_count == 1:
+            plot_plan = plot_plan_top + plot_plan_bottom[-2:]
+        elif layer_count == 2:
+            plot_plan = plot_plan_top + plot_plan_bottom
+        else:
+            plot_plan = (
+                plot_plan_top
+                + [
+                    (
+                        f"CuIn{layer}",
+                        getattr(import_module("pcbnew"), f"In{layer}_Cu"),
+                        f"Inner layer {layer}",
+                    )
+                    for layer in range(1, layer_count - 1)
+                ]
+                + plot_plan_bottom
+            )
+
+        # Add JLC_ prefixed layers
+        enabled_layer_ids = list(self.board.GetEnabledLayers().Seq())
+        for enabled_layer_id in enabled_layer_ids:
+            layer_name_string = str(self.board.GetLayerName(enabled_layer_id)).upper()
+            if "JLC_" in layer_name_string:
+                plot_plan.append((layer_name_string, enabled_layer_id, layer_name_string))
+
+        # Add *.Cuts* layers
+        already_plotted_ids = {layer_info[1] for layer_info in plot_plan}
+        for enabled_layer_id in enabled_layer_ids:
+            if enabled_layer_id in already_plotted_ids:
+                continue
+            layer_name_string = str(self.board.GetLayerName(enabled_layer_id))
+            if "Cuts" in layer_name_string:
+                plot_plan.append((
+                    layer_name_string.replace(".", ""),
+                    enabled_layer_id,
+                    layer_name_string,
+                ))
+
+        pdfdir = os.path.join(self.docdir, "pcb_layers")
+        Path(pdfdir).mkdir(parents=True, exist_ok=True)
+
+        # Clean old PDF files
+        for f in glob.glob(os.path.join(pdfdir, "*.pdf")):
+            os.remove(f)
+
+        pctl = PLOT_CONTROLLER(self.board)
+        popt = pctl.GetPlotOptions()
+        popt.SetOutputDirectory(pdfdir)
+        popt.SetPlotValue(
+            self.parent.settings.get("gerber", {}).get("plot_values", True)
+        )
+        popt.SetPlotReference(
+            self.parent.settings.get("gerber", {}).get("plot_references", True)
+        )
+        popt.SetPlotFrameRef(True)
+        popt.SetDrillMarksType(NO_DRILL_SHAPE)
+        popt.SetSketchPadsOnFabLayers(False)
+
+        # Plot each layer as a separate PDF file
+        layer_pdfs = []
+        for layer_info in plot_plan:
+            if layer_info[1] <= B_Cu:
+                popt.SetSkipPlotNPTH_Pads(True)
+            else:
+                popt.SetSkipPlotNPTH_Pads(False)
+            pctl.SetLayer(layer_info[1])
+            pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_PDF, layer_info[2])
+            if pctl.PlotLayer() is False:
+                self.logger.error("Error plotting PDF for %s", layer_info[2])
+            else:
+                self.logger.info("Successfully plotted PDF for %s", layer_info[2])
+                layer_pdfs.append((layer_info[0], layer_info[2]))
+            pctl.ClosePlot()
+
+        # Match generated PDF files to layer names by filename prefix
+        generated_files = sorted(glob.glob(os.path.join(pdfdir, "*.pdf")))
+        pdf_with_labels = []
+        for pdf_file in generated_files:
+            basename = os.path.basename(pdf_file)
+            label = basename  # fallback
+            for short_name, description in layer_pdfs:
+                if short_name in basename:
+                    label = description
+                    break
+            pdf_with_labels.append((pdf_file, label))
+
+        if pdf_with_labels:
+            # Merge into single multi-page PDF with bookmarks per layer
+            combined_pdf = os.path.join(
+                self.docdir, f"PCB-Layers-{Path(self.filename).stem}.pdf"
+            )
+            try:
+                from PyPDF2 import PdfMerger  # pylint: disable=import-error
+                merger = PdfMerger()
+                for pdf_file, label in pdf_with_labels:
+                    merger.append(pdf_file, outline_item=label)
+                merger.write(combined_pdf)
+                merger.close()
+                self.logger.info(
+                    "Finished generating combined PCB PDF: %s", combined_pdf
+                )
+            except ImportError:
+                try:
+                    from pypdf import PdfMerger  # pylint: disable=import-error
+                    merger = PdfMerger()
+                    for pdf_file, label in pdf_with_labels:
+                        merger.append(pdf_file, outline_item=label)
+                    merger.write(combined_pdf)
+                    merger.close()
+                    self.logger.info(
+                        "Finished generating combined PCB PDF: %s", combined_pdf
+                    )
+                except ImportError:
+                    self.logger.warning(
+                        "PyPDF2/pypdf not available — individual layer PDFs saved in %s",
+                        pdfdir,
+                    )
+        else:
+            self.logger.error("No layer PDFs were generated")
+
+    def generate_schematic_pdf(self):
+        """Generate a color PDF of the schematic using kicad-cli."""
+        schematic_path = os.path.join(
+            self.path, f"{Path(self.filename).stem}.kicad_sch"
+        )
+        if not os.path.isfile(schematic_path):
+            self.logger.warning(
+                "Schematic file not found: %s — skipping schematic PDF", schematic_path
+            )
+            return
+
+        output_pdf = os.path.join(
+            self.docdir, f"Schematic-{Path(self.filename).stem}.pdf"
+        )
+
+        # Find kicad-cli executable
+        kicad_cli = None
+        for candidate in [
+            "kicad-cli",
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.dirname(self.board.GetFileName())
+            ))), "bin", "kicad-cli"),
+        ]:
+            try:
+                result = subprocess.run(
+                    [candidate, "--version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    kicad_cli = candidate
+                    break
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+
+        # Search common installation paths on Windows
+        if not kicad_cli:
+            for prog_dir in [
+                os.environ.get("PROGRAMFILES", "C:\\Program Files"),
+                os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
+            ]:
+                for kicad_dir in sorted(
+                    glob.glob(os.path.join(prog_dir, "KiCad", "*", "bin", "kicad-cli.exe")),
+                    reverse=True,
+                ):
+                    kicad_cli = kicad_dir
+                    break
+                if kicad_cli:
+                    break
+
+        if not kicad_cli:
+            self.logger.warning(
+                "kicad-cli not found — skipping schematic PDF generation"
+            )
+            return
+
+        cmd = [
+            kicad_cli, "sch", "export", "pdf",
+            "--output", output_pdf,
+            "--theme", "KiCad Default",
+            schematic_path,
+        ]
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                self.logger.info("Finished generating schematic PDF: %s", output_pdf)
+            else:
+                self.logger.error(
+                    "kicad-cli schematic export failed: %s", result.stderr
+                )
+        except subprocess.TimeoutExpired:
+            self.logger.error("kicad-cli timed out generating schematic PDF")
+        except Exception as e:
+            self.logger.error("Error generating schematic PDF: %s", e)
 
     def generate_cpl(self):
         """Generate placement file (CPL)."""

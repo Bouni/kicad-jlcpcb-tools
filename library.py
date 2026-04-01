@@ -172,7 +172,11 @@ class Library:
             self.order_dir = "DESC"
         else:
             self.order_by = order_by[n]
-            self.order_dir = "ASC"
+            # Stock should always be sorted descending (highest to lowest)
+            if order_by[n] == "Stock":
+                self.order_dir = "DESC"
+            else:
+                self.order_dir = "ASC"
 
     def search(self, parameters):
         """Search the database for parts that meet the given parameters."""
@@ -262,8 +266,6 @@ class Library:
             library_types.append('"Basic"')
         if parameters["extended"]:
             library_types.append('"Extended"')
-        if parameters["preferred"]:
-            library_types.append('"Preferred"')
         if library_types:
             query_chunks.append(f'"Library Type" IN ({",".join(library_types)})')
 
@@ -288,7 +290,15 @@ class Library:
                 query += " AND "
             query += " AND ".join(query_chunks)
 
-        query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+        # Prioritize high-stock items when stock filter is enabled
+        if parameters["stock"]:
+            query += ' ORDER BY "Stock" DESC, "Library Type" ASC'
+        else:
+            # Use primary sort column, but add Stock DESC as secondary sort for better prioritization
+            query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+            # Add stock as secondary sort (except when already sorting by Stock)
+            if self.order_by != "Stock":
+                query += ', "Stock" DESC'
         query += " LIMIT 1000"
 
         self.logger.debug("query '%s'", query)
@@ -462,7 +472,7 @@ class Library:
             cur = con.cursor()
             query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type,
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
-                "First Category" as category
+                "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
             cur.execute(query, {"number": number})
             return next((n for n in cur.fetchall() if n["lcsc"] == number), {})

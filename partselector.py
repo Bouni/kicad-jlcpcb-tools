@@ -16,7 +16,7 @@ from .partdetails import PartDetailsDialog
 class PartSelectorDialog(wx.Dialog):
     """The part selector window."""
 
-    def __init__(self, parent, parts):
+    def __init__(self, parent, parts, auto_category=None):
         wx.Dialog.__init__(
             self,
             parent,
@@ -30,6 +30,7 @@ class PartSelectorDialog(wx.Dialog):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.parts = parts
+        self.auto_category = auto_category
         lcsc_selection = self.get_existing_selection(parts)
 
         self.search_timer = wx.Timer(self)
@@ -137,6 +138,10 @@ class PartSelectorDialog(wx.Dialog):
             style=wx.CB_READONLY,
         )
         self.category.SetHint("e.g. Resistors")
+        
+        # Set auto-detected category if provided
+        if self.auto_category and self.auto_category in parent.library.categories:
+            self.category.SetValue(self.auto_category)
 
         part_no_label = wx.StaticText(
             self,
@@ -201,21 +206,6 @@ class PartSelectorDialog(wx.Dialog):
             0,
             name="basic",
         )
-        preferred_label = wx.StaticText(
-            self,
-            wx.ID_ANY,
-            "Include preferred parts",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
-        )
-        self.preferred_checkbox = wx.CheckBox(
-            self,
-            wx.ID_ANY,
-            "Preferred",
-            wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
-            0,
-            name="preferred",
-        )
         extended_label = wx.StaticText(
             self,
             wx.ID_ANY,
@@ -253,16 +243,12 @@ class PartSelectorDialog(wx.Dialog):
         self.extended_checkbox.SetValue(
             self.parent.settings.get("partselector", {}).get("extended", True)
         )
-        self.preferred_checkbox.SetValue(
-            self.parent.settings.get("partselector", {}).get("preferred", True)
-        )
         self.assert_stock_checkbox.SetValue(
             self.parent.settings.get("partselector", {}).get("stock", False)
         )
 
         self.basic_checkbox.Bind(wx.EVT_CHECKBOX, self.update_settings)
         self.extended_checkbox.Bind(wx.EVT_CHECKBOX, self.update_settings)
-        self.preferred_checkbox.Bind(wx.EVT_CHECKBOX, self.update_settings)
         self.assert_stock_checkbox.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
         help_button = wx.Button(
@@ -347,13 +333,6 @@ class PartSelectorDialog(wx.Dialog):
         search_sizer_four.Add(basic_label, 0, wx.ALL, 5)
         search_sizer_four.Add(
             self.basic_checkbox,
-            0,
-            wx.LEFT | wx.RIGHT | wx.BOTTOM,
-            5,
-        )
-        search_sizer_four.Add(preferred_label, 0, wx.ALL, 5)
-        search_sizer_four.Add(
-            self.preferred_checkbox,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
@@ -670,7 +649,6 @@ class PartSelectorDialog(wx.Dialog):
             "solder_joints": self.solder_joints.GetValue(),
             "basic": self.basic_checkbox.GetValue(),
             "extended": self.extended_checkbox.GetValue(),
-            "preferred": self.preferred_checkbox.GetValue(),
             "stock": self.assert_stock_checkbox.GetValue(),
         }
         start = time.time()

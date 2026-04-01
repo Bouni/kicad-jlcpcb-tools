@@ -263,6 +263,45 @@ class SettingsDialog(wx.Dialog):
         order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
         order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Auto generate search keywords #####
+
+        self.auto_search_keywords_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Auto-generate search keywords from designator and value",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_auto_search_keywords",
+        )
+
+        self.auto_search_keywords_setting.SetToolTip(
+            wx.ToolTip(
+                "Automatically generate search keywords based on reference designator (R, C, D, Q, U) and component value"
+            )
+        )
+
+        self.auto_search_keywords_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled(
+                "database-outline.png", self.parent.scale_factor, static=True
+            ),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.auto_search_keywords_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        auto_search_keywords_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        auto_search_keywords_sizer.Add(
+            self.auto_search_keywords_image, 10, wx.ALL | wx.EXPAND, 5
+        )
+        auto_search_keywords_sizer.Add(
+            self.auto_search_keywords_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -275,6 +314,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(auto_search_keywords_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -411,6 +451,19 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_auto_search_keywords(self, enable):
+        """Update settings dialog according to the settings."""
+        if enable:
+            self.auto_search_keywords_setting.SetValue(enable)
+            self.auto_search_keywords_setting.SetLabel(
+                "Auto-generate search keywords from designator and value"
+            )
+        else:
+            self.auto_search_keywords_setting.SetValue(enable)
+            self.auto_search_keywords_setting.SetLabel(
+                "Don't auto-generate search keywords"
+            )
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
@@ -433,6 +486,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)
+        )
+        self.update_auto_search_keywords(
+            self.parent.settings.get("general", {}).get("auto_search_keywords", True)
         )
 
     def update_settings(self, event):
