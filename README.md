@@ -68,9 +68,9 @@ git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 
 You may need to create the `scripting/plugins` folder if it does not exist.
 
-### Flatpack :warning:
+### Flatpak :warning:
 
-The Flatpak installation of KiCAD currently dows not ship with pip and requests installed. The later is required for the plugin to work.
+The Flatpak installation of KiCAD currently does not ship with pip and requests installed. The later is required for the plugin to work.
 In order to get it working you can run the following 3 commands:
 
 1. `flatpak run --command=sh org.kicad.KiCad`
@@ -121,7 +121,7 @@ Footprints are included into the BOM and CPL files according to their `exclude f
 
 ### Export Additional JLC Specific Layers
 
-Some boards you have manufactured will require additional layers in your Gerber. For example, when manufacturing flex PCBs with a stiffener, JLC requires a layer outlining the stiffener layer (top/bottom), dimensions and the stiffener material properties (material, thickness etc). Export these additional JLC speciific layers in your production files with a simple modification.
+Some boards you have manufactured will require additional layers in your Gerber. For example, when manufacturing flex PCBs with a stiffener, JLC requires a layer outlining the stiffener layer (top/bottom), dimensions and the stiffener material properties (material, thickness etc). Export these additional JLC specific layers in your production files with a simple modification.
 
 Additional layers can be exported by creating layers with `JLC_` as the prefix of the layer name. You can access and edit the layer names in *Board Setup/Board Stackup/Board Editor Layers*
 
@@ -132,7 +132,7 @@ This tool will automatically export all additional layers with the JLC_ prefix a
 ## Footprint rotation correction
 
 JLCPCB seems to need corrected rotation information. @matthewlai implemented that in his [JLCKicadTools](https://github.com/matthewlai/JLCKicadTools) and I adopted his work in this plugin as well.
-You can download Matthews file from GitHub as well als manage your own corrections in the Rotation manager.
+You can download Matthews file from GitHub and manage your own corrections in the Rotation manager.
 
 ## Icons
 
@@ -268,7 +268,7 @@ If using PyCharm or Jetbrains IDEs, set the interpreter to Kicad's python, <i><b
 Click on 'script path' and change instead to 'module name',
 entering the name of the kicad-jlcpcb-tools folder, <i><b>{kicad-jlcpcb-tools folder name}</b></i>.
 
-## How to release new vesions of this plugin
+## How to release new versions of this plugin
 
 [bouni-kicad-repository](https://raw.githubusercontent.com/Bouni/bouni-kicad-repository/main/repository.json) contains the
 files for the latest version of the plugin, in the format KiCAD expects from external plugins.
