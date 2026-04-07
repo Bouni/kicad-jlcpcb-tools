@@ -146,7 +146,7 @@ def get_valid_footprints(board):
     """
     footprints = []
     for fp in board.GetFootprints():
-        if re.match(r"[\w\d-]+", fp.GetReference()) and len(fp.GetReference()) < 8:
+        if re.match(r"[\w\d-]+", fp.GetReference()):
             footprints.append(fp)
     return footprints
 
