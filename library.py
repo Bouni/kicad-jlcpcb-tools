@@ -21,6 +21,7 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
+from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .unzip_parts import unzip_parts
 
 
@@ -187,21 +188,13 @@ class Library:
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database."""
-        order_by = [
-            "LCSC Part",
-            "MFR.Part",
-            "Package",
-            "Solder Joint",
-            "Library Type",
-            "Stock",
-            "Manufacturer",
-            "Description",
-            "Price",
-        ]
-        if self.order_by == order_by[n] and self.order_dir == "ASC":
+        column = SORTABLE_COLUMN_INDEX_TO_DB.get(n)
+        if column is None:
+            return
+        if self.order_by == column and self.order_dir == "ASC":
             self.order_dir = "DESC"
         else:
-            self.order_by = order_by[n]
+            self.order_by = column
             self.order_dir = "ASC"
 
     def search(self, parameters):
@@ -215,21 +208,8 @@ class Library:
         ):
             return []
 
-        # Note: this must mach the widget order in PartSelectorDialog init and
-        # populate_part_list in parselector.py
-        columns = [
-            "LCSC Part",
-            "MFR.Part",
-            "Package",
-            "Solder Joint",
-            "Library Type",
-            "Stock",
-            "Manufacturer",
-            "Description",
-            "Price",
-            "First Category",
-        ]
-        s = ",".join(f'"{c}"' for c in columns)
+        # Note: must match the shared part selector column definitions.
+        s = ",".join(f'"{c}"' for c in DB_FIELDS)
         query = f"SELECT {s} FROM parts WHERE "
 
         match_chunks = []
