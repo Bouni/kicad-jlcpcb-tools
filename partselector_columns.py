@@ -22,7 +22,6 @@ PARTSELECTOR_COLUMNS: list[PartSelectorColumn] = [
     PartSelectorColumn("lcsc", "LCSC", "LCSC Part", 60, "center"),
     PartSelectorColumn("mfr_number", "MFR Number", "MFR.Part", 140, "left"),
     PartSelectorColumn("package", "Package", "Package", 100, "left"),
-    PartSelectorColumn("pins", "Pins", "Solder Joint", 40, "center"),
     PartSelectorColumn("type", "Type", "Library Type", 50, "left"),
     PartSelectorColumn("params", "Params", None, 150, "center", sortable=False),
     PartSelectorColumn("stock", "Stock", "Stock", 50, "center"),
