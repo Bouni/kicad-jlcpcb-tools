@@ -130,9 +130,13 @@ def set_lcsc_value(fp, lcsc: str):
         fp.SetField(lcsc_field.GetName(), lcsc)
     else:
         fp.SetField("LCSC", lcsc)
-        field = fp.GetFieldByName("LCSC")
-        field.SetVisible(False)
-
+        if hasattr(fp, "GetFieldByName"):
+            fp.GetFieldByName("LCSC").SetVisible(False)
+        else:
+            for field in fp.GetFields():
+                if field.GetName() == "LCSC":
+                    field.SetVisible(False)
+                    break
 
 def get_valid_footprints(board):
     """Get all footprints that have a valid reference.
