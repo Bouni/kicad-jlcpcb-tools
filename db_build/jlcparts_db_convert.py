@@ -8,77 +8,20 @@ This replaces the old .csv based database creation that JLCPCB no longer support
 import os
 from pathlib import Path
 import sys
-import time
-from typing import NamedTuple
 
 # Add parent directory to path so we can import common module
 # TODO(z2amiller):  Use proper packaging
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import click
+import click  # noqa: E402
 
-from common.componentdb import ComponentsDatabase
-from common.filemgr import FileManager
-from common.jlcapi import CategoryFetch, Component, JlcApi
-from common.partsdb import Generate, PartsDatabase
-from common.progress import PrintNestedProgressBar, TqdmNestedProgressBar
+from common.componentdb import ComponentsDatabase  # noqa: E402
+from common.filemgr import FileManager  # noqa: E402
+from common.jlcapi import CategoryFetch, Component, JlcApi  # noqa: E402
+from common.partsdb import Generate, PartsDatabase  # noqa: E402
+from common.progress import PrintNestedProgressBar, TqdmNestedProgressBar  # noqa: E402
+from dblib import DatabaseConfig  # noqa: E402
 
-
-class PartDatabaseConfig(NamedTuple):
-    """Configuration for part database generation."""
-
-    name: str
-    chunk_file_name: str
-    where_clause: str
-    populate_preferred: bool = False
-
-
-class DatabaseConfig:
-    """Predefined database configurations."""
-
-    @staticmethod
-    def preferredAndBasic() -> PartDatabaseConfig:
-        """Select only preferred and basic parts."""
-        return PartDatabaseConfig(
-            name="basic-parts-fts5.db",
-            chunk_file_name="chunk_num_basic_parts_fts5.txt",
-            where_clause="basic = 1 OR preferred = 1",
-            populate_preferred=True,
-        )
-
-    @staticmethod
-    def allParts() -> PartDatabaseConfig:
-        """Select all parts.
-
-        This is the most backwards-compatible database, and therefore uses
-        the default "parts-fts5.db" name.
-        """
-        return PartDatabaseConfig(
-            name="parts-fts5.db",
-            chunk_file_name="chunk_num_fts5.txt",
-            where_clause="TRUE",
-            populate_preferred=False,
-        )
-
-    @staticmethod
-    def ignoreObsoleteParts(obsolete_threshold_days: int = 365) -> PartDatabaseConfig:
-        """Select all parts except obsolete parts."""
-        filter_seconds = int(time.time()) - obsolete_threshold_days * 24 * 60 * 60
-        return PartDatabaseConfig(
-            name="current-parts-fts5.db",
-            chunk_file_name="chunk_num_current_parts_fts5.txt",
-            where_clause=f"NOT (stock = 0 AND last_on_stock < {filter_seconds})",
-            populate_preferred=True,
-        )
-
-    @staticmethod
-    def emptyParts() -> PartDatabaseConfig:
-        """Select no parts."""
-        return PartDatabaseConfig(
-            name="empty-parts-fts5.db",
-            chunk_file_name="chunk_num_empty_parts_fts5.txt",
-            where_clause="FALSE",
-        )
 
 def update_components_db_from_api() -> None:
     """Update the component cache database."""
@@ -273,7 +216,8 @@ def main(
             sentinel_filename="cache_chunk_num.txt",
         )
         fm.compress_and_split(
-            output_dir=Path(archive_dir), delete_original=skip_cleanup)
+            output_dir=Path(archive_dir), delete_original=skip_cleanup
+        )
 
 
 if __name__ == "__main__":
