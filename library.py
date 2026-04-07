@@ -46,8 +46,8 @@ class Library:
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.order_by = "LCSC Part"
-        self.order_dir = "ASC"
+        self.order_by = "Stock"
+        self.order_dir = "DESC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
 
         selected_library = self.parent.settings.get("library", {}).get(
