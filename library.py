@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 from threading import Thread
 import time
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
@@ -809,7 +809,7 @@ class Library:
             except sqlite3.OperationalError:
                 return
 
-    def get_parts_db_info(self) -> PartsDatabaseInfo | None:
+    def get_parts_db_info(self) -> Optional[PartsDatabaseInfo]:  # noqa: UP045
         """Retrieve the database information."""
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con, con as cur:
             try:
