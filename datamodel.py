@@ -24,9 +24,10 @@ class PartListDataModel(dv.PyDataViewModel):
             "STOCK_COL": 5,
             "BOM_COL": 6,
             "POS_COL": 7,
-            "ROT_COL": 8,
-            "SIDE_COL": 9,
-            "PARAMS_COL": 10,
+            "DNP_COL": 8,
+            "ROT_COL": 9,
+            "SIDE_COL": 10,
+            "PARAMS_COL": 11,
         }
 
         self.bom_pos_icons = [
@@ -74,6 +75,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "string",
             "wxDataViewIconText",
             "wxDataViewIconText",
+            "wxDataViewIconText",
             "string",
             "wxDataViewIconText",
             "string",
@@ -102,6 +104,7 @@ class PartListDataModel(dv.PyDataViewModel):
         if col in [
             self.columns["BOM_COL"],
             self.columns["POS_COL"],
+            self.columns["DNP_COL"],
             self.columns["SIDE_COL"],
         ]:
             icon = row[col]
@@ -114,6 +117,7 @@ class PartListDataModel(dv.PyDataViewModel):
         if col in [
             self.columns["BOM_COL"],
             self.columns["POS_COL"],
+            self.columns["DNP_COL"],
             self.columns["SIDE_COL"],
         ]:
             return False
@@ -155,6 +159,9 @@ class PartListDataModel(dv.PyDataViewModel):
         )
         data[self.columns["POS_COL"]] = self.get_bom_pos_icon(
             data[self.columns["POS_COL"]]
+        )
+        data[self.columns["DNP_COL"]] = self.get_bom_pos_icon(
+            data[self.columns["DNP_COL"]]
         )
         data[self.columns["SIDE_COL"]] = self.get_side_icon(
             data[self.columns["SIDE_COL"]]
