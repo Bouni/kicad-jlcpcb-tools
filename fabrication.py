@@ -32,6 +32,8 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
+from .helpers import get_is_dnp
+
 # Compatibility hack for V6 / V7 / V7.99
 try:
     from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE  # pylint: disable=import-error
@@ -340,6 +342,12 @@ class Fabrication:
             )
             footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
             for fp in footprints:
+                if get_is_dnp(fp):
+                    self.logger.info(
+                        "Component %s has 'Do not place' enabled: removing from CPL",
+                        fp.GetReference(),
+                    )
+                    continue
                 part = self.parent.store.get_part(fp.GetReference())
                 if not part:  # No matching part in the database, continue
                     continue

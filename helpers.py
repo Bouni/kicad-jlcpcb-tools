@@ -177,6 +177,16 @@ def get_exclude_from_bom(footprint):
     return bool(get_bit(val, EXCLUDE_FROM_BOM))
 
 
+def get_is_dnp(footprint):
+    """Get the runtime 'Do not place' state of a footprint."""
+    if not footprint:
+        return False
+    is_dnp = getattr(footprint, "IsDNP", None)
+    if not callable(is_dnp):
+        return False
+    return bool(is_dnp())
+
+
 def toggle_exclude_from_pos(footprint):
     """Toggle the 'exclude from POS' property of a footprint."""
     if not footprint:
