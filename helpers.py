@@ -8,6 +8,7 @@ import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
 PLUGIN_PATH = Path(__file__).resolve().parent
+PLUGIN_DATA_PATH = os.getenv("LOCALAPPDATA") if os.name == "nt" else PLUGIN_PATH
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3

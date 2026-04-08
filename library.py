@@ -20,7 +20,7 @@ from .events import (
     DownloadStartedEvent,
     MessageEvent,
 )
-from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
+from .helpers import PLUGIN_DATA_PATH, dict_factory, natural_sort_collation
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .unzip_parts import unzip_parts
 
@@ -49,7 +49,7 @@ class Library:
         self.parent = parent
         self.order_by = "LCSC Part"
         self.order_dir = "ASC"
-        self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
+        self.datadir = os.path.join(PLUGIN_DATA_PATH, "jlcpcb")
 
         selected_library = self.parent.settings.get("library", {}).get(
             "selected_library", DEFAULT_LIBRARY
