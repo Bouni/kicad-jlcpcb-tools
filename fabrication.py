@@ -32,6 +32,8 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
+from .helpers import get_is_dnp
+
 # Compatibility hack for V6 / V7 / V7.99
 try:
     from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE  # pylint: disable=import-error
@@ -340,6 +342,12 @@ class Fabrication:
             )
             footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
             for fp in footprints:
+                if get_is_dnp(fp):
+                    self.logger.info(
+                        "Component %s has 'Do not place' enabled: removing from CPL",
+                        fp.GetReference(),
+                    )
+                    continue
                 part = self.parent.store.get_part(fp.GetReference())
                 if not part:  # No matching part in the database, continue
                     continue
@@ -375,37 +383,35 @@ class Fabrication:
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
+        footprints = {fp.GetReference(): fp for fp in self.board.Footprints()}
         with open(
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
             for part in self.parent.store.read_bom_parts():
-                components = part["refs"].split(",")
-                for component in components:
-                    for fp in self.board.Footprints():
-                        if (
-                            fp.GetReference() == component
-                            and hasattr(fp, "IsDNP")
-                            and callable(fp.IsDNP)
-                            and fp.IsDNP()
-                        ):
-                            components.remove(component)
-                            part["refs"] = ",".join(components)
-                            self.logger.info(
-                                "Component %s has 'Do not place' enabled: removing from BOM",
-                                component,
-                            )
                 if not add_without_lcsc and not part["lcsc"]:
                     self.logger.info(
-                        "Component %s has no LCSC number assigned and the setting Add parts without LCSC is disabled: removing from BOM",
-                        component,
+                        "Component group %s has no LCSC number assigned and the setting Add parts without LCSC is disabled: removing from BOM",
+                        part["refs"],
                     )
+                    continue
+                components = []
+                for component in part["refs"].split(","):
+                    fp = footprints.get(component)
+                    if fp and get_is_dnp(fp):
+                        self.logger.info(
+                            "Component %s has 'Do not place' enabled: removing from BOM",
+                            component,
+                        )
+                        continue
+                    components.append(component)
+                if not components:
                     continue
                 writer.writerow(
                     [
                         part["value"],
-                        part["refs"],
+                        ",".join(components),
                         part["footprint"],
                         part["lcsc"],
                         len(components),
