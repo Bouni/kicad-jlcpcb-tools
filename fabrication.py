@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from .helpers import get_dnp_value, should_exclude_from_bom_or_pos
+
 from pcbnew import (  # pylint: disable=import-error
     EXCELLON_WRITER,
     PCB_PLOT_PARAMS,
@@ -345,6 +347,13 @@ class Fabrication:
                     continue
                 if part["exclude_from_pos"] == 1:
                     continue
+                # Check DNP parameter and skip if component should not be placed
+                if should_exclude_from_bom_or_pos(fp):
+                    self.logger.info(
+                        "Component %s has DNP parameter or 'Do not place' enabled: excluding from CPL",
+                        fp.GetReference(),
+                    )
+                    continue
                 if not add_without_lcsc and not part["lcsc"]:
                     continue
                 try:  # Kicad <= 8.0
@@ -384,18 +393,16 @@ class Fabrication:
                 components = part["refs"].split(",")
                 for component in components:
                     for fp in self.board.Footprints():
-                        if (
-                            fp.GetReference() == component
-                            and hasattr(fp, "IsDNP")
-                            and callable(fp.IsDNP)
-                            and fp.IsDNP()
-                        ):
-                            components.remove(component)
-                            part["refs"] = ",".join(components)
-                            self.logger.info(
-                                "Component %s has 'Do not place' enabled: removing from BOM",
-                                component,
-                            )
+                        if fp.GetReference() == component:
+                            # Check both native DNP flag and ${DNP} parameter
+                            if should_exclude_from_bom_or_pos(fp):
+                                components.remove(component)
+                                part["refs"] = ",".join(components)
+                                self.logger.info(
+                                    "Component %s has DNP parameter or 'Do not place' enabled: removing from BOM",
+                                    component,
+                                )
+                            break
                 if not add_without_lcsc and not part["lcsc"]:
                     self.logger.info(
                         "Component %s has no LCSC number assigned and the setting Add parts without LCSC is disabled: removing from BOM",
