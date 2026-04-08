@@ -38,6 +38,7 @@ from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
     HighResWxSize,
+    get_is_dnp,
     getVersion,
     loadBitmapScaled,
     set_lcsc_value,
@@ -403,7 +404,7 @@ class JLCPCBTools(wx.Dialog):
         )
         params = self.footprint_list.AppendTextColumn(
             "LCSC Params",
-            10,
+            11,
             width=150,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
@@ -423,15 +424,18 @@ class JLCPCBTools(wx.Dialog):
         pos = self.footprint_list.AppendIconTextColumn(
             "POS", 7, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
+        dnp = self.footprint_list.AppendIconTextColumn(
+            "POP", 8, width=50, mode=dv.DATAVIEW_CELL_INERT
+        )
         correction = self.footprint_list.AppendTextColumn(
             "Correction",
-            8,
+            9,
             width=120,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
         side = self.footprint_list.AppendIconTextColumn(
-            "Side", 9, width=50, mode=dv.DATAVIEW_CELL_INERT
+            "Side", 10, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
 
         reference.SetSortable(True)
@@ -442,6 +446,7 @@ class JLCPCBTools(wx.Dialog):
         stock.SetSortable(True)
         bom.SetSortable(True)
         pos.SetSortable(False)
+        dnp.SetSortable(True)
         correction.SetSortable(True)
         side.SetSortable(True)
         params.SetSortable(True)
@@ -669,6 +674,7 @@ class JLCPCBTools(wx.Dialog):
         corrections = self.library.get_all_correction_data()
         for part in self.store.read_all():
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
+            is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
             if part["lcsc"] and part["lcsc"] not in details:
                 details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
@@ -688,6 +694,7 @@ class JLCPCBTools(wx.Dialog):
                     details.get(part["lcsc"], {}).get("stock", ""),  # stock
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
+                    int(is_dnp),
                     str(self.get_correction(part, corrections)),
                     str(fp.GetLayer()),
                     params_for_part(details.get(part["lcsc"], {})),
