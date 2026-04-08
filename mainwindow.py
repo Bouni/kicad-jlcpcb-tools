@@ -912,8 +912,8 @@ class JLCPCBTools(wx.Dialog):
         self.settings[e.section][e.setting] = e.value
         self.save_settings()
 
-        # Refresh library configuration if the library selection changed
-        if e.section == "library" and e.setting == "selected_library":
+        # Refresh library configuration if relevant library settings changed
+        if e.section == "library" and e.setting in ["selected_library", "data_path"]:
             self.library.refresh_library_config()
 
     def logbox_append(self, e):

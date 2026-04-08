@@ -49,8 +49,35 @@ class Library:
         self.parent = parent
         self.order_by = "LCSC Part"
         self.order_dir = "ASC"
-        self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
+        self.datadir = ""
+        self.selected_library = DEFAULT_LIBRARY
+        self.partsdb_file = ""
+        self.rotationsdb_file = ""
+        self.localcorrectionsdb_file = ""
+        self.globalcorrectionsdb_file = ""
+        self.correctionsdb_file = ""
+        self.mappingsdb_file = ""
+        self.state = None
+        self.download_lock = Lock()
+        self.category_map = {}
 
+        self.refresh_library_config()
+
+        self.logger.debug("partsdb_file %s", self.partsdb_file)
+        self.logger.debug("sqlite.sqlite_version %s", sqlite3.sqlite_version)
+
+    def _resolve_data_directory(self):
+        """Resolve the directory where global database files are stored."""
+        configured = self.parent.settings.get("library", {}).get("data_path", "")
+        if isinstance(configured, str) and configured.strip():
+            return os.path.abspath(os.path.expanduser(configured.strip()))
+        return os.path.join(PLUGIN_PATH, "jlcpcb")
+
+    def refresh_library_config(self):
+        """Refresh library configuration from settings."""
+        self.datadir = self._resolve_data_directory()
+
+        # Get selected library from settings, default to all-parts
         selected_library = self.parent.settings.get("library", {}).get(
             "selected_library", DEFAULT_LIBRARY
         )
@@ -60,7 +87,6 @@ class Library:
         self.selected_library = selected_library
         library_config = LIBRARY_CONFIGS[selected_library]
         self.partsdb_file = os.path.join(self.datadir, library_config.name)
-
         self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
         self.localcorrectionsdb_file = os.path.join(
             self.parent.project_path, "jlcpcb", "project.db"
@@ -72,32 +98,15 @@ class Library:
             else self.localcorrectionsdb_file
         )
         self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
-        self.state = None
-        self.download_lock = Lock()
         self.category_map = {}
-
-        self.logger.debug("partsdb_file %s", self.partsdb_file)
-        self.logger.debug("sqlite.sqlite_version %s", sqlite3.sqlite_version)
 
         self.setup()
         self.check_library()
 
-    def refresh_library_config(self):
-        """Refresh library configuration from settings."""
-        # Get selected library from settings, default to all-parts
-        selected_library = self.parent.settings.get("library", {}).get(
-            "selected_library", DEFAULT_LIBRARY
-        )
-        if selected_library not in LIBRARY_CONFIGS:
-            selected_library = DEFAULT_LIBRARY
-
-        self.selected_library = selected_library
-        library_config = LIBRARY_CONFIGS[selected_library]
-        self.partsdb_file = os.path.join(self.datadir, library_config.name)
-
         self.logger.debug(
-            "Library configuration refreshed. Selected: %s, Database: %s",
+            "Library configuration refreshed. Selected: %s, Data directory: %s, Database: %s",
             self.selected_library,
+            self.datadir,
             self.partsdb_file,
         )
 

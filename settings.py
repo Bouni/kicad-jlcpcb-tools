@@ -297,11 +297,53 @@ class SettingsDialog(wx.Dialog):
         library_sizer.Add(library_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         library_sizer.Add(self.library_selected_setting, 1, wx.ALL | wx.EXPAND, 5)
 
+        ##### Library Data Directory #####
+
+        library_data_path_label = wx.StaticText(
+            self,
+            id=wx.ID_ANY,
+            label="Database directory:",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+        )
+
+        self.library_data_path_setting = wx.DirPickerCtrl(
+            self,
+            id=wx.ID_ANY,
+            path="",
+            message="Choose folder for global library database files",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=wx.DIRP_DEFAULT_STYLE | wx.DIRP_USE_TEXTCTRL,
+            name="library_data_path",
+        )
+
+        self.library_data_path_setting.SetToolTip(
+            wx.ToolTip(
+                "Override where the global library database files are stored."
+                " If you change this, you may want to copy existing mapping and"
+                " corrections files from the old location to the new one to avoid"
+                " losing existing mappings and corrections."
+            )
+        )
+
+        self.library_data_path_setting.Bind(
+            wx.EVT_DIRPICKER_CHANGED, self.update_settings
+        )
+
+        library_data_path_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        library_data_path_sizer.Add(
+            library_data_path_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        library_data_path_sizer.Add(
+            self.library_data_path_setting, 1, wx.ALL | wx.EXPAND, 5
+        )
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        layout = wx.GridSizer(10, 2, 0, 0)
+        layout = wx.GridSizer(11, 2, 0, 0)
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -310,6 +352,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -474,6 +517,9 @@ class SettingsDialog(wx.Dialog):
                 "selected_library", "current-parts"
             )
         )
+        self.update_data_path(
+            self.parent.settings.get("library", {}).get("data_path", "")
+        )
 
     def update_selected_library(self, library_key):
         """Update settings dialog according to the selected library."""
@@ -481,10 +527,19 @@ class SettingsDialog(wx.Dialog):
             display_name = LIBRARY_CONFIGS[library_key].display_name
             self.library_selected_setting.SetStringSelection(display_name)
 
+    def update_data_path(self, data_path):
+        """Update settings dialog according to the configured data path."""
+        value = data_path.strip() if isinstance(data_path, str) else ""
+        effective_path = value if value else self.parent.library.datadir
+        self.library_data_path_setting.SetPath(effective_path)
+
     def update_settings(self, event):
         """Update and persist a setting that was changed."""
         section, name = event.GetEventObject().GetName().split("_", 1)
-        value = event.GetEventObject().GetValue()
+        if hasattr(event.GetEventObject(), "GetPath"):
+            value = event.GetEventObject().GetPath()
+        else:
+            value = event.GetEventObject().GetValue()
         self.logger.debug(section)
         self.logger.debug(name)
         self.logger.debug(value)
