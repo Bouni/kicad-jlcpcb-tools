@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 import sqlite3
-from threading import Thread
+from threading import Lock, Thread
 import time
 from typing import NamedTuple
 
@@ -73,6 +73,7 @@ class Library:
         )
         self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
         self.state = None
+        self.download_lock = Lock()
         self.category_map = {}
 
         self.logger.debug("partsdb_file %s", self.partsdb_file)
@@ -479,11 +480,40 @@ class Library:
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
-        Thread(target=self.download).start()
+        with self.download_lock:
+            if self.state == LibraryState.DOWNLOAD_RUNNING:
+                self.logger.info(
+                    "Download already running, ignoring duplicate request."
+                )
+                return
+            self.state = LibraryState.DOWNLOAD_RUNNING
+        try:
+            Thread(target=self._download_wrapper).start()
+        except Exception:
+            with self.download_lock:
+                self.state = LibraryState.INITIALIZED
+            raise
+
+    def _download_wrapper(self):
+        """Run the download worker with guaranteed state cleanup."""
+        try:
+            self.download()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.exception("Unexpected error while downloading parts database")
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Download Error",
+                    text=f"Unexpected error while downloading parts database: {exc}",
+                    style="error",
+                ),
+            )
+        finally:
+            with self.download_lock:
+                self.state = LibraryState.INITIALIZED
 
     def download(self):
         """Actual worker thread that downloads and imports the parts data."""
-        self.state = LibraryState.DOWNLOAD_RUNNING
         start = time.time()
         wx.PostEvent(self.parent, DownloadStartedEvent())
 
