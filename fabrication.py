@@ -38,41 +38,36 @@ class Fabrication:
 
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
-        original = footprint.GetOrientation()
-        # `.AsDegrees()` added in KiCAD 6.99
-        try:
-            rotation = original.AsDegrees()
-        except AttributeError:
-            # we need to divide by 10 to get 180 out of 1800 for example.
-            # This might be a bug in 5.99 / 6.0 RC
-            rotation = original / 10
-        if footprint.GetLayer() != 0:
+        footprint_api = self.kicad.footprint
+        rotation = footprint_api.get_orientation(footprint)
+        if footprint_api.get_layer(footprint) != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
         # First check if the part name matches
         for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint.GetReference())):
+            if re.search(regex, str(footprint_api.get_reference(footprint))):
                 return self.rotate(footprint, rotation, correction)
         # Then try to match by value
         for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint.GetValue())):
+            if re.search(regex, str(footprint_api.get_value(footprint))):
                 return self.rotate(footprint, rotation, correction)
         # Then if the package matches
         for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
+            if re.search(regex, str(footprint_api.get_fpid_name(footprint))):
                 return self.rotate(footprint, rotation, correction)
         # If no correction matches, return the original rotation
         return rotation
 
     def rotate(self, footprint, rotation, correction):
         """Calculate the actual correction."""
+        footprint_api = self.kicad.footprint
         rotation = (rotation + int(correction)) % 360
         self.logger.info(
             "Fixed rotation of %s (%s / %s) on %s Layer by %d degrees",
-            footprint.GetReference(),
-            footprint.GetValue(),
-            footprint.GetFPID().GetLibItemName(),
-            "Top" if footprint.GetLayer() == 0 else "Bottom",
+            footprint_api.get_reference(footprint),
+            footprint_api.get_value(footprint),
+            footprint_api.get_fpid_name(footprint),
+            "Top" if footprint_api.get_layer(footprint) == 0 else "Bottom",
             correction,
         )
         return rotation
@@ -80,15 +75,9 @@ class Fabrication:
     def reposition(self, footprint, position, offset):
         """Adjust the position of the footprint, returning the new position as a wxPoint."""
         if offset[0] != 0 or offset[1] != 0:
-            original = footprint.GetOrientation()
-            # `.AsRadians()` added in KiCAD 6.99
-            try:
-                rotation = original.AsDegrees()
-            except AttributeError:
-                # we need to divide by 10 to get 180 out of 1800 for example.
-                # This might be a bug in 5.99 / 6.0 RC
-                rotation = original / 10
-            if footprint.GetLayer() != 0:
+            footprint_api = self.kicad.footprint
+            rotation = footprint_api.get_orientation(footprint)
+            if footprint_api.get_layer(footprint) != 0:
                 # bottom angles need to be mirrored on Y-axis
                 rotation = (180 - rotation) % 360
             offset_x = self.kicad.utility.from_mm(offset[0]) * math.cos(
@@ -97,15 +86,15 @@ class Fabrication:
             offset_y = -self.kicad.utility.from_mm(offset[0]) * math.sin(
                 math.radians(rotation)
             ) + self.kicad.utility.from_mm(offset[1]) * math.cos(math.radians(rotation))
-            if footprint.GetLayer() != 0:
+            if footprint_api.get_layer(footprint) != 0:
                 # mirrored coordinate system needs to be taken into account on the bottom
                 offset_x = -offset_x
             self.logger.info(
                 "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
-                footprint.GetReference(),
-                footprint.GetValue(),
-                footprint.GetFPID().GetLibItemName(),
-                "Top" if footprint.GetLayer() == 0 else "Bottom",
+                footprint_api.get_reference(footprint),
+                footprint_api.get_value(footprint),
+                footprint_api.get_fpid_name(footprint),
+                "Top" if footprint_api.get_layer(footprint) == 0 else "Bottom",
                 offset[0],
                 offset[1],
             )
@@ -116,17 +105,18 @@ class Fabrication:
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
+        footprint_api = self.kicad.footprint
         # First check if the part name matches
         for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint.GetReference())):
+            if re.search(regex, str(footprint_api.get_reference(footprint))):
                 return self.reposition(footprint, position, correction)
         # Then try to match by value
         for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint.GetValue())):
+            if re.search(regex, str(footprint_api.get_value(footprint))):
                 return self.reposition(footprint, position, correction)
         # Then if the package matches
         for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
+            if re.search(regex, str(footprint_api.get_fpid_name(footprint))):
                 return self.reposition(footprint, position, correction)
         # If no correction matches, return the original position
         return position
@@ -134,16 +124,18 @@ class Fabrication:
     def get_position(self, footprint):
         """Calculate position based on center of bounding box."""
         try:
-            pads = footprint.Pads()
+            pads = self.kicad.footprint.get_pads(footprint)
             bbox = pads[0].GetBoundingBox()
             for pad in pads:
                 bbox.Merge(pad.GetBoundingBox())
             return bbox.GetCenter()
         except:
             self.logger.info(
-                "WARNING footprint %s: original position used", footprint.GetReference()
+                "WARNING footprint %s: original position used",
+                self.kicad.footprint.get_reference(footprint),
             )
-            return footprint.GetPosition()
+            x_pos, y_pos = self.kicad.footprint.get_position(footprint)
+            return self.kicad.utility.create_vector2i(int(x_pos), int(y_pos))
 
     def generate_geber(self, layer_count=None):
         """Generate Gerber files."""
@@ -315,16 +307,17 @@ class Fabrication:
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
             footprints = sorted(
-                self.kicad.board.get_footprints(), key=lambda x: x.GetReference()
+                self.kicad.board.get_footprints(),
+                key=lambda footprint: self.kicad.footprint.get_reference(footprint),
             )
             for fp in footprints:
                 if self.kicad.footprint.get_is_dnp(fp):
                     self.logger.info(
                         "Component %s has 'Do not place' enabled: removing from CPL",
-                        fp.GetReference(),
+                        self.kicad.footprint.get_reference(fp),
                     )
                     continue
-                part = self.parent.store.get_part(fp.GetReference())
+                part = self.parent.store.get_part(self.kicad.footprint.get_reference(fp))
                 if not part:  # No matching part in the database, continue
                     continue
                 if part["exclude_from_pos"] == 1:
@@ -346,7 +339,7 @@ class Fabrication:
                         self.kicad.utility.to_mm(position.x),
                         self.kicad.utility.to_mm(position.y) * -1,
                         self.fix_rotation(fp),
-                        "top" if fp.GetLayer() == 0 else "bottom",
+                        "top" if self.kicad.footprint.get_layer(fp) == 0 else "bottom",
                     ]
                 )
         self.logger.info(
@@ -360,7 +353,8 @@ class Fabrication:
             "lcsc_bom_cpl", True
         )
         footprints = {
-            fp.GetReference(): fp for fp in self.kicad.board.get_footprints()
+            self.kicad.footprint.get_reference(fp): fp
+            for fp in self.kicad.board.get_footprints()
         }
         with open(
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
