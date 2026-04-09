@@ -179,9 +179,15 @@ class IPCExportPlan(ExportPlan):
 
     IPC_EXPORT_MINIMUM_VERSION = (11, 0, 0)
 
-    def __init__(self, fabrication: Fabrication, command_runner=None):
+    def __init__(
+        self,
+        fabrication: Fabrication,
+        command_runner=None,
+        ipc_client=None,
+    ):
         self.fabrication = fabrication
         self.command_runner = command_runner or subprocess.run
+        self.ipc_client = ipc_client if ipc_client is not None else self._create_ipc_client()
 
     def generate_gerbers(self, layer_count: Optional[int] = None) -> None:
         """Generate Gerber outputs via IPC when available, else `kicad-cli`."""
@@ -215,15 +221,43 @@ class IPCExportPlan(ExportPlan):
 
     def _ipc_export_available(self) -> bool:
         """Return whether direct IPC export implementation is available."""
-        return False
+        if self.ipc_client is None:
+            return False
+        is_available = getattr(self.ipc_client, "is_available", None)
+        if not callable(is_available):
+            return False
+        try:
+            return bool(is_available())
+        except Exception:
+            return False
 
     def _run_ipc_gerber_export(self, _layer_count: Optional[int] = None) -> None:
-        """Run direct IPC Gerber export when implemented."""
-        raise NotImplementedError("Direct IPC Gerber export not implemented yet")
+        """Run direct IPC Gerber export when available."""
+        if self.ipc_client is None:
+            raise RuntimeError("IPC client not available")
+        self.ipc_client.export_gerbers(
+            board_file=self.fabrication.board.GetFileName(),
+            output_dir=self.fabrication.gerberdir,
+        )
 
     def _run_ipc_drill_export(self) -> None:
-        """Run direct IPC drill export when implemented."""
-        raise NotImplementedError("Direct IPC drill export not implemented yet")
+        """Run direct IPC drill export when available."""
+        if self.ipc_client is None:
+            raise RuntimeError("IPC client not available")
+        self.ipc_client.export_drill(
+            board_file=self.fabrication.board.GetFileName(),
+            output_dir=self.fabrication.gerberdir,
+        )
+
+    @staticmethod
+    def _create_ipc_client():
+        """Create IPC client instance when transport module is available."""
+        try:
+            from ipc_client import KiCadIPCClient
+
+            return KiCadIPCClient()
+        except Exception:
+            return None
 
     def _run_cli_gerber_export(self) -> None:
         board_file = self.fabrication.board.GetFileName()
