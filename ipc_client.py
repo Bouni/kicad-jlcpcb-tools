@@ -144,11 +144,6 @@ class KiCadIPCClient:
             )
         if sys.platform.startswith("linux"):
             return str(
-                home
-                / ".local"
-                / "share"
-                / "kicad"
-                / "scripting"
-                / "kicad-ipc.sock"
+                home / ".local" / "share" / "kicad" / "scripting" / "kicad-ipc.sock"
             )
         return None

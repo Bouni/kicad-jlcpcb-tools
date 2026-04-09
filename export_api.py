@@ -214,7 +214,9 @@ class IPCExportPlan(ExportPlan):
     ):
         self.fabrication = fabrication
         self.command_runner = command_runner or subprocess.run
-        self.ipc_client = ipc_client if ipc_client is not None else self._create_ipc_client()
+        self.ipc_client = (
+            ipc_client if ipc_client is not None else self._create_ipc_client()
+        )
 
     def generate_gerbers(self, layer_count: Optional[int] = None) -> None:
         """Generate Gerber outputs via IPC when available, else `kicad-cli`."""
