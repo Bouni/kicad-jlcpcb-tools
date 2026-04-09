@@ -119,39 +119,40 @@ Validation:
 
 ### Phase 3: Plugin Directory Structure & Packaging
 
-**Status**: ⬜ Not started
+**Status**: ✅ Complete (Commit: `23ef9bf`)
 
 **PR-303: Set up plugin directory layout for KiCad discovery**
 
 Files to modify:
 
--   [ ] Create or confirm `plugin_manifest/plugin.json` location
--   [ ] New `plugin_manifest/py.typed` (for type hints)
--   [ ] Update `pyproject.toml` (package data, entry point)
--   [ ] Create `PLUGIN_README.md` (for plugin distribution)
+- [x] Confirm `plugin.json` location (repo root used as plugin folder root)
+- [x] New `plugin_manifest/py.typed` (for type hints)
+- [x] Update `pyproject.toml` (package data and module packaging)
+- [x] Create `PLUGIN_README.md` (for plugin distribution)
 
 Tasks:
 
-1.  [ ] Decide: plugin lives in repo root or in subdirectory?
-    -   KiCad expects: `~/.local/share/KiCad/9.0/plugins/kicad-jlcpcb-tools/plugin.json`
-    -   Build process: copy files to that location during install
+1. [x] Decide plugin folder layout.
+    - Keep `plugin.json` at repository root (source of truth)
+    - Target install path remains `${KICAD_DOCUMENTS_HOME}/<version>/plugins/kicad-jlcpcb-tools/`
+    - Repo root can be directly symlinked/copied as plugin folder for local dev
 
-2.  [ ] Update packaging:
-    -   `pyproject.toml` `[project]` section: name as plugin identifier
-    -   `[tool.setuptools.package-data]`: include `plugin.json`, `py.typed`
-    -   Document installation: "Copy built package to KiCad plugins directory"
+2. [x] Update packaging:
+    - Normalize project identifier to `kicad-jlcpcb-tools`
+    - Add setuptools `data-files` entries for `plugin.json`, `py.typed`, icon, settings, and `VERSION`
+    - Add top-level `py-modules` to include runtime modules in wheel builds
 
-3.  [ ] Create `PLUGIN_README.md`:
-    -   Installation steps (OS-specific paths)
-    -   Minimum KiCad version (9.0)
-    -   Debugging instructions (enable trace, check logs)
-    -   Fallback to SWIG if IPC unavailable
+3. [x] Create `PLUGIN_README.md`:
+    - Installation steps (OS-specific paths)
+    - Minimum KiCad version (9.0+ IPC path)
+    - Debugging instructions (trace and API logging)
+    - Fallback behavior notes (IPC/SWIG/export fallbacks)
 
 Validation:
 
--   [ ] `python -m build` succeeds
--   [ ] Wheel/tarball contains `plugin.json` and all required files
--   [ ] Manual: extract and place in KiCad plugins dir, verify action appears
+- [x] `python -m build` succeeds
+- [x] Wheel/tarball contains `plugin.json` and required files (`py.typed`, icon, settings, `VERSION`, runtime modules)
+- [ ] Manual: extract and place in KiCad plugins dir, verify action appears
 
 ---
 
@@ -259,10 +260,10 @@ Validation:
 - [x] IPC initialization tests pass
 - [x] Full test suite green (no regression)
 
-**MS-11** (after Phase 3) ⬜ Not started
+**MS-11** (after Phase 3) ✅ Complete
 
--   [ ] Built package includes `plugin.json` and all required files
--   [ ] Installation instructions clear
+- [x] Built package includes `plugin.json` and all required files
+- [x] Installation instructions clear
 
 **MS-12 — IPC Plugin Ready** (after Phase 4) ⬜ Not started
 
