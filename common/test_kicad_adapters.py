@@ -1,5 +1,6 @@
 """Tests for adapter-based KiCad abstraction in standalone mode."""
 
+from kicad_api import BoardAPI, FootprintAPI, GerberAPI, UtilityAPI
 from standalone_impl import create_adapter_set
 
 
@@ -7,10 +8,10 @@ def test_standalone_adapter_set_shape():
     """Standalone adapter set exposes the same high-level structure as runtime adapters."""
     adapters = create_adapter_set()
 
-    assert adapters.board is not None
-    assert adapters.footprint is not None
-    assert adapters.gerber is not None
-    assert adapters.utility is not None
+    assert isinstance(adapters.board, BoardAPI)
+    assert isinstance(adapters.footprint, FootprintAPI)
+    assert isinstance(adapters.gerber, GerberAPI)
+    assert isinstance(adapters.utility, UtilityAPI)
     assert adapters.version == (8, 0, 1)
 
 
