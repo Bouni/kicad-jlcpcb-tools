@@ -114,6 +114,47 @@ class BoardStub:
         """Get a list of footprints that match a reference."""
         return Footprint_Stub(reference, "stub", 100)
 
+    def Footprints(self):
+        """Footprint iterator-style access used by some KiCad versions."""
+        return self.footprints
+
+    def GetCopperLayerCount(self) -> int:
+        """Copper layer count."""
+        return 2
+
+    def GetEnabledLayers(self):
+        """Enabled layer IDs wrapper."""
+
+        class EnabledLayers_Stub:
+            def Seq(self_nonlocal):
+                return [0, 1, 2, 3, 4, 5, 7, 8, 9]
+
+        return EnabledLayers_Stub()
+
+    def GetLayerName(self, layer_id):
+        """Layer name lookup."""
+        layer_names = {
+            0: "F_Cu",
+            1: "B_Cu",
+            2: "F_SilkS",
+            3: "B_SilkS",
+            4: "F_Mask",
+            5: "B_Mask",
+            7: "F_Paste",
+            8: "B_Paste",
+            9: "Edge_Cuts",
+        }
+        return layer_names.get(layer_id, str(layer_id))
+
+    def GetDesignSettings(self):
+        """Board design settings wrapper."""
+
+        class DesignSettings_Stub:
+            def GetAuxOrigin(self_nonlocal):
+                return Point_Stub(0, 0)
+
+        return DesignSettings_Stub()
+
 
 class PcbnewStub:
     """Stub implementation of pcbnew."""
@@ -163,6 +204,9 @@ class StubBoardAdapter:
     def get_all_footprints(self) -> List[Footprint_Stub]:
         return sorted(self.get_board().GetFootprints(), key=lambda x: x.GetReference())
 
+    def get_footprints(self) -> List[Footprint_Stub]:
+        return list(self.get_board().Footprints())
+
     def get_footprint_by_reference(self, reference: str) -> Optional[Footprint_Stub]:
         return self.get_board().FindFootprintByReference(reference)
 
@@ -183,6 +227,12 @@ class StubBoardAdapter:
 
     def get_current_selection(self) -> List[Any]:
         return list(self.pcbnew.GetCurrentSelection())
+
+    def get_copper_layer_count(self) -> int:
+        return self.get_board().GetCopperLayerCount()
+
+    def get_aux_origin(self) -> Point_Stub:
+        return self.get_board().GetDesignSettings().GetAuxOrigin()
 
 
 class StubFootprintAdapter:

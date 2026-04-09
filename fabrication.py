@@ -198,7 +198,7 @@ class Fabrication:
 
         # if no layer_count is given, get the layer count from the board
         if not layer_count:
-            layer_count = self.board.GetCopperLayerCount()
+            layer_count = self.kicad.board.get_copper_layer_count()
 
         plot_plan_top = [
             ("CuTop", layers["F_Cu"], "Top layer"),
@@ -239,9 +239,9 @@ class Fabrication:
 
         # Add all JLC prefixed layers - layers must have "JLC_" in their name
         jlc_layers_to_plot = []
-        enabled_layer_ids = list(self.board.GetEnabledLayers().Seq())
+        enabled_layer_ids = self.kicad.board.get_enabled_layers()
         for enabled_layer_id in enabled_layer_ids:
-            layer_name_string = str(self.board.GetLayerName(enabled_layer_id)).upper()
+            layer_name_string = self.kicad.board.get_layer_name(enabled_layer_id).upper()
             if "JLC_" in layer_name_string:
                 plotter_info = (layer_name_string, enabled_layer_id, layer_name_string)
                 jlc_layers_to_plot.append(plotter_info)
@@ -271,7 +271,7 @@ class Fabrication:
         drlwriter = self.kicad.gerber.create_excellon_writer(self.board)
         mirror = False
         minimalHeader = False
-        offset = self.board.GetDesignSettings().GetAuxOrigin()
+        offset = self.kicad.board.get_aux_origin()
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
         drlwriter.SetFormat(False)
@@ -301,7 +301,7 @@ class Fabrication:
         """Generate placement file (CPL)."""
         cplname = f"CPL-{Path(self.filename).stem}.csv"
         self.corrections = self.parent.library.get_all_correction_data()
-        aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
+        aux_orgin = self.kicad.board.get_aux_origin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
@@ -312,7 +312,9 @@ class Fabrication:
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
-            footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
+            footprints = sorted(
+                self.kicad.board.get_footprints(), key=lambda x: x.GetReference()
+            )
             for fp in footprints:
                 if self.kicad.footprint.get_is_dnp(fp):
                     self.logger.info(
@@ -355,7 +357,9 @@ class Fabrication:
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
-        footprints = {fp.GetReference(): fp for fp in self.board.Footprints()}
+        footprints = {
+            fp.GetReference(): fp for fp in self.kicad.board.get_footprints()
+        }
         with open(
             os.path.join(self.outputdir, bomname), "w", newline="", encoding="utf-8"
         ) as csvfile:
