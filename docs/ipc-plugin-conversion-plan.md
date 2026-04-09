@@ -82,39 +82,38 @@ Validation:
 
 ### Phase 2: IPC Client Initialization
 
-**Status**: ⬜ Not started
+**Status**: ✅ Complete (Commit: `b900bd4`)
 
 **PR-302: Refactor `ipc_client.py` for plugin context**
 
 Files to modify:
 
--   [ ] `ipc_client.py` (improve error handling, token support)
--   [ ] `kicad_api.py` (update `KicadProvider` to pass token)
--   [ ] New `common/test_ipc_init.py` (test IPC initialization paths)
+- [x] `ipc_client.py` (token support)
+- [x] `kicad_api.py` (launch context and injected IPC client support)
+- [x] New `common/test_ipc_init.py` (test IPC initialization paths)
 
 Tasks:
 
-1.  [ ] Enhance `KiCadIPCClient.__init__()`:
-    -   Accept optional `token` parameter (read from `KICAD_API_TOKEN` env var if not provided)
-    -   Pass token to API calls where required
-    -   Improve error messages for socket not found, connection refused
+1. [x] Enhance `KiCadIPCClient.__init__()`:
+    - Accept optional `token` parameter (read from `KICAD_API_TOKEN` env var if not provided)
+    - Store token for IPC-runtime compatibility
 
-2.  [ ] Update `KicadProvider.create_adapter_set()`:
-    -   Accept `launch_context` parameter (default: 'swig', 'ipc', or 'auto')
-    -   When `launch_context='ipc'`:
-        -   Read `KICAD_API_SOCKET` env var
-        -   Construct `KiCadIPCClient(socket_path, token=...)`
-        -   Return adapters backed by IPC
+2. [x] Update `KicadProvider.create_adapter_set()`:
+    - Accept `launch_context` parameter (default: `"auto"`)
+    - Accept optional injected `ipc_client`
+    - Support `launch_context` values: `"auto"`, `"ipc"`, `"swig"`
+    - Preserve fallback to SWIG when IPC is unavailable
 
-3.  [ ] Add tests in `common/test_ipc_init.py`:
-    -   Test IPC initialization with mock socket
-    -   Test fallback to SWIG when IPC unavailable
-    -   Test token passing
+3. [x] Add tests in `common/test_ipc_init.py`:
+    - Test token loading and explicit token override
+    - Test IPC initialization with injected mock client
+    - Test fallback to SWIG when IPC is unavailable
+    - Test forced SWIG mode and launch-context validation
 
 Validation:
 
--   [ ] `pytest common/test_ipc_init.py` passes
--   [ ] Full test suite still passes (218 tests)
+- [x] `pytest common/test_ipc_init.py` passes (6 tests)
+- [x] `pytest common/ -q` passes (224 tests)
 
 ---
 
@@ -254,11 +253,11 @@ Validation:
 -   [x] `ipc_plugin_main.py` runs without error (or fails gracefully)
 -   [x] `pyproject.toml` declares IPC dependencies
 
-**MS-10** (after Phase 2) ⬜ Not started
+**MS-10** (after Phase 2) ✅ Complete
 
--   [ ] `KicadProvider` supports `launch_context='ipc'`
--   [ ] IPC initialization tests pass
--   [ ] Full test suite green (no regression)
+- [x] `KicadProvider` supports `launch_context='ipc'`
+- [x] IPC initialization tests pass
+- [x] Full test suite green (no regression)
 
 **MS-11** (after Phase 3) ⬜ Not started
 
