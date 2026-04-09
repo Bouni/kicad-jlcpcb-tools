@@ -100,7 +100,6 @@ class JLCPCBTools(wx.Dialog):
         )
         # Store adapters for use throughout the dialog
         self.kicad = adapter_set
-        self.pcbnew = adapter_set.pcbnew
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
@@ -539,7 +538,8 @@ class JLCPCBTools(wx.Dialog):
             self.init_store()
         self.library.create_mapping_table()
 
-        self.logger.debug("kicad version: %s", self.kicad.pcbnew.GetBuildVersion())
+        version = ".".join(str(part) for part in self.kicad.version)
+        self.logger.debug("kicad version: %s", version)
 
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
