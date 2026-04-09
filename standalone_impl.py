@@ -2,6 +2,11 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from .kicad_api import BoardAPI, FootprintAPI, GerberAPI, UtilityAPI
+except ImportError:
+    from kicad_api import BoardAPI, FootprintAPI, GerberAPI, UtilityAPI
+
 
 class Point_Stub:
     """Simple point-like object compatible with x/y access and tuple unpacking."""
@@ -189,7 +194,7 @@ class KicadStub:
         return self.pcbnew
 
 
-class StubBoardAdapter:
+class StubBoardAdapter(BoardAPI):
     """Standalone adapter for board-level API."""
 
     def __init__(self, pcbnew: PcbnewStub):
@@ -235,7 +240,7 @@ class StubBoardAdapter:
         return self.get_board().GetDesignSettings().GetAuxOrigin()
 
 
-class StubFootprintAdapter:
+class StubFootprintAdapter(FootprintAPI):
     """Standalone adapter for footprint-level API."""
 
     def get_reference(self, footprint: Footprint_Stub) -> str:
@@ -293,7 +298,7 @@ class StubFootprintAdapter:
         return []
 
 
-class StubGerberAdapter:
+class StubGerberAdapter(GerberAPI):
     """Standalone no-op adapter for gerber generation API."""
 
     def create_plot_controller(self, board: Any) -> Any:
@@ -377,7 +382,7 @@ class StubGerberAdapter:
         return None
 
 
-class StubUtilityAdapter:
+class StubUtilityAdapter(UtilityAPI):
     """Standalone utility adapter."""
 
     def from_mm(self, value: float) -> int:
