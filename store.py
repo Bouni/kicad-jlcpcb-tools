@@ -24,6 +24,7 @@ class Store:
     def __init__(self, parent, project_path, board):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
+        self.kicad = getattr(parent, "kicad", None)
         self.project_path = project_path
         self.board = board
         self.datadir = os.path.join(self.project_path, "jlcpcb")
@@ -171,13 +172,22 @@ class Store:
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
         for fp in get_valid_footprints(self.board):
+            if self.kicad:
+                lcsc = self.kicad.footprint.get_lcsc_value(fp)
+                exclude_from_bom = self.kicad.footprint.get_exclude_from_bom(fp)
+                exclude_from_pos = self.kicad.footprint.get_exclude_from_pos(fp)
+            else:
+                lcsc = get_lcsc_value(fp)
+                exclude_from_bom = get_exclude_from_bom(fp)
+                exclude_from_pos = get_exclude_from_pos(fp)
+
             board_part = {
                 "reference": fp.GetReference(),
                 "value": fp.GetValue(),
                 "footprint": str(fp.GetFPID().GetLibItemName()),
-                "lcsc": get_lcsc_value(fp),
-                "exclude_from_bom": get_exclude_from_bom(fp),
-                "exclude_from_pos": get_exclude_from_pos(fp),
+                "lcsc": lcsc,
+                "exclude_from_bom": exclude_from_bom,
+                "exclude_from_pos": exclude_from_pos,
             }
             db_part = self.get_part(board_part["reference"])
             # if part is not in the database yet, create it
