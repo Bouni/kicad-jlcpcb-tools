@@ -341,6 +341,12 @@ class StubGerberAdapter:
     def set_disable_macros(self, plot_options: Any, value: bool) -> None:
         return None
 
+    def set_plot_frame_ref(self, plot_options: Any, value: bool) -> None:
+        return None
+
+    def set_skip_plot_npth_pads(self, plot_options: Any, value: bool) -> None:
+        return None
+
     def set_layer(self, plot_controller: Any, layer_id: int) -> None:
         return None
 
@@ -362,6 +368,9 @@ class StubGerberAdapter:
         return None
 
     def set_drill_options(self, writer: Any, **kwargs: Any) -> None:
+        return None
+
+    def set_drill_format(self, writer: Any, metric: bool) -> None:
         return None
 
     def generate_drill_files(self, writer: Any, output_directory: str) -> None:

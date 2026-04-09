@@ -264,6 +264,14 @@ class GerberAPI(ABC):
         """Set whether to disable aperture macros."""
 
     @abstractmethod
+    def set_plot_frame_ref(self, plot_options: Any, value: bool) -> None:
+        """Set whether to plot the frame reference/title block."""
+
+    @abstractmethod
+    def set_skip_plot_npth_pads(self, plot_options: Any, value: bool) -> None:
+        """Set whether NPTH pads should be omitted from plotted output."""
+
+    @abstractmethod
     def set_layer(self, plot_controller: Any, layer_id: int) -> None:
         """Set the current layer to plot."""
 
@@ -292,6 +300,10 @@ class GerberAPI(ABC):
     @abstractmethod
     def set_drill_options(self, writer: Any, **kwargs: Any) -> None:
         """Set drill writer options."""
+
+    @abstractmethod
+    def set_drill_format(self, writer: Any, metric: bool) -> None:
+        """Set drill output format."""
 
     @abstractmethod
     def generate_drill_files(self, writer: Any, output_directory: str) -> None:
@@ -670,6 +682,14 @@ class SWIGGerberAdapter(GerberAPI):
         elif hasattr(plot_options, "SetDisableGerberMacros"):
             plot_options.SetDisableGerberMacros(value)
 
+    def set_plot_frame_ref(self, plot_options: Any, value: bool) -> None:
+        """Set whether to plot the frame reference/title block."""
+        plot_options.SetPlotFrameRef(value)
+
+    def set_skip_plot_npth_pads(self, plot_options: Any, value: bool) -> None:
+        """Set whether NPTH pads should be omitted from plotted output."""
+        plot_options.SetSkipPlotNPTH_Pads(value)
+
     def set_layer(self, plot_controller: Any, layer_id: int) -> None:
         """Set the current layer to plot."""
         plot_controller.SetLayer(layer_id)
@@ -704,7 +724,15 @@ class SWIGGerberAdapter(GerberAPI):
         for key, value in kwargs.items():
             setter_name = f"Set{key}"
             if hasattr(writer, setter_name):
-                getattr(writer, setter_name)(value)
+                setter = getattr(writer, setter_name)
+                if isinstance(value, (tuple, list)):
+                    setter(*value)
+                else:
+                    setter(value)
+
+    def set_drill_format(self, writer: Any, metric: bool) -> None:
+        """Set drill output format."""
+        writer.SetFormat(metric)
 
     def generate_drill_files(self, writer: Any, output_directory: str) -> None:
         """Generate drill files."""
