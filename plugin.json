@@ -15,7 +15,8 @@
       "entrypoint": "ipc_plugin_main.py",
       "show-button": true,
       "scopes": ["pcb"],
-      "icons-light": ["icon.png"]
+      "icons-light": ["jlcpcb-icon.png"],
+      "icons-dark": ["jlcpcb-icon.png"]
     }
   ]
 }
