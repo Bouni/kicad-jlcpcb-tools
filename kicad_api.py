@@ -866,14 +866,12 @@ class KicadAdapterSet:
         self,
         board: BoardAPI,
         footprint: FootprintAPI,
-        gerber: GerberAPI,
         utility: UtilityAPI,
         pcbnew_module: Any,
         version: Tuple[int, int, int],
     ) -> None:
         self.board = board
         self.footprint = footprint
-        self.gerber = gerber
         self.utility = utility
         self.pcbnew = pcbnew_module
         self.version = version
@@ -914,8 +912,6 @@ class KicadProvider:
         version_tuple = _parse_version(version_string)
         logger.info("Detected KiCad version: %s", version_string)
 
-        gerber_adapter = SWIGGerberAdapter(kicad_pcbnew)
-
         if prefer_ipc is None:
             prefer_ipc = _is_ipc_launch_context()
 
@@ -932,7 +928,6 @@ class KicadProvider:
                     return KicadAdapterSet(
                         board=ipc_board_adapter(ipc_client),
                         footprint=ipc_footprint_adapter(ipc_client),
-                        gerber=gerber_adapter,
                         utility=ipc_utility_adapter(ipc_client),
                         pcbnew_module=kicad_pcbnew,
                         version=version_tuple,
@@ -962,7 +957,6 @@ class KicadProvider:
         return KicadAdapterSet(
             board=board_adapter,
             footprint=footprint_adapter,
-            gerber=gerber_adapter,
             utility=utility_adapter,
             pcbnew_module=kicad_pcbnew,
             version=version_tuple,
