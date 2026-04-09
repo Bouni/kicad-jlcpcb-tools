@@ -1,33 +1,19 @@
 {
-  "version": "1.0",
-  "name": "Kicad-jlcpcb-tools",
-  "display_name": "KiCad JLCPCB Tools",
-  "identifier": "kicad-jlcpcb-tools",
+  "identifier": "io.github.z2amiller.kicad-jlcpcb-tools",
+  "name": "KiCad JLCPCB Tools",
   "description": "Generate BOM and CPL files for JLCPCB manufacturing.",
-  "url": "https://github.com/z2amiller/kicad-jlcpcb-tools",
-  "author": {
-    "name": "Andrew Miller",
-    "url": "https://github.com/z2amiller"
-  },
-  "license": "MIT",
-  "kicad": {
-    "pcbnew": {
-      "actions": [
-        {
-          "identifier": "kicad-jlcpcb-tools.generate-bom-gerbers",
-          "display_name": "Generate JLCPCB Files (BOM/Gerbers)",
-          "description": "Generate BOM and Gerber files for JLCPCB manufacturing",
-          "show_on_toolbar": true,
-          "icon": null
-        }
-      ]
-    }
-  },
   "runtime": {
-    "language": "python",
+    "type": "python",
     "min_version": "3.9"
   },
-  "dependencies": [
-    "kicad-python"
+  "actions": [
+    {
+      "identifier": "generate-bom-gerbers",
+      "name": "Generate JLCPCB Files (BOM/Gerbers)",
+      "description": "Generate BOM and Gerber files for JLCPCB manufacturing",
+      "entrypoint": "ipc_plugin_main",
+      "show-button": true,
+      "scopes": ["pcb"]
+    }
   ]
 }
