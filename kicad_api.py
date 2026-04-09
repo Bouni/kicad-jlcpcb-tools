@@ -7,9 +7,11 @@ The module detects the KiCad version at initialization and provides version-awar
 wrappers that handle compatibility across v6, v7, v8, and v8.99+ versions.
 """
 
-import logging
-import re
 from abc import ABC, abstractmethod
+import importlib
+import logging
+import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
@@ -18,6 +20,8 @@ except ImportError:
     kicad_pcbnew = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+IPC_MINIMUM_VERSION = (8, 99, 0)
 
 
 # Constants for attribute bits
@@ -52,7 +56,7 @@ def _parse_version(version_string: str) -> Tuple[int, int, int]:
     """
     match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_string)
     if not match:
-        raise ValueError("Cannot parse KiCad version: %s" % version_string)
+        raise ValueError(f"Cannot parse KiCad version: {version_string}")
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
@@ -61,6 +65,32 @@ def _is_version_at_least(
 ) -> bool:
     """Check if version is at least required version."""
     return version_tuple >= required
+
+
+def _get_ipc_client_class() -> Any:
+    """Import and return the IPC transport client class."""
+    return importlib.import_module("ipc_client").KiCadIPCClient
+
+
+def _get_ipc_adapter_classes() -> Tuple[Any, Any, Any]:
+    """Import and return IPC adapter classes for board/footprint/utility."""
+    ipc_impl = importlib.import_module("ipc_impl")
+    return (
+        ipc_impl.IPCBoardAdapter,
+        ipc_impl.IPCFootprintAdapter,
+        ipc_impl.IPCUtilityAdapter,
+    )
+
+
+def _is_ipc_launch_context() -> bool:
+    """Return True when plugin appears to be launched by KiCad IPC runtime."""
+    # KiCad IPC plugin launcher sets KICAD_API_SOCKET/KICAD_API_TOKEN.
+    # Keep KICAD_IPC_SOCKET as a local dev override for backward compatibility.
+    return bool(
+        os.getenv("KICAD_API_SOCKET")
+        or os.getenv("KICAD_API_TOKEN")
+        or os.getenv("KICAD_IPC_SOCKET")
+    )
 
 
 # ============================================================================
@@ -850,8 +880,14 @@ class KicadProvider:
     """Factory for creating KiCad adapter sets."""
 
     @staticmethod
-    def create_adapter_set() -> KicadAdapterSet:
+    def create_adapter_set(prefer_ipc: Optional[bool] = None) -> KicadAdapterSet:
         """Create and initialize adapter set for current KiCad version.
+
+        Args:
+            prefer_ipc: Backend selection override.
+                - None (default): auto-select IPC only in IPC launch context.
+                - True: force IPC attempt regardless of launch context.
+                - False: force SWIG.
 
         Returns:
             KicadAdapterSet with all adapters initialized and ready to use
@@ -869,10 +905,49 @@ class KicadProvider:
         version_tuple = _parse_version(version_string)
         logger.info("Detected KiCad version: %s", version_string)
 
+        gerber_adapter = SWIGGerberAdapter(kicad_pcbnew)
+
+        if prefer_ipc is None:
+            prefer_ipc = _is_ipc_launch_context()
+
+        use_ipc = prefer_ipc and _is_version_at_least(version_tuple, IPC_MINIMUM_VERSION)
+        if use_ipc:
+            try:
+                ipc_client_class = _get_ipc_client_class()
+                ipc_board_adapter, ipc_footprint_adapter, ipc_utility_adapter = (
+                    _get_ipc_adapter_classes()
+                )
+                ipc_client = ipc_client_class()
+                if ipc_client.is_available():
+                    logger.info("Using IPC adapters for KiCad %s", version_string)
+                    return KicadAdapterSet(
+                        board=ipc_board_adapter(ipc_client),
+                        footprint=ipc_footprint_adapter(ipc_client),
+                        gerber=gerber_adapter,
+                        utility=ipc_utility_adapter(ipc_client),
+                        pcbnew_module=kicad_pcbnew,
+                        version=version_tuple,
+                    )
+                logger.info("KiCad IPC server unavailable; falling back to SWIG adapters")
+            except Exception as exc:
+                logger.warning(
+                    "IPC adapter initialization failed; falling back to SWIG: %s", exc
+                )
+        elif prefer_ipc and not _is_version_at_least(version_tuple, IPC_MINIMUM_VERSION):
+            logger.info(
+                "IPC requested but KiCad %s is below minimum supported version %s.%s.%s; "
+                "using SWIG adapters",
+                version_string,
+                IPC_MINIMUM_VERSION[0],
+                IPC_MINIMUM_VERSION[1],
+                IPC_MINIMUM_VERSION[2],
+            )
+        else:
+            logger.info("Using SWIG adapters (IPC launch context not detected)")
+
         # Create SWIG adapter instances
         board_adapter = SWIGBoardAdapter(kicad_pcbnew)
         footprint_adapter = SWIGFootprintAdapter(kicad_pcbnew)
-        gerber_adapter = SWIGGerberAdapter(kicad_pcbnew)
         utility_adapter = SWIGUtilityAdapter(kicad_pcbnew)
 
         return KicadAdapterSet(
