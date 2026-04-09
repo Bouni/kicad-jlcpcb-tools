@@ -4,16 +4,146 @@ from export_api import IPCExportPlan, ExportPlan, SWIGExportPlan, create_export_
 
 
 class _FakeFabrication:
-    def __init__(self, version=(11, 0, 0)):
-        self.gerber_calls = []
-        self.drill_calls = 0
-        self.kicad = type("Kicad", (), {"version": version})()
+    def __init__(self, tmp_path=None, version=(11, 0, 0)):
+        self.logger = type(
+            "Logger",
+            (),
+            {
+                "info": staticmethod(lambda *_args, **_kwargs: None),
+                "error": staticmethod(lambda *_args, **_kwargs: None),
+            },
+        )()
+        self.parent = type(
+            "Parent",
+            (),
+            {
+                "settings": {
+                    "gerber": {
+                        "plot_values": True,
+                        "plot_references": True,
+                        "tented_vias": True,
+                    }
+                }
+            },
+        )()
+        self.board = object()
+        self.gerberdir = str(tmp_path) if tmp_path is not None else "."
 
-    def _generate_gerber_impl(self, layer_count=None):
-        self.gerber_calls.append(layer_count)
+        class _FakeGerber:
+            def __init__(self):
+                self.calls = []
 
-    def _generate_excellon_impl(self):
-        self.drill_calls += 1
+            @staticmethod
+            def create_plot_controller(_board):
+                return object()
+
+            @staticmethod
+            def get_plot_options(_plot_controller):
+                return object()
+
+            def __getattr__(self, name):
+                if name in {
+                    "set_output_directory",
+                    "set_format",
+                    "set_plot_component_values",
+                    "set_plot_reference_designators",
+                    "set_sketch_pads_on_mask_layers",
+                    "set_use_protel_extensions",
+                    "set_create_job_file",
+                    "set_mask_color",
+                    "set_use_auxiliary_origin",
+                    "set_plot_vias_on_mask",
+                    "set_use_x2_format",
+                    "set_include_netlist_attributes",
+                    "set_disable_macros",
+                    "set_drill_marks",
+                    "set_plot_frame_ref",
+                    "set_skip_plot_npth_pads",
+                    "set_layer",
+                    "open_plot_file",
+                    "close_plot",
+                    "set_drill_options",
+                    "set_drill_format",
+                    "generate_drill_files",
+                }:
+                    return lambda *args, **kwargs: self.calls.append(
+                        (name, args, kwargs)
+                    )
+                raise AttributeError(name)
+
+            @staticmethod
+            def plot_layer(_plot_controller):
+                return True
+
+            @staticmethod
+            def create_excellon_writer(_board):
+                return object()
+
+        class _FakeUtility:
+            @staticmethod
+            def get_layer_constants():
+                return {
+                    "F_Cu": 0,
+                    "B_Cu": 1,
+                    "F_SilkS": 2,
+                    "B_SilkS": 3,
+                    "F_Mask": 4,
+                    "B_Mask": 5,
+                    "F_Paste": 7,
+                    "B_Paste": 8,
+                    "Edge_Cuts": 9,
+                }
+
+            @staticmethod
+            def get_no_drill_shape():
+                return 0
+
+            @staticmethod
+            def get_plot_format_gerber():
+                return 1
+
+            @staticmethod
+            def get_inner_cu_layer(layer):
+                return 100 + layer
+
+        class _FakeBoard:
+            @staticmethod
+            def get_copper_layer_count():
+                return 2
+
+            @staticmethod
+            def get_enabled_layers():
+                return [0, 1, 2, 3, 4, 5, 7, 8, 9]
+
+            @staticmethod
+            def get_layer_name(layer_id):
+                names = {
+                    0: "F_Cu",
+                    1: "B_Cu",
+                    2: "F_SilkS",
+                    3: "B_SilkS",
+                    4: "F_Mask",
+                    5: "B_Mask",
+                    7: "F_Paste",
+                    8: "B_Paste",
+                    9: "Edge_Cuts",
+                }
+                return names[layer_id]
+
+            @staticmethod
+            def get_aux_origin():
+                return (0, 0)
+
+        self.kicad = type(
+            "Kicad",
+            (),
+            {
+                "version": version,
+                "gerber": _FakeGerber(),
+                "utility": _FakeUtility(),
+                "board": _FakeBoard(),
+            },
+        )()
 
 
 def test_swig_export_plan_implements_export_plan():
@@ -23,17 +153,18 @@ def test_swig_export_plan_implements_export_plan():
     assert isinstance(plan, ExportPlan)
 
 
-def test_swig_export_plan_delegates_to_fabrication_impls():
-    """SWIG export plan should delegate gerber/drill generation to fabrication internals."""
-    fake = _FakeFabrication()
+def test_swig_export_plan_runs_export_flow(tmp_path):
+    """SWIG export plan should own Gerber/Drill generation behavior."""
+    fake = _FakeFabrication(tmp_path=tmp_path)
     plan = SWIGExportPlan(fake)
 
     plan.generate_gerbers(layer_count=4)
-    plan.generate_gerbers()
     plan.generate_drill_files()
 
-    assert fake.gerber_calls == [4, None]
-    assert fake.drill_calls == 1
+    method_names = [call[0] for call in fake.kicad.gerber.calls]
+    assert "set_format" in method_names
+    assert "open_plot_file" in method_names
+    assert "generate_drill_files" in method_names
 
 
 def test_create_export_plan_defaults_to_swig_without_ipc_context(monkeypatch):

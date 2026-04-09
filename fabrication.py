@@ -10,9 +10,9 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 try:
-    from .export_api import create_export_plan
+    from .export_api import SWIGExportPlan, create_export_plan
 except ImportError:  # pragma: no cover - fallback for direct script imports/tests
-    from export_api import create_export_plan
+    from export_api import SWIGExportPlan, create_export_plan
 
 
 class Fabrication:
@@ -148,143 +148,16 @@ class Fabrication:
         self.export_plan.generate_gerbers(layer_count)
 
     def _generate_gerber_impl(self, layer_count=None):
-        """Generate Gerber files."""
-        # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
-
-        layers = self.kicad.utility.get_layer_constants()
-        pctl = self.kicad.gerber.create_plot_controller(self.board)
-        popt = self.kicad.gerber.get_plot_options(pctl)
-
-        # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
-        self.kicad.gerber.set_output_directory(popt, self.gerberdir)
-
-        # Plot format to Gerber
-        # https://github.com/KiCad/kicad-source-mirror/blob/master/include/plotter.h#L67-L78
-        self.kicad.gerber.set_format(popt, 1)
-
-        # General Options
-        self.kicad.gerber.set_plot_component_values(
-            popt,
-            self.parent.settings.get("gerber", {}).get("plot_values", True),
-        )
-        self.kicad.gerber.set_plot_reference_designators(
-            popt,
-            self.parent.settings.get("gerber", {}).get("plot_references", True),
-        )
-        self.kicad.gerber.set_sketch_pads_on_mask_layers(popt, False)
-
-        # Gerber Options
-        self.kicad.gerber.set_use_protel_extensions(popt, False)
-        self.kicad.gerber.set_create_job_file(popt, False)
-        self.kicad.gerber.set_mask_color(popt, True)
-        self.kicad.gerber.set_use_auxiliary_origin(popt, True)
-
-        # Tented vias or not, selcted by user in settings
-        # Only possible via settings in KiCAD < 8.99
-        # In KiCAD 8.99 this must be set in the layer settings of KiCAD
-        self.kicad.gerber.set_plot_vias_on_mask(
-            popt,
-            not self.parent.settings.get("gerber", {}).get("tented_vias", True),
-        )
-
-        self.kicad.gerber.set_use_x2_format(popt, True)
-        self.kicad.gerber.set_include_netlist_attributes(popt, True)
-        self.kicad.gerber.set_disable_macros(popt, False)
-        self.kicad.gerber.set_drill_marks(popt, self.kicad.utility.get_no_drill_shape())
-        self.kicad.gerber.set_plot_frame_ref(popt, False)
-
-        # delete all existing files in the output directory first
-        for f in os.listdir(self.gerberdir):
-            os.remove(os.path.join(self.gerberdir, f))
-
-        # if no layer_count is given, get the layer count from the board
-        if not layer_count:
-            layer_count = self.kicad.board.get_copper_layer_count()
-
-        plot_plan_top = [
-            ("CuTop", layers["F_Cu"], "Top layer"),
-            ("SilkTop", layers["F_SilkS"], "Silk top"),
-            ("MaskTop", layers["F_Mask"], "Mask top"),
-            ("PasteTop", layers["F_Paste"], "Paste top"),
-        ]
-        plot_plan_bottom = [
-            ("CuBottom", layers["B_Cu"], "Bottom layer"),
-            ("SilkBottom", layers["B_SilkS"], "Silk bottom"),
-            ("MaskBottom", layers["B_Mask"], "Mask bottom"),
-            ("EdgeCuts", layers["Edge_Cuts"], "Edges"),
-            ("PasteBottom", layers["B_Paste"], "Paste bottom"),
-        ]
-
-        plot_plan = []
-
-        # Single sided PCB
-        if layer_count == 1:
-            plot_plan = plot_plan_top + plot_plan_bottom[-2:]
-        # Double sided PCB
-        elif layer_count == 2:
-            plot_plan = plot_plan_top + plot_plan_bottom
-        # Everything with inner layers
-        else:
-            plot_plan = (
-                plot_plan_top
-                + [
-                    (
-                        f"CuIn{layer}",
-                        self.kicad.utility.get_inner_cu_layer(layer),
-                        f"Inner layer {layer}",
-                    )
-                    for layer in range(1, layer_count - 1)
-                ]
-                + plot_plan_bottom
-            )
-
-        # Add all JLC prefixed layers - layers must have "JLC_" in their name
-        jlc_layers_to_plot = []
-        enabled_layer_ids = self.kicad.board.get_enabled_layers()
-        for enabled_layer_id in enabled_layer_ids:
-            layer_name_string = self.kicad.board.get_layer_name(enabled_layer_id).upper()
-            if "JLC_" in layer_name_string:
-                plotter_info = (layer_name_string, enabled_layer_id, layer_name_string)
-                jlc_layers_to_plot.append(plotter_info)
-        plot_plan += jlc_layers_to_plot
-
-        for layer_info in plot_plan:
-            if layer_info[1] <= layers["B_Cu"]:
-                self.kicad.gerber.set_skip_plot_npth_pads(popt, True)
-            else:
-                self.kicad.gerber.set_skip_plot_npth_pads(popt, False)
-            self.kicad.gerber.set_layer(pctl, layer_info[1])
-            self.kicad.gerber.open_plot_file(
-                pctl,
-                layer_info[0],
-                self.kicad.utility.get_plot_format_gerber(),
-                layer_info[2],
-            )
-            plotted = self.kicad.gerber.plot_layer(pctl)
-
-            if plotted is False:
-                self.logger.error("Error plotting %s", layer_info[2])
-            self.logger.info("Successfully plotted %s", layer_info[2])
-        self.kicad.gerber.close_plot(pctl)
+        """Compatibility shim; use `generate_geber()` / `export_plan` instead."""
+        SWIGExportPlan(self).generate_gerbers(layer_count)
 
     def generate_excellon(self):
         """Generate Excellon files."""
         self.export_plan.generate_drill_files()
 
     def _generate_excellon_impl(self):
-        """Generate Excellon files."""
-        drlwriter = self.kicad.gerber.create_excellon_writer(self.board)
-        mirror = False
-        minimalHeader = False
-        offset = self.kicad.board.get_aux_origin()
-        mergeNPTH = False
-        self.kicad.gerber.set_drill_options(
-            drlwriter,
-            Options=(mirror, minimalHeader, offset, mergeNPTH),
-        )
-        self.kicad.gerber.set_drill_format(drlwriter, False)
-        self.kicad.gerber.generate_drill_files(drlwriter, self.gerberdir)
-        self.logger.info("Finished generating Excellon files")
+        """Compatibility shim; use `generate_excellon()` / `export_plan` instead."""
+        SWIGExportPlan(self).generate_drill_files()
 
     def zip_gerber_excellon(self):
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""

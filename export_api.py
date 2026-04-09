@@ -39,12 +39,134 @@ class SWIGExportPlan(ExportPlan):
         self.fabrication = fabrication
 
     def generate_gerbers(self, layer_count: Optional[int] = None) -> None:
-        """Generate Gerber files via existing SWIG-backed implementation."""
-        self.fabrication._generate_gerber_impl(layer_count)
+        """Generate Gerber files via SWIG adapter-backed export flow."""
+        kicad = self.fabrication.kicad
+        layers = kicad.utility.get_layer_constants()
+        pctl = kicad.gerber.create_plot_controller(self.fabrication.board)
+        popt = kicad.gerber.get_plot_options(pctl)
+
+        kicad.gerber.set_output_directory(popt, self.fabrication.gerberdir)
+        kicad.gerber.set_format(popt, 1)
+
+        # General options
+        kicad.gerber.set_plot_component_values(
+            popt,
+            self.fabrication.parent.settings.get("gerber", {}).get("plot_values", True),
+        )
+        kicad.gerber.set_plot_reference_designators(
+            popt,
+            self.fabrication.parent.settings.get("gerber", {}).get(
+                "plot_references", True
+            ),
+        )
+        kicad.gerber.set_sketch_pads_on_mask_layers(popt, False)
+
+        # Gerber options
+        kicad.gerber.set_use_protel_extensions(popt, False)
+        kicad.gerber.set_create_job_file(popt, False)
+        kicad.gerber.set_mask_color(popt, True)
+        kicad.gerber.set_use_auxiliary_origin(popt, True)
+        kicad.gerber.set_plot_vias_on_mask(
+            popt,
+            not self.fabrication.parent.settings.get("gerber", {}).get(
+                "tented_vias", True
+            ),
+        )
+        kicad.gerber.set_use_x2_format(popt, True)
+        kicad.gerber.set_include_netlist_attributes(popt, True)
+        kicad.gerber.set_disable_macros(popt, False)
+        kicad.gerber.set_drill_marks(popt, kicad.utility.get_no_drill_shape())
+        kicad.gerber.set_plot_frame_ref(popt, False)
+
+        for filename in os.listdir(self.fabrication.gerberdir):
+            os.remove(os.path.join(self.fabrication.gerberdir, filename))
+
+        if not layer_count:
+            layer_count = kicad.board.get_copper_layer_count()
+
+        plot_plan = self._build_plot_plan(layer_count)
+        for layer_info in plot_plan:
+            if layer_info[1] <= layers["B_Cu"]:
+                kicad.gerber.set_skip_plot_npth_pads(popt, True)
+            else:
+                kicad.gerber.set_skip_plot_npth_pads(popt, False)
+
+            kicad.gerber.set_layer(pctl, layer_info[1])
+            kicad.gerber.open_plot_file(
+                pctl,
+                layer_info[0],
+                kicad.utility.get_plot_format_gerber(),
+                layer_info[2],
+            )
+            plotted = kicad.gerber.plot_layer(pctl)
+            if plotted is False:
+                self.fabrication.logger.error("Error plotting %s", layer_info[2])
+            self.fabrication.logger.info("Successfully plotted %s", layer_info[2])
+
+        kicad.gerber.close_plot(pctl)
 
     def generate_drill_files(self) -> None:
-        """Generate drill files via existing SWIG-backed implementation."""
-        self.fabrication._generate_excellon_impl()
+        """Generate drill files via SWIG adapter-backed export flow."""
+        kicad = self.fabrication.kicad
+        drlwriter = kicad.gerber.create_excellon_writer(self.fabrication.board)
+        mirror = False
+        minimal_header = False
+        offset = kicad.board.get_aux_origin()
+        merge_npth = False
+        kicad.gerber.set_drill_options(
+            drlwriter,
+            Options=(mirror, minimal_header, offset, merge_npth),
+        )
+        kicad.gerber.set_drill_format(drlwriter, False)
+        kicad.gerber.generate_drill_files(drlwriter, self.fabrication.gerberdir)
+        self.fabrication.logger.info("Finished generating Excellon files")
+
+    def _build_plot_plan(self, layer_count: int) -> list[tuple[str, int, str]]:
+        """Build the layer plot plan used for Gerber generation."""
+        kicad = self.fabrication.kicad
+        layers = kicad.utility.get_layer_constants()
+
+        plot_plan_top = [
+            ("CuTop", layers["F_Cu"], "Top layer"),
+            ("SilkTop", layers["F_SilkS"], "Silk top"),
+            ("MaskTop", layers["F_Mask"], "Mask top"),
+            ("PasteTop", layers["F_Paste"], "Paste top"),
+        ]
+        plot_plan_bottom = [
+            ("CuBottom", layers["B_Cu"], "Bottom layer"),
+            ("SilkBottom", layers["B_SilkS"], "Silk bottom"),
+            ("MaskBottom", layers["B_Mask"], "Mask bottom"),
+            ("EdgeCuts", layers["Edge_Cuts"], "Edges"),
+            ("PasteBottom", layers["B_Paste"], "Paste bottom"),
+        ]
+
+        if layer_count == 1:
+            plot_plan = plot_plan_top + plot_plan_bottom[-2:]
+        elif layer_count == 2:
+            plot_plan = plot_plan_top + plot_plan_bottom
+        else:
+            plot_plan = (
+                plot_plan_top
+                + [
+                    (
+                        f"CuIn{layer}",
+                        kicad.utility.get_inner_cu_layer(layer),
+                        f"Inner layer {layer}",
+                    )
+                    for layer in range(1, layer_count - 1)
+                ]
+                + plot_plan_bottom
+            )
+
+        enabled_layer_ids = kicad.board.get_enabled_layers()
+        for enabled_layer_id in enabled_layer_ids:
+            layer_name_string = kicad.board.get_layer_name(enabled_layer_id).upper()
+            if "JLC_" in layer_name_string:
+                plot_plan.append(
+                    (layer_name_string, enabled_layer_id, layer_name_string)
+                )
+
+        return plot_plan
 
 
 class IPCExportPlan(ExportPlan):
