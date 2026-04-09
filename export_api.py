@@ -35,48 +35,74 @@ class SWIGExportPlan(ExportPlan):
     delegates to Fabrication's existing implementation internals.
     """
 
-    def __init__(self, fabrication: Fabrication):
+    def __init__(self, fabrication: Fabrication, gerber_adapter=None):
         self.fabrication = fabrication
+        self._gerber_adapter = gerber_adapter
+
+    def _resolve_gerber(self):
+        """Lazily resolve and cache the gerber adapter.
+
+        Resolution order:
+        1. Constructor-injected adapter (tests / explicit override).
+        2. Duck-typed ``fabrication.kicad.gerber`` (standalone shims and
+           legacy test adapter-set fixtures that still carry a ``.gerber``
+           attribute).
+        3. Production path: create a fresh ``SWIGGerberAdapter`` from the raw
+           ``pcbnew`` module stored on the adapter set.
+        """
+        if self._gerber_adapter is not None:
+            return self._gerber_adapter
+        # Backward-compat / test-injection path
+        kicad_gerber = getattr(self.fabrication.kicad, "gerber", None)
+        if kicad_gerber is not None:
+            self._gerber_adapter = kicad_gerber
+            return self._gerber_adapter
+        # Production path: build our own adapter from the raw pcbnew module
+        from kicad_api import SWIGGerberAdapter  # pylint: disable=import-outside-toplevel
+
+        self._gerber_adapter = SWIGGerberAdapter(self.fabrication.kicad.pcbnew)
+        return self._gerber_adapter
 
     def generate_gerbers(self, layer_count: Optional[int] = None) -> None:
         """Generate Gerber files via SWIG adapter-backed export flow."""
         kicad = self.fabrication.kicad
+        gerber = self._resolve_gerber()
         layers = kicad.utility.get_layer_constants()
-        pctl = kicad.gerber.create_plot_controller(self.fabrication.board)
-        popt = kicad.gerber.get_plot_options(pctl)
+        pctl = gerber.create_plot_controller(self.fabrication.board)
+        popt = gerber.get_plot_options(pctl)
 
-        kicad.gerber.set_output_directory(popt, self.fabrication.gerberdir)
-        kicad.gerber.set_format(popt, 1)
+        gerber.set_output_directory(popt, self.fabrication.gerberdir)
+        gerber.set_format(popt, 1)
 
         # General options
-        kicad.gerber.set_plot_component_values(
+        gerber.set_plot_component_values(
             popt,
             self.fabrication.parent.settings.get("gerber", {}).get("plot_values", True),
         )
-        kicad.gerber.set_plot_reference_designators(
+        gerber.set_plot_reference_designators(
             popt,
             self.fabrication.parent.settings.get("gerber", {}).get(
                 "plot_references", True
             ),
         )
-        kicad.gerber.set_sketch_pads_on_mask_layers(popt, False)
+        gerber.set_sketch_pads_on_mask_layers(popt, False)
 
         # Gerber options
-        kicad.gerber.set_use_protel_extensions(popt, False)
-        kicad.gerber.set_create_job_file(popt, False)
-        kicad.gerber.set_mask_color(popt, True)
-        kicad.gerber.set_use_auxiliary_origin(popt, True)
-        kicad.gerber.set_plot_vias_on_mask(
+        gerber.set_use_protel_extensions(popt, False)
+        gerber.set_create_job_file(popt, False)
+        gerber.set_mask_color(popt, True)
+        gerber.set_use_auxiliary_origin(popt, True)
+        gerber.set_plot_vias_on_mask(
             popt,
             not self.fabrication.parent.settings.get("gerber", {}).get(
                 "tented_vias", True
             ),
         )
-        kicad.gerber.set_use_x2_format(popt, True)
-        kicad.gerber.set_include_netlist_attributes(popt, True)
-        kicad.gerber.set_disable_macros(popt, False)
-        kicad.gerber.set_drill_marks(popt, kicad.utility.get_no_drill_shape())
-        kicad.gerber.set_plot_frame_ref(popt, False)
+        gerber.set_use_x2_format(popt, True)
+        gerber.set_include_netlist_attributes(popt, True)
+        gerber.set_disable_macros(popt, False)
+        gerber.set_drill_marks(popt, kicad.utility.get_no_drill_shape())
+        gerber.set_plot_frame_ref(popt, False)
 
         for filename in os.listdir(self.fabrication.gerberdir):
             os.remove(os.path.join(self.fabrication.gerberdir, filename))
@@ -87,38 +113,39 @@ class SWIGExportPlan(ExportPlan):
         plot_plan = self._build_plot_plan(layer_count)
         for layer_info in plot_plan:
             if layer_info[1] <= layers["B_Cu"]:
-                kicad.gerber.set_skip_plot_npth_pads(popt, True)
+                gerber.set_skip_plot_npth_pads(popt, True)
             else:
-                kicad.gerber.set_skip_plot_npth_pads(popt, False)
+                gerber.set_skip_plot_npth_pads(popt, False)
 
-            kicad.gerber.set_layer(pctl, layer_info[1])
-            kicad.gerber.open_plot_file(
+            gerber.set_layer(pctl, layer_info[1])
+            gerber.open_plot_file(
                 pctl,
                 layer_info[0],
                 kicad.utility.get_plot_format_gerber(),
                 layer_info[2],
             )
-            plotted = kicad.gerber.plot_layer(pctl)
+            plotted = gerber.plot_layer(pctl)
             if plotted is False:
                 self.fabrication.logger.error("Error plotting %s", layer_info[2])
             self.fabrication.logger.info("Successfully plotted %s", layer_info[2])
 
-        kicad.gerber.close_plot(pctl)
+        gerber.close_plot(pctl)
 
     def generate_drill_files(self) -> None:
         """Generate drill files via SWIG adapter-backed export flow."""
         kicad = self.fabrication.kicad
-        drlwriter = kicad.gerber.create_excellon_writer(self.fabrication.board)
+        gerber = self._resolve_gerber()
+        drlwriter = gerber.create_excellon_writer(self.fabrication.board)
         mirror = False
         minimal_header = False
         offset = kicad.board.get_aux_origin()
         merge_npth = False
-        kicad.gerber.set_drill_options(
+        gerber.set_drill_options(
             drlwriter,
             Options=(mirror, minimal_header, offset, merge_npth),
         )
-        kicad.gerber.set_drill_format(drlwriter, False)
-        kicad.gerber.generate_drill_files(drlwriter, self.fabrication.gerberdir)
+        gerber.set_drill_format(drlwriter, False)
+        gerber.generate_drill_files(drlwriter, self.fabrication.gerberdir)
         self.fabrication.logger.info("Finished generating Excellon files")
 
     def _build_plot_plan(self, layer_count: int) -> list[tuple[str, int, str]]:

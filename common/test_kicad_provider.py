@@ -6,7 +6,6 @@ from kicad_api import (
     KicadProvider,
     SWIGBoardAdapter,
     SWIGFootprintAdapter,
-    SWIGGerberAdapter,
     SWIGUtilityAdapter,
 )
 
@@ -50,7 +49,6 @@ def test_provider_uses_swig_below_ipc_minimum(monkeypatch):
 
     assert isinstance(adapters.board, SWIGBoardAdapter)
     assert isinstance(adapters.footprint, SWIGFootprintAdapter)
-    assert isinstance(adapters.gerber, SWIGGerberAdapter)
     assert isinstance(adapters.utility, SWIGUtilityAdapter)
     assert adapters.version < IPC_MINIMUM_VERSION
 
@@ -67,7 +65,6 @@ def test_provider_uses_swig_without_ipc_launch_context(monkeypatch):
 
     assert isinstance(adapters.board, SWIGBoardAdapter)
     assert isinstance(adapters.footprint, SWIGFootprintAdapter)
-    assert isinstance(adapters.gerber, SWIGGerberAdapter)
     assert isinstance(adapters.utility, SWIGUtilityAdapter)
 
 
@@ -88,7 +85,6 @@ def test_provider_uses_ipc_in_ipc_launch_context(monkeypatch):
     assert isinstance(adapters.board, _FakeIPCBoardAdapter)
     assert isinstance(adapters.footprint, _FakeIPCFootprintAdapter)
     assert isinstance(adapters.utility, _FakeIPCUtilityAdapter)
-    assert isinstance(adapters.gerber, SWIGGerberAdapter)
     assert isinstance(adapters.board.client, _FakeIPCClient)
 
 
@@ -112,5 +108,4 @@ def test_provider_falls_back_to_swig_when_ipc_unavailable(monkeypatch):
 
     assert isinstance(adapters.board, SWIGBoardAdapter)
     assert isinstance(adapters.footprint, SWIGFootprintAdapter)
-    assert isinstance(adapters.gerber, SWIGGerberAdapter)
     assert isinstance(adapters.utility, SWIGUtilityAdapter)
