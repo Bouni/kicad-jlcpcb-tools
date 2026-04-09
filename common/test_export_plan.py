@@ -189,10 +189,10 @@ def test_create_export_plan_selects_ipc_in_ipc_context_with_supported_version(
     assert isinstance(plan, IPCExportPlan)
 
 
-def test_create_export_plan_falls_back_to_swig_on_unsupported_version(monkeypatch):
-    """IPC context on unsupported versions should fall back to SWIG plan."""
+def test_create_export_plan_selects_ipc_in_context_on_older_versions(monkeypatch):
+    """IPC context on older versions should still select IPCExportPlan."""
     monkeypatch.setenv("KICAD_API_SOCKET", "/tmp/kicad-api.sock")
 
     plan = create_export_plan(_FakeFabrication(version=(10, 0, 0)))
 
-    assert isinstance(plan, SWIGExportPlan)
+    assert isinstance(plan, IPCExportPlan)

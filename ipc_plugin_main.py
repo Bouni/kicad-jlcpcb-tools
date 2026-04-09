@@ -11,7 +11,7 @@ through the IPC plugin system. It:
 """
 
 import importlib
-import importlib.util
+import types
 import logging
 import os
 import sys
@@ -21,6 +21,9 @@ from ipc_client import KiCadIPCClient
 from kicad_api import KicadProvider
 
 logger = logging.getLogger(__name__)
+
+_WX_APP = None
+_WINDOW = None
 
 
 def _import_mainwindow(plugin_dir: str):
@@ -36,21 +39,9 @@ def _import_mainwindow(plugin_dir: str):
     pkg_name = os.path.basename(plugin_dir).replace("-", "_")
 
     if pkg_name not in sys.modules:
-        init_path = os.path.join(plugin_dir, "__init__.py")
-        spec = importlib.util.spec_from_file_location(
-            pkg_name,
-            init_path,
-            submodule_search_locations=[plugin_dir],
-        )
-        pkg_mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-        pkg_mod.__path__ = [plugin_dir]  # type: ignore[assignment]
+        pkg_mod = types.ModuleType(pkg_name)
+        pkg_mod.__path__ = [plugin_dir]  # type: ignore[attr-defined]
         sys.modules[pkg_name] = pkg_mod
-        try:
-            spec.loader.exec_module(pkg_mod)  # type: ignore[union-attr]
-        except Exception:  # noqa: BLE001
-            # __init__.py registers the SWIG plugin which isn't available here;
-            # the ImportError is expected and harmless.
-            pass
 
     mainwindow_mod = importlib.import_module(f"{pkg_name}.mainwindow")
     return mainwindow_mod.JLCPCBTools
@@ -66,6 +57,29 @@ def _wait_for_ipc(client: KiCadIPCClient, timeout_s: float = 8.0) -> bool:
         time.sleep(0.2)
 
     return client.is_available()
+
+
+def _ensure_wx_app():
+    """Ensure a wx application object exists.
+
+    Returns:
+        tuple[object | None, bool]: ``(app, created_new_app)`` where
+        ``created_new_app`` is ``True`` only if this function created an app.
+    """
+    global _WX_APP
+
+    try:
+        import wx  # pylint: disable=import-error
+    except Exception:  # noqa: BLE001
+        logger.exception("Unable to import wx; UI cannot be shown")
+        return None, False
+
+    app = wx.GetApp()
+    if app is not None:
+        return app, False
+
+    _WX_APP = wx.App(None)
+    return _WX_APP, True
 
 
 def main() -> int:
@@ -123,10 +137,20 @@ def main() -> int:
         # Launch main window with IPC-backed adapters
         plugin_dir = os.path.dirname(os.path.abspath(__file__))
         JLCPCBTools = _import_mainwindow(plugin_dir)
+        app, created_wx_app = _ensure_wx_app()
+
+        if app is None:
+            return 1
+
         logger.info("Launching main window")
-        window = JLCPCBTools(None, adapter_set=adapter_set)
-        window.Center()
-        window.Show()
+        global _WINDOW
+        _WINDOW = JLCPCBTools(None, adapter_set=adapter_set)
+        _WINDOW.Center()
+        _WINDOW.Show()
+
+        if created_wx_app:
+            logger.info("Starting wx main loop for IPC plugin dialog")
+            app.MainLoop()
 
         return 0
 

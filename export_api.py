@@ -8,12 +8,19 @@ without changing call sites.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import logging
 import os
+import re
+import shutil
 import subprocess
+import sys
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fabrication import Fabrication
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExportPlan(ABC):
@@ -220,33 +227,29 @@ class IPCExportPlan(ExportPlan):
 
     def generate_gerbers(self, layer_count: Optional[int] = None) -> None:
         """Generate Gerber outputs via IPC when available, else `kicad-cli`."""
-        self._ensure_supported_version()
-        if self._ipc_export_available():
+        self._requested_layer_count = layer_count
+        if self._supports_direct_ipc_export() and self._ipc_export_available():
             try:
                 self._run_ipc_gerber_export(layer_count)
                 return
             except Exception:
-                pass
+                logger.exception("IPC gerber export failed; falling back to kicad-cli")
         self._run_cli_gerber_export()
 
     def generate_drill_files(self) -> None:
         """Generate drill outputs via IPC when available, else `kicad-cli`."""
-        self._ensure_supported_version()
-        if self._ipc_export_available():
+        if self._supports_direct_ipc_export() and self._ipc_export_available():
             try:
                 self._run_ipc_drill_export()
                 return
             except Exception:
-                pass
+                logger.exception("IPC drill export failed; falling back to kicad-cli")
         self._run_cli_drill_export()
 
-    def _ensure_supported_version(self) -> None:
+    def _supports_direct_ipc_export(self) -> bool:
+        """Return whether direct IPC export endpoints are expected to exist."""
         version = getattr(getattr(self.fabrication, "kicad", None), "version", None)
-        if not version or tuple(version) < self.IPC_EXPORT_MINIMUM_VERSION:
-            minimum = ".".join(str(v) for v in self.IPC_EXPORT_MINIMUM_VERSION)
-            raise RuntimeError(
-                f"IPC export requires KiCad >= {minimum}; use SWIGExportPlan on older versions"
-            )
+        return bool(version and tuple(version) >= self.IPC_EXPORT_MINIMUM_VERSION)
 
     def _ipc_export_available(self) -> bool:
         """Return whether direct IPC export implementation is available."""
@@ -264,8 +267,9 @@ class IPCExportPlan(ExportPlan):
         """Run direct IPC Gerber export when available."""
         if self.ipc_client is None:
             raise RuntimeError("IPC client not available")
+        board_file = self._board_filename()
         self.ipc_client.export_gerbers(
-            board_file=self.fabrication.board.GetFileName(),
+            board_file=board_file,
             output_dir=self.fabrication.gerberdir,
         )
 
@@ -273,8 +277,9 @@ class IPCExportPlan(ExportPlan):
         """Run direct IPC drill export when available."""
         if self.ipc_client is None:
             raise RuntimeError("IPC client not available")
+        board_file = self._board_filename()
         self.ipc_client.export_drill(
-            board_file=self.fabrication.board.GetFileName(),
+            board_file=board_file,
             output_dir=self.fabrication.gerberdir,
         )
 
@@ -289,29 +294,35 @@ class IPCExportPlan(ExportPlan):
             return None
 
     def _run_cli_gerber_export(self) -> None:
-        board_file = self.fabrication.board.GetFileName()
-        output_dir = self.fabrication.gerberdir
-        self.command_runner(
-            [
-                "kicad-cli",
-                "pcb",
-                "export",
-                "gerbers",
-                "--output",
-                output_dir,
-                board_file,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
+        board_file = os.path.abspath(self._board_filename())
+        output_dir = os.path.abspath(self.fabrication.gerberdir)
+        if not os.path.isfile(board_file):
+            raise RuntimeError(
+                "Board file does not exist or is not accessible: "
+                f"{board_file}. "
+                "If KiCad provides a relative board path in IPC mode, set KIPRJMOD "
+                "or open the board from its project directory."
+            )
+        self._clear_output_directory(output_dir)
+        command = self._cli_gerber_command(board_file=board_file, output_dir=output_dir)
+        self._run_cli_command(
+            command,
+            cwd=os.path.dirname(board_file) or None,
         )
 
     def _run_cli_drill_export(self) -> None:
-        board_file = self.fabrication.board.GetFileName()
-        output_dir = self.fabrication.gerberdir
-        self.command_runner(
+        board_file = os.path.abspath(self._board_filename())
+        output_dir = os.path.abspath(self.fabrication.gerberdir)
+        if not os.path.isfile(board_file):
+            raise RuntimeError(
+                "Board file does not exist or is not accessible: "
+                f"{board_file}. "
+                "If KiCad provides a relative board path in IPC mode, set KIPRJMOD "
+                "or open the board from its project directory."
+            )
+        self._run_cli_command(
             [
-                "kicad-cli",
+                self._resolve_kicad_cli(),
                 "pcb",
                 "export",
                 "drill",
@@ -319,10 +330,178 @@ class IPCExportPlan(ExportPlan):
                 output_dir,
                 board_file,
             ],
-            check=True,
-            capture_output=True,
-            text=True,
+            cwd=os.path.dirname(board_file) or None,
         )
+
+    def _run_cli_command(self, command: list[str], cwd: Optional[str] = None) -> None:
+        """Run a kicad-cli command with consistent options and error mapping."""
+        try:
+            self.command_runner(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+        except FileNotFoundError as exc:
+            tried = ", ".join(self._candidate_kicad_cli_paths())
+            raise RuntimeError(
+                "Could not find kicad-cli executable. "
+                "Set KICAD_CLI_PATH or settings['gerber']['kicad_cli_path']. "
+                f"Tried: {tried}"
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            stdout = (exc.stdout or "").strip()
+            details = stderr or stdout or str(exc)
+            raise RuntimeError(f"kicad-cli export failed: {details}") from exc
+
+    def _resolve_kicad_cli(self) -> str:
+        """Resolve path to `kicad-cli` for sandboxed KiCad plugin runtimes."""
+        for candidate in self._candidate_kicad_cli_paths():
+            if candidate == "kicad-cli":
+                if shutil.which("kicad-cli"):
+                    return "kicad-cli"
+                continue
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+        return "kicad-cli"
+
+    def _candidate_kicad_cli_paths(self) -> list[str]:
+        """Return ordered candidate paths for `kicad-cli` resolution."""
+        settings = getattr(getattr(self.fabrication, "parent", None), "settings", {})
+        gerber_settings = settings.get("gerber", {}) if isinstance(settings, dict) else {}
+        configured_path = (
+            os.getenv("KICAD_CLI_PATH")
+            or gerber_settings.get("kicad_cli_path")
+            or ""
+        )
+
+        candidates: list[str] = []
+        if configured_path:
+            candidates.append(configured_path)
+
+        candidates.append("kicad-cli")
+
+        # Standard macOS app bundle paths.
+        candidates.extend(
+            [
+                "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+                "/Applications/KiCad/nightly/KiCad.app/Contents/MacOS/kicad-cli",
+            ]
+        )
+
+        # Derive app bundle path from Python executable when running inside KiCad.
+        python_exe = os.path.realpath(sys.executable)
+        marker = ".app/Contents/"
+        marker_index = python_exe.find(marker)
+        if marker_index != -1:
+            app_contents = python_exe[: marker_index + len(marker)]
+            candidates.append(os.path.join(app_contents, "MacOS", "kicad-cli"))
+
+        # Preserve order but remove duplicates.
+        deduped: list[str] = []
+        for candidate in candidates:
+            if candidate and candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
+
+    @staticmethod
+    def _clear_output_directory(output_dir: str) -> None:
+        """Remove existing files from output directory before generating Gerbers."""
+        if not os.path.isdir(output_dir):
+            return
+        for filename in os.listdir(output_dir):
+            file_path = os.path.join(output_dir, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+
+    def _cli_gerber_command(self, board_file: str, output_dir: str) -> list[str]:
+        """Build the constrained `kicad-cli` Gerber export command."""
+        settings = getattr(getattr(self.fabrication, "parent", None), "settings", {})
+        gerber_settings = settings.get("gerber", {}) if isinstance(settings, dict) else {}
+
+        command = [
+            self._resolve_kicad_cli(),
+            "pcb",
+            "export",
+            "gerbers",
+            "--output",
+            output_dir,
+            "--layers",
+            ",".join(self._cli_gerber_layers()),
+            "--no-protel-ext",
+            "--use-drill-file-origin",
+        ]
+
+        if not gerber_settings.get("plot_references", True):
+            command.append("--exclude-refdes")
+        if not gerber_settings.get("plot_values", True):
+            command.append("--exclude-value")
+        if not gerber_settings.get("tented_vias", True):
+            command.append("--subtract-soldermask")
+
+        command.append(board_file)
+        return command
+
+    def _cli_gerber_layers(self) -> list[str]:
+        """Return a constrained CLI layer list equivalent to legacy SWIG behavior."""
+        layer_count = getattr(self, "_requested_layer_count", None)
+        if not layer_count:
+            layer_count = getattr(self.fabrication, "layer_count", None)
+        if not layer_count:
+            layer_count = self.fabrication.kicad.board.get_copper_layer_count()
+
+        layer_count = int(layer_count)
+
+        top_layers = ["F.Cu", "F.SilkS", "F.Mask", "F.Paste"]
+        bottom_layers = ["B.Cu", "B.SilkS", "B.Mask", "Edge.Cuts", "B.Paste"]
+
+        if layer_count == 1:
+            layers = top_layers + bottom_layers[-2:]
+        elif layer_count == 2:
+            layers = top_layers + bottom_layers
+        else:
+            inner_layers = [f"In{idx}.Cu" for idx in range(1, layer_count - 1)]
+            layers = top_layers + inner_layers + bottom_layers
+
+        for enabled_layer_id in self.fabrication.kicad.board.get_enabled_layers():
+            raw_name = str(self.fabrication.kicad.board.get_layer_name(enabled_layer_id))
+            cli_name = self._to_cli_layer_name(raw_name)
+            if "JLC_" in raw_name.upper() and cli_name not in layers:
+                layers.append(cli_name)
+
+        return layers
+
+    @staticmethod
+    def _to_cli_layer_name(layer_name: str) -> str:
+        """Convert adapter layer naming to `kicad-cli` untranslated layer names."""
+        normalized = layer_name.strip()
+        if not normalized:
+            return normalized
+
+        if normalized.lower() == "undefined":
+            return ""
+
+        match = re.match(r"^In-?(\d+)[._]Cu$", normalized, flags=re.IGNORECASE)
+        if match:
+            return f"In{int(match.group(1))}.Cu"
+
+        normalized = normalized.replace("_", ".")
+        return normalized
+
+    def _board_filename(self) -> str:
+        """Resolve board filename across old/new fabrication test doubles."""
+        getter = getattr(self.fabrication, "get_board_filename", None)
+        if callable(getter):
+            return getter()
+
+        board = getattr(self.fabrication, "board", None)
+        if hasattr(board, "GetFileName"):
+            return board.GetFileName()
+        if isinstance(board, dict):
+            return str(board.get("path", ""))
+        return ""
 
 
 def _is_ipc_launch_context() -> bool:
@@ -341,21 +520,16 @@ def create_export_plan(
 
     Selection policy:
     - `prefer_ipc is None`: auto-detect from IPC launch context env vars.
-    - `prefer_ipc is True`: prefer IPC plan when KiCad version is supported.
+    - `prefer_ipc is True`: prefer IPC plan in IPC runtime context.
     - Otherwise use SWIG plan.
 
-    IPC plan selection is version-gated to avoid runtime failures on versions
-    without IPC export support.
+    Note: `IPCExportPlan` can safely run on older versions by falling back to
+    `kicad-cli` when direct IPC export endpoints are unavailable.
     """
     if prefer_ipc is None:
         prefer_ipc = _is_ipc_launch_context()
 
-    version = getattr(getattr(fabrication, "kicad", None), "version", None)
-    if (
-        prefer_ipc
-        and version
-        and tuple(version) >= IPCExportPlan.IPC_EXPORT_MINIMUM_VERSION
-    ):
+    if prefer_ipc:
         return IPCExportPlan(fabrication)
 
     return SWIGExportPlan(fabrication)

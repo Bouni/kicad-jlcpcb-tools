@@ -104,8 +104,33 @@ class JLCPCBTools(wx.Dialog):
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
         board_filename = self.kicad.board.get_board_filename()
-        self.project_path = os.path.split(board_filename)[0]
-        self.board_name = os.path.split(board_filename)[1]
+        if board_filename and not os.path.isabs(board_filename):
+            kiprjmod = os.getenv("KIPRJMOD", "")
+            if kiprjmod:
+                candidate = os.path.abspath(os.path.join(kiprjmod, board_filename))
+                if os.path.exists(candidate):
+                    board_filename = candidate
+
+        if (not os.path.isabs(board_filename)) or (
+            board_filename and not os.path.exists(board_filename)
+        ):
+            # IPC payload paths can be relative in some KiCad builds; use SWIG
+            # board filename as a compatibility fallback when available.
+            pcbnew_module = getattr(self.kicad, "pcbnew", None)
+            if pcbnew_module is not None and hasattr(pcbnew_module, "GetBoard"):
+                try:
+                    swig_board = pcbnew_module.GetBoard()
+                    swig_name = swig_board.GetFileName() if swig_board is not None else ""
+                    if swig_name:
+                        board_filename = swig_name
+                except Exception:  # noqa: BLE001
+                    pass
+
+        board_filename = os.path.abspath(board_filename) if board_filename else ""
+        self.project_path = os.path.split(board_filename)[0] if board_filename else ""
+        self.board_name = os.path.split(board_filename)[1] if board_filename else ""
+        if not self.project_path:
+            self.project_path = os.getenv("KIPRJMOD", "")
         self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -1251,4 +1276,6 @@ class LogBoxHandler(logging.StreamHandler):
     def emit(self, record):
         """Marshal the event over to the main thread."""
         msg = self.format(record)
-        wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
+        # Destination window may already be destroyed during shutdown.
+        with suppress(RuntimeError):
+            wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
