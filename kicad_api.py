@@ -19,9 +19,7 @@ try:
 except ImportError:
     kicad_pcbnew = None  # type: ignore
 
-ActionPluginBase = (
-    kicad_pcbnew.ActionPlugin if kicad_pcbnew is not None else object
-)
+ActionPluginBase = kicad_pcbnew.ActionPlugin if kicad_pcbnew is not None else object
 
 logger = logging.getLogger(__name__)
 
@@ -915,7 +913,9 @@ class KicadProvider:
         if prefer_ipc is None:
             prefer_ipc = _is_ipc_launch_context()
 
-        use_ipc = prefer_ipc and _is_version_at_least(version_tuple, IPC_MINIMUM_VERSION)
+        use_ipc = prefer_ipc and _is_version_at_least(
+            version_tuple, IPC_MINIMUM_VERSION
+        )
         if use_ipc:
             try:
                 ipc_client_class = _get_ipc_client_class()
@@ -932,12 +932,16 @@ class KicadProvider:
                         pcbnew_module=kicad_pcbnew,
                         version=version_tuple,
                     )
-                logger.info("KiCad IPC server unavailable; falling back to SWIG adapters")
+                logger.info(
+                    "KiCad IPC server unavailable; falling back to SWIG adapters"
+                )
             except Exception as exc:
                 logger.warning(
                     "IPC adapter initialization failed; falling back to SWIG: %s", exc
                 )
-        elif prefer_ipc and not _is_version_at_least(version_tuple, IPC_MINIMUM_VERSION):
+        elif prefer_ipc and not _is_version_at_least(
+            version_tuple, IPC_MINIMUM_VERSION
+        ):
             logger.info(
                 "IPC requested but KiCad %s is below minimum supported version %s.%s.%s; "
                 "using SWIG adapters",

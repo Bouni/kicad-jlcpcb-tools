@@ -77,7 +77,11 @@ def test_provider_uses_ipc_in_ipc_launch_context(monkeypatch):
     monkeypatch.setattr(
         kicad_api,
         "_get_ipc_adapter_classes",
-        lambda: (_FakeIPCBoardAdapter, _FakeIPCFootprintAdapter, _FakeIPCUtilityAdapter),
+        lambda: (
+            _FakeIPCBoardAdapter,
+            _FakeIPCFootprintAdapter,
+            _FakeIPCUtilityAdapter,
+        ),
     )
 
     adapters = KicadProvider.create_adapter_set()
@@ -101,7 +105,11 @@ def test_provider_falls_back_to_swig_when_ipc_unavailable(monkeypatch):
     monkeypatch.setattr(
         kicad_api,
         "_get_ipc_adapter_classes",
-        lambda: (_FakeIPCBoardAdapter, _FakeIPCFootprintAdapter, _FakeIPCUtilityAdapter),
+        lambda: (
+            _FakeIPCBoardAdapter,
+            _FakeIPCFootprintAdapter,
+            _FakeIPCUtilityAdapter,
+        ),
     )
 
     adapters = KicadProvider.create_adapter_set()
