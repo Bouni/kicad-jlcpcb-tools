@@ -45,6 +45,11 @@ class _FakeWindow:
         self.__class__.shown = True
 
 
+class _FakeApp:
+    def MainLoop(self):
+        return None
+
+
 def _fresh_module():
     module = importlib.import_module("ipc_plugin_main")
     return importlib.reload(module)
@@ -80,6 +85,7 @@ def test_ipc_plugin_main_bootstraps_successfully(monkeypatch):
     monkeypatch.setattr(ipc_plugin_main, "KicadProvider", lambda: fake_provider)
     # Patch _import_mainwindow so we don't try to import wx/KiCad in tests
     monkeypatch.setattr(ipc_plugin_main, "_import_mainwindow", lambda _dir: _FakeWindow)
+    monkeypatch.setattr(ipc_plugin_main, "_ensure_wx_app", lambda: (_FakeApp(), False))
 
     _FakeProvider.calls = []
     _FakeWindow.created_with = None

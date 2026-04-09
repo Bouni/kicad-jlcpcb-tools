@@ -1,5 +1,4 @@
 {
-  "$schema": "https://go.kicad.org/api/schemas/v1",
   "identifier": "io.github.z2amiller.kicad-jlcpcb-tools",
   "name": "KiCad JLCPCB Tools",
   "description": "Generate BOM and CPL files for JLCPCB manufacturing.",
@@ -15,7 +14,7 @@
       "entrypoint": "ipc_plugin_main.py",
       "show-button": true,
       "scopes": ["pcb"],
-      "icons-light": ["icon.png"]
+      "icons-light": ["icons/mdi-database-export-outline.png"]
     }
   ]
 }

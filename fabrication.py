@@ -26,9 +26,70 @@ class Fabrication:
         if self.kicad is None:
             raise ValueError("Fabrication requires an initialized KiCad adapter set")
         self.corrections = []
-        self.path, self.filename = os.path.split(self.board.GetFileName())
+        self.layer_count = None
+        board_filename = self.get_board_filename()
+        self.path, self.filename = os.path.split(board_filename)
         self.create_folders()
         self.export_plan = create_export_plan(self)
+
+    def get_board_filename(self) -> str:
+        """Return the current board filename across SWIG and IPC backends."""
+        board_filename = ""
+        board_adapter = getattr(self.kicad, "board", None)
+        if board_adapter is not None and hasattr(board_adapter, "get_board_filename"):
+            board_filename = board_adapter.get_board_filename() or ""
+
+        if not board_filename and hasattr(self.board, "GetFileName"):
+            board_filename = self.board.GetFileName()
+
+        if not board_filename and isinstance(self.board, dict):
+            board_filename = str(self.board.get("path", ""))
+
+        if not board_filename:
+            project_path = getattr(self.parent, "project_path", "")
+            board_name = getattr(self.parent, "board_name", "")
+            if project_path and board_name:
+                board_filename = os.path.join(project_path, board_name)
+
+        if not board_filename:
+            return ""
+
+        if os.path.isabs(board_filename):
+            if os.path.exists(board_filename):
+                return board_filename
+
+        if board_filename and not os.path.isabs(board_filename):
+            kiprjmod = os.getenv("KIPRJMOD", "")
+            if kiprjmod:
+                candidate = os.path.abspath(os.path.join(kiprjmod, board_filename))
+                if os.path.exists(candidate):
+                    return candidate
+
+        project_path = getattr(self.parent, "project_path", "")
+        if project_path:
+            candidate = os.path.abspath(os.path.join(project_path, board_filename))
+            if os.path.exists(candidate):
+                return candidate
+
+        if not board_filename:
+            board_name = getattr(self.parent, "board_name", "")
+            kiprjmod = os.getenv("KIPRJMOD", "")
+            if board_name and kiprjmod:
+                candidate = os.path.abspath(os.path.join(kiprjmod, board_name))
+                if os.path.exists(candidate):
+                    return candidate
+
+        pcbnew_module = getattr(self.kicad, "pcbnew", None)
+        if pcbnew_module is not None and hasattr(pcbnew_module, "GetBoard"):
+            try:
+                swig_board = pcbnew_module.GetBoard()
+                swig_name = swig_board.GetFileName() if swig_board is not None else ""
+                if swig_name:
+                    return os.path.abspath(swig_name)
+            except Exception:  # noqa: BLE001
+                pass
+
+        return os.path.abspath(board_filename)
 
     def create_folders(self):
         """Create output folders if they not already exist."""
@@ -202,6 +263,7 @@ class Fabrication:
 
     def generate_geber(self, layer_count=None):
         """Generate Gerber files."""
+        self.layer_count = layer_count
         self.export_plan.generate_gerbers(layer_count)
 
     def _generate_gerber_impl(self, layer_count=None):
