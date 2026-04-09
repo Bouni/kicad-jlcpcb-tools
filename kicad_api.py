@@ -84,6 +84,10 @@ class BoardAPI(ABC):
         """Get all footprints on the board, sorted by reference."""
 
     @abstractmethod
+    def get_footprints(self) -> List[Any]:
+        """Get all footprints on the board in board iteration order."""
+
+    @abstractmethod
     def get_footprint_by_reference(self, reference: str) -> Optional[Any]:
         """Find a footprint by its reference designator."""
 
@@ -110,6 +114,14 @@ class BoardAPI(ABC):
     @abstractmethod
     def get_current_selection(self) -> List[Any]:
         """Get currently selected board items."""
+
+    @abstractmethod
+    def get_copper_layer_count(self) -> int:
+        """Get number of copper layers in the board stackup."""
+
+    @abstractmethod
+    def get_aux_origin(self) -> Any:
+        """Get the board auxiliary origin point."""
 
 
 class FootprintAPI(ABC):
@@ -361,6 +373,10 @@ class SWIGBoardAdapter(BoardAPI):
         board = self.get_board()
         return sorted(board.GetFootprints(), key=lambda x: x.GetReference())
 
+    def get_footprints(self) -> List[Any]:
+        """Get all footprints on the board in board iteration order."""
+        return list(self.get_board().Footprints())
+
     def get_footprint_by_reference(self, reference: str) -> Optional[Any]:
         """Find a footprint by its reference designator."""
         board = self.get_board()
@@ -391,6 +407,14 @@ class SWIGBoardAdapter(BoardAPI):
     def get_current_selection(self) -> List[Any]:
         """Get currently selected board items."""
         return list(self.pcbnew.GetCurrentSelection())
+
+    def get_copper_layer_count(self) -> int:
+        """Get number of copper layers in the board stackup."""
+        return self.get_board().GetCopperLayerCount()
+
+    def get_aux_origin(self) -> Any:
+        """Get the board auxiliary origin point."""
+        return self.get_board().GetDesignSettings().GetAuxOrigin()
 
 
 class SWIGFootprintAdapter(FootprintAPI):

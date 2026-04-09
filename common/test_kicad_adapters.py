@@ -20,10 +20,14 @@ def test_board_adapter_basic_calls():
 
     assert adapters.board.get_board_filename() == "fake_test_board.kicad_pcb"
     assert adapters.board.get_current_selection() == []
+    assert adapters.board.get_copper_layer_count() == 2
+    assert adapters.board.get_aux_origin().x == 0
+    assert adapters.board.get_aux_origin().y == 0
 
     fps = adapters.board.get_all_footprints()
     assert len(fps) == 1
     assert adapters.footprint.get_reference(fps[0]) == "R1"
+    assert len(adapters.board.get_footprints()) == 1
 
 
 def test_utility_adapter_constants():
