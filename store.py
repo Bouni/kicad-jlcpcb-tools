@@ -222,18 +222,25 @@ class Store:
         """Read all footprints from the board and insert them into the database if they do not exist."""
         for fp in get_valid_footprints(self.board):
             if self.kicad:
+                footprint_api = self.kicad.footprint
                 lcsc = self.kicad.footprint.get_lcsc_value(fp)
                 exclude_from_bom = self.kicad.footprint.get_exclude_from_bom(fp)
                 exclude_from_pos = self.kicad.footprint.get_exclude_from_pos(fp)
+                reference = footprint_api.get_reference(fp)
+                value = footprint_api.get_value(fp)
+                footprint_name = str(footprint_api.get_fpid_name(fp))
             else:
                 lcsc = get_lcsc_value(fp)
                 exclude_from_bom = get_exclude_from_bom(fp)
                 exclude_from_pos = get_exclude_from_pos(fp)
+                reference = fp.GetReference()
+                value = fp.GetValue()
+                footprint_name = str(fp.GetFPID().GetLibItemName())
 
             board_part = {
-                "reference": fp.GetReference(),
-                "value": fp.GetValue(),
-                "footprint": str(fp.GetFPID().GetLibItemName()),
+                "reference": reference,
+                "value": value,
+                "footprint": footprint_name,
                 "lcsc": lcsc,
                 "exclude_from_bom": exclude_from_bom,
                 "exclude_from_pos": exclude_from_pos,
@@ -296,7 +303,13 @@ class Store:
 
     def clean_database(self):
         """Delete all parts from the database that are no longer present on the board."""
-        refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(self.board)]
+        if self.kicad:
+            refs = [
+                f"'{self.kicad.footprint.get_reference(fp)}'"
+                for fp in self.kicad.board.get_footprints()
+            ]
+        else:
+            refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(self.board)]
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
