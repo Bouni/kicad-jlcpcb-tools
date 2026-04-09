@@ -5,10 +5,6 @@ import os
 import os.path
 import re
 
-from pcbnew import GetBuildVersion  # pylint: disable=import-error
-
-from .core.version import is_version6, is_version7
-
 
 class SchematicExport:
     """A class to export Schematic files."""
@@ -21,11 +17,13 @@ class SchematicExport:
 
     def load_schematic(self, paths):
         """Load schematic file."""
-        if is_version6(GetBuildVersion()):
+        version_major = self.parent.kicad.version[0]
+
+        if version_major == 6:
             self.logger.info("Kicad 6...")
             for path in paths:
                 self._update_schematic6(path)
-        elif is_version7(GetBuildVersion()):
+        elif version_major == 7:
             self.logger.info("Kicad 7...")
             for path in paths:
                 self._update_schematic7(path)
