@@ -1,14 +1,13 @@
 """Contains the Action Plugin."""
 
-import os
 import logging
+import os
 
-from pcbnew import ActionPlugin  # pylint: disable=import-error
-
-from .kicad_api import KicadProvider
+from .kicad_api import KicadProvider, get_action_plugin_base
 from .mainwindow import JLCPCBTools
 
 logger = logging.getLogger(__name__)
+ActionPlugin = get_action_plugin_base()
 
 
 class JLCPCBPlugin(ActionPlugin):
