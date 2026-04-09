@@ -9,6 +9,11 @@ import re
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+try:
+    from .export_api import SWIGExportPlan
+except ImportError:  # pragma: no cover - fallback for direct script imports/tests
+    from export_api import SWIGExportPlan
+
 
 class Fabrication:
     """Contains all functionality to generate the JLCPCB production files."""
@@ -23,6 +28,7 @@ class Fabrication:
         self.corrections = []
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
+        self.export_plan = SWIGExportPlan(self)
 
     def create_folders(self):
         """Create output folders if they not already exist."""
@@ -138,6 +144,10 @@ class Fabrication:
             return self.kicad.utility.create_vector2i(int(x_pos), int(y_pos))
 
     def generate_geber(self, layer_count=None):
+        """Generate Gerber files."""
+        self.export_plan.generate_gerbers(layer_count)
+
+    def _generate_gerber_impl(self, layer_count=None):
         """Generate Gerber files."""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
 
@@ -258,6 +268,10 @@ class Fabrication:
         self.kicad.gerber.close_plot(pctl)
 
     def generate_excellon(self):
+        """Generate Excellon files."""
+        self.export_plan.generate_drill_files()
+
+    def _generate_excellon_impl(self):
         """Generate Excellon files."""
         drlwriter = self.kicad.gerber.create_excellon_writer(self.board)
         mirror = False
