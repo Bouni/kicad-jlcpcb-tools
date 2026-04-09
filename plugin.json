@@ -11,9 +11,10 @@
       "identifier": "generate-bom-gerbers",
       "name": "Generate JLCPCB Files (BOM/Gerbers)",
       "description": "Generate BOM and Gerber files for JLCPCB manufacturing",
-      "entrypoint": "ipc_plugin_main",
+      "entrypoint": "ipc_plugin_main.py",
       "show-button": true,
-      "scopes": ["pcb"]
+      "scopes": ["pcb"],
+      "icons-light": ["icons/mdi-database-export-outline.png"]
     }
   ]
 }
