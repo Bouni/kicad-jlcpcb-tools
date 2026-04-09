@@ -19,6 +19,10 @@ try:
 except ImportError:
     kicad_pcbnew = None  # type: ignore
 
+ActionPluginBase = (
+    kicad_pcbnew.ActionPlugin if kicad_pcbnew is not None else object
+)
+
 logger = logging.getLogger(__name__)
 
 IPC_MINIMUM_VERSION = (8, 99, 0)
@@ -42,6 +46,11 @@ def _get_kicad_version() -> str:
     if kicad_pcbnew is None:
         raise ImportError("KiCad SWIG bindings not available")
     return kicad_pcbnew.GetBuildVersion()
+
+
+def get_action_plugin_base() -> Any:
+    """Return the ActionPlugin base class from KiCad when available."""
+    return ActionPluginBase
 
 
 def _parse_version(version_string: str) -> Tuple[int, int, int]:
