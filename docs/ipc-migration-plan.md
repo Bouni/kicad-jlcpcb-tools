@@ -103,12 +103,13 @@ These PRs close the remaining direct `pcbnew` call sites in business logic ident
 - Files: new `ipc_impl.py`, `common/test_kicad_adapters.py`
 - `IPCBoardAdapter`, `IPCFootprintAdapter`, `IPCUtilityAdapter` implementing existing ABCs. Contract tests confirm these satisfy the same ABC shape as SWIG counterparts.
 
-**PR-013: Provider version routing**
+**PR-013: Provider launch-context routing**
 - Files: `kicad_api.py`, `plugin.py`
-- `KicadProvider.create_adapter_set()` selects IPC vs SWIG by version (IPC preferred on KiCad 8.99+) with soft fallback to SWIG and explicit startup log. `GerberAPI` stays SWIG throughout this phase.
+- `KicadProvider.create_adapter_set()` selects IPC vs SWIG by launch context (`KICAD_API_SOCKET` / IPC runtime), then applies version capability guard (IPC only on supported KiCad versions), with soft fallback to SWIG and explicit startup log. `GerberAPI` stays SWIG throughout this phase.
 
 **MS-05** (closes after PR-013)
-- [ ] Plugin starts correctly under both SWIG (v8.0) and IPC (v8.99+) paths.
+
+- [ ] Plugin starts correctly under both SWIG (no IPC launch context, e.g. v8.0 Action Plugin) and IPC (IPC plugin launch context on supported versions) paths.
 - [ ] Startup logs clearly state selected backend and capability set.
 - [ ] Export path unchanged; all existing tests green.
 
