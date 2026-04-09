@@ -885,7 +885,11 @@ class KicadProvider:
     """Factory for creating KiCad adapter sets."""
 
     @staticmethod
-    def create_adapter_set(prefer_ipc: Optional[bool] = None) -> KicadAdapterSet:
+    def create_adapter_set(
+        prefer_ipc: Optional[bool] = None,
+        launch_context: str = "auto",
+        ipc_client: Optional[Any] = None,
+    ) -> KicadAdapterSet:
         """Create and initialize adapter set for current KiCad version.
 
         Args:
@@ -893,6 +897,12 @@ class KicadProvider:
                 - None (default): auto-select IPC only in IPC launch context.
                 - True: force IPC attempt regardless of launch context.
                 - False: force SWIG.
+            launch_context: Explicit runtime context selector.
+                - "auto" (default): detect based on environment variables.
+                - "ipc": force IPC selection attempt.
+                - "swig": force SWIG selection.
+            ipc_client: Optional pre-constructed IPC client instance.
+                Used when launch_context="ipc" or prefer_ipc=True.
 
         Returns:
             KicadAdapterSet with all adapters initialized and ready to use
@@ -902,6 +912,11 @@ class KicadProvider:
             ValueError: If version cannot be parsed
 
         """
+        if launch_context not in ("auto", "ipc", "swig"):
+            raise ValueError(
+                "launch_context must be one of: 'auto', 'ipc', or 'swig'"
+            )
+
         if kicad_pcbnew is None:
             logger.error("KiCad SWIG bindings not available")
             raise ImportError("KiCad SWIG bindings not available")
@@ -910,7 +925,11 @@ class KicadProvider:
         version_tuple = _parse_version(version_string)
         logger.info("Detected KiCad version: %s", version_string)
 
-        if prefer_ipc is None:
+        if launch_context == "ipc":
+            prefer_ipc = True if prefer_ipc is None else prefer_ipc
+        elif launch_context == "swig":
+            prefer_ipc = False
+        elif prefer_ipc is None:
             prefer_ipc = _is_ipc_launch_context()
 
         use_ipc = prefer_ipc and _is_version_at_least(
@@ -918,17 +937,21 @@ class KicadProvider:
         )
         if use_ipc:
             try:
-                ipc_client_class = _get_ipc_client_class()
                 ipc_board_adapter, ipc_footprint_adapter, ipc_utility_adapter = (
                     _get_ipc_adapter_classes()
                 )
-                ipc_client = ipc_client_class()
-                if ipc_client.is_available():
+
+                selected_ipc_client = ipc_client
+                if selected_ipc_client is None:
+                    ipc_client_class = _get_ipc_client_class()
+                    selected_ipc_client = ipc_client_class()
+
+                if selected_ipc_client.is_available():
                     logger.info("Using IPC adapters for KiCad %s", version_string)
                     return KicadAdapterSet(
-                        board=ipc_board_adapter(ipc_client),
-                        footprint=ipc_footprint_adapter(ipc_client),
-                        utility=ipc_utility_adapter(ipc_client),
+                        board=ipc_board_adapter(selected_ipc_client),
+                        footprint=ipc_footprint_adapter(selected_ipc_client),
+                        utility=ipc_utility_adapter(selected_ipc_client),
                         pcbnew_module=kicad_pcbnew,
                         version=version_tuple,
                     )
