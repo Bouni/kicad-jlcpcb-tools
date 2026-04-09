@@ -10,9 +10,9 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 try:
-    from .export_api import SWIGExportPlan
+    from .export_api import create_export_plan
 except ImportError:  # pragma: no cover - fallback for direct script imports/tests
-    from export_api import SWIGExportPlan
+    from export_api import create_export_plan
 
 
 class Fabrication:
@@ -28,7 +28,7 @@ class Fabrication:
         self.corrections = []
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
-        self.export_plan = SWIGExportPlan(self)
+        self.export_plan = create_export_plan(self)
 
     def create_folders(self):
         """Create output folders if they not already exist."""

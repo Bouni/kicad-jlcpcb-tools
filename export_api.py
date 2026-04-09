@@ -8,6 +8,7 @@ without changing call sites.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import os
 import subprocess
 from typing import Optional, TYPE_CHECKING
 
@@ -137,3 +138,39 @@ class IPCExportPlan(ExportPlan):
             capture_output=True,
             text=True,
         )
+
+
+def _is_ipc_launch_context() -> bool:
+    """Return True when running under KiCad IPC plugin launcher context."""
+    return bool(
+        os.getenv("KICAD_API_SOCKET")
+        or os.getenv("KICAD_API_TOKEN")
+        or os.getenv("KICAD_IPC_SOCKET")
+    )
+
+
+def create_export_plan(
+    fabrication: Fabrication, prefer_ipc: Optional[bool] = None
+) -> ExportPlan:
+    """Create an export plan with safe defaults.
+
+    Selection policy:
+    - `prefer_ipc is None`: auto-detect from IPC launch context env vars.
+    - `prefer_ipc is True`: prefer IPC plan when KiCad version is supported.
+    - Otherwise use SWIG plan.
+
+    IPC plan selection is version-gated to avoid runtime failures on versions
+    without IPC export support.
+    """
+    if prefer_ipc is None:
+        prefer_ipc = _is_ipc_launch_context()
+
+    version = getattr(getattr(fabrication, "kicad", None), "version", None)
+    if (
+        prefer_ipc
+        and version
+        and tuple(version) >= IPCExportPlan.IPC_EXPORT_MINIMUM_VERSION
+    ):
+        return IPCExportPlan(fabrication)
+
+    return SWIGExportPlan(fabrication)
