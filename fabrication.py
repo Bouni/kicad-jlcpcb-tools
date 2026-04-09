@@ -189,8 +189,7 @@ class Fabrication:
         self.kicad.gerber.set_include_netlist_attributes(popt, True)
         self.kicad.gerber.set_disable_macros(popt, False)
         self.kicad.gerber.set_drill_marks(popt, self.kicad.utility.get_no_drill_shape())
-
-        popt.SetPlotFrameRef(False)
+        self.kicad.gerber.set_plot_frame_ref(popt, False)
 
         # delete all existing files in the output directory first
         for f in os.listdir(self.gerberdir):
@@ -249,9 +248,9 @@ class Fabrication:
 
         for layer_info in plot_plan:
             if layer_info[1] <= layers["B_Cu"]:
-                popt.SetSkipPlotNPTH_Pads(True)
+                self.kicad.gerber.set_skip_plot_npth_pads(popt, True)
             else:
-                popt.SetSkipPlotNPTH_Pads(False)
+                self.kicad.gerber.set_skip_plot_npth_pads(popt, False)
             self.kicad.gerber.set_layer(pctl, layer_info[1])
             self.kicad.gerber.open_plot_file(
                 pctl,
@@ -273,8 +272,11 @@ class Fabrication:
         minimalHeader = False
         offset = self.kicad.board.get_aux_origin()
         mergeNPTH = False
-        drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
-        drlwriter.SetFormat(False)
+        self.kicad.gerber.set_drill_options(
+            drlwriter,
+            Options=(mirror, minimalHeader, offset, mergeNPTH),
+        )
+        self.kicad.gerber.set_drill_format(drlwriter, False)
         self.kicad.gerber.generate_drill_files(drlwriter, self.gerberdir)
         self.logger.info("Finished generating Excellon files")
 
