@@ -1,55 +1,25 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
 import csv
-from importlib import import_module
 import logging
 import math
 import os
 from pathlib import Path
 import re
+from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
-
-from pcbnew import (  # pylint: disable=import-error
-    EXCELLON_WRITER,
-    PCB_PLOT_PARAMS,
-    PCB_VIA,
-    PLOT_CONTROLLER,
-    PLOT_FORMAT_GERBER,
-    VECTOR2I,
-    ZONE_FILLER,
-    B_Cu,
-    B_Mask,
-    B_Paste,
-    B_SilkS,
-    Edge_Cuts,
-    F_Cu,
-    F_Mask,
-    F_Paste,
-    F_SilkS,
-    FromMM,
-    Refresh,
-    ToMM,
-    wxPoint,
-)
-
-from .helpers import get_is_dnp
-
-# Compatibility hack for V6 / V7 / V7.99
-try:
-    from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE  # pylint: disable=import-error
-
-    NO_DRILL_SHAPE = DRILL_MARKS_NO_DRILL_SHAPE
-except ImportError:
-    NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
 
 
 class Fabrication:
     """Contains all functionality to generate the JLCPCB production files."""
 
-    def __init__(self, parent, board):
+    def __init__(self, parent, board, adapter_set=None):
         self.parent = parent
         self.logger = logging.getLogger(__name__)
         self.board = board
+        self.kicad: Any = adapter_set or getattr(parent, "kicad", None)
+        if self.kicad is None:
+            raise ValueError("Fabrication requires an initialized KiCad adapter set")
         self.corrections = []
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
@@ -84,10 +54,7 @@ class Fabrication:
     def fill_zones(self):
         """Refill copper zones following user prompt."""
         if self.parent.settings.get("gerber", {}).get("fill_zones", True):
-            filler = ZONE_FILLER(self.board)
-            zones = self.board.Zones()
-            filler.Fill(zones)
-            Refresh()
+            self.kicad.utility.refill_zones(self.board)
 
     def _find_correction(self, value):
         """Return (rotation, offset) for the first correction matching value.
@@ -154,8 +121,12 @@ class Fabrication:
             if footprint.GetLayer() != 0:
                 # bottom angles need to be mirrored on Y-axis
                 rotation = (180 - rotation) % 360
-            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(offset[1]) * math.sin(math.radians(rotation))
-            offset_y = - FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
+            offset_x = self.kicad.utility.from_mm(offset[0]) * math.cos(
+                math.radians(rotation)
+            ) + self.kicad.utility.from_mm(offset[1]) * math.sin(math.radians(rotation))
+            offset_y = -self.kicad.utility.from_mm(offset[0]) * math.sin(
+                math.radians(rotation)
+            ) + self.kicad.utility.from_mm(offset[1]) * math.cos(math.radians(rotation))
             if footprint.GetLayer() != 0:
                 # mirrored coordinate system needs to be taken into account on the bottom
                 offset_x = -offset_x
@@ -168,7 +139,7 @@ class Fabrication:
                 offset[0],
                 offset[1],
             )
-            return wxPoint(
+            return self.kicad.utility.create_wx_point(
                 position.x + offset_x, position.y + offset_y
             )
         return position
@@ -203,50 +174,46 @@ class Fabrication:
         """Generate Gerber files."""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
 
-        pctl = PLOT_CONTROLLER(self.board)
-        popt = pctl.GetPlotOptions()
+        layers = self.kicad.utility.get_layer_constants()
+        pctl = self.kicad.gerber.create_plot_controller(self.board)
+        popt = self.kicad.gerber.get_plot_options(pctl)
 
         # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
-        popt.SetOutputDirectory(self.gerberdir)
+        self.kicad.gerber.set_output_directory(popt, self.gerberdir)
 
         # Plot format to Gerber
         # https://github.com/KiCad/kicad-source-mirror/blob/master/include/plotter.h#L67-L78
-        popt.SetFormat(1)
+        self.kicad.gerber.set_format(popt, 1)
 
         # General Options
-        popt.SetPlotValue(
-            self.parent.settings.get("gerber", {}).get("plot_values", True)
+        self.kicad.gerber.set_plot_component_values(
+            popt,
+            self.parent.settings.get("gerber", {}).get("plot_values", True),
         )
-        popt.SetPlotReference(
-            self.parent.settings.get("gerber", {}).get("plot_references", True)
+        self.kicad.gerber.set_plot_reference_designators(
+            popt,
+            self.parent.settings.get("gerber", {}).get("plot_references", True),
         )
-
-        popt.SetSketchPadsOnFabLayers(False)
+        self.kicad.gerber.set_sketch_pads_on_mask_layers(popt, False)
 
         # Gerber Options
-        popt.SetUseGerberProtelExtensions(False)
-
-        popt.SetCreateGerberJobFile(False)
-
-        popt.SetSubtractMaskFromSilk(True)
-
-        popt.SetUseAuxOrigin(True)
+        self.kicad.gerber.set_use_protel_extensions(popt, False)
+        self.kicad.gerber.set_create_job_file(popt, False)
+        self.kicad.gerber.set_mask_color(popt, True)
+        self.kicad.gerber.set_use_auxiliary_origin(popt, True)
 
         # Tented vias or not, selcted by user in settings
         # Only possible via settings in KiCAD < 8.99
         # In KiCAD 8.99 this must be set in the layer settings of KiCAD
-        if hasattr(PCB_VIA, "SetPlotViaOnMaskLayer"):
-            popt.SetPlotViaOnMaskLayer(
-                not self.parent.settings.get("gerber", {}).get("tented_vias", True)
-            )
+        self.kicad.gerber.set_plot_vias_on_mask(
+            popt,
+            not self.parent.settings.get("gerber", {}).get("tented_vias", True),
+        )
 
-        popt.SetUseGerberX2format(True)
-
-        popt.SetIncludeGerberNetlistInfo(True)
-
-        popt.SetDisableGerberMacros(False)
-
-        popt.SetDrillMarksType(NO_DRILL_SHAPE)
+        self.kicad.gerber.set_use_x2_format(popt, True)
+        self.kicad.gerber.set_include_netlist_attributes(popt, True)
+        self.kicad.gerber.set_disable_macros(popt, False)
+        self.kicad.gerber.set_drill_marks(popt, self.kicad.utility.get_no_drill_shape())
 
         popt.SetPlotFrameRef(False)
 
@@ -259,17 +226,17 @@ class Fabrication:
             layer_count = self.board.GetCopperLayerCount()
 
         plot_plan_top = [
-            ("CuTop", F_Cu, "Top layer"),
-            ("SilkTop", F_SilkS, "Silk top"),
-            ("MaskTop", F_Mask, "Mask top"),
-            ("PasteTop", F_Paste, "Paste top"),
+            ("CuTop", layers["F_Cu"], "Top layer"),
+            ("SilkTop", layers["F_SilkS"], "Silk top"),
+            ("MaskTop", layers["F_Mask"], "Mask top"),
+            ("PasteTop", layers["F_Paste"], "Paste top"),
         ]
         plot_plan_bottom = [
-            ("CuBottom", B_Cu, "Bottom layer"),
-            ("SilkBottom", B_SilkS, "Silk bottom"),
-            ("MaskBottom", B_Mask, "Mask bottom"),
-            ("EdgeCuts", Edge_Cuts, "Edges"),
-            ("PasteBottom", B_Paste, "Paste bottom"),
+            ("CuBottom", layers["B_Cu"], "Bottom layer"),
+            ("SilkBottom", layers["B_SilkS"], "Silk bottom"),
+            ("MaskBottom", layers["B_Mask"], "Mask bottom"),
+            ("EdgeCuts", layers["Edge_Cuts"], "Edges"),
+            ("PasteBottom", layers["B_Paste"], "Paste bottom"),
         ]
 
         plot_plan = []
@@ -287,7 +254,7 @@ class Fabrication:
                 + [
                     (
                         f"CuIn{layer}",
-                        getattr(import_module("pcbnew"), f"In{layer}_Cu"),
+                        self.kicad.utility.get_inner_cu_layer(layer),
                         f"Inner layer {layer}",
                     )
                     for layer in range(1, layer_count - 1)
@@ -306,29 +273,34 @@ class Fabrication:
         plot_plan += jlc_layers_to_plot
 
         for layer_info in plot_plan:
-            if layer_info[1] <= B_Cu:
+            if layer_info[1] <= layers["B_Cu"]:
                 popt.SetSkipPlotNPTH_Pads(True)
             else:
                 popt.SetSkipPlotNPTH_Pads(False)
-            pctl.SetLayer(layer_info[1])
-            pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
-            if pctl.PlotLayer() is False:
+            self.kicad.gerber.set_layer(pctl, layer_info[1])
+            self.kicad.gerber.open_plot_file(
+                pctl,
+                layer_info[0],
+                self.kicad.utility.get_plot_format_gerber(),
+                layer_info[2],
+            )
+            plotted = self.kicad.gerber.plot_layer(pctl)
+
+            if plotted is False:
                 self.logger.error("Error plotting %s", layer_info[2])
             self.logger.info("Successfully plotted %s", layer_info[2])
-        pctl.ClosePlot()
+        self.kicad.gerber.close_plot(pctl)
 
     def generate_excellon(self):
         """Generate Excellon files."""
-        drlwriter = EXCELLON_WRITER(self.board)
+        drlwriter = self.kicad.gerber.create_excellon_writer(self.board)
         mirror = False
         minimalHeader = False
         offset = self.board.GetDesignSettings().GetAuxOrigin()
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
         drlwriter.SetFormat(False)
-        genDrl = True
-        genMap = True
-        drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
+        self.kicad.gerber.generate_drill_files(drlwriter, self.gerberdir)
         self.logger.info("Finished generating Excellon files")
 
     def zip_gerber_excellon(self):
@@ -363,7 +335,7 @@ class Fabrication:
             )
             footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
             for fp in footprints:
-                if get_is_dnp(fp):
+                if self.kicad.footprint.get_is_dnp(fp):
                     self.logger.info(
                         "Component %s has 'Do not place' enabled: removing from CPL",
                         fp.GetReference(),
@@ -381,15 +353,15 @@ class Fabrication:
                 except TypeError:  # Kicad 8.99
                     x1, y1 = self.get_position(fp)
                     x2, y2 = aux_orgin
-                    position = VECTOR2I(x1 - x2, y1 - y2)
+                    position = self.kicad.utility.create_vector2i(x1 - x2, y1 - y2)
                 position = self.fix_position(fp, position)
                 writer.writerow(
                     [
                         part["reference"],
                         part["value"],
                         part["footprint"],
-                        ToMM(position.x),
-                        ToMM(position.y) * -1,
+                        self.kicad.utility.to_mm(position.x),
+                        self.kicad.utility.to_mm(position.y) * -1,
                         self.fix_rotation(fp),
                         "top" if fp.GetLayer() == 0 else "bottom",
                     ]
@@ -416,7 +388,7 @@ class Fabrication:
                 components = []
                 for component in part["refs"].split(","):
                     fp = footprints.get(component)
-                    if fp and get_is_dnp(fp):
+                    if fp and self.kicad.footprint.get_is_dnp(fp):
                         self.logger.info(
                             "Component %s has 'Do not place' enabled: removing from BOM",
                             component,

@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 import re
+from collections.abc import Iterable
+from typing import Any, cast
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
@@ -16,6 +18,8 @@ EXCLUDE_FROM_BOM = 3
 def getWxWidgetsVersion():
     """Get wx widgets version."""
     v = re.search(r"wxWidgets\s([\d\.]+)", wx.version())
+    if v is None:
+        return 0
     v = int(v.group(1).replace(".", ""))
     return v
 
@@ -100,8 +104,11 @@ def dict_factory(cursor, row) -> dict:
     return d
 
 
-def get_lcsc_value(fp):
-    """Get the first lcsc number (C123456 for example) from the properties of the footprint."""
+def get_lcsc_value(fp: Any) -> str:
+    """Get the first LCSC number from a footprint-like object.
+
+    Supports both KiCad SWIG footprints and compatible test/adapter stubs.
+    """
     # KiCad 7.99
     try:
         for field in fp.GetFields():
@@ -117,91 +124,47 @@ def get_lcsc_value(fp):
     return ""
 
 
-def set_lcsc_value(fp, lcsc: str):
-    """Set an lcsc number to the first matching propertie of the footprint, use LCSC as property name if not found."""
-    lcsc_field = None
-    for field in fp.GetFields():
-        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and re.match(
-            r"^C\d+$", field.GetText()
-        ):
-            lcsc_field = field
+def _iter_footprints(board: Any):
+    """Return an iterable of footprints from either a board or board adapter."""
+    if hasattr(board, "get_all_footprints") and callable(board.get_all_footprints):
+        return cast(Iterable[Any], board.get_all_footprints())
+    if hasattr(board, "GetFootprints") and callable(board.GetFootprints):
+        return cast(Iterable[Any], board.GetFootprints())
+    if hasattr(board, "Footprints") and callable(board.Footprints):
+        return cast(Iterable[Any], board.Footprints())
+    raise TypeError(
+        "board must expose get_all_footprints(), GetFootprints(), or Footprints()"
+    )
 
-    if lcsc_field:
-        fp.SetField(lcsc_field.GetName(), lcsc)
-    else:
-        fp.SetField("LCSC", lcsc)
-        if hasattr(fp, "GetFieldByName"):
-            fp.GetFieldByName("LCSC").SetVisible(False)
-        else:
-            for field in fp.GetFields():
-                if field.GetName() == "LCSC":
-                    field.SetVisible(False)
-                    break
 
-def get_valid_footprints(board):
+def get_valid_footprints(board: Any) -> list:
     """Get all footprints that have a valid reference.
 
     Drop all REF** for example
     Drop kibuzzard footprints (length check)
+
+    The input can be either:
+    - A KiCad SWIG board object
+    - A board adapter exposing `get_all_footprints()`
     """
     footprints = []
-    for fp in board.GetFootprints():
+    for fp in _iter_footprints(board):
         if re.match(r"[\w\d-]+", fp.GetReference()):
             footprints.append(fp)
     return footprints
 
 
-def get_bit(value, bit):
-    """Get the nth bit of a byte."""
-    return value & (1 << bit)
-
-
-def toggle_bit(value, bit):
-    """Toggle the nth bit of a byte."""
-    return value ^ (1 << bit)
-
-
-def get_exclude_from_pos(footprint):
-    """Get the 'exclude from POS' property of a footprint."""
+def get_exclude_from_pos(footprint: Any):
+    """Get the 'exclude from POS' property of a footprint-like object."""
     if not footprint:
         return None
     val = footprint.GetAttributes()
-    return bool(get_bit(val, EXCLUDE_FROM_POS))
+    return bool(val & (1 << EXCLUDE_FROM_POS))
 
 
-def get_exclude_from_bom(footprint):
-    """Get the 'exclude from BOM' property of a footprint."""
+def get_exclude_from_bom(footprint: Any):
+    """Get the 'exclude from BOM' property of a footprint-like object."""
     if not footprint:
         return None
     val = footprint.GetAttributes()
-    return bool(get_bit(val, EXCLUDE_FROM_BOM))
-
-
-def get_is_dnp(footprint):
-    """Get the runtime 'Do not place' state of a footprint."""
-    if not footprint:
-        return False
-    is_dnp = getattr(footprint, "IsDNP", None)
-    if not callable(is_dnp):
-        return False
-    return bool(is_dnp())
-
-
-def toggle_exclude_from_pos(footprint):
-    """Toggle the 'exclude from POS' property of a footprint."""
-    if not footprint:
-        return None
-    val = footprint.GetAttributes()
-    val = toggle_bit(val, EXCLUDE_FROM_POS)
-    footprint.SetAttributes(val)
-    return bool(get_bit(val, EXCLUDE_FROM_POS))
-
-
-def toggle_exclude_from_bom(footprint):
-    """Toggle the 'exclude from BOM' property of a footprint."""
-    if not footprint:
-        return None
-    val = footprint.GetAttributes()
-    val = toggle_bit(val, EXCLUDE_FROM_BOM)
-    footprint.SetAttributes(val)
-    return bool(get_bit(val, EXCLUDE_FROM_BOM))
+    return bool(val & (1 << EXCLUDE_FROM_BOM))
