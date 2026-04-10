@@ -1046,10 +1046,11 @@ class JLCPCBTools(wx.Dialog):
                 if result == wx.CANCEL:
                     return
 
+        self.fabrication.fill_zones()
+
         if not self.run_drc_before_gerber_export():
             return
 
-        self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
         number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
         if number:
