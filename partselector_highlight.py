@@ -187,7 +187,7 @@ if wx is not None and dv is not None:  # pragma: no branch
                         x += dc.GetTextExtent(segment)[0]
 
                     segment = text[start:end]
-                    segment_width, segment_height = dc.GetTextExtent(segment)
+                    segment_width, _ = dc.GetTextExtent(segment)
                     dc.SetTextForeground(highlight)
                     dc.DrawText(segment, x, y)
                     x += segment_width
