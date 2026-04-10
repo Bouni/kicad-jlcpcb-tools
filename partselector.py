@@ -24,6 +24,11 @@ HIGHLIGHTED_COLUMN_KEYS = {
 }
 
 
+def _format_duration(seconds: float) -> str:
+    """Format a duration as seconds or milliseconds for UI labels."""
+    return f"{seconds:.2f}s" if seconds > 1 else f"{seconds * 1000.0:.0f}ms"
+
+
 class PartSelectorDialog(wx.Dialog):
     """The part selector window."""
 
@@ -678,21 +683,12 @@ class PartSelectorDialog(wx.Dialog):
 
     def populate_part_list(self, parts, search_duration):
         """Populate the list with the result of the search."""
-        search_duration_text = (
-            f"{search_duration:.2f}s"
-            if search_duration > 1
-            else f"{search_duration * 1000.0:.0f}ms"
-        )
+        search_duration_text = _format_duration(search_duration)
+        start = time.time()
         self.part_list_model.RemoveAll()
         if parts is None:
             return
-        count = len(parts)
-        if count >= 1000:
-            self.result_count.SetLabel(
-                f"{count} Results (limited) in {search_duration_text}"
-            )
-        else:
-            self.result_count.SetLabel(f"{count} Results in {search_duration_text}")
+        limit_text = " (limited)" if len(parts) >= 1000 else ""
         for p in parts:
             db_row = {field: str(value) for field, value in zip(DB_FIELDS, p)}
             price = round(self.get_price(len(self.parts), db_row.get("Price", "")), 3)
@@ -719,6 +715,14 @@ class PartSelectorDialog(wx.Dialog):
                 else:
                     item.append("")
             self.part_list_model.AddEntry(item)
+        render_duration = time.time() - start
+        render_duration_text = _format_duration(render_duration)
+        result_count_label = (
+            f"{len(parts)} parts {limit_text}."
+            f"Search in {search_duration_text}, "
+            f"Render in {render_duration_text}."
+        )
+        self.result_count.SetLabel(result_count_label)
 
     def select_part(self, *_):
         """Save the selected part number and close the modal."""

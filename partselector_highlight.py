@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover - test environments may not have wx
 
 _HIGHLIGHT_FG = (180, 120, 0)
 _HIGHLIGHT_FG_SELECTED = (255, 215, 64)
+_MIN_HIGHLIGHT_TERM_LENGTH = 2
 
 
 def normalize_highlight_terms(query: str) -> list[str]:
@@ -69,6 +70,9 @@ if wx is not None and dv is not None:  # pragma: no branch
             super().__init__("string", dv.DATAVIEW_CELL_INERT, align)
             self._highlight_text_getter = highlight_text_getter
             self._value = ""
+            self._cached_query = ""
+            self._cached_terms: list[str] = []
+            self._span_cache: dict[str, list[tuple[int, int]]] = {}
 
         def SetValue(self, value: str) -> bool:
             """Store value to render for the current cell."""
@@ -109,8 +113,32 @@ if wx is not None and dv is not None:  # pragma: no branch
             if not text:
                 return True
 
-            terms = normalize_highlight_terms(self._highlight_text_getter())
-            spans = find_highlight_spans(text, terms)
+            query = self._highlight_text_getter()
+            if query != self._cached_query:
+                self._cached_query = query
+                self._cached_terms = [
+                    t
+                    for t in normalize_highlight_terms(query)
+                    if len(t) >= _MIN_HIGHLIGHT_TERM_LENGTH
+                ]
+                self._span_cache.clear()
+
+            terms = self._cached_terms
+            if not terms:
+                text_height = dc.GetTextExtent("Hg")[1]
+                x = rect.x + 4
+                y = rect.y + max(0, (rect.height - text_height) // 2)
+                dc.SetClippingRegion(rect)
+                try:
+                    dc.DrawText(text, x, y)
+                finally:
+                    dc.DestroyClippingRegion()
+                return True
+
+            spans = self._span_cache.get(text)
+            if spans is None:
+                spans = find_highlight_spans(text, terms)
+                self._span_cache[text] = spans
             text_height = dc.GetTextExtent("Hg")[1]
             x = rect.x + 4
             y = rect.y + max(0, (rect.height - text_height) // 2)
