@@ -12,6 +12,16 @@ from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 from .partselector_columns import DB_FIELDS, PARAMS_COLUMN_KEY, PARTSELECTOR_COLUMNS
+from .partselector_highlight import HighlightedTextRenderer
+
+HIGHLIGHTED_COLUMN_KEYS = {
+    "lcsc",
+    "mfr_number",
+    "package",
+    "params",
+    "mfr",
+    "description",
+}
 
 
 class PartSelectorDialog(wx.Dialog):
@@ -444,13 +454,27 @@ class PartSelectorDialog(wx.Dialog):
             "center": wx.ALIGN_CENTER,
         }
         for idx, column in enumerate(PARTSELECTOR_COLUMNS):
-            view_col = self.part_list.AppendTextColumn(
-                column.label,
-                idx,
-                width=int(parent.scale_factor * column.width),
-                mode=dv.DATAVIEW_CELL_INERT,
-                align=align_map[column.align],
-            )
+            if column.key in HIGHLIGHTED_COLUMN_KEYS:
+                renderer = HighlightedTextRenderer(
+                    highlight_text_getter=self.get_highlight_text,
+                    align=align_map[column.align],
+                )
+                view_col = dv.DataViewColumn(
+                    column.label,
+                    renderer,
+                    idx,
+                    width=int(parent.scale_factor * column.width),
+                    align=align_map[column.align],
+                )
+                self.part_list.AppendColumn(view_col)
+            else:
+                view_col = self.part_list.AppendTextColumn(
+                    column.label,
+                    idx,
+                    width=int(parent.scale_factor * column.width),
+                    mode=dv.DATAVIEW_CELL_INERT,
+                    align=align_map[column.align],
+                )
             if column.sortable:
                 view_col.SetSortable(True)
 
@@ -611,6 +635,14 @@ class PartSelectorDialog(wx.Dialog):
         self.logger.debug("len(result) %d", len(result))
         search_duration = time.time() - start
         self.populate_part_list(result, search_duration)
+
+    def get_highlight_text(self) -> str:
+        """Return the active keyword search text for result highlighting."""
+        if not self.parent.settings.get("partselector", {}).get(
+            "highlight_matches", True
+        ):
+            return ""
+        return self.keyword.GetValue()
 
     def update_subcategories(self, *_):
         """Update the possible subcategory selection."""
