@@ -61,6 +61,26 @@ def find_highlight_spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
     return merged
 
 
+def filtered_highlight_terms(query: str) -> list[str]:
+    """Return normalized terms that are long enough to highlight."""
+    return [
+        t for t in normalize_highlight_terms(query) if len(t) >= _MIN_HIGHLIGHT_TERM_LENGTH
+    ]
+
+
+def cached_highlight_spans(
+    span_cache: dict[str, list[tuple[int, int]]],
+    text: str,
+    terms: list[str],
+) -> list[tuple[int, int]]:
+    """Return cached spans for text/terms, computing and storing on cache miss."""
+    spans = span_cache.get(text)
+    if spans is None:
+        spans = find_highlight_spans(text, terms)
+        span_cache[text] = spans
+    return spans
+
+
 if wx is not None and dv is not None:  # pragma: no branch
 
     class HighlightedTextRenderer(dv.DataViewCustomRenderer):
@@ -116,11 +136,7 @@ if wx is not None and dv is not None:  # pragma: no branch
             query = self._highlight_text_getter()
             if query != self._cached_query:
                 self._cached_query = query
-                self._cached_terms = [
-                    t
-                    for t in normalize_highlight_terms(query)
-                    if len(t) >= _MIN_HIGHLIGHT_TERM_LENGTH
-                ]
+                self._cached_terms = filtered_highlight_terms(query)
                 self._span_cache.clear()
 
             terms = self._cached_terms
@@ -135,10 +151,7 @@ if wx is not None and dv is not None:  # pragma: no branch
                     dc.DestroyClippingRegion()
                 return True
 
-            spans = self._span_cache.get(text)
-            if spans is None:
-                spans = find_highlight_spans(text, terms)
-                self._span_cache[text] = spans
+            spans = cached_highlight_spans(self._span_cache, text, terms)
             text_height = dc.GetTextExtent("Hg")[1]
             x = rect.x + 4
             y = rect.y + max(0, (rect.height - text_height) // 2)

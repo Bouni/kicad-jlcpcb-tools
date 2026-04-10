@@ -615,7 +615,7 @@ class PartSelectorDialog(wx.Dialog):
     def search_dwell(self, *_):
         """Initiate a search once the timeout expires.
 
-        Used to avoid continous searches
+        Used to avoid continuous searches
         when input fields are still being changed by the user.
         """
         self.search_timer.StartOnce(750)
@@ -662,7 +662,7 @@ class PartSelectorDialog(wx.Dialog):
         self.search(None)
 
     def get_price(self, quantity, prices) -> float:
-        """Find the price for the number of selected parts accordning to the price ranges."""
+        """Find the price for the number of selected parts according to the price ranges."""
         price_ranges = prices.split(",")
         if not price_ranges[0]:
             return -1.0
@@ -754,7 +754,7 @@ class PartSelectorDialog(wx.Dialog):
         text = """
         Use % as wildcard selector. \n
         For example DS24% will match DS2411\n
-        %QFP% wil match LQFP-64 as well as TQFP-32\n
+        %QFP% will match LQFP-64 as well as TQFP-32\n
         The keyword search box is automatically post- and prefixed with wildcard operators.
         The others are not by default.\n
         The keyword search field is applied to "LCSC Part", "Description", "MFR.Part",
