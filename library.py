@@ -22,6 +22,7 @@ from .events import (
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
+from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
 
 
@@ -245,36 +246,38 @@ class Library:
                 # skip over empty keywords
                 if w != "":
                     if len(w) < 3:  # LIKE entry
-                        kw = f"description LIKE '%{w}%'"
+                        escaped = escape_like_term(w)
+                        kw = f"description LIKE '%{escaped}%' ESCAPE '\\'"
                         like_chunks.append(kw)
                     else:  # MATCH entry
-                        kw = f'"{w}"'
+                        escaped = escape_fts_phrase(w)
+                        kw = f'"{escaped}"'
                         match_keywords_intermediate.append(kw)
             if match_keywords_intermediate:
                 match_entry = " AND ".join(match_keywords_intermediate)
                 match_chunks.append(f"{match_entry}")
 
         if "manufacturer" in parameters and parameters["manufacturer"] != "":
-            p = parameters["manufacturer"]
+            p = escape_fts_phrase(parameters["manufacturer"])
             match_chunks.append(f'"Manufacturer":"{p}"')
         if "package" in parameters and parameters["package"] != "":
-            p = parameters["package"]
+            p = escape_fts_phrase(parameters["package"])
             match_chunks.append(f'"Package":"{p}"')
         if (
             "category" in parameters
             and parameters["category"] != ""
             and parameters["category"] != "All"
         ):
-            p = parameters["category"]
+            p = escape_fts_phrase(parameters["category"])
             match_chunks.append(f'"First Category":"{p}"')
         if "subcategory" in parameters and parameters["subcategory"] != "":
-            p = parameters["subcategory"]
+            p = escape_fts_phrase(parameters["subcategory"])
             match_chunks.append(f'"Second Category":"{p}"')
         if "part_no" in parameters and parameters["part_no"] != "":
-            p = parameters["part_no"]
+            p = escape_fts_phrase(parameters["part_no"])
             match_chunks.append(f'"MFR.Part":"{p}"')
         if "solder_joints" in parameters and parameters["solder_joints"] != "":
-            p = parameters["solder_joints"]
+            p = escape_fts_phrase(parameters["solder_joints"])
             match_chunks.append(f'"Solder Joint":"{p}"')
 
         library_types = []
