@@ -64,21 +64,44 @@ def find_highlight_spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
 def filtered_highlight_terms(query: str) -> list[str]:
     """Return normalized terms that are long enough to highlight."""
     return [
-        t for t in normalize_highlight_terms(query) if len(t) >= _MIN_HIGHLIGHT_TERM_LENGTH
+        t
+        for t in normalize_highlight_terms(query)
+        if len(t) >= _MIN_HIGHLIGHT_TERM_LENGTH
     ]
 
 
-def cached_highlight_spans(
-    span_cache: dict[str, list[tuple[int, int]]],
-    text: str,
-    terms: list[str],
-) -> list[tuple[int, int]]:
-    """Return cached spans for text/terms, computing and storing on cache miss."""
-    spans = span_cache.get(text)
-    if spans is None:
-        spans = find_highlight_spans(text, terms)
-        span_cache[text] = spans
-    return spans
+class HighlightQueryCache:
+    """Cache normalized query terms and highlight spans for one active query."""
+
+    def __init__(self):
+        self._query = ""
+        self._terms: list[str] = []
+        self._span_cache: dict[str, list[tuple[int, int]]] = {}
+
+    def prepare(self, query: str):
+        """Prepare cache state for a query, resetting cached spans on change."""
+        if query != self._query:
+            self._query = query
+            self._terms = filtered_highlight_terms(query)
+            self._span_cache.clear()
+
+    def clear(self):
+        """Clear all cached query and span data."""
+        self._query = ""
+        self._terms = []
+        self._span_cache.clear()
+
+    def get_terms(self) -> list[str]:
+        """Return terms prepared for the active query."""
+        return self._terms
+
+    def get_spans(self, text: str) -> list[tuple[int, int]]:
+        """Return cached spans for text, computing and storing on cache miss."""
+        spans = self._span_cache.get(text)
+        if spans is None:
+            spans = find_highlight_spans(text, self._terms)
+            self._span_cache[text] = spans
+        return spans
 
 
 if wx is not None and dv is not None:  # pragma: no branch
@@ -90,9 +113,10 @@ if wx is not None and dv is not None:  # pragma: no branch
             super().__init__("string", dv.DATAVIEW_CELL_INERT, align)
             self._highlight_text_getter = highlight_text_getter
             self._value = ""
-            self._cached_query = ""
-            self._cached_terms: list[str] = []
-            self._span_cache: dict[str, list[tuple[int, int]]] = {}
+            # Cache lifetime is tied to this renderer instance (one dialog/session).
+            # It resets automatically when the query string changes via prepare(query).
+            # A new part selector dialog constructs new renderer instances and caches.
+            self._query_cache = HighlightQueryCache()
 
         def SetValue(self, value: str) -> bool:
             """Store value to render for the current cell."""
@@ -134,12 +158,8 @@ if wx is not None and dv is not None:  # pragma: no branch
                 return True
 
             query = self._highlight_text_getter()
-            if query != self._cached_query:
-                self._cached_query = query
-                self._cached_terms = filtered_highlight_terms(query)
-                self._span_cache.clear()
-
-            terms = self._cached_terms
+            self._query_cache.prepare(query)
+            terms = self._query_cache.get_terms()
             if not terms:
                 text_height = dc.GetTextExtent("Hg")[1]
                 x = rect.x + 4
@@ -151,7 +171,7 @@ if wx is not None and dv is not None:  # pragma: no branch
                     dc.DestroyClippingRegion()
                 return True
 
-            spans = cached_highlight_spans(self._span_cache, text, terms)
+            spans = self._query_cache.get_spans(text)
             text_height = dc.GetTextExtent("Hg")[1]
             x = rect.x + 4
             y = rect.y + max(0, (rect.height - text_height) // 2)
