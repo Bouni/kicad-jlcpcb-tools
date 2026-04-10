@@ -427,6 +427,33 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def build_force_drc_bitmap(self, enabled):
+        """Build the Force DRC icon, overlaying a red X when disabled."""
+        bitmap = loadBitmapScaled(
+            "bug-check-outline.png", self.parent.scale_factor, static=True
+        )
+        if enabled:
+            return bitmap
+
+        return self.create_disabled_bitmap(bitmap)
+
+    def create_disabled_bitmap(self, bitmap):
+        """Create a disabled-state bitmap by drawing a red X over it."""
+        disabled_bitmap = bitmap.ConvertToImage().ConvertToBitmap()
+        memory_dc = wx.MemoryDC()
+        memory_dc.SelectObject(disabled_bitmap)
+        try:
+            pen_width = max(2, int(round(self.parent.scale_factor * 2)))
+            margin = max(2, int(round(self.parent.scale_factor * 3)))
+            width, height = disabled_bitmap.GetSize()
+            memory_dc.SetPen(wx.Pen(wx.Colour(220, 0, 0), width=pen_width))
+            memory_dc.DrawLine(margin, margin, width - margin, height - margin)
+            memory_dc.DrawLine(margin, height - margin, width - margin, margin)
+        finally:
+            memory_dc.SelectObject(wx.NullBitmap)
+
+        return disabled_bitmap
+
     def update_plot_values(self, plot_values):
         """Update settings dialog according to the settings."""
         if plot_values:
@@ -447,6 +474,7 @@ class SettingsDialog(wx.Dialog):
     def update_force_drc(self, force_drc):
         """Update settings dialog according to the settings."""
         self.force_drc_setting.SetValue(bool(force_drc))
+        self.force_drc_image.SetBitmap(self.build_force_drc_bitmap(bool(force_drc)))
         if force_drc:
             self.force_drc_setting.SetLabel(
                 "Force DRC check before Gerber export - Saves board and fills zones!"
