@@ -45,6 +45,7 @@ from .helpers import (
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
+from .kicad_cli import DRCViolationCounter
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
@@ -925,6 +926,13 @@ class JLCPCBTools(wx.Dialog):
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
 
+        gerber_settings = self.settings.setdefault("gerber", {})
+        if gerber_settings.get("force_drc", False) and not gerber_settings.get(
+            "fill_zones", True
+        ):
+            gerber_settings["fill_zones"] = True
+            self.save_settings()
+
     def save_settings(self):
         """Save settings to settings.json."""
         with open(
@@ -1037,6 +1045,10 @@ class JLCPCBTools(wx.Dialog):
                 )
                 if result == wx.CANCEL:
                     return
+
+        if not self.run_drc_before_gerber_export():
+            return
+
         self.fabrication.fill_zones()
         layer_selection = self.layer_selection.GetSelection()
         number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
@@ -1049,6 +1061,84 @@ class JLCPCBTools(wx.Dialog):
         self.fabrication.zip_gerber_excellon()
         self.fabrication.generate_cpl()
         self.fabrication.generate_bom()
+
+    def save_board_for_cli(self):
+        """Save the current board so CLI-based checks operate on latest board state."""
+        board = self.pcbnew.GetBoard()
+        board_filename = board.GetFileName()
+        if not board_filename:
+            raise RuntimeError("Board must be saved before running DRC checks")
+
+        if hasattr(board, "Save"):
+            try:
+                board.Save(board_filename)
+            except TypeError:
+                board.Save()
+            return
+
+        if hasattr(self.pcbnew, "SaveBoard"):
+            self.pcbnew.SaveBoard(board_filename, board)
+            return
+
+        raise RuntimeError("Unable to save board using current KiCad API")
+
+    def run_drc_before_gerber_export(self):
+        """Run optional DRC via kicad-cli and prompt when violations exist."""
+        if not self.settings.get("gerber", {}).get("force_drc", False):
+            return True
+
+        board_filename = self.pcbnew.GetBoard().GetFileName()
+        if not board_filename:
+            wx.MessageBox(
+                "Board must be saved before DRC can be run.",
+                "DRC check",
+                style=wx.ICON_ERROR,
+            )
+            return False
+
+        try:
+            self.save_board_for_cli()
+        except Exception as exc:
+            wx.MessageBox(
+                f"Failed to save board before DRC: {exc}",
+                "DRC check",
+                style=wx.ICON_ERROR,
+            )
+            return False
+
+        try:
+            drc_counter = DRCViolationCounter(
+                pcbnew_module=self.pcbnew,
+                working_dir=self.project_path,
+            )
+            violation_count = drc_counter.get_violation_count(board_filename)
+
+            if violation_count > 0:
+                dialog = wx.MessageDialog(
+                    self,
+                    f"DRC found {violation_count} error violation(s).\n\n"
+                    "Resolve or exclude DRC errors before manufacturing whenever possible.",
+                    "DRC violations found",
+                    wx.YES_NO
+                    | wx.NO_DEFAULT
+                    | wx.ICON_WARNING
+                    | wx.CENTER,
+                )
+                dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
+                result = dialog.ShowModal()
+                dialog.Destroy()
+                if result != wx.ID_YES:
+                    return False
+
+            return True
+        except Exception as exc:
+            self.logger.exception("Unexpected error while running forced DRC")
+            wx.MessageBox(
+                f"Unexpected error while running DRC: {exc}",
+                "DRC check",
+                style=wx.ICON_ERROR,
+            )
+            return False
 
     def copy_part_lcsc(self, *_):
         """Fetch part details from LCSC and show them in a modal."""
