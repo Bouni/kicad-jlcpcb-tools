@@ -12,7 +12,7 @@ from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 from .partselector_columns import DB_FIELDS, PARAMS_COLUMN_KEY, PARTSELECTOR_COLUMNS
-from .partselector_highlight import HighlightedTextRenderer
+from .dataview_highlight import HighlightedTextRenderer
 
 HIGHLIGHTED_COLUMN_KEYS = {
     "lcsc",
