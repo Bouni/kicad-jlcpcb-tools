@@ -18,6 +18,15 @@ _HIGHLIGHT_FG_SELECTED = (255, 215, 64)
 _MIN_HIGHLIGHT_TERM_LENGTH = 2
 _HIGHLIGHT_VALUE_SEPARATOR = "\x1f"
 
+_FOOTPRINT_ALIAS_FORWARD = {
+    "SIOC-8": "SO-8",
+    "SOT-23": "TO-236",
+}
+_FOOTPRINT_ALIAS_MAP = dict(_FOOTPRINT_ALIAS_FORWARD)
+_FOOTPRINT_ALIAS_MAP.update(
+    {target: source for source, target in _FOOTPRINT_ALIAS_FORWARD.items()}
+)
+
 
 def normalize_highlight_terms(query: str) -> list[str]:
     """Split keyword query into normalized terms suitable for highlighting."""
@@ -82,7 +91,9 @@ def encode_highlighted_value(text: str, terms: list[str]) -> str:
         if cleaned:
             packed_terms.append(cleaned)
 
-    return _HIGHLIGHT_VALUE_SEPARATOR.join(["" if text is None else str(text), *packed_terms])
+    return _HIGHLIGHT_VALUE_SEPARATOR.join(
+        ["" if text is None else str(text), *packed_terms]
+    )
 
 
 def decode_highlighted_value(value: str) -> tuple[str, list[str]]:
@@ -95,6 +106,51 @@ def decode_highlighted_value(value: str) -> tuple[str, list[str]]:
     display_text = parts[0]
     raw_terms = " ".join(parts[1:])
     return display_text, normalize_highlight_terms(raw_terms)
+
+
+def expand_value(reference: str, value: str) -> list[str]:
+    """Return value variants used for highlight matching.
+
+    For resistor references (`R*`), include ohm-symbol equivalents so terms like
+    `390R` can also match `390Ω`, and `10K` can also match `10KΩ`.
+    For capacitor references (`C*`), include `u`/`µ` interchangeable variants
+    and optional `F`-suffixed forms.
+    """
+    raw = "" if value is None else str(value).strip()
+    if not raw:
+        return []
+
+    variants = [raw]
+    ref = "" if reference is None else str(reference).strip()
+    upper_ref = ref.upper()
+
+    if upper_ref.startswith("R"):
+        if raw.endswith("Ω"):
+            base = raw[:-1]
+            if base and base[-1] in "RrOoKkMm":
+                variants.append(base)
+        else:
+            last = raw[-1]
+            if last in "RrOo":
+                variants.append(f"{raw[:-1]}Ω")
+            elif last in "KkMm":
+                variants.append(f"{raw}Ω")
+
+    if upper_ref.startswith("C"):
+        has_micro = "µ" in raw or "u" in raw or "U" in raw
+        if has_micro:
+            swapped = raw.replace("µ", "u") if "µ" in raw else re.sub(r"[uU]", "µ", raw)
+
+            if raw.endswith("F"):
+                variants.extend([raw, swapped, raw[:-1], swapped[:-1]])
+            else:
+                variants.extend([raw, swapped, f"{raw}F", f"{swapped}F"])
+
+    deduped = []
+    for variant in variants:
+        if variant not in deduped:
+            deduped.append(variant)
+    return deduped
 
 
 def simplify_footprint_name(footprint: str) -> str:
@@ -112,6 +168,46 @@ def simplify_footprint_name(footprint: str) -> str:
         if "_" in footprint_name
         else footprint_name
     )
+
+
+def expand_footprint(reference: str, footprint: str) -> list[str]:
+    """Return footprint variants used for highlight matching.
+
+    Includes simplified package tokens, selected alias mappings, and optional
+    designator-specific mappings.
+    """
+    raw = "" if footprint is None else str(footprint).strip()
+    if not raw:
+        return []
+
+    footprint_name = raw.split(":")[-1]
+    upper_name = footprint_name.upper()
+    variants: list[str] = []
+
+    simplified = simplify_footprint_name(footprint_name)
+    if simplified:
+        variants.append(simplified)
+
+    # Common package aliases used by parts databases and footprints.
+    for source, target in _FOOTPRINT_ALIAS_MAP.items():
+        if source in upper_name:
+            variants.append(target)
+
+    # Capacitor-specific mapping: CP_Elec_6.3x7.7 -> SMD,D6.3
+    ref = "" if reference is None else str(reference).strip()
+    if ref.upper().startswith("C"):
+        match = re.search(
+            r"CP_ELEC_([0-9]+(?:\.[0-9]+)?)X[0-9]+(?:\.[0-9]+)?",
+            upper_name,
+        )
+        if match:
+            variants.append(f"SMD,D{match.group(1)}")
+
+    deduped = []
+    for variant in variants:
+        if variant and variant not in deduped:
+            deduped.append(variant)
+    return deduped
 
 
 class HighlightQueryCache:
@@ -179,7 +275,9 @@ if wx is not None and dv is not None:  # pragma: no branch
             if self._value_decoder is not None:
                 return self._value_decoder(self._value)
 
-            highlight_text = self._highlight_text_getter() if self._highlight_text_getter else ""
+            highlight_text = (
+                self._highlight_text_getter() if self._highlight_text_getter else ""
+            )
             self._query_cache.prepare(highlight_text)
             return self._value, self._query_cache.get_terms()
 

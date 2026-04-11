@@ -4,6 +4,8 @@ from dataview_highlight import (
     HighlightQueryCache,
     decode_highlighted_value,
     encode_highlighted_value,
+    expand_footprint,
+    expand_value,
     filtered_highlight_terms,
     find_highlight_spans,
     normalize_highlight_terms,
@@ -24,6 +26,12 @@ def test_filtered_highlight_terms_skips_short_terms():
 def test_find_highlight_spans_merges_overlaps():
     """Highlight spans are returned in display order without overlap duplication."""
     assert find_highlight_spans("0603 10kΩ", ["0603", "10k"]) == [(0, 4), (5, 8)]
+
+
+def test_find_highlight_spans_prefers_longest_overlap_when_merged():
+    """Overlapping matches merge to the longest highlighted span."""
+    terms = normalize_highlight_terms("10K 10KΩ")
+    assert find_highlight_spans("10KΩ", terms) == [(0, 4)]
 
 
 def test_highlight_query_cache_stores_negative_results():
@@ -95,3 +103,49 @@ def test_simplify_footprint_name_extracts_metric_size():
 def test_simplify_footprint_name_falls_back_to_last_token():
     """Non-metric footprint names fall back to a readable final token."""
     assert simplify_footprint_name("Package_TO_SOT_SMD:SOT-23") == "SOT-23"
+
+
+def test_expand_value_for_resistor_adds_ohm_symbol_variants():
+    """Resistor values expand with Ω-compatible alternatives for matching."""
+    assert expand_value("R1", "390R") == ["390R", "390Ω"]
+    assert expand_value("R2", "10K") == ["10K", "10KΩ"]
+    assert expand_value("R3", "10KΩ") == ["10KΩ", "10K"]
+
+
+def test_expand_value_for_non_resistor_keeps_original_only():
+    """Non-resistor references do not get resistor-specific value expansion."""
+    assert expand_value("C1", "10K") == ["10K"]
+
+
+def test_expand_value_for_capacitor_adds_micro_variants():
+    """Capacitor values add interchangeable `u` and `µ` variants."""
+    assert expand_value("C10", "10µF") == ["10µF", "10uF", "10µ", "10u"]
+    assert expand_value("C11", "10uF") == ["10uF", "10µF", "10u", "10µ"]
+
+
+def test_expand_value_for_capacitor_without_suffix_adds_f_variants():
+    """Capacitor values without `F` also get `F`-suffixed variants."""
+    assert expand_value("C12", "1u") == ["1u", "1µ", "1uF", "1µF"]
+    assert expand_value("C13", "1µ") == ["1µ", "1u", "1µF", "1uF"]
+
+
+def test_expand_footprint_adds_known_aliases():
+    """Footprint aliases include known compatible package naming alternatives."""
+    assert "SO-8" in expand_footprint("U1", "Package_SO:SIOC-8")
+    assert "TO-236" in expand_footprint("Q1", "Package_TO_SOT_SMD:SOT-23")
+
+
+def test_expand_footprint_adds_reverse_aliases_generated_from_forward_map():
+    """Reverse aliases are auto-generated from the canonical alias map."""
+    assert "SIOC-8" in expand_footprint("U2", "Package_SO:SO-8")
+    assert "SOT-23" in expand_footprint("Q2", "Package_TO_SOT_SMD:TO-236")
+
+
+def test_expand_footprint_maps_capacitor_electrolytic_diameter():
+    """Capacitor electrolytic footprints emit an SMD diameter term for matching."""
+    assert "SMD,D6.3" in expand_footprint("C5", "Capacitor_SMD:CP_Elec_6.3x7.7")
+
+
+def test_expand_footprint_diameter_mapping_is_capacitor_only():
+    """Electrolytic diameter mapping is only applied for capacitor references."""
+    assert "SMD,D6.3" not in expand_footprint("U5", "Capacitor_SMD:CP_Elec_6.3x7.7")
