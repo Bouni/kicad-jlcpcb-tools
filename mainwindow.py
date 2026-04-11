@@ -937,17 +937,38 @@ class JLCPCBTools(wx.Dialog):
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
 
-        changed = False
-
         gerber_settings = self.settings.setdefault("gerber", {})
+        highlighting_settings = self.settings.setdefault("highlighting", {})
+        partselector_settings = self.settings.setdefault("partselector", {})
+        migrated = False
+
+        if "matches" not in highlighting_settings:
+            if "highlight_matches" in partselector_settings:
+                highlighting_settings["matches"] = partselector_settings.pop(
+                    "highlight_matches"
+                )
+                migrated = True
+            else:
+                highlighting_settings["matches"] = True
+                migrated = True
+
         if gerber_settings.get("force_drc", False) and not gerber_settings.get(
             "fill_zones", True
         ):
             gerber_settings["fill_zones"] = True
-            changed = True
+            migrated = True
 
-        if changed:
+        if migrated:
             self.save_settings()
+
+    def decode_mainwindow_highlight_value(
+        self, value: str
+    ) -> tuple[str, list[str]]:
+        """Decode params cell text, optionally disabling highlight terms by setting."""
+        text, terms = decode_highlighted_value(value)
+        if not self.settings.get("highlighting", {}).get("matches", True):
+            return text, []
+        return text, terms
 
     def save_settings(self):
         """Save settings to settings.json."""

@@ -299,12 +299,12 @@ class SettingsDialog(wx.Dialog):
         order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
         order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
 
-        ##### Highlight text matches in part selector ######
+        ##### Highlight text matches ######
 
         highlight_matches_label = wx.StaticText(
             self,
             id=wx.ID_ANY,
-            label="Part selector highlighting",
+            label="Match highlighting",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
         )
@@ -316,11 +316,13 @@ class SettingsDialog(wx.Dialog):
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
-            name="partselector_highlight_matches",
+            name="highlighting_matches",
         )
 
         self.highlight_matches_setting.SetToolTip(
-            wx.ToolTip("Highlight keyword matches in the part selector search results")
+            wx.ToolTip(
+                "Highlight keyword matches in the part selector and main window LCSC Params column"
+            )
         )
 
         self.highlight_matches_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
@@ -752,6 +754,10 @@ class SettingsDialog(wx.Dialog):
         else:
             self.highlight_matches_setting.SetLabel("Do not highlight search matches")
 
+    def update_matches(self, enabled):
+        """Alias shared highlighting setting updates to the checkbox UI helper."""
+        self.update_highlight_matches(enabled)
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
@@ -779,7 +785,7 @@ class SettingsDialog(wx.Dialog):
             self.parent.settings.get("general", {}).get("order_number", True)
         )
         self.update_highlight_matches(
-            self.parent.settings.get("partselector", {}).get("highlight_matches", True)
+            self.parent.settings.get("highlighting", {}).get("matches", True)
         )
         self.update_selected_library(
             self.parent.settings.get("library", {}).get(

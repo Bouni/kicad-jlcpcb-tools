@@ -8,7 +8,8 @@ import wx.dataview as dv
 from .dataview_highlight import (
     decode_highlighted_value,
     encode_highlighted_value,
-    simplify_footprint_name,
+    expand_footprint,
+    expand_value,
 )
 from .helpers import loadIconScaled
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
@@ -116,11 +117,19 @@ class PartListDataModel(dv.PyDataViewModel):
             return dv.DataViewIconText("", icon)
         return row[col]
 
-    def _encode_params_value(self, value: str, footprint: str, params: str) -> str:
+    def _encode_params_value(
+        self,
+        reference: str,
+        value: str,
+        footprint: str,
+        params: str,
+    ) -> str:
         """Store params display text together with row-specific highlight terms."""
+        value_terms = expand_value(reference, value)
+        footprint_terms = expand_footprint(reference, footprint)
         return encode_highlighted_value(
             params,
-            [value, simplify_footprint_name(footprint)],
+            [*value_terms, *footprint_terms],
         )
 
     @staticmethod
@@ -176,6 +185,7 @@ class PartListDataModel(dv.PyDataViewModel):
     def AddEntry(self, data: list):
         """Add a new entry to the data model."""
         data[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            data[self.columns["REF_COL"]],
             data[self.columns["VALUE_COL"]],
             data[self.columns["FP_COL"]],
             data[self.columns["PARAMS_COL"]],
@@ -238,6 +248,7 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["TYPE_COL"]] = type
         item[self.columns["STOCK_COL"]] = stock
         item[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            item[self.columns["REF_COL"]],
             item[self.columns["VALUE_COL"]],
             item[self.columns["FP_COL"]],
             params,
@@ -251,6 +262,7 @@ class PartListDataModel(dv.PyDataViewModel):
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""
         obj[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            obj[self.columns["REF_COL"]],
             obj[self.columns["VALUE_COL"]],
             obj[self.columns["FP_COL"]],
             "",
