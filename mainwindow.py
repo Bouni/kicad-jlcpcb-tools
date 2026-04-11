@@ -16,6 +16,11 @@ import wx.dataview as dv  # pylint: disable=import-error
 
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
+from .dataview_highlight import (
+    HighlightedTextRenderer,
+    decode_highlighted_value,
+    simplify_footprint_name,
+)
 from .derive_params import params_for_part
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
@@ -403,13 +408,18 @@ class JLCPCBTools(wx.Dialog):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
-        params = self.footprint_list.AppendTextColumn(
-            "LCSC Params",
-            11,
-            width=150,
-            mode=dv.DATAVIEW_CELL_INERT,
+        params_renderer = HighlightedTextRenderer(
+            value_decoder=decode_highlighted_value,
             align=wx.ALIGN_CENTER,
         )
+        params = dv.DataViewColumn(
+            "LCSC Params",
+            params_renderer,
+            11,
+            width=150,
+            align=wx.ALIGN_CENTER,
+        )
+        self.footprint_list.AppendColumn(params)
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
@@ -952,9 +962,8 @@ class JLCPCBTools(wx.Dialog):
                 if value.endswith("R") or value.endswith("r") or value.endswith("o"):
                     value = value[:-1]
                 value += "Ω"
-            m = re.search(r"_(\d+)_\d+Metric", footprint)
-            if m:
-                value += f" {m.group(1)}"
+            if simplified_footprint := simplify_footprint_name(footprint):
+                value += f" {simplified_footprint}"
             selection[ref] = value
         PartSelectorDialog(self, selection).ShowModal()
 
