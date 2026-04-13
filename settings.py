@@ -106,6 +106,39 @@ class SettingsDialog(wx.Dialog):
         fill_zones_sizer.Add(self.fill_zones_image, 10, wx.ALL | wx.EXPAND, 5)
         fill_zones_sizer.Add(self.fill_zones_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Force DRC before Gerber export #####
+
+        self.force_drc_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Force DRC check before Gerber export - Saves board and fills zones!",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_force_drc",
+        )
+
+        self.force_drc_setting.SetToolTip(
+            wx.ToolTip(
+                "Run kicad-cli DRC with error severity before generating Gerbers (Saves board and fills zones!)"
+            )
+        )
+
+        self.force_drc_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("bug-check-outline.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.force_drc_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        force_drc_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        force_drc_sizer.Add(self.force_drc_image, 10, wx.ALL | wx.EXPAND, 5)
+        force_drc_sizer.Add(self.force_drc_setting, 100, wx.ALL | wx.EXPAND, 5)
+
         ##### Plot values #####
 
         self.plot_values_setting = wx.CheckBox(
@@ -380,6 +413,7 @@ class SettingsDialog(wx.Dialog):
         layout = wx.GridSizer(12, 2, 0, 0)
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -428,6 +462,33 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def build_force_drc_bitmap(self, enabled):
+        """Build the Force DRC icon, overlaying a red X when disabled."""
+        bitmap = loadBitmapScaled(
+            "bug-check-outline.png", self.parent.scale_factor, static=True
+        )
+        if enabled:
+            return bitmap
+
+        return self.create_disabled_bitmap(bitmap)
+
+    def create_disabled_bitmap(self, bitmap):
+        """Create a disabled-state bitmap by drawing a red X over it."""
+        disabled_bitmap = bitmap.ConvertToImage().ConvertToBitmap()
+        memory_dc = wx.MemoryDC()
+        memory_dc.SelectObject(disabled_bitmap)
+        try:
+            pen_width = max(2, int(round(self.parent.scale_factor * 2)))
+            margin = max(2, int(round(self.parent.scale_factor * 3)))
+            width, height = disabled_bitmap.GetSize()
+            memory_dc.SetPen(wx.Pen(wx.Colour(220, 0, 0), width=pen_width))
+            memory_dc.DrawLine(margin, margin, width - margin, height - margin)
+            memory_dc.DrawLine(margin, height - margin, width - margin, margin)
+        finally:
+            memory_dc.SelectObject(wx.NullBitmap)
+
+        return disabled_bitmap
+
     def update_plot_values(self, plot_values):
         """Update settings dialog according to the settings."""
         if plot_values:
@@ -444,6 +505,22 @@ class SettingsDialog(wx.Dialog):
             self.plot_values_image.SetBitmap(
                 loadBitmapScaled("no_values.png", self.parent.scale_factor, static=True)
             )
+
+    def update_force_drc(self, force_drc):
+        """Update settings dialog according to the settings."""
+        self.force_drc_setting.SetValue(bool(force_drc))
+        self.force_drc_image.SetBitmap(self.build_force_drc_bitmap(bool(force_drc)))
+        if force_drc:
+            self.force_drc_setting.SetLabel(
+                "Force DRC check before Gerber export - Saves board and fills zones!"
+            )
+            self.update_fill_zones(True)
+            self.fill_zones_setting.Disable()
+        else:
+            self.force_drc_setting.SetLabel(
+                "Do not force DRC check before Gerber export"
+            )
+            self.fill_zones_setting.Enable()
 
     def update_plot_references(self, plot_references):
         """Update settings dialog according to the settings."""
@@ -540,6 +617,9 @@ class SettingsDialog(wx.Dialog):
         self.update_fill_zones(
             self.parent.settings.get("gerber", {}).get("fill_zones", True)
         )
+        self.update_force_drc(
+            self.parent.settings.get("gerber", {}).get("force_drc", False)
+        )
         self.update_plot_values(
             self.parent.settings.get("gerber", {}).get("plot_values", True)
         )
@@ -599,7 +679,26 @@ class SettingsDialog(wx.Dialog):
                     value = key
                     break
 
+        # If forced DRC is enabled, fill zones must stay enabled.
+        if (
+            section == "gerber"
+            and name == "fill_zones"
+            and self.force_drc_setting.GetValue()
+        ):
+            value = True
+
         getattr(self, f"update_{name}")(value)
+
+        # Turning on forced DRC implies enabling fill zones.
+        if section == "gerber" and name == "force_drc" and value:
+            wx.PostEvent(
+                self.parent,
+                UpdateSetting(
+                    section="gerber",
+                    setting="fill_zones",
+                    value=True,
+                ),
+            )
 
         wx.PostEvent(
             self.parent,
