@@ -20,6 +20,8 @@ cp *.png PCM/archive/plugins
 cp settings.json PCM/archive/plugins
 cp -r icons PCM/archive/plugins
 cp -r lib PCM/archive/plugins
+cp -r dblib PCM/archive/plugins
+cp -r common PCM/archive/plugins
 mkdir PCM/archive/plugins/core
 cp core/*.py PCM/archive/plugins/core
 cp PCM/icon.png PCM/archive/resources
