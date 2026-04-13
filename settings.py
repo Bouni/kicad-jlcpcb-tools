@@ -298,6 +298,40 @@ class SettingsDialog(wx.Dialog):
         order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
         order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Highlight text matches in part selector ######
+
+        highlight_matches_label = wx.StaticText(
+            self,
+            id=wx.ID_ANY,
+            label="Part selector highlighting",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+        )
+
+        self.highlight_matches_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Highlight search matches",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="partselector_highlight_matches",
+        )
+
+        self.highlight_matches_setting.SetToolTip(
+            wx.ToolTip("Highlight keyword matches in the part selector search results")
+        )
+
+        self.highlight_matches_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        highlight_matches_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        highlight_matches_sizer.Add(
+            highlight_matches_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        highlight_matches_sizer.Add(
+            self.highlight_matches_setting, 0, wx.ALL | wx.EXPAND, 5
+        )
+
         ##### Library Selection #####
 
         library_label = wx.StaticText(
@@ -376,7 +410,7 @@ class SettingsDialog(wx.Dialog):
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        layout = wx.GridSizer(11, 2, 0, 0)
+        layout = wx.GridSizer(12, 2, 0, 0)
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -385,6 +419,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
@@ -566,6 +601,14 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_highlight_matches(self, enabled):
+        """Update settings dialog according to the settings."""
+        self.highlight_matches_setting.SetValue(bool(enabled))
+        if enabled:
+            self.highlight_matches_setting.SetLabel("Highlight search matches")
+        else:
+            self.highlight_matches_setting.SetLabel("Do not highlight search matches")
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
@@ -591,6 +634,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)
+        )
+        self.update_highlight_matches(
+            self.parent.settings.get("partselector", {}).get("highlight_matches", True)
         )
         self.update_selected_library(
             self.parent.settings.get("library", {}).get(
