@@ -12,6 +12,21 @@ from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 from .partselector_columns import DB_FIELDS, PARAMS_COLUMN_KEY, PARTSELECTOR_COLUMNS
+from .partselector_highlight import HighlightedTextRenderer
+
+HIGHLIGHTED_COLUMN_KEYS = {
+    "lcsc",
+    "mfr_number",
+    "package",
+    "params",
+    "mfr",
+    "description",
+}
+
+
+def _format_duration(seconds: float) -> str:
+    """Format a duration as seconds or milliseconds for UI labels."""
+    return f"{seconds:.2f}s" if seconds > 1 else f"{seconds * 1000.0:.0f}ms"
 
 
 class PartSelectorDialog(wx.Dialog):
@@ -444,13 +459,27 @@ class PartSelectorDialog(wx.Dialog):
             "center": wx.ALIGN_CENTER,
         }
         for idx, column in enumerate(PARTSELECTOR_COLUMNS):
-            view_col = self.part_list.AppendTextColumn(
-                column.label,
-                idx,
-                width=int(parent.scale_factor * column.width),
-                mode=dv.DATAVIEW_CELL_INERT,
-                align=align_map[column.align],
-            )
+            if column.key in HIGHLIGHTED_COLUMN_KEYS:
+                renderer = HighlightedTextRenderer(
+                    highlight_text_getter=self.get_highlight_text,
+                    align=align_map[column.align],
+                )
+                view_col = dv.DataViewColumn(
+                    column.label,
+                    renderer,
+                    idx,
+                    width=int(parent.scale_factor * column.width),
+                    align=align_map[column.align],
+                )
+                self.part_list.AppendColumn(view_col)
+            else:
+                view_col = self.part_list.AppendTextColumn(
+                    column.label,
+                    idx,
+                    width=int(parent.scale_factor * column.width),
+                    mode=dv.DATAVIEW_CELL_INERT,
+                    align=align_map[column.align],
+                )
             if column.sortable:
                 view_col.SetSortable(True)
 
@@ -586,7 +615,7 @@ class PartSelectorDialog(wx.Dialog):
     def search_dwell(self, *_):
         """Initiate a search once the timeout expires.
 
-        Used to avoid continous searches
+        Used to avoid continuous searches
         when input fields are still being changed by the user.
         """
         self.search_timer.StartOnce(750)
@@ -612,6 +641,14 @@ class PartSelectorDialog(wx.Dialog):
         search_duration = time.time() - start
         self.populate_part_list(result, search_duration)
 
+    def get_highlight_text(self) -> str:
+        """Return the active keyword search text for result highlighting."""
+        if not self.parent.settings.get("partselector", {}).get(
+            "highlight_matches", True
+        ):
+            return ""
+        return self.keyword.GetValue()
+
     def update_subcategories(self, *_):
         """Update the possible subcategory selection."""
         self.subcategory.Clear()
@@ -625,7 +662,7 @@ class PartSelectorDialog(wx.Dialog):
         self.search(None)
 
     def get_price(self, quantity, prices) -> float:
-        """Find the price for the number of selected parts accordning to the price ranges."""
+        """Find the price for the number of selected parts according to the price ranges."""
         price_ranges = prices.split(",")
         if not price_ranges[0]:
             return -1.0
@@ -646,21 +683,12 @@ class PartSelectorDialog(wx.Dialog):
 
     def populate_part_list(self, parts, search_duration):
         """Populate the list with the result of the search."""
-        search_duration_text = (
-            f"{search_duration:.2f}s"
-            if search_duration > 1
-            else f"{search_duration * 1000.0:.0f}ms"
-        )
+        search_duration_text = _format_duration(search_duration)
+        start = time.time()
         self.part_list_model.RemoveAll()
         if parts is None:
             return
-        count = len(parts)
-        if count >= 1000:
-            self.result_count.SetLabel(
-                f"{count} Results (limited) in {search_duration_text}"
-            )
-        else:
-            self.result_count.SetLabel(f"{count} Results in {search_duration_text}")
+        limit_text = " (limited)" if len(parts) >= 1000 else ""
         for p in parts:
             db_row = {field: str(value) for field, value in zip(DB_FIELDS, p)}
             price = round(self.get_price(len(self.parts), db_row.get("Price", "")), 3)
@@ -687,6 +715,14 @@ class PartSelectorDialog(wx.Dialog):
                 else:
                     item.append("")
             self.part_list_model.AddEntry(item)
+        render_duration = time.time() - start
+        render_duration_text = _format_duration(render_duration)
+        result_count_label = (
+            f"{len(parts)} parts {limit_text}."
+            f"Search in {search_duration_text}, "
+            f"Render in {render_duration_text}."
+        )
+        self.result_count.SetLabel(result_count_label)
 
     def select_part(self, *_):
         """Save the selected part number and close the modal."""
@@ -718,7 +754,7 @@ class PartSelectorDialog(wx.Dialog):
         text = """
         Use % as wildcard selector. \n
         For example DS24% will match DS2411\n
-        %QFP% wil match LQFP-64 as well as TQFP-32\n
+        %QFP% will match LQFP-64 as well as TQFP-32\n
         The keyword search box is automatically post- and prefixed with wildcard operators.
         The others are not by default.\n
         The keyword search field is applied to "LCSC Part", "Description", "MFR.Part",
