@@ -45,7 +45,7 @@ from .helpers import (
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
-from .kicad_cli import DRCViolationCounter
+from .kicad_drc import DRCViolationCounter
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
@@ -1063,8 +1063,8 @@ class JLCPCBTools(wx.Dialog):
         self.fabrication.generate_cpl()
         self.fabrication.generate_bom()
 
-    def save_board_for_cli(self):
-        """Save the current board so CLI-based checks operate on latest board state."""
+    def save_board_for_drc(self):
+        """Save the current board so DRC checks operate on latest board state."""
         board = self.pcbnew.GetBoard()
         board_filename = board.GetFileName()
         if not board_filename:
@@ -1084,7 +1084,7 @@ class JLCPCBTools(wx.Dialog):
         raise RuntimeError("Unable to save board using current KiCad API")
 
     def run_drc_before_gerber_export(self):
-        """Run optional DRC via kicad-cli and prompt when violations exist."""
+        """Run optional DRC via KiCad Python API and prompt when violations exist."""
         if not self.settings.get("gerber", {}).get("force_drc", False):
             return True
 
@@ -1098,7 +1098,7 @@ class JLCPCBTools(wx.Dialog):
             return False
 
         try:
-            self.save_board_for_cli()
+            self.save_board_for_drc()
         except Exception as exc:
             wx.MessageBox(
                 f"Failed to save board before DRC: {exc}",
