@@ -47,8 +47,8 @@ def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
     summary = calculate_bom_estimate(parts, board_count=5, get_part_details=get_details)
 
     assert round(summary["component_cost"], 3) == 2.000  # qty=10 at $0.20
-    assert round(summary["assembly_cost"], 3) == 44.517  # (5 * $8) + $1.5 stencil + $3 extended + 10 smt joints
-    assert round(summary["total_cost"], 3) == 46.517
+    assert round(summary["assembly_cost"], 3) == 12.516  # $8 setup + $1.5 stencil + $3 extended + 10 smt joints
+    assert round(summary["total_cost"], 3) == 14.516
     assert summary["missing_prices"] == 0
     assert summary["standard_part_count"] == 0
 
@@ -72,8 +72,8 @@ def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
     summary = calculate_bom_estimate(parts, board_count=5, get_part_details=get_details)
 
     assert round(summary["component_cost"], 3) == 2.500
-    assert round(summary["assembly_cost"], 3) == 43.673  # (5 * 8.00) + 3.50 + (10 * 0.0173)
-    assert round(summary["total_cost"], 3) == 46.173
+    assert round(summary["assembly_cost"], 3) == 11.657  # 8.00 + 3.50 + (10 * 0.0157)
+    assert round(summary["total_cost"], 3) == 14.157
 
 
 def test_calculate_bom_estimate_missing_price_counts_unknown_lcsc_price():
@@ -169,7 +169,7 @@ def test_standard_fees_apply_for_standard_smt_part():
     )
 
     assert round(summary["component_cost"], 3) == 2.000
-    assert round(summary["assembly_cost"], 3) == 9.707  # (2 * 4.0) + 1.2 + 0.5 + 4*0.0017
+    assert round(summary["assembly_cost"], 3) == 5.706  # 4.0 + 1.2 + 0.5 + 4*0.0016
     assert summary["standard_part_count"] == 1
 
 
@@ -211,7 +211,7 @@ def test_standard_fees_are_orthogonal_to_tht_fees():
     )
 
     assert round(summary["component_cost"], 3) == 4.800
-    assert round(summary["assembly_cost"], 3) == 11.109  # 3.5 + (3 * 2.0) + 0.5 + 1.0 + 6*0.0173 + 3*0.0017
+    assert round(summary["assembly_cost"], 3) == 7.099  # 3.5 + 2.0 + 0.5 + 1.0 + 6*0.0157 + 3*0.0016
     assert summary["standard_part_count"] == 1
 
 
@@ -242,7 +242,7 @@ def test_standard_fees_do_not_apply_for_non_standard_parts():
     )
 
     assert round(summary["component_cost"], 3) == 2.000
-    assert round(summary["assembly_cost"], 3) == 33.507  # (4 * 8.0) + 1.5 + 4*0.0017
+    assert round(summary["assembly_cost"], 3) == 9.506  # 8.0 + 1.5 + 4*0.0016
     assert summary["standard_part_count"] == 0
 
 
@@ -281,7 +281,7 @@ def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
     )
 
     assert round(summary["component_cost"], 3) == 2.000
-    assert round(summary["assembly_cost"], 3) == 68.605  # (25+7.8)*2 + 2*1.5 + 3*0.0017
+    assert round(summary["assembly_cost"], 3) == 68.605  # (25+7.8)*2 + 2*1.5 + 3*0.0016
 
 
 def test_cost_breakdown_fields_sum_to_total_and_per_board():
@@ -309,17 +309,17 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
     )
 
     assert round(summary["component_cost"], 3) == 5.000
-    assert round(summary["fixed_cost"], 3) == 41.500  # (5 * 8.0) setup + 1.5 stencil
-    assert round(summary["economic_setup_cost"], 3) == 40.000
+    assert round(summary["fixed_cost"], 3) == 9.500  # 8.0 setup + 1.5 stencil
+    assert round(summary["economic_setup_cost"], 3) == 8.000
     assert round(summary["stencil_cost"], 3) == 1.500
     assert round(summary["tht_setup_cost"], 3) == 0.000
     assert round(summary["standard_setup_cost"], 3) == 0.000
     assert round(summary["policy_cost"], 3) == 0.000
     assert round(summary["extended_cost"], 3) == 3.000
-    assert round(summary["variable_assembly_cost"], 3) == 0.017  # 10 * 0.0017
-    assert round(summary["assembly_cost"], 3) == 44.517
-    assert round(summary["total_cost"], 3) == 49.517
-    assert round(summary["cost_per_board"], 3) == 9.903
+    assert round(summary["variable_assembly_cost"], 3) == 0.016  # 10 * 0.0016
+    assert round(summary["assembly_cost"], 3) == 12.516
+    assert round(summary["total_cost"], 3) == 17.516
+    assert round(summary["cost_per_board"], 3) == 3.503
 
 
 def test_optional_policy_fees_apply_when_configured():
@@ -351,9 +351,9 @@ def test_optional_policy_fees_apply_when_configured():
 
     assert round(summary["component_cost"], 3) == 5.000
     assert round(summary["policy_cost"], 3) == 3.000  # 2.0 + (10 * 0.1)
-    assert round(summary["fixed_cost"], 3) == 84.500  # (10 * 8.0) + 1.5 + 3.0
-    assert round(summary["assembly_cost"], 3) == 84.517
-    assert round(summary["total_cost"], 3) == 89.517
+    assert round(summary["fixed_cost"], 3) == 12.500  # 8.0 + 1.5 + 3.0
+    assert round(summary["assembly_cost"], 3) == 12.516
+    assert round(summary["total_cost"], 3) == 17.516
 
 
 def test_panelization_fee_does_not_apply_below_threshold():
@@ -384,4 +384,4 @@ def test_panelization_fee_does_not_apply_below_threshold():
     )
 
     assert round(summary["policy_cost"], 3) == 2.000
-    assert round(summary["fixed_cost"], 3) == 43.500  # (5 * 8.0) + 1.5 + 2.0
+    assert round(summary["fixed_cost"], 3) == 11.500  # 8.0 + 1.5 + 2.0
