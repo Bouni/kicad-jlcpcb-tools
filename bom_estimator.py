@@ -60,6 +60,20 @@ class _AssemblyApi(Protocol):
         """Fetch part details for an LCSC number."""
 
 
+@dataclass
+class _AssemblyScan:
+    """Intermediate assembly scan state for BOM estimate aggregation."""
+
+    tht_present: bool = False
+    standard_present: bool = False
+    populated_part_present: bool = False
+    tht_joints: int = 0
+    smt_joints: int = 0
+    standard_part_count: int = 0
+    extended_lcsc: set[str] = field(default_factory=set)
+    smt_lcsc: set[str] = field(default_factory=set)
+
+
 def get_unit_price(quantity: int, prices: str) -> float:
     """Resolve quantity-tiered unit price from encoded price bands."""
     if not prices:
@@ -95,7 +109,7 @@ def get_unit_price(quantity: int, prices: str) -> float:
     return -1.0
 
 
-def is_tht_part(part: dict) -> bool:
+def is_tht_part(part: Mapping[str, object]) -> bool:
     """Return True if metadata indicates a through-hole part."""
     if part.get("has_tht") is not None:
         return bool(part.get("has_tht"))
@@ -108,7 +122,7 @@ def is_tht_part(part: dict) -> bool:
     )
 
 
-def get_assembly_flags(part: dict) -> dict:
+def get_assembly_flags(part: Mapping[str, object]) -> dict:
     """Parse assembly flags from persisted JSON."""
     try:
         return json.loads(part.get("assembly_flags") or "{}")
@@ -148,6 +162,124 @@ def fetch_assembly_processes(
     return results
 
 
+def _create_empty_summary() -> dict:
+    """Create an initialized BOM estimate summary payload."""
+    return {
+        "component_cost": 0.0,
+        "fixed_cost": 0.0,
+        "tht_setup_cost": 0.0,
+        "economic_setup_cost": 0.0,
+        "standard_setup_cost": 0.0,
+        "stencil_cost": 0.0,
+        "extended_cost": 0.0,
+        "standard_part_surcharge_cost": 0.0,
+        "variable_assembly_cost": 0.0,
+        "assembly_cost": 0.0,
+        "total_cost": 0.0,
+        "cost_per_board": 0.0,
+        "missing_prices": 0,
+        "bom_part_count": 0,
+        "standard_part_count": 0,
+        "smt_joint_count": 0,
+        "tht_joint_count": 0,
+    }
+
+
+def _collect_billable_bom_parts(parts: Iterable[Mapping[str, object]]) -> list[Mapping[str, object]]:
+    """Filter parts down to BOM-assigned, non-DNP rows."""
+    bom_parts: list[Mapping[str, object]] = []
+    for part in parts:
+        if part.get("exclude_from_bom") or not str(part.get("lcsc") or ""):
+            continue
+        flags = get_assembly_flags(part)
+        if bool(flags.get("is_dnp", False)):
+            continue
+        bom_parts.append(part)
+    return bom_parts
+
+
+def _get_cached_part_details(
+    lcsc: str,
+    details_cache: dict[str, dict],
+    get_part_details: Callable[[str], dict],
+) -> dict:
+    """Fetch and cache part details by LCSC code."""
+    details = details_cache.get(lcsc)
+    if details is None:
+        details = get_part_details(lcsc)
+        details_cache[lcsc] = details
+    return details
+
+
+def _build_lcsc_quantities(
+    bom_parts: Iterable[Mapping[str, object]], board_count: int
+) -> dict[str, int]:
+    """Aggregate quantity per LCSC code for component pricing lookup."""
+    lcsc_quantities: dict[str, int] = {}
+    for part in bom_parts:
+        lcsc = str(part.get("lcsc") or "")
+        lcsc_quantities[lcsc] = lcsc_quantities.get(lcsc, 0) + board_count
+    return lcsc_quantities
+
+
+def _calculate_component_costs(
+    lcsc_quantities: Mapping[str, int],
+    *,
+    details_cache: dict[str, dict],
+    get_part_details: Callable[[str], dict],
+) -> tuple[float, int]:
+    """Calculate direct component cost and missing-price count."""
+    component_cost = 0.0
+    missing_prices = 0
+    for lcsc, quantity in lcsc_quantities.items():
+        details = _get_cached_part_details(lcsc, details_cache, get_part_details)
+        unit_price = get_unit_price(quantity, str(details.get("price") or ""))
+        if unit_price < 0:
+            missing_prices += 1
+            continue
+        component_cost += unit_price * quantity
+    return component_cost, missing_prices
+
+
+def _scan_assembly_state(
+    bom_parts: Iterable[Mapping[str, object]],
+    board_count: int,
+    *,
+    details_cache: dict[str, dict],
+    get_part_details: Callable[[str], dict],
+) -> _AssemblyScan:
+    """Scan BOM rows to collect assembly-mode and surcharge metrics."""
+    scan = _AssemblyScan()
+
+    for part in bom_parts:
+        lcsc = str(part.get("lcsc") or "")
+        details = _get_cached_part_details(lcsc, details_cache, get_part_details)
+
+        with contextlib.suppress(ValueError, TypeError):
+            if int(part.get("component_product_type")) != 0:
+                scan.standard_present = True
+                scan.standard_part_count += 1
+
+        flags = get_assembly_flags(part)
+        exclude_from_pos = bool(flags.get("exclude_from_pos", False))
+        tht = is_tht_part(part)
+
+        if not exclude_from_pos:
+            scan.populated_part_present = True
+            joints = max(0, int(part.get("pad_count") or 0)) * board_count
+            if tht:
+                scan.tht_present = True
+                scan.tht_joints += joints
+            else:
+                scan.smt_joints += joints
+                scan.smt_lcsc.add(lcsc)
+
+        if str(details.get("type") or "") == "Extended" and not tht:
+            scan.extended_lcsc.add(lcsc)
+
+    return scan
+
+
 def calculate_bom_estimate(
     parts: Iterable[Mapping],
     board_count: int,
@@ -173,102 +305,38 @@ def calculate_bom_estimate(
     _economic_setup_fee = p.economic_setup_fee
     _economic_stencil_fee = p.economic_stencil_fee
     _standard_stencil_fee = p.standard_stencil_fee
-    summary = {
-        "component_cost": 0.0,
-        "fixed_cost": 0.0,
-        "tht_setup_cost": 0.0,
-        "economic_setup_cost": 0.0,
-        "standard_setup_cost": 0.0,
-        "stencil_cost": 0.0,
-        "extended_cost": 0.0,
-        "standard_part_surcharge_cost": 0.0,
-        "variable_assembly_cost": 0.0,
-        "assembly_cost": 0.0,
-        "total_cost": 0.0,
-        "cost_per_board": 0.0,
-        "missing_prices": 0,
-        "bom_part_count": 0,
-        "standard_part_count": 0,
-        "smt_joint_count": 0,
-        "tht_joint_count": 0,
-    }
+    summary = _create_empty_summary()
 
-    bom_parts = []
-    for part in parts:
-        if part.get("exclude_from_bom") or not str(part.get("lcsc") or ""):
-            continue
-
-        flags = get_assembly_flags(part)
-        if bool(flags.get("is_dnp", False)):
-            continue
-
-        bom_parts.append(part)
+    bom_parts = _collect_billable_bom_parts(parts)
     summary["bom_part_count"] = len(bom_parts)
     if not bom_parts:
         return summary
 
-    lcsc_quantities = {}
-    for part in bom_parts:
-        lcsc = str(part.get("lcsc") or "")
-        lcsc_quantities[lcsc] = lcsc_quantities.get(lcsc, 0) + board_count
+    lcsc_quantities = _build_lcsc_quantities(bom_parts, board_count)
 
-    details_cache = {}
+    details_cache: dict[str, dict] = {}
 
-    for lcsc, quantity in lcsc_quantities.items():
-        details = details_cache.get(lcsc)
-        if details is None:
-            details = get_part_details(lcsc)
-            details_cache[lcsc] = details
+    component_cost, missing_prices = _calculate_component_costs(
+        lcsc_quantities,
+        details_cache=details_cache,
+        get_part_details=get_part_details,
+    )
+    summary["component_cost"] = component_cost
+    summary["missing_prices"] = missing_prices
 
-        unit_price = get_unit_price(quantity, str(details.get("price") or ""))
-        if unit_price < 0:
-            summary["missing_prices"] += 1
-            continue
-        summary["component_cost"] += unit_price * quantity
+    scan = _scan_assembly_state(
+        bom_parts,
+        board_count,
+        details_cache=details_cache,
+        get_part_details=get_part_details,
+    )
+    summary["standard_part_count"] = scan.standard_part_count
 
-    tht_present = False
-    standard_present = False
-    populated_part_present = False
-    tht_joints = 0
-    smt_joints = 0
-    extended_lcsc = set()
-    smt_lcsc = set()
-
-    for part in bom_parts:
-        lcsc = str(part.get("lcsc") or "")
-        details = details_cache.get(lcsc)
-        if details is None:
-            details = get_part_details(lcsc)
-            details_cache[lcsc] = details
-
-        with contextlib.suppress(ValueError, TypeError):
-            if int(part.get("component_product_type")) != 0:
-                standard_present = True
-                summary["standard_part_count"] += 1
-
-        flags = get_assembly_flags(part)
-        is_dnp = bool(flags.get("is_dnp", False))
-        exclude_from_pos = bool(flags.get("exclude_from_pos", False))
-        tht = is_tht_part(part)
-
-        if not is_dnp and not exclude_from_pos:
-            populated_part_present = True
-            joints = max(0, int(part.get("pad_count") or 0)) * board_count
-            if tht:
-                tht_present = True
-                tht_joints += joints
-            else:
-                smt_joints += joints
-                smt_lcsc.add(lcsc)
-
-        if str(details.get("type") or "") == "Extended" and not tht:
-            extended_lcsc.add(lcsc)
-
-    if tht_present:
+    if scan.tht_present:
         summary["tht_setup_cost"] += _tht_setup_fee
 
-    board_is_standard = standard_present if board_standard is None else board_standard
-    if not board_is_standard and populated_part_present:
+    board_is_standard = scan.standard_present if board_standard is None else board_standard
+    if not board_is_standard and scan.populated_part_present:
         summary["economic_setup_cost"] += _economic_setup_fee
 
     if board_is_standard:
@@ -276,7 +344,7 @@ def calculate_bom_estimate(
         if side_count > 0:
             summary["standard_setup_cost"] += _standard_setup_fee * side_count
             summary["stencil_cost"] += _standard_stencil_fee * side_count
-    elif smt_joints > 0:
+    elif scan.smt_joints > 0:
         summary["stencil_cost"] += _economic_stencil_fee
 
     summary["fixed_cost"] = (
@@ -286,13 +354,13 @@ def calculate_bom_estimate(
         + summary["stencil_cost"]
     )
 
-    summary["smt_joint_count"] = smt_joints
-    summary["tht_joint_count"] = tht_joints
-    summary["variable_assembly_cost"] += tht_joints * _tht_per_joint_fee
-    summary["variable_assembly_cost"] += smt_joints * _smt_per_joint_fee
-    summary["extended_cost"] += len(extended_lcsc) * _extended_part_fee
+    summary["smt_joint_count"] = scan.smt_joints
+    summary["tht_joint_count"] = scan.tht_joints
+    summary["variable_assembly_cost"] += scan.tht_joints * _tht_per_joint_fee
+    summary["variable_assembly_cost"] += scan.smt_joints * _smt_per_joint_fee
+    summary["extended_cost"] += len(scan.extended_lcsc) * _extended_part_fee
     if board_is_standard:
-        summary["standard_part_surcharge_cost"] += len(smt_lcsc) * _standard_part_fee
+        summary["standard_part_surcharge_cost"] += len(scan.smt_lcsc) * _standard_part_fee
         summary["variable_assembly_cost"] += summary["standard_part_surcharge_cost"]
 
     summary["assembly_cost"] = (
