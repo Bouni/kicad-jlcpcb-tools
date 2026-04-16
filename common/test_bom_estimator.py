@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bom_estimator import (
     AssemblyPricing,
     DEFAULT_PRICING,
+    _collect_billable_bom_parts,
+    _scan_assembly_state,
     build_bom_estimate_view_model,
     build_standard_mode_context,
     calculate_bom_estimate,
@@ -776,3 +778,73 @@ def test_assembly_pricing_custom_instance_overrides_defaults():
     )
     expected_assembly = 1.0 + 0.5 + 10 * 0.001
     assert round(summary["assembly_cost"], 4) == round(expected_assembly, 4)
+
+
+def test_collect_billable_bom_parts_filters_excluded_unassigned_and_dnp():
+    """Helper keeps only rows eligible for BOM costing."""
+    parts = [
+        {"reference": "R1", "lcsc": "C1", "exclude_from_bom": 0, "assembly_flags": "{}"},
+        {"reference": "R2", "lcsc": "", "exclude_from_bom": 0, "assembly_flags": "{}"},
+        {"reference": "R3", "lcsc": "C3", "exclude_from_bom": 1, "assembly_flags": "{}"},
+        {
+            "reference": "R4",
+            "lcsc": "C4",
+            "exclude_from_bom": 0,
+            "assembly_flags": '{"is_dnp": true}',
+        },
+    ]
+
+    filtered = _collect_billable_bom_parts(parts)
+
+    assert [part["reference"] for part in filtered] == ["R1"]
+
+
+def test_scan_assembly_state_reports_joints_standard_and_extended_sets():
+    """Assembly scan helper computes core mode/surcharge diagnostics."""
+    bom_parts = [
+        {
+            "reference": "U1",
+            "lcsc": "C-SMT-STD",
+            "pad_count": 2,
+            "has_tht": 0,
+            "component_product_type": 2,
+            "assembly_flags": '{"exclude_from_pos": false}',
+        },
+        {
+            "reference": "J1",
+            "lcsc": "C-THT-EXT",
+            "pad_count": 3,
+            "has_tht": 1,
+            "component_product_type": 0,
+            "assembly_flags": '{"exclude_from_pos": false}',
+        },
+        {
+            "reference": "R9",
+            "lcsc": "C-SMT-EXT-NOPOS",
+            "pad_count": 2,
+            "has_tht": 0,
+            "component_product_type": 0,
+            "assembly_flags": '{"exclude_from_pos": true}',
+        },
+    ]
+
+    details_map = {
+        "C-SMT-STD": {"type": "Basic", "price": "1-:0.10"},
+        "C-THT-EXT": {"type": "Extended", "price": "1-:0.20"},
+        "C-SMT-EXT-NOPOS": {"type": "Extended", "price": "1-:0.30"},
+    }
+    scan = _scan_assembly_state(
+        bom_parts,
+        board_count=5,
+        details_cache={},
+        get_part_details=lambda lcsc: details_map[lcsc],
+    )
+
+    assert scan.standard_present is True
+    assert scan.standard_part_count == 1
+    assert scan.populated_part_present is True
+    assert scan.tht_present is True
+    assert scan.smt_joints == 10
+    assert scan.tht_joints == 15
+    assert scan.smt_lcsc == {"C-SMT-STD"}
+    assert scan.extended_lcsc == {"C-SMT-EXT-NOPOS"}
