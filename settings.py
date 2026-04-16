@@ -335,6 +335,43 @@ class SettingsDialog(wx.Dialog):
             self.highlight_matches_setting, 0, wx.ALL | wx.EXPAND, 5
         )
 
+        ##### Highlight Standard-mode trigger parts in main list #####
+
+        self.highlight_standard_parts_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Highlight standard-mode trigger parts",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_highlight_standard_parts",
+        )
+
+        self.highlight_standard_parts_setting.SetToolTip(
+            wx.ToolTip(
+                "Highlight parts in the main list that trigger Standard assembly mode"
+            )
+        )
+
+        self.highlight_standard_parts_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("bom.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.highlight_standard_parts_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        highlight_standard_parts_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        highlight_standard_parts_sizer.Add(
+            self.highlight_standard_parts_image, 10, wx.ALL | wx.EXPAND, 5
+        )
+        highlight_standard_parts_sizer.Add(
+            self.highlight_standard_parts_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
         ##### Library Selection #####
 
         library_label = wx.StaticText(
@@ -551,22 +588,19 @@ class SettingsDialog(wx.Dialog):
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        settings_grid = wx.GridSizer(12, 2, 0, 0)
-        settings_grid.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
-
-        layout = wx.BoxSizer(wx.VERTICAL)
-        layout.Add(settings_grid, 1, wx.ALL | wx.EXPAND, 5)
-        layout.Add(hooks_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout = wx.GridSizer(13, 2, 0, 0)
+        layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(highlight_standard_parts_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -754,9 +788,17 @@ class SettingsDialog(wx.Dialog):
         else:
             self.highlight_matches_setting.SetLabel("Do not highlight search matches")
 
-    def update_matches(self, enabled):
-        """Alias shared highlighting setting updates to the checkbox UI helper."""
-        self.update_highlight_matches(enabled)
+    def update_highlight_standard_parts(self, enabled):
+        """Update settings dialog according to the settings."""
+        self.highlight_standard_parts_setting.SetValue(bool(enabled))
+        if enabled:
+            self.highlight_standard_parts_setting.SetLabel(
+                "Highlight standard-mode trigger parts"
+            )
+        else:
+            self.highlight_standard_parts_setting.SetLabel(
+                "Do not highlight standard-mode trigger parts"
+            )
 
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
@@ -786,6 +828,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_highlight_matches(
             self.parent.settings.get("highlighting", {}).get("matches", True)
+        )
+        self.update_highlight_standard_parts(
+            self.parent.settings.get("general", {}).get("highlight_standard_parts", True)
         )
         self.update_selected_library(
             self.parent.settings.get("library", {}).get(

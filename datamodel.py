@@ -23,6 +23,7 @@ class PartListDataModel(dv.PyDataViewModel):
         super().__init__()
         self.data = []
         self.standard_trigger_refs = set()
+        self.standard_trigger_highlighting_enabled = True
         self.columns = {
             "REF_COL": 0,
             "VALUE_COL": 1,
@@ -65,9 +66,15 @@ class PartListDataModel(dv.PyDataViewModel):
         """Set references that should be highlighted as Standard-mode triggers."""
         self.standard_trigger_refs = set(refs or [])
 
+    def set_standard_trigger_highlighting_enabled(self, enabled):
+        """Enable or disable Standard-mode trigger highlighting."""
+        self.standard_trigger_highlighting_enabled = bool(enabled)
+
     def GetAttr(self, item, col, attr):
         """Apply row attributes for Standard-mode trigger highlighting."""
         del col
+        if not self.standard_trigger_highlighting_enabled:
+            return False
         row = self.ItemToObject(item)
         if not row:
             return False
