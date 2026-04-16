@@ -75,8 +75,9 @@ class PartListDataModel(dv.PyDataViewModel):
         if ref not in self.standard_trigger_refs:
             return False
 
-        attr.SetBackgroundColour(wx.Colour(255, 220, 230))
         attr.SetColour(wx.Colour(120, 0, 0))
+        if hasattr(attr, "SetBold"):
+            attr.SetBold(True)
         return True
 
     @staticmethod
