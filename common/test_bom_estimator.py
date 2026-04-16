@@ -185,9 +185,11 @@ def test_standard_fees_apply_for_standard_smt_part():
         parts,
         board_count=2,
         get_part_details=get_details,
-        standard_setup_fee=4.0,
-        standard_stencil_fee=1.2,
-        standard_part_fee=0.5,
+        pricing=AssemblyPricing(
+            standard_setup_fee=4.0,
+            standard_stencil_fee=1.2,
+            standard_part_fee=0.5,
+        ),
         board_standard=True,
         smt_populated_sides=1,
     )
@@ -229,9 +231,11 @@ def test_standard_fees_are_orthogonal_to_tht_fees():
         parts,
         board_count=3,
         get_part_details=get_details,
-        standard_setup_fee=2.0,
-        standard_stencil_fee=0.5,
-        standard_part_fee=1.0,
+        pricing=AssemblyPricing(
+            standard_setup_fee=2.0,
+            standard_stencil_fee=0.5,
+            standard_part_fee=1.0,
+        ),
         board_standard=True,
         smt_populated_sides=1,
     )
@@ -269,8 +273,10 @@ def test_standard_fees_do_not_apply_for_non_standard_parts():
         parts,
         board_count=4,
         get_part_details=get_details,
-        standard_setup_fee=99.0,
-        standard_part_fee=99.0,
+        pricing=AssemblyPricing(
+            standard_setup_fee=99.0,
+            standard_part_fee=99.0,
+        ),
         board_standard=False,
     )
 
