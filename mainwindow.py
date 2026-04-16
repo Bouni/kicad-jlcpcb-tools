@@ -1057,18 +1057,18 @@ class JLCPCBTools(wx.Dialog):
             + summary["standard_setup_cost"]
             + summary["policy_cost"]
         )
-        assembly_suffix = (
-            f", std surcharge ${summary['standard_part_surcharge_cost']:.2f}"
-            if summary["standard_part_surcharge_cost"] > 0
-            else ""
-        )
+        # Assembly cost includes variable joint fees and surcharges (extended + standard)
+        # We show them separately in the breakdown for clarity
+        surcharge_breakdown = f"extended: ${summary['extended_cost']:.2f}"
+        if summary["standard_part_surcharge_cost"] > 0:
+            surcharge_breakdown += f", standard: ${summary['standard_part_surcharge_cost']:.2f}"
         details_line = (
             f"Direct BOM Cost: ${summary['component_cost']:.2f} | "
             f"Fixed ${displayed_fixed_cost:.2f} "
-            f"(extended: ${summary['extended_cost']:.2f}, setup: ${displayed_setup_cost:.2f}, "
+            f"({surcharge_breakdown}, setup: ${displayed_setup_cost:.2f}, "
             f"stencil: ${summary['stencil_cost']:.2f}, tht: ${summary['tht_setup_cost']:.2f}) | "
             f"Assembly ${summary['variable_assembly_cost']:.2f} "
-            f"(smt: {summary['smt_joint_count']} joints, tht: {summary['tht_joint_count']} joints{assembly_suffix})"
+            f"(smt: {summary['smt_joint_count']} joints, tht: {summary['tht_joint_count']} joints)"
         )
         self.bom_estimator_summary.SetLabel(f"{overview_line}\n{details_line}")
 
