@@ -113,8 +113,8 @@ def calculate_bom_estimate(
     get_part_details: Callable[[str], dict],
     *,
     tht_setup_fee: float = 3.50,
-    tht_per_joint_fee: float = 0.0173,
-    smt_per_joint_fee: float = 0.0017,
+    tht_per_joint_fee: float = 0.0157,
+    smt_per_joint_fee: float = 0.0016,
     extended_part_fee: float = 3.00,
     standard_setup_fee: float = 25.0,
     standard_part_fee: float = 1.5,
@@ -220,12 +220,12 @@ def calculate_bom_estimate(
 
     board_is_standard = standard_present if board_standard is None else board_standard
     if not board_is_standard and populated_part_present:
-        summary["economic_setup_cost"] += economic_setup_fee * board_count
+        summary["economic_setup_cost"] += economic_setup_fee
 
     if board_is_standard:
         side_count = max(0, int(smt_populated_sides or 0))
         if side_count > 0:
-            summary["standard_setup_cost"] += standard_setup_fee * side_count * board_count
+            summary["standard_setup_cost"] += standard_setup_fee * side_count
             summary["stencil_cost"] += standard_stencil_fee * side_count
     elif smt_joints > 0:
         summary["stencil_cost"] += economic_stencil_fee
