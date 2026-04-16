@@ -7,11 +7,11 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bom_estimator import (
-    _collect_billable_bom_parts,
-    _scan_assembly_state,
+    DEFAULT_PRICING,
     AssemblyPricing,
     BomEstimateSummary,
-    DEFAULT_PRICING,
+    _collect_billable_bom_parts,
+    _scan_assembly_state,
     build_bom_estimate_view_model,
     build_standard_mode_context,
     calculate_bom_estimate,
