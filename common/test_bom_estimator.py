@@ -322,6 +322,43 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
     assert round(summary["cost_per_board"], 3) == 3.503
 
 
+def test_dnp_parts_are_excluded_from_bom_estimator_counts():
+    """DNP rows should not contribute to component or assembly totals."""
+    parts = [
+        {
+            "lcsc": "C401",
+            "exclude_from_bom": 0,
+            "pad_count": 2,
+            "has_tht": 0,
+            "assembly_process": "SMT",
+            "component_product_type": 0,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+        },
+        {
+            "lcsc": "C402",
+            "exclude_from_bom": 0,
+            "pad_count": 2,
+            "has_tht": 0,
+            "assembly_process": "SMT",
+            "component_product_type": 2,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": true}',
+        },
+    ]
+
+    def get_details(_lcsc):
+        return {"price": "1-:1.00", "type": "Basic"}
+
+    summary = calculate_bom_estimate(
+        parts,
+        board_count=5,
+        get_part_details=get_details,
+        board_standard=False,
+    )
+
+    assert round(summary["component_cost"], 3) == 5.000
+    assert summary["standard_part_count"] == 0
+
+
 def test_optional_policy_fees_apply_when_configured():
     """Optional policy fees contribute to fixed and total costs."""
     parts = [

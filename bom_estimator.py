@@ -149,11 +149,16 @@ def calculate_bom_estimate(
         "standard_part_count": 0,
     }
 
-    bom_parts = [
-        part
-        for part in parts
-        if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
-    ]
+    bom_parts = []
+    for part in parts:
+        if part.get("exclude_from_bom") or not str(part.get("lcsc") or ""):
+            continue
+
+        flags = get_assembly_flags(part)
+        if bool(flags.get("is_dnp", False)):
+            continue
+
+        bom_parts.append(part)
     summary["bom_part_count"] = len(bom_parts)
     if not bom_parts:
         return summary
