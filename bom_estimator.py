@@ -154,37 +154,25 @@ def calculate_bom_estimate(
     get_part_details: Callable[[str], dict],
     *,
     pricing: Optional[AssemblyPricing] = None,
-    tht_setup_fee: Optional[float] = None,
-    tht_per_joint_fee: Optional[float] = None,
-    smt_per_joint_fee: Optional[float] = None,
-    extended_part_fee: Optional[float] = None,
-    standard_setup_fee: Optional[float] = None,
-    standard_part_fee: Optional[float] = None,
-    economic_setup_fee: Optional[float] = None,
-    economic_stencil_fee: Optional[float] = None,
-    standard_stencil_fee: Optional[float] = None,
     board_standard: Optional[bool] = None,
     smt_populated_sides: int = 0,
 ) -> dict:
     """Calculate BOM and assembly estimate totals.
 
-    Pass a custom ``pricing`` instance to override the full fee schedule, or
-    override individual fees via keyword arguments (individual kwargs take
-    precedence over ``pricing``).
+    Pass a custom ``pricing`` instance to override the fee schedule.
 
     Returns a summary dict with totals and diagnostics.
     """
     p = pricing if pricing is not None else DEFAULT_PRICING
-    # Individual kwarg overrides (backwards-compatible)
-    _tht_setup_fee = tht_setup_fee if tht_setup_fee is not None else p.tht_setup_fee
-    _tht_per_joint_fee = tht_per_joint_fee if tht_per_joint_fee is not None else p.tht_per_joint_fee
-    _smt_per_joint_fee = smt_per_joint_fee if smt_per_joint_fee is not None else p.smt_per_joint_fee
-    _extended_part_fee = extended_part_fee if extended_part_fee is not None else p.extended_part_fee
-    _standard_setup_fee = standard_setup_fee if standard_setup_fee is not None else p.standard_setup_fee
-    _standard_part_fee = standard_part_fee if standard_part_fee is not None else p.standard_part_fee
-    _economic_setup_fee = economic_setup_fee if economic_setup_fee is not None else p.economic_setup_fee
-    _economic_stencil_fee = economic_stencil_fee if economic_stencil_fee is not None else p.economic_stencil_fee
-    _standard_stencil_fee = standard_stencil_fee if standard_stencil_fee is not None else p.standard_stencil_fee
+    _tht_setup_fee = p.tht_setup_fee
+    _tht_per_joint_fee = p.tht_per_joint_fee
+    _smt_per_joint_fee = p.smt_per_joint_fee
+    _extended_part_fee = p.extended_part_fee
+    _standard_setup_fee = p.standard_setup_fee
+    _standard_part_fee = p.standard_part_fee
+    _economic_setup_fee = p.economic_setup_fee
+    _economic_stencil_fee = p.economic_stencil_fee
+    _standard_stencil_fee = p.standard_stencil_fee
     summary = {
         "component_cost": 0.0,
         "fixed_cost": 0.0,
