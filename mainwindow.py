@@ -160,6 +160,10 @@ class JLCPCBTools(wx.Dialog):
             1,
             minimum=1,
         )
+        self.highlight_standard_parts = bool(
+            general_settings.get("highlight_standard_parts", True)
+        )
+        general_settings["highlight_standard_parts"] = self.highlight_standard_parts
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -659,6 +663,9 @@ class JLCPCBTools(wx.Dialog):
 
         self.init_logger()
         self.partlist_data_model = PartListDataModel(self.scale_factor)
+        self.partlist_data_model.set_standard_trigger_highlighting_enabled(
+            self.highlight_standard_parts
+        )
         self.footprint_list.AssociateModel(self.partlist_data_model)
 
         self.init_data()
@@ -1428,6 +1435,12 @@ class JLCPCBTools(wx.Dialog):
                     minimum=1,
                 )
                 self.recompute_bom_estimate()
+            elif e.setting == "highlight_standard_parts":
+                self.highlight_standard_parts = bool(e.value)
+                self.partlist_data_model.set_standard_trigger_highlighting_enabled(
+                    self.highlight_standard_parts
+                )
+                self.footprint_list.Refresh()
 
         self.save_settings()
 
