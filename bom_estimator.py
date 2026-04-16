@@ -4,7 +4,48 @@ from __future__ import annotations
 
 import contextlib
 import json
+from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, Mapping, Optional, Protocol
+
+
+@dataclass
+class AssemblyPricing:
+    """JLC assembly fee schedule.
+
+    All values are in USD.  Update this class when JLC changes their prices —
+    the rest of the estimator and its tests derive from these constants.
+    """
+
+    # THT assembly
+    tht_setup_fee: float = 3.50
+    """One-time THT setup charge per order."""
+    tht_per_joint_fee: float = 0.0157
+    """Per-pad fee for wave/THT soldering."""
+
+    # SMT assembly (joint-level)
+    smt_per_joint_fee: float = 0.0016
+    """Per-pad fee for SMT placement."""
+
+    # Extended part surcharge
+    extended_part_fee: float = 3.00
+    """Per distinct extended-part LCSC code fee."""
+
+    # Standard mode fixed fees
+    standard_setup_fee: float = 25.0
+    """Per-populated-SMT-side setup fee in Standard mode."""
+    standard_part_fee: float = 1.5
+    """Per distinct SMT LCSC code fee in Standard mode."""
+    standard_stencil_fee: float = 7.8
+    """Per-populated-SMT-side stencil fee in Standard mode."""
+
+    # Economic mode fixed fees
+    economic_setup_fee: float = 8.0
+    """One-time setup fee in Economic mode."""
+    economic_stencil_fee: float = 1.5
+    """One-time stencil fee in Economic mode."""
+
+
+DEFAULT_PRICING = AssemblyPricing()
 
 try:
     from .lcsc_api import LCSC_API
@@ -112,25 +153,38 @@ def calculate_bom_estimate(
     board_count: int,
     get_part_details: Callable[[str], dict],
     *,
-    tht_setup_fee: float = 3.50,
-    tht_per_joint_fee: float = 0.0157,
-    smt_per_joint_fee: float = 0.0016,
-    extended_part_fee: float = 3.00,
-    standard_setup_fee: float = 25.0,
-    standard_part_fee: float = 1.5,
-    economic_setup_fee: float = 8.0,
-    economic_stencil_fee: float = 1.5,
-    standard_stencil_fee: float = 7.8,
-    order_handling_fee: float = 0.0,
-    panelization_per_board_fee: float = 0.0,
-    panelization_threshold_boards: int = 1,
+    pricing: Optional[AssemblyPricing] = None,
+    tht_setup_fee: Optional[float] = None,
+    tht_per_joint_fee: Optional[float] = None,
+    smt_per_joint_fee: Optional[float] = None,
+    extended_part_fee: Optional[float] = None,
+    standard_setup_fee: Optional[float] = None,
+    standard_part_fee: Optional[float] = None,
+    economic_setup_fee: Optional[float] = None,
+    economic_stencil_fee: Optional[float] = None,
+    standard_stencil_fee: Optional[float] = None,
     board_standard: Optional[bool] = None,
     smt_populated_sides: int = 0,
 ) -> dict:
     """Calculate BOM and assembly estimate totals.
 
+    Pass a custom ``pricing`` instance to override the full fee schedule, or
+    override individual fees via keyword arguments (individual kwargs take
+    precedence over ``pricing``).
+
     Returns a summary dict with totals and diagnostics.
     """
+    p = pricing if pricing is not None else DEFAULT_PRICING
+    # Individual kwarg overrides (backwards-compatible)
+    _tht_setup_fee = tht_setup_fee if tht_setup_fee is not None else p.tht_setup_fee
+    _tht_per_joint_fee = tht_per_joint_fee if tht_per_joint_fee is not None else p.tht_per_joint_fee
+    _smt_per_joint_fee = smt_per_joint_fee if smt_per_joint_fee is not None else p.smt_per_joint_fee
+    _extended_part_fee = extended_part_fee if extended_part_fee is not None else p.extended_part_fee
+    _standard_setup_fee = standard_setup_fee if standard_setup_fee is not None else p.standard_setup_fee
+    _standard_part_fee = standard_part_fee if standard_part_fee is not None else p.standard_part_fee
+    _economic_setup_fee = economic_setup_fee if economic_setup_fee is not None else p.economic_setup_fee
+    _economic_stencil_fee = economic_stencil_fee if economic_stencil_fee is not None else p.economic_stencil_fee
+    _standard_stencil_fee = standard_stencil_fee if standard_stencil_fee is not None else p.standard_stencil_fee
     summary = {
         "component_cost": 0.0,
         "fixed_cost": 0.0,
@@ -138,8 +192,8 @@ def calculate_bom_estimate(
         "economic_setup_cost": 0.0,
         "standard_setup_cost": 0.0,
         "stencil_cost": 0.0,
-        "policy_cost": 0.0,
         "extended_cost": 0.0,
+        "standard_part_surcharge_cost": 0.0,
         "variable_assembly_cost": 0.0,
         "assembly_cost": 0.0,
         "total_cost": 0.0,
@@ -147,6 +201,8 @@ def calculate_bom_estimate(
         "missing_prices": 0,
         "bom_part_count": 0,
         "standard_part_count": 0,
+        "smt_joint_count": 0,
+        "tht_joint_count": 0,
     }
 
     bom_parts = []
@@ -221,42 +277,35 @@ def calculate_bom_estimate(
             extended_lcsc.add(lcsc)
 
     if tht_present:
-        summary["tht_setup_cost"] += tht_setup_fee
+        summary["tht_setup_cost"] += _tht_setup_fee
 
     board_is_standard = standard_present if board_standard is None else board_standard
     if not board_is_standard and populated_part_present:
-        summary["economic_setup_cost"] += economic_setup_fee
+        summary["economic_setup_cost"] += _economic_setup_fee
 
     if board_is_standard:
         side_count = max(0, int(smt_populated_sides or 0))
         if side_count > 0:
-            summary["standard_setup_cost"] += standard_setup_fee * side_count
-            summary["stencil_cost"] += standard_stencil_fee * side_count
+            summary["standard_setup_cost"] += _standard_setup_fee * side_count
+            summary["stencil_cost"] += _standard_stencil_fee * side_count
     elif smt_joints > 0:
-        summary["stencil_cost"] += economic_stencil_fee
-
-    if populated_part_present and order_handling_fee > 0:
-        summary["policy_cost"] += order_handling_fee
-    if (
-        populated_part_present
-        and panelization_per_board_fee > 0
-        and board_count >= max(1, int(panelization_threshold_boards))
-    ):
-        summary["policy_cost"] += panelization_per_board_fee * board_count
+        summary["stencil_cost"] += _economic_stencil_fee
 
     summary["fixed_cost"] = (
         summary["tht_setup_cost"]
         + summary["economic_setup_cost"]
         + summary["standard_setup_cost"]
         + summary["stencil_cost"]
-        + summary["policy_cost"]
     )
 
-    summary["variable_assembly_cost"] += tht_joints * tht_per_joint_fee
-    summary["variable_assembly_cost"] += smt_joints * smt_per_joint_fee
-    summary["extended_cost"] += len(extended_lcsc) * extended_part_fee
+    summary["smt_joint_count"] = smt_joints
+    summary["tht_joint_count"] = tht_joints
+    summary["variable_assembly_cost"] += tht_joints * _tht_per_joint_fee
+    summary["variable_assembly_cost"] += smt_joints * _smt_per_joint_fee
+    summary["extended_cost"] += len(extended_lcsc) * _extended_part_fee
     if board_is_standard:
-        summary["variable_assembly_cost"] += len(smt_lcsc) * standard_part_fee
+        summary["standard_part_surcharge_cost"] += len(smt_lcsc) * _standard_part_fee
+        summary["variable_assembly_cost"] += summary["standard_part_surcharge_cost"]
 
     summary["assembly_cost"] = (
         summary["fixed_cost"]
@@ -267,3 +316,223 @@ def calculate_bom_estimate(
     if board_count > 0:
         summary["cost_per_board"] = summary["total_cost"] / board_count
     return summary
+
+
+def format_bom_estimate_summary(
+    summary: dict, board_count: int, mode: str, reason_text: str
+) -> tuple[str, str]:
+    """Format BOM estimate summary into display lines.
+
+    Args:
+        summary: BOM estimate dict from calculate_bom_estimate()
+        board_count: Number of boards
+        mode: "Standard" or "Economic" mode string
+        reason_text: Comma-joined reason text for triggers (or "none")
+
+    Returns:
+        (overview_line, details_line) tuple for two-line display
+    """
+    overview_line = (
+        f"BOM Estimate ({board_count} boards): Mode {mode} | "
+        f"Total ${summary['total_cost']:.2f} | "
+        f"Per board ${summary['cost_per_board']:.2f} | "
+        f"Triggers {reason_text} | "
+        f"Missing prices {summary['missing_prices']}"
+    )
+
+    displayed_fixed_cost = summary["fixed_cost"] + summary["extended_cost"]
+    displayed_setup_cost = (
+        summary["economic_setup_cost"]
+        + summary["standard_setup_cost"]
+    )
+
+    # Assembly cost includes variable joint fees and surcharges (extended + standard)
+    # We show them separately in the breakdown for clarity
+    surcharge_breakdown = f"extended: ${summary['extended_cost']:.2f}"
+    if summary["standard_part_surcharge_cost"] > 0:
+        surcharge_breakdown += f", standard: ${summary['standard_part_surcharge_cost']:.2f}"
+
+    details_line = (
+        f"Direct BOM Cost: ${summary['component_cost']:.2f} | "
+        f"Fixed ${displayed_fixed_cost:.2f} "
+        f"({surcharge_breakdown}, setup: ${displayed_setup_cost:.2f}, "
+        f"stencil: ${summary['stencil_cost']:.2f}, tht: ${summary['tht_setup_cost']:.2f}) | "
+        f"Assembly ${summary['variable_assembly_cost']:.2f} "
+        f"(smt: {summary['smt_joint_count']} joints, tht: {summary['tht_joint_count']} joints)"
+    )
+
+    return overview_line, details_line
+
+
+def standard_signal_reasons(signals: Mapping[str, object]) -> list[str]:
+    """Build user-facing reason labels for active Standard-mode triggers."""
+    reason_map = [
+        ("manual_enabled", "manual"),
+        ("qty_50_plus", "qty≥50"),
+        ("v_cut_drawings", "V-cut layer"),
+        ("standard_part_present", "standard part"),
+        ("multi_side_populated", "both sides populated"),
+    ]
+    return [label for key, label in reason_map if signals.get(key)]
+
+
+def calculate_part_bom_cost(
+    part: Mapping[str, object], details: Mapping[str, object], board_count: int
+) -> Optional[float]:
+    """Return the raw BOM contribution for a part, excluding fixed fees."""
+    if part.get("exclude_from_bom"):
+        return None
+
+    lcsc = str(part.get("lcsc") or "")
+    if not lcsc:
+        return None
+
+    unit_price = get_unit_price(board_count, str(details.get("price") or ""))
+    if unit_price < 0:
+        return None
+
+    return unit_price * board_count
+
+
+def format_part_bom_price_label(
+    part: Mapping[str, object], details: Mapping[str, object], board_count: int
+) -> str:
+    """Build per-part BOM contribution label for UI display."""
+    if part.get("exclude_from_bom"):
+        return ""
+
+    lcsc = str(part.get("lcsc") or "")
+    if not lcsc:
+        return ""
+
+    contribution = calculate_part_bom_cost(part, details, board_count)
+    if contribution is None:
+        return "N/A"
+
+    return f"${contribution:.4f}"
+
+
+def build_bom_estimate_view_model(
+    parts: Iterable[Mapping[str, object]],
+    board_count: int,
+    get_part_details: Callable[[str], dict],
+    standard_context: Mapping[str, object],
+) -> dict:
+    """Build a pure BOM estimate view model for UI consumption."""
+    parts = list(parts)
+    if not parts:
+        return {
+            "summary": None,
+            "mode": None,
+            "reason_text": "none",
+            "highlight_refs": set(),
+            "summary_label": f"BOM Estimate ({board_count} boards): no parts",
+        }
+
+    bom_parts = [
+        part
+        for part in parts
+        if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
+    ]
+    if not bom_parts:
+        return {
+            "summary": None,
+            "mode": None,
+            "reason_text": "none",
+            "highlight_refs": set(),
+            "summary_label": f"BOM Estimate ({board_count} boards): no assigned BOM parts",
+        }
+
+    board_standard = bool(standard_context.get("board_standard"))
+    summary = calculate_bom_estimate(
+        parts=parts,
+        board_count=board_count,
+        get_part_details=get_part_details,
+        board_standard=board_standard,
+        smt_populated_sides=int(standard_context.get("smt_populated_sides") or 0),
+    )
+
+    mode = "Standard" if board_standard else "Economic"
+    reason_text = ", ".join(
+        standard_signal_reasons(standard_context.get("signals", {}))
+    ) or "none"
+    highlight_refs = (
+        set(standard_context.get("trigger_references", set())) if board_standard else set()
+    )
+    overview_line, details_line = format_bom_estimate_summary(
+        summary,
+        board_count,
+        mode,
+        reason_text,
+    )
+    return {
+        "summary": summary,
+        "mode": mode,
+        "reason_text": reason_text,
+        "highlight_refs": highlight_refs,
+        "summary_label": f"{overview_line}\n{details_line}",
+    }
+
+
+def build_standard_mode_context(
+    *,
+    manual_enabled: bool,
+    board_count: int,
+    has_v_cut_drawings: bool,
+    populated_refs: Iterable[str],
+    populated_sides: Iterable[str],
+    smt_populated_sides: Iterable[str],
+    standard_part_refs: Iterable[str],
+) -> dict:
+    """Build pure Standard/Economic policy context from normalized board facts."""
+    populated_refs = set(populated_refs)
+    populated_sides = set(populated_sides)
+    smt_populated_sides = set(smt_populated_sides)
+    standard_part_refs = set(standard_part_refs)
+
+    signals = {
+        "manual_enabled": bool(manual_enabled),
+        "qty_50_plus": board_count >= 50,
+        "v_cut_drawings": bool(has_v_cut_drawings),
+        "standard_part_present": bool(standard_part_refs),
+        "multi_side_populated": len(populated_sides) > 1,
+    }
+    trigger_references = set(standard_part_refs)
+    if signals["multi_side_populated"]:
+        trigger_references.update(populated_refs)
+
+    return {
+        "signals": signals,
+        "board_standard": any(signals.values()),
+        "smt_populated_sides": len(smt_populated_sides),
+        "trigger_references": trigger_references,
+    }
+
+
+def prepare_bom_price_labels(
+    parts: Iterable[Mapping[str, object]],
+    board_count: int,
+    get_part_details: Callable[[str], dict],
+) -> dict:
+    """Return a {reference: label} mapping for BOM price column population.
+
+    Pure function — no UI or wx dependencies.  Callers are responsible for
+    applying the resulting labels to the data model.
+    """
+    details_cache: dict = {}
+    result: dict = {}
+    for part in parts:
+        reference = part.get("reference")
+        if not reference:
+            continue
+
+        lcsc = str(part.get("lcsc") or "")
+        details: dict = {}
+        if lcsc:
+            if lcsc not in details_cache:
+                details_cache[lcsc] = get_part_details(lcsc)
+            details = details_cache[lcsc]
+
+        result[reference] = format_part_bom_price_label(part, details, board_count)
+
+    return result
