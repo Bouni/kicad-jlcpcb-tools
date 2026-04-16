@@ -1,5 +1,6 @@
 """Contains the settings dialog."""
 
+import contextlib
 import logging
 
 import wx  # pylint: disable=import-error
@@ -406,22 +407,164 @@ class SettingsDialog(wx.Dialog):
             self.library_data_path_setting, 1, wx.ALL | wx.EXPAND, 5
         )
 
+        ##### Generation hooks #####
+
+        pre_hook_label = wx.StaticText(
+            self,
+            id=wx.ID_ANY,
+            label="Pre-generate hook script:",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+        )
+
+        self.pre_script_setting = wx.FilePickerCtrl(
+            self,
+            id=wx.ID_ANY,
+            path="",
+            message="Choose pre-generate hook script",
+            wildcard="All files (*.*)|*.*",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=wx.FLP_DEFAULT_STYLE | wx.FLP_USE_TEXTCTRL,
+            name="hooks_pre_script",
+        )
+        self.pre_script_setting.SetToolTip(
+            wx.ToolTip(
+                "Runs before fabrication generation."
+                " A nonzero exit code shows a Continue/Cancel prompt."
+            )
+        )
+
+        self.pre_script_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("mdi-terminal.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.pre_script_setting.Bind(wx.EVT_FILEPICKER_CHANGED, self.update_settings)
+
+        pre_hook_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        pre_hook_sizer.Add(
+            self.pre_script_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        pre_hook_sizer.Add(pre_hook_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        pre_hook_sizer.Add(self.pre_script_setting, 1, wx.ALL | wx.EXPAND, 5)
+
+        post_hook_label = wx.StaticText(
+            self,
+            id=wx.ID_ANY,
+            label="Post-generate hook script:",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+        )
+
+        self.post_script_setting = wx.FilePickerCtrl(
+            self,
+            id=wx.ID_ANY,
+            path="",
+            message="Choose post-generate hook script",
+            wildcard="All files (*.*)|*.*",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=wx.FLP_DEFAULT_STYLE | wx.FLP_USE_TEXTCTRL,
+            name="hooks_post_script",
+        )
+        self.post_script_setting.SetToolTip(
+            wx.ToolTip(
+                "Runs only after successful fabrication generation."
+            )
+        )
+
+        self.post_script_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("mdi-terminal.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.post_script_setting.Bind(wx.EVT_FILEPICKER_CHANGED, self.update_settings)
+
+        post_hook_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        post_hook_sizer.Add(
+            self.post_script_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        post_hook_sizer.Add(post_hook_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        post_hook_sizer.Add(self.post_script_setting, 1, wx.ALL | wx.EXPAND, 5)
+
+        hook_timeout_label = wx.StaticText(
+            self,
+            id=wx.ID_ANY,
+            label="Hook timeout (seconds):",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+        )
+
+        self.timeout_seconds_setting = wx.SpinCtrl(
+            self,
+            id=wx.ID_ANY,
+            min=1,
+            max=3600,
+            initial=30,
+            name="hooks_timeout_seconds",
+        )
+        self.timeout_seconds_setting.SetToolTip(
+            wx.ToolTip("Maximum runtime for pre/post hook scripts.")
+        )
+
+        self.timeout_seconds_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled("mdi-hourglass-top.png", self.parent.scale_factor, static=True),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.timeout_seconds_setting.Bind(wx.EVT_SPINCTRL, self.update_settings)
+
+        timeout_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        timeout_sizer.Add(
+            self.timeout_seconds_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        timeout_sizer.Add(
+            hook_timeout_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        timeout_sizer.Add(
+            self.timeout_seconds_setting, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+
+        hooks_box_sizer = wx.StaticBoxSizer(
+            wx.VERTICAL, self, "Generation hooks"
+        )
+        hooks_box_sizer.Add(pre_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        hooks_box_sizer.Add(post_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        hooks_box_sizer.Add(timeout_sizer, 0, wx.ALL | wx.EXPAND, 5)
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        layout = wx.GridSizer(12, 2, 0, 0)
-        layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid = wx.GridSizer(12, 2, 0, 0)
+        settings_grid.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
+
+        layout = wx.BoxSizer(wx.VERTICAL)
+        layout.Add(settings_grid, 1, wx.ALL | wx.EXPAND, 5)
+        layout.Add(hooks_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -646,6 +789,13 @@ class SettingsDialog(wx.Dialog):
         self.update_data_path(
             self.parent.settings.get("library", {}).get("data_path", "")
         )
+        self.update_pre_script(self.parent.settings.get("hooks", {}).get("pre_script", ""))
+        self.update_post_script(
+            self.parent.settings.get("hooks", {}).get("post_script", "")
+        )
+        self.update_timeout_seconds(
+            self.parent.settings.get("hooks", {}).get("timeout_seconds", 30)
+        )
 
     def update_selected_library(self, library_key):
         """Update settings dialog according to the selected library."""
@@ -658,6 +808,24 @@ class SettingsDialog(wx.Dialog):
         value = data_path.strip() if isinstance(data_path, str) else ""
         effective_path = value if value else self.parent.library.datadir
         self.library_data_path_setting.SetPath(effective_path)
+
+    def update_pre_script(self, script_path):
+        """Update settings dialog according to pre-hook script path."""
+        value = script_path.strip() if isinstance(script_path, str) else ""
+        self.pre_script_setting.SetPath(value)
+
+    def update_post_script(self, script_path):
+        """Update settings dialog according to post-hook script path."""
+        value = script_path.strip() if isinstance(script_path, str) else ""
+        self.post_script_setting.SetPath(value)
+
+    def update_timeout_seconds(self, timeout_seconds):
+        """Update settings dialog according to hook timeout."""
+        with contextlib.suppress(ValueError, TypeError):
+            timeout = int(timeout_seconds)
+            self.timeout_seconds_setting.SetValue(max(1, timeout))
+            return
+        self.timeout_seconds_setting.SetValue(30)
 
     def update_settings(self, event):
         """Update and persist a setting that was changed."""

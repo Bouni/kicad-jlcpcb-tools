@@ -21,6 +21,8 @@ from .helpers import (
 class Store:
     """A storage class to get data from a sqlite database and write it back."""
 
+    GENERATION_COUNT_KEY = "generation_count"
+
     def __init__(self, parent, project_path, board):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
@@ -81,7 +83,54 @@ class Store:
                 "exclude_from_pos NUMERIC DEFAULT 0"
                 ")",
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS metadata ("
+                "key TEXT NOT NULL PRIMARY KEY,"
+                "value TEXT NOT NULL"
+                ")",
+            )
             cur.commit()
+
+    def get_generation_count(self) -> int:
+        """Return the per-project generation counter."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            row = cur.execute(
+                "SELECT value FROM metadata WHERE key = :key",
+                {"key": self.GENERATION_COUNT_KEY},
+            ).fetchone()
+
+        if not row:
+            return 0
+
+        with contextlib.suppress(ValueError, TypeError):
+            return max(0, int(row[0]))
+        return 0
+
+    def increment_generation_count(self) -> int:
+        """Increment and persist the per-project generation counter."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            row = cur.execute(
+                "SELECT value FROM metadata WHERE key = :key",
+                {"key": self.GENERATION_COUNT_KEY},
+            ).fetchone()
+
+            current = 0
+            if row:
+                with contextlib.suppress(ValueError, TypeError):
+                    current = max(0, int(row[0]))
+
+            next_count = current + 1
+            cur.execute(
+                "INSERT INTO metadata (key, value) VALUES (:key, :value) "
+                "ON CONFLICT(key) DO UPDATE SET value = :value",
+                {
+                    "key": self.GENERATION_COUNT_KEY,
+                    "value": str(next_count),
+                },
+            )
+            cur.commit()
+
+        return next_count
 
     def read_all(self) -> dict:
         """Read all parts from the database."""

@@ -117,6 +117,13 @@ Also in the `production_files` folder, two files are generated, `BOM-<projectnam
 
 Footprints are included into the BOM and CPL files according to their `exclude from BOM` and `exclude from POS` attributes.
 
+Optional pre/post generation hook scripts can be configured in settings.
+
+- The pre-hook runs before generation and can block generation on failure (with Continue/Cancel prompt).
+- The post-hook runs only after successful generation.
+
+See [HOOKS.md](HOOKS.md) for configuration details and available environment variables.
+
 ![The fabrication files](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/fabrication_files.png)
 
 ### Export Additional JLC Specific Layers
