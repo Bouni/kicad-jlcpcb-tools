@@ -45,6 +45,33 @@ class AssemblyPricing:
     """One-time stencil fee in Economic mode."""
 
 
+@dataclass
+class BomEstimateSummary:
+    """Typed BOM estimate result payload."""
+
+    component_cost: float = 0.0
+    fixed_cost: float = 0.0
+    tht_setup_cost: float = 0.0
+    economic_setup_cost: float = 0.0
+    standard_setup_cost: float = 0.0
+    stencil_cost: float = 0.0
+    extended_cost: float = 0.0
+    standard_part_surcharge_cost: float = 0.0
+    variable_assembly_cost: float = 0.0
+    assembly_cost: float = 0.0
+    total_cost: float = 0.0
+    cost_per_board: float = 0.0
+    missing_prices: int = 0
+    bom_part_count: int = 0
+    standard_part_count: int = 0
+    smt_joint_count: int = 0
+    tht_joint_count: int = 0
+
+    def __getitem__(self, key: str):
+        """Temporary mapping-style access during migration from dict summaries."""
+        return getattr(self, key)
+
+
 DEFAULT_PRICING = AssemblyPricing()
 
 try:
@@ -162,27 +189,9 @@ def fetch_assembly_processes(
     return results
 
 
-def _create_empty_summary() -> dict:
+def _create_empty_summary() -> BomEstimateSummary:
     """Create an initialized BOM estimate summary payload."""
-    return {
-        "component_cost": 0.0,
-        "fixed_cost": 0.0,
-        "tht_setup_cost": 0.0,
-        "economic_setup_cost": 0.0,
-        "standard_setup_cost": 0.0,
-        "stencil_cost": 0.0,
-        "extended_cost": 0.0,
-        "standard_part_surcharge_cost": 0.0,
-        "variable_assembly_cost": 0.0,
-        "assembly_cost": 0.0,
-        "total_cost": 0.0,
-        "cost_per_board": 0.0,
-        "missing_prices": 0,
-        "bom_part_count": 0,
-        "standard_part_count": 0,
-        "smt_joint_count": 0,
-        "tht_joint_count": 0,
-    }
+    return BomEstimateSummary()
 
 
 def _collect_billable_bom_parts(parts: Iterable[Mapping[str, object]]) -> list[Mapping[str, object]]:
@@ -288,7 +297,7 @@ def calculate_bom_estimate(
     pricing: Optional[AssemblyPricing] = None,
     board_standard: Optional[bool] = None,
     smt_populated_sides: int = 0,
-) -> dict:
+) -> BomEstimateSummary:
     """Calculate BOM and assembly estimate totals.
 
     Pass a custom ``pricing`` instance to override the fee schedule.
@@ -308,7 +317,7 @@ def calculate_bom_estimate(
     summary = _create_empty_summary()
 
     bom_parts = _collect_billable_bom_parts(parts)
-    summary["bom_part_count"] = len(bom_parts)
+    summary.bom_part_count = len(bom_parts)
     if not bom_parts:
         return summary
 
@@ -321,8 +330,8 @@ def calculate_bom_estimate(
         details_cache=details_cache,
         get_part_details=get_part_details,
     )
-    summary["component_cost"] = component_cost
-    summary["missing_prices"] = missing_prices
+    summary.component_cost = component_cost
+    summary.missing_prices = missing_prices
 
     scan = _scan_assembly_state(
         bom_parts,
@@ -330,57 +339,57 @@ def calculate_bom_estimate(
         details_cache=details_cache,
         get_part_details=get_part_details,
     )
-    summary["standard_part_count"] = scan.standard_part_count
+    summary.standard_part_count = scan.standard_part_count
 
     if scan.tht_present:
-        summary["tht_setup_cost"] += _tht_setup_fee
+        summary.tht_setup_cost += _tht_setup_fee
 
     board_is_standard = scan.standard_present if board_standard is None else board_standard
     if not board_is_standard and scan.populated_part_present:
-        summary["economic_setup_cost"] += _economic_setup_fee
+        summary.economic_setup_cost += _economic_setup_fee
 
     if board_is_standard:
         side_count = max(0, int(smt_populated_sides or 0))
         if side_count > 0:
-            summary["standard_setup_cost"] += _standard_setup_fee * side_count
-            summary["stencil_cost"] += _standard_stencil_fee * side_count
+            summary.standard_setup_cost += _standard_setup_fee * side_count
+            summary.stencil_cost += _standard_stencil_fee * side_count
     elif scan.smt_joints > 0:
-        summary["stencil_cost"] += _economic_stencil_fee
+        summary.stencil_cost += _economic_stencil_fee
 
-    summary["fixed_cost"] = (
-        summary["tht_setup_cost"]
-        + summary["economic_setup_cost"]
-        + summary["standard_setup_cost"]
-        + summary["stencil_cost"]
+    summary.fixed_cost = (
+        summary.tht_setup_cost
+        + summary.economic_setup_cost
+        + summary.standard_setup_cost
+        + summary.stencil_cost
     )
 
-    summary["smt_joint_count"] = scan.smt_joints
-    summary["tht_joint_count"] = scan.tht_joints
-    summary["variable_assembly_cost"] += scan.tht_joints * _tht_per_joint_fee
-    summary["variable_assembly_cost"] += scan.smt_joints * _smt_per_joint_fee
-    summary["extended_cost"] += len(scan.extended_lcsc) * _extended_part_fee
+    summary.smt_joint_count = scan.smt_joints
+    summary.tht_joint_count = scan.tht_joints
+    summary.variable_assembly_cost += scan.tht_joints * _tht_per_joint_fee
+    summary.variable_assembly_cost += scan.smt_joints * _smt_per_joint_fee
+    summary.extended_cost += len(scan.extended_lcsc) * _extended_part_fee
     if board_is_standard:
-        summary["standard_part_surcharge_cost"] += len(scan.smt_lcsc) * _standard_part_fee
-        summary["variable_assembly_cost"] += summary["standard_part_surcharge_cost"]
+        summary.standard_part_surcharge_cost += len(scan.smt_lcsc) * _standard_part_fee
+        summary.variable_assembly_cost += summary.standard_part_surcharge_cost
 
-    summary["assembly_cost"] = (
-        summary["fixed_cost"]
-        + summary["extended_cost"]
-        + summary["variable_assembly_cost"]
+    summary.assembly_cost = (
+        summary.fixed_cost
+        + summary.extended_cost
+        + summary.variable_assembly_cost
     )
-    summary["total_cost"] = summary["component_cost"] + summary["assembly_cost"]
+    summary.total_cost = summary.component_cost + summary.assembly_cost
     if board_count > 0:
-        summary["cost_per_board"] = summary["total_cost"] / board_count
+        summary.cost_per_board = summary.total_cost / board_count
     return summary
 
 
 def format_bom_estimate_summary(
-    summary: dict, board_count: int, mode: str, reason_text: str
+    summary: BomEstimateSummary, board_count: int, mode: str, reason_text: str
 ) -> tuple[str, str]:
     """Format BOM estimate summary into display lines.
 
     Args:
-        summary: BOM estimate dict from calculate_bom_estimate()
+        summary: BOM estimate from calculate_bom_estimate()
         board_count: Number of boards
         mode: "Standard" or "Economic" mode string
         reason_text: Comma-joined reason text for triggers (or "none")
@@ -390,31 +399,28 @@ def format_bom_estimate_summary(
     """
     overview_line = (
         f"BOM Estimate ({board_count} boards): Mode {mode} | "
-        f"Total ${summary['total_cost']:.2f} | "
-        f"Per board ${summary['cost_per_board']:.2f} | "
+        f"Total ${summary.total_cost:.2f} | "
+        f"Per board ${summary.cost_per_board:.2f} | "
         f"Triggers {reason_text} | "
-        f"Missing prices {summary['missing_prices']}"
+        f"Missing prices {summary.missing_prices}"
     )
 
-    displayed_fixed_cost = summary["fixed_cost"] + summary["extended_cost"]
-    displayed_setup_cost = (
-        summary["economic_setup_cost"]
-        + summary["standard_setup_cost"]
-    )
+    displayed_fixed_cost = summary.fixed_cost + summary.extended_cost
+    displayed_setup_cost = summary.economic_setup_cost + summary.standard_setup_cost
 
     # Assembly cost includes variable joint fees and surcharges (extended + standard)
     # We show them separately in the breakdown for clarity
-    surcharge_breakdown = f"extended: ${summary['extended_cost']:.2f}"
-    if summary["standard_part_surcharge_cost"] > 0:
-        surcharge_breakdown += f", standard: ${summary['standard_part_surcharge_cost']:.2f}"
+    surcharge_breakdown = f"extended: ${summary.extended_cost:.2f}"
+    if summary.standard_part_surcharge_cost > 0:
+        surcharge_breakdown += f", standard: ${summary.standard_part_surcharge_cost:.2f}"
 
     details_line = (
-        f"Direct BOM Cost: ${summary['component_cost']:.2f} | "
+        f"Direct BOM Cost: ${summary.component_cost:.2f} | "
         f"Fixed ${displayed_fixed_cost:.2f} "
         f"({surcharge_breakdown}, setup: ${displayed_setup_cost:.2f}, "
-        f"stencil: ${summary['stencil_cost']:.2f}, tht: ${summary['tht_setup_cost']:.2f}) | "
-        f"Assembly ${summary['variable_assembly_cost']:.2f} "
-        f"(smt: {summary['smt_joint_count']} joints, tht: {summary['tht_joint_count']} joints)"
+        f"stencil: ${summary.stencil_cost:.2f}, tht: ${summary.tht_setup_cost:.2f}) | "
+        f"Assembly ${summary.variable_assembly_cost:.2f} "
+        f"(smt: {summary.smt_joint_count} joints, tht: {summary.tht_joint_count} joints)"
     )
 
     return overview_line, details_line
