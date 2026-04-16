@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 import contextlib
-import json
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, Mapping, Optional, Protocol
+import json
+from typing import Protocol, cast
 
 
 @dataclass
@@ -85,6 +86,7 @@ class _AssemblyApi(Protocol):
 
     def get_part_data(self, lcsc: str) -> dict:
         """Fetch part details for an LCSC number."""
+        ...
 
 
 @dataclass
@@ -152,15 +154,25 @@ def is_tht_part(part: Mapping[str, object]) -> bool:
 def get_assembly_flags(part: Mapping[str, object]) -> dict:
     """Parse assembly flags from persisted JSON."""
     try:
-        return json.loads(part.get("assembly_flags") or "{}")
+        return json.loads(str(part.get("assembly_flags") or "{}"))
     except (json.JSONDecodeError, TypeError, ValueError):
         return {}
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    """Best-effort integer conversion for persisted metadata fields."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        with contextlib.suppress(ValueError, TypeError):
+            return int(value)
+    return default
+
+
 def fetch_assembly_processes(
     lcsc_codes: Iterable[str],
-    api: Optional[_AssemblyApi] = None,
-) -> Dict[str, Dict[str, object]]:
+    api: _AssemblyApi | None = None,
+) -> dict[str, dict[str, object]]:
     """Fetch assembly metadata values from LCSC API for the given part numbers."""
     client = api or LCSC_API()
     results = {}
@@ -179,7 +191,7 @@ def fetch_assembly_processes(
 
         is_standard = False
         with contextlib.suppress(ValueError, TypeError):
-            is_standard = int(component_product_type) != 0
+            is_standard = _safe_int(component_product_type) != 0
 
         results[lcsc] = {
             "assembly_process": assembly_process,
@@ -264,10 +276,9 @@ def _scan_assembly_state(
         lcsc = str(part.get("lcsc") or "")
         details = _get_cached_part_details(lcsc, details_cache, get_part_details)
 
-        with contextlib.suppress(ValueError, TypeError):
-            if int(part.get("component_product_type")) != 0:
-                scan.standard_present = True
-                scan.standard_part_count += 1
+        if _safe_int(part.get("component_product_type")) != 0:
+            scan.standard_present = True
+            scan.standard_part_count += 1
 
         flags = get_assembly_flags(part)
         exclude_from_pos = bool(flags.get("exclude_from_pos", False))
@@ -275,7 +286,7 @@ def _scan_assembly_state(
 
         if not exclude_from_pos:
             scan.populated_part_present = True
-            joints = max(0, int(part.get("pad_count") or 0)) * board_count
+            joints = max(0, _safe_int(part.get("pad_count"))) * board_count
             if tht:
                 scan.tht_present = True
                 scan.tht_joints += joints
@@ -294,15 +305,16 @@ def calculate_bom_estimate(
     board_count: int,
     get_part_details: Callable[[str], dict],
     *,
-    pricing: Optional[AssemblyPricing] = None,
-    board_standard: Optional[bool] = None,
+    pricing: AssemblyPricing | None = None,
+    board_standard: bool | None = None,
     smt_populated_sides: int = 0,
 ) -> BomEstimateSummary:
     """Calculate BOM and assembly estimate totals.
 
     Pass a custom ``pricing`` instance to override the fee schedule.
 
-    Returns a summary dict with totals and diagnostics.
+    Returns a summary object with totals and diagnostics.
+
     """
     p = pricing if pricing is not None else DEFAULT_PRICING
     _tht_setup_fee = p.tht_setup_fee
@@ -396,6 +408,7 @@ def format_bom_estimate_summary(
 
     Returns:
         (overview_line, details_line) tuple for two-line display
+
     """
     overview_line = (
         f"BOM Estimate ({board_count} boards): Mode {mode} | "
@@ -440,7 +453,7 @@ def standard_signal_reasons(signals: Mapping[str, object]) -> list[str]:
 
 def calculate_part_bom_cost(
     part: Mapping[str, object], details: Mapping[str, object], board_count: int
-) -> Optional[float]:
+) -> float | None:
     """Return the raw BOM contribution for a part, excluding fixed fees."""
     if part.get("exclude_from_bom"):
         return None
@@ -506,21 +519,22 @@ def build_bom_estimate_view_model(
         }
 
     board_standard = bool(standard_context.get("board_standard"))
+    smt_side_count = _safe_int(standard_context.get("smt_populated_sides"))
+    signals = cast(Mapping[str, object], standard_context.get("signals", {}))
+    trigger_references = cast(
+        Iterable[str], standard_context.get("trigger_references", set())
+    )
     summary = calculate_bom_estimate(
         parts=parts,
         board_count=board_count,
         get_part_details=get_part_details,
         board_standard=board_standard,
-        smt_populated_sides=int(standard_context.get("smt_populated_sides") or 0),
+        smt_populated_sides=smt_side_count,
     )
 
     mode = "Standard" if board_standard else "Economic"
-    reason_text = ", ".join(
-        standard_signal_reasons(standard_context.get("signals", {}))
-    ) or "none"
-    highlight_refs = (
-        set(standard_context.get("trigger_references", set())) if board_standard else set()
-    )
+    reason_text = ", ".join(standard_signal_reasons(signals)) or "none"
+    highlight_refs = set(trigger_references) if board_standard else set()
     overview_line, details_line = format_bom_estimate_summary(
         summary,
         board_count,
