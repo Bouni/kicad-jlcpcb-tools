@@ -2,6 +2,7 @@
 
 import contextlib
 import csv
+import json
 import logging
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ from .helpers import (
     dict_factory,
     get_exclude_from_bom,
     get_exclude_from_pos,
+    get_is_dnp,
     get_lcsc_value,
     get_valid_footprints,
     natural_sort_collation,
@@ -22,6 +24,13 @@ class Store:
     """A storage class to get data from a sqlite database and write it back."""
 
     GENERATION_COUNT_KEY = "generation_count"
+    PART_INFO_ESTIMATOR_COLUMNS = {
+        "pad_count": "INTEGER",
+        "has_tht": "NUMERIC",
+        "assembly_process": "TEXT",
+        "component_product_type": "INTEGER",
+        "assembly_flags": "TEXT",
+    }
 
     def __init__(self, parent, project_path, board):
         self.logger = logging.getLogger(__name__)
@@ -83,6 +92,7 @@ class Store:
                 "exclude_from_pos NUMERIC DEFAULT 0"
                 ")",
             )
+            self.ensure_part_info_columns(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS metadata ("
                 "key TEXT NOT NULL PRIMARY KEY,"
@@ -90,6 +100,18 @@ class Store:
                 ")",
             )
             cur.commit()
+
+    def ensure_part_info_columns(self, cur):
+        """Idempotently ensure estimator metadata columns exist in part_info."""
+        existing_columns = {
+            row[1] for row in cur.execute("PRAGMA table_info(part_info)").fetchall()
+        }
+        for column_name, column_type in self.PART_INFO_ESTIMATOR_COLUMNS.items():
+            if column_name in existing_columns:
+                continue
+            cur.execute(
+                f"ALTER TABLE part_info ADD COLUMN {column_name} {column_type}",
+            )
 
     def get_generation_count(self) -> int:
         """Return the per-project generation counter."""
@@ -159,8 +181,12 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 "INSERT INTO part_info ("
-                "reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos"
-                ") VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)",
+                "reference, value, footprint, lcsc, stock, exclude_from_bom, "
+                "exclude_from_pos"
+                ") VALUES ("
+                ":reference, :value, :footprint, :lcsc, '', :exclude_from_bom, "
+                ":exclude_from_pos"
+                ")",
                 part,
             )
             cur.commit()
@@ -169,7 +195,10 @@ class Store:
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info set value = :value, footprint = :footprint, lcsc = :lcsc, exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos WHERE reference = :reference",
+                "UPDATE part_info set "
+                "value = :value, footprint = :footprint, lcsc = :lcsc, "
+                "exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos "
+                "WHERE reference = :reference",
                 part,
             )
             cur.commit()
@@ -214,26 +243,182 @@ class Store:
         """Change the LCSC attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference",
-                {"reference": ref, "lcsc": lcsc},
+                "UPDATE part_info SET "
+                "lcsc = :lcsc, "
+                "assembly_process = '', "
+                "component_product_type = NULL "
+                "WHERE reference = :reference",
+                {
+                    "reference": ref,
+                    "lcsc": lcsc,
+                },
             )
             cur.commit()
 
-    def get_assembly_enrichment_targets(self, references=None):
-        """Return enrichment targets grouped by LCSC.
+    def set_assembly_metadata(
+        self,
+        ref: str,
+        assembly_process: str,
+        component_product_type,
+    ):
+        """Persist assembly metadata for a part."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                "UPDATE part_info SET "
+                "assembly_process = :assembly_process, "
+                "component_product_type = :component_product_type "
+                "WHERE reference = :reference",
+                {
+                    "reference": ref,
+                    "assembly_process": assembly_process,
+                    "component_product_type": component_product_type,
+                },
+            )
+            cur.commit()
 
-        Compatibility shim for branches where enrichment metadata persistence is
-        not yet stored in the project database.
-        """
-        del references
-        return {}
+    def get_assembly_enrichment_targets(self, references=None) -> dict:
+        """Get references grouped by LCSC that still need assembly process enrichment."""
+        query = (
+            "SELECT reference, lcsc FROM part_info "
+            "WHERE lcsc IS NOT NULL AND lcsc != '' "
+            "AND ("
+            "assembly_process IS NULL OR assembly_process = '' "
+            "OR component_product_type IS NULL"
+            ")"
+        )
+        params = []
+        if references:
+            placeholders = ",".join("?" for _ in references)
+            query += f" AND reference IN ({placeholders})"
+            params.extend(references)
 
-    def set_assembly_metadata(self, reference, assembly_process, component_product_type):
-        """Persist enrichment metadata for one reference.
+        query += " ORDER BY lcsc, reference"
 
-        Compatibility no-op for branches where metadata columns do not exist.
-        """
-        del reference, assembly_process, component_product_type
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            rows = cur.execute(query, params).fetchall()
+
+        targets = {}
+        for reference, lcsc in rows:
+            if lcsc not in targets:
+                targets[lcsc] = []
+            targets[lcsc].append(reference)
+        return targets
+
+    def get_footprint_pad_count(self, footprint) -> int:
+        """Count pads that likely correspond to electrical solder joints."""
+        return sum(1 for pad in self.get_footprint_pads(footprint) if self.count_pad(pad))
+
+    def get_footprint_pads(self, footprint):
+        """Return an iterable of pads for a footprint across KiCad API variants."""
+        pads_fn = getattr(footprint, "Pads", None)
+        if callable(pads_fn):
+            return pads_fn()
+
+        get_pads_fn = getattr(footprint, "GetPads", None)
+        if callable(get_pads_fn):
+            return get_pads_fn()
+
+        return []
+
+    def count_pad(self, pad) -> bool:
+        """Return True when a pad should count as a solder joint."""
+        is_npth_fn = getattr(pad, "IsNPTH", None)
+        if callable(is_npth_fn) and is_npth_fn():
+            return False
+
+        is_plated_fn = getattr(pad, "IsPlated", None)
+        if callable(is_plated_fn) and not is_plated_fn():
+            return False
+
+        get_attribute_fn = getattr(pad, "GetAttribute", None)
+        if callable(get_attribute_fn):
+            attribute_text = str(get_attribute_fn()).upper()
+            if "NPTH" in attribute_text or "NONPLATED" in attribute_text:
+                return False
+
+        return True
+
+    def footprint_has_tht(self, footprint) -> bool:
+        """Heuristically determine if a footprint has through-hole pads."""
+        pads = self.get_footprint_pads(footprint)
+
+        for pad in pads:
+            if not self.count_pad(pad):
+                continue
+
+            has_hole_fn = getattr(pad, "HasHole", None)
+            if callable(has_hole_fn) and has_hole_fn():
+                return True
+
+            get_drill_size_fn = getattr(pad, "GetDrillSize", None)
+            if callable(get_drill_size_fn):
+                drill_size = get_drill_size_fn()
+                x = getattr(drill_size, "x", 0)
+                y = getattr(drill_size, "y", 0)
+                if x > 0 or y > 0:
+                    return True
+
+        return False
+
+    def get_assembly_flags(self, footprint) -> str:
+        """Build assembly-related footprint flags for estimator persistence."""
+        flags = {
+            "exclude_from_bom": bool(get_exclude_from_bom(footprint)),
+            "exclude_from_pos": bool(get_exclude_from_pos(footprint)),
+            "is_dnp": bool(get_is_dnp(footprint)),
+        }
+        return json.dumps(flags, sort_keys=True)
+
+    def set_estimator_metadata(
+        self,
+        ref: str,
+        pad_count: int,
+        has_tht: bool,
+        assembly_flags: str,
+    ):
+        """Persist estimator metadata for one part reference."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                "UPDATE part_info SET "
+                "pad_count = :pad_count, has_tht = :has_tht, assembly_flags = :assembly_flags "
+                "WHERE reference = :reference",
+                {
+                    "reference": ref,
+                    "pad_count": pad_count,
+                    "has_tht": int(bool(has_tht)),
+                    "assembly_flags": assembly_flags,
+                },
+            )
+            cur.commit()
+
+    def backfill_estimator_metadata(self, footprint, db_part: dict):
+        """Backfill estimator metadata when missing or stale."""
+        pad_count = self.get_footprint_pad_count(footprint)
+        has_tht = self.footprint_has_tht(footprint)
+        assembly_flags = self.get_assembly_flags(footprint)
+
+        ref = footprint.GetReference()
+        if not db_part:
+            db_part = self.get_part(ref)
+        if not db_part:
+            return
+
+        current_has_tht = db_part.get("has_tht")
+        if current_has_tht is None:
+            has_tht_changed = True
+        else:
+            has_tht_changed = bool(current_has_tht) != bool(has_tht)
+
+        should_update = (
+            db_part.get("pad_count") != pad_count
+            or has_tht_changed
+            or db_part.get("assembly_flags") != assembly_flags
+        )
+        if not should_update:
+            return
+
+        self.set_estimator_metadata(ref, pad_count, has_tht, assembly_flags)
+        self.logger.debug("Updated estimator metadata for %s", ref)
 
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
@@ -299,6 +484,7 @@ class Store:
                     board_part["reference"],
                 )
                 self.update_part(board_part)
+            self.backfill_estimator_metadata(fp, db_part)
         self.import_legacy_assignments()
         self.clean_database()
 
