@@ -7,10 +7,11 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bom_estimator import (
-    AssemblyPricing,
-    DEFAULT_PRICING,
     _collect_billable_bom_parts,
     _scan_assembly_state,
+    AssemblyPricing,
+    BomEstimateSummary,
+    DEFAULT_PRICING,
     build_bom_estimate_view_model,
     build_standard_mode_context,
     calculate_bom_estimate,
@@ -361,20 +362,20 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
 
     P = DEFAULT_PRICING
     assert round(summary["component_cost"], 3) == 5.000
-    assert round(summary["fixed_cost"], 3) == round(P.economic_setup_fee + P.economic_stencil_fee, 3)
-    assert round(summary["economic_setup_cost"], 3) == round(P.economic_setup_fee, 3)
-    assert round(summary["stencil_cost"], 3) == round(P.economic_stencil_fee, 3)
-    assert round(summary["tht_setup_cost"], 3) == 0.000
-    assert round(summary["standard_setup_cost"], 3) == 0.000
-    assert round(summary["extended_cost"], 3) == round(P.extended_part_fee, 3)
+    assert round(summary.fixed_cost, 3) == round(P.economic_setup_fee + P.economic_stencil_fee, 3)
+    assert round(summary.economic_setup_cost, 3) == round(P.economic_setup_fee, 3)
+    assert round(summary.stencil_cost, 3) == round(P.economic_stencil_fee, 3)
+    assert round(summary.tht_setup_cost, 3) == 0.000
+    assert round(summary.standard_setup_cost, 3) == 0.000
+    assert round(summary.extended_cost, 3) == round(P.extended_part_fee, 3)
     assert round(summary["standard_part_surcharge_cost"], 3) == 0.000
-    assert round(summary["variable_assembly_cost"], 3) == round(10 * P.smt_per_joint_fee, 3)
+    assert round(summary.variable_assembly_cost, 3) == round(10 * P.smt_per_joint_fee, 3)
     assert summary["smt_joint_count"] == 10
     assert summary["tht_joint_count"] == 0
     expected_assembly = P.economic_setup_fee + P.economic_stencil_fee + P.extended_part_fee + 10 * P.smt_per_joint_fee
     assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
     assert round(summary["total_cost"], 3) == round(5.0 + expected_assembly, 3)
-    assert round(summary["cost_per_board"], 3) == round((5.0 + expected_assembly) / 5, 3)
+    assert round(summary.cost_per_board, 3) == round((5.0 + expected_assembly) / 5, 3)
 
 
 def test_standard_surcharge_and_joint_counts_are_reported_separately():
@@ -454,22 +455,22 @@ def test_dnp_parts_are_excluded_from_bom_estimator_counts():
 
 def test_format_bom_estimate_summary_basic():
     """format_bom_estimate_summary produces expected display lines."""
-    summary = {
-        "total_cost": 25.50,
-        "cost_per_board": 12.75,
-        "missing_prices": 0,
-        "component_cost": 10.00,
-        "fixed_cost": 8.00,
-        "extended_cost": 3.00,
-        "economic_setup_cost": 8.00,
-        "standard_setup_cost": 0.00,
-        "stencil_cost": 1.50,
-        "tht_setup_cost": 0.00,
-        "variable_assembly_cost": 7.50,
-        "standard_part_surcharge_cost": 0.00,
-        "smt_joint_count": 100,
-        "tht_joint_count": 0,
-    }
+    summary = BomEstimateSummary(
+        total_cost=25.50,
+        cost_per_board=12.75,
+        missing_prices=0,
+        component_cost=10.00,
+        fixed_cost=8.00,
+        extended_cost=3.00,
+        economic_setup_cost=8.00,
+        standard_setup_cost=0.00,
+        stencil_cost=1.50,
+        tht_setup_cost=0.00,
+        variable_assembly_cost=7.50,
+        standard_part_surcharge_cost=0.00,
+        smt_joint_count=100,
+        tht_joint_count=0,
+    )
 
     overview, details = format_bom_estimate_summary(
         summary, board_count=2, mode="Economic", reason_text="none"
@@ -491,23 +492,22 @@ def test_format_bom_estimate_summary_basic():
 
 def test_format_bom_estimate_summary_with_standard_surcharge():
     """format_bom_estimate_summary shows standard surcharge in breakdown."""
-    summary = {
-        "total_cost": 35.00,
-        "cost_per_board": 17.50,
-        "missing_prices": 2,
-        "component_cost": 10.00,
-        "fixed_cost": 8.00,
-        "extended_cost": 3.00,
-        "economic_setup_cost": 0.00,
-        "standard_setup_cost": 25.00,
-        "stencil_cost": 7.80,
-        "tht_setup_cost": 0.00,
-        "variable_assembly_cost": 12.20,
-        "standard_part_surcharge_cost": 1.50,
-        "smt_joint_count": 50,
-        "tht_joint_count": 10,
-    }
-
+    summary = BomEstimateSummary(
+        total_cost=35.00,
+        cost_per_board=17.50,
+        missing_prices=2,
+        component_cost=10.00,
+        fixed_cost=8.00,
+        extended_cost=3.00,
+        economic_setup_cost=0.00,
+        standard_setup_cost=25.00,
+        stencil_cost=7.80,
+        tht_setup_cost=0.00,
+        variable_assembly_cost=12.20,
+        standard_part_surcharge_cost=1.50,
+        smt_joint_count=50,
+        tht_joint_count=10,
+    )
     overview, details = format_bom_estimate_summary(
         summary, board_count=1, mode="Standard", reason_text="standard parts"
     )
