@@ -481,17 +481,17 @@ class JLCPCBTools(wx.Dialog):
         dnp = self.footprint_list.AppendIconTextColumn(
             "POP", 8, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
-        correction = self.footprint_list.AppendTextColumn(
-            "Correction",
-            9,
-            width=120,
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
-        )
         price = self.footprint_list.AppendTextColumn(
             "BOM Price",
             13,
             width=100,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
+        correction = self.footprint_list.AppendTextColumn(
+            "Correction",
+            9,
+            width=120,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
@@ -581,13 +581,21 @@ class JLCPCBTools(wx.Dialog):
             initial=self.bom_estimator_board_count,
             size=HighResWxSize(self.window, wx.Size(90, -1)),
         )
+        if hasattr(self.bom_estimator_boards_input, "SetIncrement"):
+            self.bom_estimator_boards_input.SetIncrement(5)
+        self.bom_estimator_text_timer = wx.Timer(self)
+        self.Bind(
+            wx.EVT_TIMER,
+            self.on_bom_estimator_board_count_text_timer,
+            self.bom_estimator_text_timer,
+        )
         self.bom_estimator_boards_input.Bind(
             wx.EVT_SPINCTRL,
-            self.on_bom_estimator_board_count_changed,
+            self.on_bom_estimator_board_count_spinctrl,
         )
         self.bom_estimator_boards_input.Bind(
             wx.EVT_TEXT,
-            self.on_bom_estimator_board_count_changed,
+            self.on_bom_estimator_board_count_text,
         )
         estimator_controls_sizer.Add(
             self.bom_estimator_boards_input,
@@ -846,17 +854,35 @@ class JLCPCBTools(wx.Dialog):
         self.start_assembly_enrichment(e.references)
         self.recompute_bom_estimate()
 
-    def on_bom_estimator_board_count_changed(self, e):
-        """Persist board count changes and update BOM estimate."""
-        value = self._normalize_board_count(e.GetEventObject().GetValue())
-        if e.GetEventObject().GetValue() != value:
-            e.GetEventObject().SetValue(value)
+    def _set_bom_estimator_board_count(self, value: int) -> None:
+        """Persist board count and update estimate when value changed."""
         if value == self.bom_estimator_board_count:
             return
         self.bom_estimator_board_count = value
         self.settings.setdefault("general", {})["bom_estimator_boards"] = value
         self.save_settings()
         self.recompute_bom_estimate()
+
+    def on_bom_estimator_board_count_spinctrl(self, e):
+        """Handle SpinCtrl arrows immediately, using step=5 increments."""
+        value = self._normalize_board_count(e.GetEventObject().GetValue())
+        if e.GetEventObject().GetValue() != value:
+            e.GetEventObject().SetValue(value)
+        self._set_bom_estimator_board_count(value)
+
+    def on_bom_estimator_board_count_text(self, *_):
+        """Debounce manual text entry to avoid recompute flicker while typing."""
+        if hasattr(self.bom_estimator_text_timer, "StartOnce"):
+            self.bom_estimator_text_timer.StartOnce(300)
+        else:
+            self.bom_estimator_text_timer.Start(300, oneShot=True)
+
+    def on_bom_estimator_board_count_text_timer(self, *_):
+        """Apply board count from text field after debounce delay."""
+        value = self._normalize_board_count(self.bom_estimator_boards_input.GetValue())
+        if self.bom_estimator_boards_input.GetValue() != value:
+            self.bom_estimator_boards_input.SetValue(value)
+        self._set_bom_estimator_board_count(value)
 
     def _normalize_board_count(self, value) -> int:
         """Normalize board count to a minimum of 5 boards."""
