@@ -17,7 +17,11 @@ import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
-from .bom_estimator import calculate_bom_estimate, fetch_assembly_processes
+from .bom_estimator import (
+    calculate_bom_estimate,
+    fetch_assembly_processes,
+    prepare_bom_price_labels,
+)
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
 from .dataview_highlight import (
@@ -484,6 +488,13 @@ class JLCPCBTools(wx.Dialog):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
+        price = self.footprint_list.AppendTextColumn(
+            "BOM Price",
+            13,
+            width=100,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
         side = self.footprint_list.AppendIconTextColumn(
             "Side", 10, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
@@ -501,6 +512,7 @@ class JLCPCBTools(wx.Dialog):
         lcsc.SetSortable(True)
         type.SetSortable(True)
         stock.SetSortable(True)
+        price.SetSortable(True)
         bom.SetSortable(True)
         pos.SetSortable(False)
         dnp.SetSortable(True)
@@ -1025,6 +1037,12 @@ class JLCPCBTools(wx.Dialog):
             if standard_context["board_standard"]
             else set()
         )
+        for reference, price_label in prepare_bom_price_labels(
+            parts,
+            board_count,
+            self.library.get_part_details,
+        ).items():
+            self.partlist_data_model.set_bom_price(reference, price_label)
         self.partlist_data_model.set_standard_trigger_refs(highlight_refs)
         self.footprint_list.Refresh()
         overview_line = (
@@ -1037,8 +1055,7 @@ class JLCPCBTools(wx.Dialog):
             f"Direct BOM ${summary['component_cost']:.2f} | "
             f"Fixed ${summary['fixed_cost']:.2f} "
             f"(tht ${summary['tht_setup_cost']:.2f}, eco ${summary['economic_setup_cost']:.2f}, "
-            f"std ${summary['standard_setup_cost']:.2f}, stencil ${summary['stencil_cost']:.2f}, "
-            f"policy ${summary['policy_cost']:.2f}) | "
+            f"std ${summary['standard_setup_cost']:.2f}, stencil ${summary['stencil_cost']:.2f}) | "
             f"Extended ${summary['extended_cost']:.2f} | "
             f"Assembly var ${summary['variable_assembly_cost']:.2f} | "
             f"Assembly ${summary['assembly_cost']:.2f} | "
@@ -1161,9 +1178,10 @@ class JLCPCBTools(wx.Dialog):
         if not self.store:
             self.init_store()
         self.partlist_data_model.RemoveAll()
+        parts = self.store.read_all()
         details = {}
         corrections = self.library.get_all_correction_data()
-        for part in self.store.read_all():
+        for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
@@ -1190,6 +1208,7 @@ class JLCPCBTools(wx.Dialog):
                     str(fp.GetLayer()),
                     params_for_part(details.get(part["lcsc"], {})),
                     self._get_enrichment_status_label(part),  # enrichment
+                    "",  # bom price label
                 ]
             )
         self.recompute_bom_estimate()
