@@ -164,6 +164,10 @@ class JLCPCBTools(wx.Dialog):
             general_settings.get("highlight_standard_parts", True)
         )
         general_settings["highlight_standard_parts"] = self.highlight_standard_parts
+        self.enrichment_enabled = bool(
+            general_settings.get("enrichment_enabled", True)
+        )
+        general_settings["enrichment_enabled"] = self.enrichment_enabled
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -721,7 +725,8 @@ class JLCPCBTools(wx.Dialog):
         self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
-            self.start_assembly_enrichment()
+            if self.enrichment_enabled:
+                self.start_assembly_enrichment()
             self.recompute_bom_estimate()
 
     def init_fabrication(self):
@@ -1056,6 +1061,8 @@ class JLCPCBTools(wx.Dialog):
 
     def _get_enrichment_status_label(self, part: dict) -> str:
         """Build UI status text for per-part assembly enrichment state."""
+        if not self.enrichment_enabled:
+            return ""
         lcsc = str(part.get("lcsc") or "")
         if not lcsc:
             return ""
@@ -1067,6 +1074,8 @@ class JLCPCBTools(wx.Dialog):
 
     def start_assembly_enrichment(self, references=None):
         """Start background enrichment for missing assembly process metadata."""
+        if not self.enrichment_enabled:
+            return
         targets = self.store.get_assembly_enrichment_targets(references)
         targets = {
             lcsc: refs
@@ -1122,6 +1131,8 @@ class JLCPCBTools(wx.Dialog):
             if assembly_process or component_product_type is not None
             else "No data"
         )
+        if not self.enrichment_enabled:
+            status = ""
 
         for reference in refs:
             self.store.set_assembly_metadata(
@@ -1441,6 +1452,12 @@ class JLCPCBTools(wx.Dialog):
                     self.highlight_standard_parts
                 )
                 self.footprint_list.Refresh()
+            elif e.setting == "enrichment_enabled":
+                self.enrichment_enabled = bool(e.value)
+                self.pending_assembly_enrichment.clear()
+                self.populate_footprint_list()
+                if self.enrichment_enabled:
+                    self.start_assembly_enrichment()
 
         self.save_settings()
 
