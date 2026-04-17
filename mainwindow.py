@@ -20,6 +20,7 @@ import wx.dataview as dv  # pylint: disable=import-error
 from .bom_estimator import (
     calculate_bom_estimate,
     fetch_assembly_processes,
+    format_bom_estimate_summary,
     prepare_bom_price_labels,
 )
 from .corrections import CorrectionManagerDialog
@@ -1071,22 +1072,11 @@ class JLCPCBTools(wx.Dialog):
             self.partlist_data_model.set_bom_price(reference, price_label)
         self.partlist_data_model.set_standard_trigger_refs(highlight_refs)
         self.footprint_list.Refresh()
-        overview_line = (
-            f"BOM Estimate ({board_count} boards): Mode {mode} | "
-            f"Total ${summary['total_cost']:.2f} | "
-            f"Per board ${summary['cost_per_board']:.2f} | "
-            f"Triggers {reason_text}"
-        )
-        details_line = (
-            f"Direct BOM ${summary['component_cost']:.2f} | "
-            f"Fixed ${summary['fixed_cost']:.2f} "
-            f"(tht ${summary['tht_setup_cost']:.2f}, eco ${summary['economic_setup_cost']:.2f}, "
-            f"std ${summary['standard_setup_cost']:.2f}, stencil ${summary['stencil_cost']:.2f}) | "
-            f"Extended ${summary['extended_cost']:.2f} | "
-            f"Assembly var ${summary['variable_assembly_cost']:.2f} | "
-            f"Assembly ${summary['assembly_cost']:.2f} | "
-            f"Missing prices {summary['missing_prices']} | "
-            f"Standard parts {summary['standard_part_count']}"
+        overview_line, details_line = format_bom_estimate_summary(
+            summary,
+            board_count,
+            mode,
+            reason_text,
         )
         self.bom_estimator_summary.SetLabel(f"{overview_line}\n{details_line}")
 
