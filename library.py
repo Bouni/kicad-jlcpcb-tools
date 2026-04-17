@@ -1,6 +1,7 @@
 """Handle the JLCPCB parts database."""
 
 import contextlib
+import csv
 from enum import Enum
 import logging
 import os
@@ -130,12 +131,15 @@ class Library:
             self.state = LibraryState.UPDATE_NEEDED
         else:
             self.state = LibraryState.INITIALIZED
-        if (
-            not os.path.isfile(self.correctionsdb_file)
-            or os.path.getsize(self.correctionsdb_file) == 0
-        ):
+        corrections_file_missing = not os.path.isfile(self.correctionsdb_file)
+        if corrections_file_missing or os.path.getsize(self.correctionsdb_file) == 0:
             self.create_correction_table()
             self.migrate_corrections()
+            if (
+                corrections_file_missing
+                and self.correctionsdb_file == self.globalcorrectionsdb_file
+            ):
+                Thread(target=self.fetch_remote_corrections, daemon=True).start()
         if (
             not os.path.isfile(self.mappingsdb_file)
             or os.path.getsize(self.mappingsdb_file) == 0
@@ -821,6 +825,22 @@ class Library:
         """Migrate existing rotations from old rotation db and parts db to correction db."""
         self.migrate_corrections_from_rotation()
         self.migrate_corrections_from_parts()
+
+    def fetch_remote_corrections(self):
+        """Download rotation corrections from Matthew Lai's JLCKicadTools repo."""
+        url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
+            next(corrections)
+            for row in corrections:
+                if not self.get_correction_data(row[0]):
+                    offset = (row[2], row[3]) if len(row) >= 4 else (0, 0)
+                    self.insert_correction_data(row[0], row[1], offset)
+            self.logger.info("Downloaded global corrections from remote source.")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.debug("Failed to download global corrections: %s", exc)
 
     def migrate_mappings(self):
         """Migrate existing mappings from parts db to mappings db."""

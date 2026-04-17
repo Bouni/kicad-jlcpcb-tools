@@ -4,7 +4,6 @@ import csv
 import logging
 import os
 
-import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
@@ -580,30 +579,7 @@ class CorrectionManagerDialog(wx.Dialog):
     def download_correction_data(self, *_):
         """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo."""
         self.parent.library.create_correction_table()
-        try:
-            r = requests.get(
-                "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv",
-                timeout=5,
-            )
-            corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
-            next(corrections)
-            for row in corrections:
-                if not self.parent.library.get_correction_data(row[0]):
-                    if len(row) >= 4:
-                        self.parent.library.insert_correction_data(
-                            row[0], row[1], (row[2], row[3])
-                        )
-                    else:
-                        self.parent.library.insert_correction_data(
-                            row[0], row[1], (0, 0)
-                        )
-                else:
-                    self.logger.info(
-                        "Correction '%s' exists already in database. Leaving this one out.",
-                        row[0],
-                    )
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            self.logger.debug(err)
+        self.parent.library.fetch_remote_corrections()
         self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
