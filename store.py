@@ -219,6 +219,22 @@ class Store:
             )
             cur.commit()
 
+    def get_assembly_enrichment_targets(self, references=None):
+        """Return enrichment targets grouped by LCSC.
+
+        Compatibility shim for branches where enrichment metadata persistence is
+        not yet stored in the project database.
+        """
+        del references
+        return {}
+
+    def set_assembly_metadata(self, reference, assembly_process, component_product_type):
+        """Persist enrichment metadata for one reference.
+
+        Compatibility no-op for branches where metadata columns do not exist.
+        """
+        del reference, assembly_process, component_product_type
+
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
         for fp in get_valid_footprints(self.board):

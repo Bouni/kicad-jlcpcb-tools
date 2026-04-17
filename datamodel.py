@@ -3,6 +3,7 @@
 import logging
 import re
 
+import wx  # pylint: disable=import-error
 import wx.dataview as dv
 
 from .dataview_highlight import (
@@ -21,6 +22,7 @@ class PartListDataModel(dv.PyDataViewModel):
     def __init__(self, scale_factor):
         super().__init__()
         self.data = []
+        self.standard_trigger_refs = set()
         self.columns = {
             "REF_COL": 0,
             "VALUE_COL": 1,
@@ -34,6 +36,8 @@ class PartListDataModel(dv.PyDataViewModel):
             "ROT_COL": 9,
             "SIDE_COL": 10,
             "PARAMS_COL": 11,
+            "ENRICH_COL": 12,
+            "PRICE_COL": 13,
         }
 
         self.bom_pos_icons = [
@@ -57,6 +61,25 @@ class PartListDataModel(dv.PyDataViewModel):
             ),
         ]
         self.logger = logging.getLogger(__name__)
+
+    def set_standard_trigger_refs(self, refs):
+        """Set references that should be highlighted as Standard-mode triggers."""
+        self.standard_trigger_refs = set(refs or [])
+
+    def GetAttr(self, item, col, attr):
+        """Apply row attributes for Standard-mode trigger highlighting."""
+        del col
+        row = self.ItemToObject(item)
+        if not row:
+            return False
+        ref = str(row[self.columns["REF_COL"]] or "")
+        if ref not in self.standard_trigger_refs:
+            return False
+
+        attr.SetColour(wx.Colour(120, 0, 0))
+        if hasattr(attr, "SetBold"):
+            attr.SetBold(True)
+        return True
 
     @staticmethod
     def natural_sort_key(s):
@@ -84,6 +107,8 @@ class PartListDataModel(dv.PyDataViewModel):
             "wxDataViewIconText",
             "string",
             "wxDataViewIconText",
+            "string",
+            "string",
             "string",
         )
         return columntypes[col]
@@ -184,12 +209,9 @@ class PartListDataModel(dv.PyDataViewModel):
 
     def AddEntry(self, data: list):
         """Add a new entry to the data model."""
-        data[self.columns["PARAMS_COL"]] = self._encode_params_value(
-            data[self.columns["REF_COL"]],
-            data[self.columns["VALUE_COL"]],
-            data[self.columns["FP_COL"]],
-            data[self.columns["PARAMS_COL"]],
-        )
+        if len(data) <= self.columns["PRICE_COL"]:
+            data.extend([""] * (self.columns["PRICE_COL"] + 1 - len(data)))
+
         data[self.columns["BOM_COL"]] = self.get_bom_pos_icon(
             data[self.columns["BOM_COL"]]
         )
@@ -247,12 +269,25 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["LCSC_COL"]] = lcsc
         item[self.columns["TYPE_COL"]] = type
         item[self.columns["STOCK_COL"]] = stock
-        item[self.columns["PARAMS_COL"]] = self._encode_params_value(
-            item[self.columns["REF_COL"]],
-            item[self.columns["VALUE_COL"]],
-            item[self.columns["FP_COL"]],
-            params,
-        )
+        item[self.columns["PARAMS_COL"]] = params
+        item[self.columns["ENRICH_COL"]] = ""
+        item[self.columns["PRICE_COL"]] = ""
+        self.ItemChanged(self.ObjectToItem(item))
+
+    def set_enrichment_status(self, ref, status):
+        """Set enrichment status text for a given part reference."""
+        if (index := self.find_index(ref)) is None:
+            return
+        item = self.data[index]
+        item[self.columns["ENRICH_COL"]] = status
+        self.ItemChanged(self.ObjectToItem(item))
+
+    def set_bom_price(self, ref, price_label):
+        """Set BOM price text for a given part reference."""
+        if (index := self.find_index(ref)) is None:
+            return
+        item = self.data[index]
+        item[self.columns["PRICE_COL"]] = price_label
         self.ItemChanged(self.ObjectToItem(item))
 
     def remove_lcsc_number(self, item):
@@ -261,12 +296,9 @@ class PartListDataModel(dv.PyDataViewModel):
         obj[self.columns["LCSC_COL"]] = ""
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""
-        obj[self.columns["PARAMS_COL"]] = self._encode_params_value(
-            obj[self.columns["REF_COL"]],
-            obj[self.columns["VALUE_COL"]],
-            obj[self.columns["FP_COL"]],
-            "",
-        )
+        obj[self.columns["PARAMS_COL"]] = ""
+        obj[self.columns["ENRICH_COL"]] = ""
+        obj[self.columns["PRICE_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_bom(self, item):

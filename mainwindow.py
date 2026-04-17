@@ -3,6 +3,7 @@
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 
 from contextlib import suppress
+from collections.abc import Iterable
 from datetime import datetime as dt
 import json
 import logging
@@ -11,6 +12,7 @@ import re
 import sys
 from threading import Thread
 import time
+from typing import cast
 
 import pcbnew as kicad_pcbnew
 import wx  # pylint: disable=import-error
@@ -902,16 +904,21 @@ class JLCPCBTools(wx.Dialog):
     def _board_has_v_cut_drawings(self) -> bool:
         """Detect whether the board contains drawings on any V-cut layer."""
         board = self.pcbnew.GetBoard()
-        for drawing in board.GetDrawings():
-            get_layer = getattr(drawing, "GetLayer", None)
-            if not callable(get_layer):
-                continue
-            layer_id = get_layer()
-            with suppress(Exception):  # pylint: disable=broad-exception-caught
-                layer_name = str(board.GetLayerName(layer_id)).upper()
-                normalized = layer_name.replace("-", "_")
-                if "V_CUT" in normalized or "VCUT" in normalized:
-                    return True
+        get_drawings = getattr(board, "GetDrawings", None)
+        if not callable(get_drawings):
+            return False
+        with suppress(TypeError):
+            drawings = cast(Iterable, get_drawings())
+            for drawing in drawings:
+                get_layer = getattr(drawing, "GetLayer", None)
+                if not callable(get_layer):
+                    continue
+                layer_id = get_layer()
+                with suppress(Exception):  # pylint: disable=broad-exception-caught
+                    layer_name = str(board.GetLayerName(layer_id)).upper()
+                    normalized = layer_name.replace("-", "_")
+                    if "V_CUT" in normalized or "VCUT" in normalized:
+                        return True
         return False
 
     def _get_board_standard_context(self, parts, board_count: int) -> dict:
