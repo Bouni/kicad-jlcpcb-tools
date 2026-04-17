@@ -138,6 +138,9 @@ ignore = [
 ]
 
 
+[tool.pytest.ini_options]
+testpaths = ["tests", "common", "dblib"]
+
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false
 
