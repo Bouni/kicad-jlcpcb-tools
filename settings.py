@@ -446,149 +446,48 @@ class SettingsDialog(wx.Dialog):
             self.library_data_path_setting, 1, wx.ALL | wx.EXPAND, 5
         )
 
-        ##### Generation hooks #####
+        ##### Enable Assembly Enrichment #####
 
-        pre_hook_label = wx.StaticText(
+        self.enrichment_enabled_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Pre-generate hook script:",
+            label="Enable assembly enrichment",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
+            style=0,
+            name="general_enrichment_enabled",
         )
 
-        self.pre_script_setting = wx.FilePickerCtrl(
-            self,
-            id=wx.ID_ANY,
-            path="",
-            message="Choose pre-generate hook script",
-            wildcard="All files (*.*)|*.*",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=wx.FLP_DEFAULT_STYLE | wx.FLP_USE_TEXTCTRL,
-            name="hooks_pre_script",
-        )
-        self.pre_script_setting.SetToolTip(
+        self.enrichment_enabled_setting.SetToolTip(
             wx.ToolTip(
-                "Runs before fabrication generation."
-                " A nonzero exit code shows a Continue/Cancel prompt."
+                "Whether to fetch and show assembly enrichment status from LCSC metadata"
             )
         )
 
-        self.pre_script_image = wx.StaticBitmap(
+        self.enrichment_enabled_image = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            loadBitmapScaled("mdi-terminal.png", self.parent.scale_factor, static=True),
+            loadBitmapScaled("database-outline.png", self.parent.scale_factor, static=True),
             wx.DefaultPosition,
             wx.DefaultSize,
             0,
         )
 
-        self.pre_script_setting.Bind(wx.EVT_FILEPICKER_CHANGED, self.update_settings)
+        self.enrichment_enabled_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        pre_hook_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        pre_hook_sizer.Add(
-            self.pre_script_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+        enrichment_enabled_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        enrichment_enabled_sizer.Add(
+            self.enrichment_enabled_image, 10, wx.ALL | wx.EXPAND, 5
         )
-        pre_hook_sizer.Add(pre_hook_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        pre_hook_sizer.Add(self.pre_script_setting, 1, wx.ALL | wx.EXPAND, 5)
-
-        post_hook_label = wx.StaticText(
-            self,
-            id=wx.ID_ANY,
-            label="Post-generate hook script:",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
+        enrichment_enabled_sizer.Add(
+            self.enrichment_enabled_setting, 100, wx.ALL | wx.EXPAND, 5
         )
-
-        self.post_script_setting = wx.FilePickerCtrl(
-            self,
-            id=wx.ID_ANY,
-            path="",
-            message="Choose post-generate hook script",
-            wildcard="All files (*.*)|*.*",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=wx.FLP_DEFAULT_STYLE | wx.FLP_USE_TEXTCTRL,
-            name="hooks_post_script",
-        )
-        self.post_script_setting.SetToolTip(
-            wx.ToolTip(
-                "Runs only after successful fabrication generation."
-            )
-        )
-
-        self.post_script_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("mdi-terminal.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.post_script_setting.Bind(wx.EVT_FILEPICKER_CHANGED, self.update_settings)
-
-        post_hook_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        post_hook_sizer.Add(
-            self.post_script_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        post_hook_sizer.Add(post_hook_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        post_hook_sizer.Add(self.post_script_setting, 1, wx.ALL | wx.EXPAND, 5)
-
-        hook_timeout_label = wx.StaticText(
-            self,
-            id=wx.ID_ANY,
-            label="Hook timeout (seconds):",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-        )
-
-        self.timeout_seconds_setting = wx.SpinCtrl(
-            self,
-            id=wx.ID_ANY,
-            min=1,
-            max=3600,
-            initial=30,
-            name="hooks_timeout_seconds",
-        )
-        self.timeout_seconds_setting.SetToolTip(
-            wx.ToolTip("Maximum runtime for pre/post hook scripts.")
-        )
-
-        self.timeout_seconds_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("mdi-hourglass-top.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.timeout_seconds_setting.Bind(wx.EVT_SPINCTRL, self.update_settings)
-
-        timeout_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        timeout_sizer.Add(
-            self.timeout_seconds_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        timeout_sizer.Add(
-            hook_timeout_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        timeout_sizer.Add(
-            self.timeout_seconds_setting, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-
-        hooks_box_sizer = wx.StaticBoxSizer(
-            wx.VERTICAL, self, "Generation hooks"
-        )
-        hooks_box_sizer.Add(pre_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        hooks_box_sizer.Add(post_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        hooks_box_sizer.Add(timeout_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        layout = wx.GridSizer(13, 2, 0, 0)
+        layout = wx.GridSizer(14, 2, 0, 0)
         layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -601,6 +500,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(highlight_standard_parts_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(enrichment_enabled_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -800,6 +700,14 @@ class SettingsDialog(wx.Dialog):
                 "Do not highlight standard-mode trigger parts"
             )
 
+    def update_enrichment_enabled(self, enabled):
+        """Update settings dialog according to enrichment enable setting."""
+        self.enrichment_enabled_setting.SetValue(bool(enabled))
+        if enabled:
+            self.enrichment_enabled_setting.SetLabel("Enable assembly enrichment")
+        else:
+            self.enrichment_enabled_setting.SetLabel("Disable assembly enrichment")
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
@@ -831,6 +739,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_highlight_standard_parts(
             self.parent.settings.get("general", {}).get("highlight_standard_parts", True)
+        )
+        self.update_enrichment_enabled(
+            self.parent.settings.get("general", {}).get("enrichment_enabled", True)
         )
         self.update_selected_library(
             self.parent.settings.get("library", {}).get(
