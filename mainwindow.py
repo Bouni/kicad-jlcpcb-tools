@@ -158,6 +158,10 @@ class JLCPCBTools(wx.Dialog):
             1,
             minimum=1,
         )
+        self.bom_estimator_show = bool(
+            general_settings.get("bom_estimator_show", True)
+        )
+        general_settings["bom_estimator_show"] = self.bom_estimator_show
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -547,7 +551,8 @@ class JLCPCBTools(wx.Dialog):
         # ---------------------- BOM Cost Estimator ---------------------------
         # ---------------------------------------------------------------------
 
-        estimator_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.estimator_sizer = wx.BoxSizer(wx.VERTICAL)
+        estimator_sizer = self.estimator_sizer
 
         estimator_controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
         estimator_controls_sizer.Add(
@@ -621,6 +626,8 @@ class JLCPCBTools(wx.Dialog):
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
+        self.Layout()
+        self.estimator_sizer.ShowItems(self.bom_estimator_show)
         self.Layout()
         self.Centre(wx.BOTH)
 
@@ -1421,6 +1428,10 @@ class JLCPCBTools(wx.Dialog):
                     minimum=1,
                 )
                 self.recompute_bom_estimate()
+            elif e.setting == "bom_estimator_show":
+                self.bom_estimator_show = bool(e.value)
+                self.estimator_sizer.ShowItems(self.bom_estimator_show)
+                self.Layout()
 
         self.save_settings()
 
