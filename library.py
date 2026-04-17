@@ -139,7 +139,12 @@ class Library:
                 corrections_file_missing
                 and self.correctionsdb_file == self.globalcorrectionsdb_file
             ):
-                Thread(target=self.fetch_remote_corrections, daemon=True).start()
+                db_path = self.globalcorrectionsdb_file
+                Thread(
+                    target=self.fetch_remote_corrections,
+                    args=(db_path,),
+                    daemon=True,
+                ).start()
         if (
             not os.path.isfile(self.mappingsdb_file)
             or os.path.getsize(self.mappingsdb_file) == 0
@@ -351,10 +356,11 @@ class Library:
             )
             cur.commit()
 
-    def get_correction_data(self, regex):
+    def get_correction_data(self, regex, db_path=None):
         """Get the correction data by its regex."""
+        target = db_path if db_path is not None else self.correctionsdb_file
         with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(target)) as con,
             con as cur,
         ):
             return cur.execute(
@@ -381,10 +387,11 @@ class Library:
             )
             cur.commit()
 
-    def insert_correction_data(self, regex, rotation, offset):
+    def insert_correction_data(self, regex, rotation, offset, db_path=None):
         """Insert a correction into the database."""
+        target = db_path if db_path is not None else self.correctionsdb_file
         with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(target)) as con,
             con as cur,
         ):
             cur.execute(
@@ -826,8 +833,9 @@ class Library:
         self.migrate_corrections_from_rotation()
         self.migrate_corrections_from_parts()
 
-    def fetch_remote_corrections(self):
+    def fetch_remote_corrections(self, db_path=None):
         """Download rotation corrections from Matthew Lai's JLCKicadTools repo."""
+        target = db_path if db_path is not None else self.correctionsdb_file
         url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
         try:
             r = requests.get(url, timeout=10)
@@ -835,12 +843,14 @@ class Library:
             corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
             next(corrections)
             for row in corrections:
-                if not self.get_correction_data(row[0]):
+                if len(row) < 2:
+                    continue
+                if not self.get_correction_data(row[0], db_path=target):
                     offset = (row[2], row[3]) if len(row) >= 4 else (0, 0)
-                    self.insert_correction_data(row[0], row[1], offset)
-            self.logger.info("Downloaded global corrections from remote source.")
+                    self.insert_correction_data(row[0], row[1], offset, db_path=target)
+            self.logger.info("Downloaded corrections to %s.", target)
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.debug("Failed to download global corrections: %s", exc)
+            self.logger.debug("Failed to download corrections to %s: %s", target, exc)
 
     def migrate_mappings(self):
         """Migrate existing mappings from parts db to mappings db."""
