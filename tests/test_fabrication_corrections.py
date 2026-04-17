@@ -1,9 +1,12 @@
 """Tests for the two-pass correction matching logic in Fabrication._find_correction."""
 
 import importlib.util
+from pathlib import Path
 import sys
 import types
 from unittest.mock import MagicMock
+
+_ROOT = Path(__file__).parent.parent
 
 # Mock KiCad modules before importing fabrication
 for _mod in ["pcbnew", "wx", "wx.dataview"]:
@@ -11,7 +14,7 @@ for _mod in ["pcbnew", "wx", "wx.dataview"]:
 
 # fabrication.py uses relative imports, so give it a fake parent package
 _pkg = types.ModuleType("kicadplugin")
-_pkg.__path__ = ["."]
+_pkg.__path__ = [str(_ROOT)]
 sys.modules["kicadplugin"] = _pkg
 
 _helpers = types.ModuleType("kicadplugin.helpers")
@@ -19,7 +22,7 @@ _helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
 sys.modules["kicadplugin.helpers"] = _helpers
 
 _spec = importlib.util.spec_from_file_location(
-    "kicadplugin.fabrication", "fabrication.py"
+    "kicadplugin.fabrication", _ROOT / "fabrication.py"
 )
 assert _spec is not None and _spec.loader is not None
 _fab_mod = importlib.util.module_from_spec(_spec)
