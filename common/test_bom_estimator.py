@@ -124,6 +124,34 @@ def test_calculate_bom_estimate_missing_price_counts_unknown_lcsc_price():
     assert summary["missing_prices"] == 1
 
 
+def test_calculate_bom_estimate_accepts_policy_kwargs_and_reports_policy_cost():
+    """Policy kwargs are accepted and included in fixed/policy cost totals."""
+    parts = [
+        {
+            "lcsc": "C100",
+            "exclude_from_bom": 0,
+            "pad_count": 1,
+            "has_tht": 0,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+        }
+    ]
+
+    def get_details(_):
+        return {"price": "1-:1.00", "type": "Basic"}
+
+    summary = calculate_bom_estimate(
+        parts,
+        board_count=10,
+        get_part_details=get_details,
+        order_handling_fee=2.5,
+        panelization_per_board_fee=0.1,
+        panelization_threshold_boards=5,
+    )
+
+    assert round(summary["policy_cost"], 3) == 3.5
+    assert summary["fixed_cost"] >= summary["policy_cost"]
+
+
 class _FakeApi:
     def get_part_data(self, lcsc):
         if lcsc == "C1":

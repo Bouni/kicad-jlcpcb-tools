@@ -56,6 +56,7 @@ class BomEstimateSummary:
     economic_setup_cost: float = 0.0
     standard_setup_cost: float = 0.0
     stencil_cost: float = 0.0
+    policy_cost: float = 0.0
     extended_cost: float = 0.0
     standard_part_surcharge_cost: float = 0.0
     variable_assembly_cost: float = 0.0
@@ -308,6 +309,9 @@ def calculate_bom_estimate(
     pricing: AssemblyPricing | None = None,
     board_standard: bool | None = None,
     smt_populated_sides: int = 0,
+    order_handling_fee: float = 0.0,
+    panelization_per_board_fee: float = 0.0,
+    panelization_threshold_boards: int = 1,
 ) -> BomEstimateSummary:
     """Calculate BOM and assembly estimate totals.
 
@@ -327,6 +331,23 @@ def calculate_bom_estimate(
     _economic_stencil_fee = p.economic_stencil_fee
     _standard_stencil_fee = p.standard_stencil_fee
     summary = _create_empty_summary()
+
+    try:
+        order_fee = max(0.0, float(order_handling_fee))
+    except (TypeError, ValueError):
+        order_fee = 0.0
+    try:
+        panel_fee = max(0.0, float(panelization_per_board_fee))
+    except (TypeError, ValueError):
+        panel_fee = 0.0
+    try:
+        panel_threshold = max(1, int(panelization_threshold_boards))
+    except (TypeError, ValueError):
+        panel_threshold = 1
+
+    summary.policy_cost += order_fee
+    if board_count >= panel_threshold:
+        summary.policy_cost += panel_fee * board_count
 
     bom_parts = _collect_billable_bom_parts(parts)
     summary.bom_part_count = len(bom_parts)
@@ -373,6 +394,7 @@ def calculate_bom_estimate(
         + summary.economic_setup_cost
         + summary.standard_setup_cost
         + summary.stencil_cost
+        + summary.policy_cost
     )
 
     summary.smt_joint_count = scan.smt_joints
