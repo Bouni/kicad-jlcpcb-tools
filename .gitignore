@@ -154,3 +154,6 @@ dev
 
 # OS cruft
 .DS_Store
+
+# Local Claude Code project instructions (use CLAUDE.md for project-wide instructions)
+CLAUDE.local.md
