@@ -89,6 +89,21 @@ class Fabrication:
             filler.Fill(zones)
             Refresh()
 
+    def _find_correction(self, value):
+        """Return (rotation, offset) for the first correction matching value.
+
+        Tries anchored match (pattern + '$') before falling back to unanchored,
+        so 'SOT-23-3' beats 'SOT-23' when both patterns exist.
+        """
+        anchored = [(f"(?:{r})$", rot, off) for r, rot, off in self.corrections]
+        for regex, rotation, offset in anchored:
+            if re.search(regex, value):
+                return rotation, offset
+        for regex, rotation, offset in self.corrections:
+            if re.search(regex, value):
+                return rotation, offset
+        return None
+
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
@@ -102,19 +117,14 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
-        # First check if the part name matches
-        for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint.GetReference())):
-                return self.rotate(footprint, rotation, correction)
-        # Then try to match by value
-        for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint.GetValue())):
-                return self.rotate(footprint, rotation, correction)
-        # Then if the package matches
-        for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
-                return self.rotate(footprint, rotation, correction)
-        # If no correction matches, return the original rotation
+        for getter in (
+            lambda: str(footprint.GetReference()),
+            lambda: str(footprint.GetValue()),
+            lambda: str(footprint.GetFPID().GetLibItemName()),
+        ):
+            match = self._find_correction(getter())
+            if match:
+                return self.rotate(footprint, rotation, match[0])
         return rotation
 
     def rotate(self, footprint, rotation, correction):
@@ -165,19 +175,14 @@ class Fabrication:
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
-        # First check if the part name matches
-        for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint.GetReference())):
-                return self.reposition(footprint, position, correction)
-        # Then try to match by value
-        for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint.GetValue())):
-                return self.reposition(footprint, position, correction)
-        # Then if the package matches
-        for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
-                return self.reposition(footprint, position, correction)
-        # If no correction matches, return the original position
+        for getter in (
+            lambda: str(footprint.GetReference()),
+            lambda: str(footprint.GetValue()),
+            lambda: str(footprint.GetFPID().GetLibItemName()),
+        ):
+            match = self._find_correction(getter())
+            if match:
+                return self.reposition(footprint, position, match[1])
         return position
 
     def get_position(self, footprint):
