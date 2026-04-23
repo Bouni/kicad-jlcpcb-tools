@@ -34,7 +34,7 @@ for file in VERSION settings.json ./*.py ./*.png; do
 done
 
 echo "Copy directories"
-for dir in icons lib common dblib core; do
+for dir in icons lib common dblib core scripts; do
 	cp -R "$dir" "$PLUGINS_DIR"
 done
 
