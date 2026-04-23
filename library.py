@@ -1,6 +1,7 @@
 """Handle the JLCPCB parts database."""
 
 import contextlib
+import csv
 from enum import Enum
 import logging
 import os
@@ -130,12 +131,20 @@ class Library:
             self.state = LibraryState.UPDATE_NEEDED
         else:
             self.state = LibraryState.INITIALIZED
-        if (
-            not os.path.isfile(self.correctionsdb_file)
-            or os.path.getsize(self.correctionsdb_file) == 0
-        ):
+        corrections_file_missing = not os.path.isfile(self.correctionsdb_file)
+        if corrections_file_missing or os.path.getsize(self.correctionsdb_file) == 0:
             self.create_correction_table()
             self.migrate_corrections()
+            if (
+                corrections_file_missing
+                and self.correctionsdb_file == self.globalcorrectionsdb_file
+            ):
+                db_path = self.globalcorrectionsdb_file
+                Thread(
+                    target=self.fetch_remote_corrections,
+                    args=(db_path,),
+                    daemon=True,
+                ).start()
         if (
             not os.path.isfile(self.mappingsdb_file)
             or os.path.getsize(self.mappingsdb_file) == 0
@@ -347,10 +356,11 @@ class Library:
             )
             cur.commit()
 
-    def get_correction_data(self, regex):
+    def get_correction_data(self, regex, db_path=None):
         """Get the correction data by its regex."""
+        target = db_path if db_path is not None else self.correctionsdb_file
         with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(target)) as con,
             con as cur,
         ):
             return cur.execute(
@@ -377,10 +387,11 @@ class Library:
             )
             cur.commit()
 
-    def insert_correction_data(self, regex, rotation, offset):
+    def insert_correction_data(self, regex, rotation, offset, db_path=None):
         """Insert a correction into the database."""
+        target = db_path if db_path is not None else self.correctionsdb_file
         with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(target)) as con,
             con as cur,
         ):
             cur.execute(
@@ -821,6 +832,25 @@ class Library:
         """Migrate existing rotations from old rotation db and parts db to correction db."""
         self.migrate_corrections_from_rotation()
         self.migrate_corrections_from_parts()
+
+    def fetch_remote_corrections(self, db_path=None):
+        """Download rotation corrections from Matthew Lai's JLCKicadTools repo."""
+        target = db_path if db_path is not None else self.correctionsdb_file
+        url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
+            next(corrections)
+            for row in corrections:
+                if len(row) < 2:
+                    continue
+                if not self.get_correction_data(row[0], db_path=target):
+                    offset = (row[2], row[3]) if len(row) >= 4 else (0, 0)
+                    self.insert_correction_data(row[0], row[1], offset, db_path=target)
+            self.logger.info("Downloaded corrections to %s.", target)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.debug("Failed to download corrections to %s: %s", target, exc)
 
     def migrate_mappings(self):
         """Migrate existing mappings from parts db to mappings db."""
