@@ -138,6 +138,7 @@ def set_lcsc_value(fp, lcsc: str):
                     field.SetVisible(False)
                     break
 
+
 def get_valid_footprints(board):
     """Get all footprints that have a valid reference.
 

@@ -16,6 +16,11 @@ import wx.dataview as dv  # pylint: disable=import-error
 
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
+from .dataview_highlight import (
+    HighlightedTextRenderer,
+    decode_highlighted_value,
+    simplify_footprint_name,
+)
 from .derive_params import params_for_part
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
@@ -404,13 +409,18 @@ class JLCPCBTools(wx.Dialog):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
-        params = self.footprint_list.AppendTextColumn(
-            "LCSC Params",
-            11,
-            width=150,
-            mode=dv.DATAVIEW_CELL_INERT,
+        params_renderer = HighlightedTextRenderer(
+            value_decoder=decode_highlighted_value,
             align=wx.ALIGN_CENTER,
         )
+        params = dv.DataViewColumn(
+            "LCSC Params",
+            params_renderer,
+            11,
+            width=150,
+            align=wx.ALIGN_CENTER,
+        )
+        self.footprint_list.AppendColumn(params)
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
@@ -927,17 +937,38 @@ class JLCPCBTools(wx.Dialog):
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
 
-        changed = False
-
         gerber_settings = self.settings.setdefault("gerber", {})
+        highlighting_settings = self.settings.setdefault("highlighting", {})
+        partselector_settings = self.settings.setdefault("partselector", {})
+        migrated = False
+
+        if "matches" not in highlighting_settings:
+            if "highlight_matches" in partselector_settings:
+                highlighting_settings["matches"] = partselector_settings.pop(
+                    "highlight_matches"
+                )
+                migrated = True
+            else:
+                highlighting_settings["matches"] = True
+                migrated = True
+
         if gerber_settings.get("force_drc", False) and not gerber_settings.get(
             "fill_zones", True
         ):
             gerber_settings["fill_zones"] = True
-            changed = True
+            migrated = True
 
-        if changed:
+        if migrated:
             self.save_settings()
+
+    def decode_mainwindow_highlight_value(
+        self, value: str
+    ) -> tuple[str, list[str]]:
+        """Decode params cell text, optionally disabling highlight terms by setting."""
+        text, terms = decode_highlighted_value(value)
+        if not self.settings.get("highlighting", {}).get("matches", True):
+            return text, []
+        return text, terms
 
     def save_settings(self):
         """Save settings to settings.json."""
@@ -958,9 +989,8 @@ class JLCPCBTools(wx.Dialog):
                 if value.endswith("R") or value.endswith("r") or value.endswith("o"):
                     value = value[:-1]
                 value += "Ω"
-            m = re.search(r"_(\d+)_\d+Metric", footprint)
-            if m:
-                value += f" {m.group(1)}"
+            if simplified_footprint := simplify_footprint_name(footprint):
+                value += f" {simplified_footprint}"
             selection[ref] = value
         PartSelectorDialog(self, selection).ShowModal()
 
