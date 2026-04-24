@@ -145,30 +145,14 @@ class Fabrication:
         if footprint_api.get_layer(footprint) != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
-<<<<<<< HEAD
-        for getter in (
-            lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
-            lambda: str(footprint.GetFPID().GetLibItemName()),
+        for value in (
+            str(footprint_api.get_reference(footprint)),
+            str(footprint_api.get_value(footprint)),
+            str(footprint_api.get_fpid_name(footprint)),
         ):
-            match = self._find_correction(getter())
+            match = self._find_correction(value)
             if match:
                 return self.rotate(footprint, rotation, match[0])
-=======
-        # First check if the part name matches
-        for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint_api.get_reference(footprint))):
-                return self.rotate(footprint, rotation, correction)
-        # Then try to match by value
-        for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint_api.get_value(footprint))):
-                return self.rotate(footprint, rotation, correction)
-        # Then if the package matches
-        for regex, correction, _ in self.corrections:
-            if re.search(regex, str(footprint_api.get_fpid_name(footprint))):
-                return self.rotate(footprint, rotation, correction)
-        # If no correction matches, return the original rotation
->>>>>>> 71a1b0f (refactor(fabrication): use FootprintAPI for footprint metadata)
         return rotation
 
     def rotate(self, footprint, rotation, correction):
@@ -218,31 +202,15 @@ class Fabrication:
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
-<<<<<<< HEAD
-        for getter in (
-            lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
-            lambda: str(footprint.GetFPID().GetLibItemName()),
+        footprint_api = self.kicad.footprint
+        for value in (
+            str(footprint_api.get_reference(footprint)),
+            str(footprint_api.get_value(footprint)),
+            str(footprint_api.get_fpid_name(footprint)),
         ):
-            match = self._find_correction(getter())
+            match = self._find_correction(value)
             if match:
                 return self.reposition(footprint, position, match[1])
-=======
-        footprint_api = self.kicad.footprint
-        # First check if the part name matches
-        for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint_api.get_reference(footprint))):
-                return self.reposition(footprint, position, correction)
-        # Then try to match by value
-        for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint_api.get_value(footprint))):
-                return self.reposition(footprint, position, correction)
-        # Then if the package matches
-        for regex, _, correction in self.corrections:
-            if re.search(regex, str(footprint_api.get_fpid_name(footprint))):
-                return self.reposition(footprint, position, correction)
-        # If no correction matches, return the original position
->>>>>>> 71a1b0f (refactor(fabrication): use FootprintAPI for footprint metadata)
         return position
 
     def get_position(self, footprint):
