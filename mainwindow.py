@@ -9,12 +9,12 @@ import re
 import sys
 import time
 
-import pcbnew as kicad_pcbnew
 import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
 from .corrections import CorrectionManagerDialog
+from .kicad_api import KicadProvider
 from .datamodel import PartListDataModel
 from .derive_params import params_for_part
 from .events import (
@@ -39,12 +39,8 @@ from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
     HighResWxSize,
-    get_is_dnp,
     getVersion,
     loadBitmapScaled,
-    set_lcsc_value,
-    toggle_exclude_from_bom,
-    toggle_exclude_from_pos,
 )
 from .kicad_drc import DRCViolationCounter
 from .library import Library, LibraryState
@@ -84,20 +80,17 @@ ID_CONTEXT_MENU_FIND_MAPPING = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_MAPPING = wx.NewIdRef()
 
 
-class KicadProvider:
-    """KiCad implementation of the provider, see standalone_impl.py for the stub version."""
-
-    def get_pcbnew(self):
-        """Get the pcbnew instance."""
-        return kicad_pcbnew
-
-
 class JLCPCBTools(wx.Dialog):
     """JLCPCBTools main dialog."""
 
-    def __init__(self, parent, kicad_provider=KicadProvider()):
+    def __init__(self, parent, adapter_set=None):
         while not wx.GetApp():
             time.sleep(1)
+
+        # Initialize adapter set (defaults to KicadProvider if not provided)
+        if adapter_set is None:
+            adapter_set = KicadProvider.create_adapter_set()
+
         wx.Dialog.__init__(
             self,
             parent,
@@ -107,12 +100,39 @@ class JLCPCBTools(wx.Dialog):
             size=wx.Size(1300, 800),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
-        self.pcbnew = kicad_provider.get_pcbnew()
+        # Store adapters for use throughout the dialog
+        self.kicad = adapter_set
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
         self.scale_factor = GetScaleFactor(self.window)
-        self.project_path = os.path.split(self.pcbnew.GetBoard().GetFileName())[0]
-        self.board_name = os.path.split(self.pcbnew.GetBoard().GetFileName())[1]
+        board_filename = self.kicad.board.get_board_filename()
+        if board_filename and not os.path.isabs(board_filename):
+            kiprjmod = os.getenv("KIPRJMOD", "")
+            if kiprjmod:
+                candidate = os.path.abspath(os.path.join(kiprjmod, board_filename))
+                if os.path.exists(candidate):
+                    board_filename = candidate
+
+        if (not os.path.isabs(board_filename)) or (
+            board_filename and not os.path.exists(board_filename)
+        ):
+            # IPC payload paths can be relative in some KiCad builds; use SWIG
+            # board filename as a compatibility fallback when available.
+            pcbnew_module = getattr(self.kicad, "pcbnew", None)
+            if pcbnew_module is not None and hasattr(pcbnew_module, "GetBoard"):
+                try:
+                    swig_board = pcbnew_module.GetBoard()
+                    swig_name = swig_board.GetFileName() if swig_board is not None else ""
+                    if swig_name:
+                        board_filename = swig_name
+                except Exception:  # noqa: BLE001
+                    pass
+
+        board_filename = os.path.abspath(board_filename) if board_filename else ""
+        self.project_path = os.path.split(board_filename)[0] if board_filename else ""
+        self.board_name = os.path.split(board_filename)[1] if board_filename else ""
+        if not self.project_path:
+            self.project_path = os.getenv("KIPRJMOD", "")
         self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
@@ -545,7 +565,8 @@ class JLCPCBTools(wx.Dialog):
             self.init_store()
         self.library.create_mapping_table()
 
-        self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
+        version = ".".join(str(part) for part in self.kicad.version)
+        self.logger.debug("kicad version: %s", version)
 
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
@@ -583,13 +604,17 @@ class JLCPCBTools(wx.Dialog):
 
     def init_store(self):
         """Initialize the store of part assignments."""
-        self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
+        self.store = Store(self, self.project_path, self.kicad.board.get_board())
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
 
     def init_fabrication(self):
         """Initialize the fabrication."""
-        self.fabrication = Fabrication(self, self.pcbnew.GetBoard())
+        self.fabrication = Fabrication(
+            self,
+            self.kicad.board.get_board(),
+            adapter_set=self.kicad,
+        )
 
     def reset_gauge(self, *_):
         """Initialize the gauge."""
@@ -634,9 +659,8 @@ class JLCPCBTools(wx.Dialog):
         for reference in e.references:
             self.store.set_lcsc(reference, e.lcsc)
             self.store.set_stock(reference, int(e.stock))
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(reference)
-            set_lcsc_value(fp, e.lcsc)
+            fp = self.kicad.board.get_footprint_by_reference(reference)
+            self.kicad.footprint.set_lcsc_value(fp, e.lcsc)
             params = params_for_part(self.library.get_part_details(e.lcsc))
             self.partlist_data_model.set_lcsc(
                 reference, e.lcsc, e.type, e.stock, params
@@ -675,8 +699,8 @@ class JLCPCBTools(wx.Dialog):
         details = {}
         corrections = self.library.get_all_correction_data()
         for part in self.store.read_all():
-            fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
-            is_dnp = get_is_dnp(fp)
+            fp = self.kicad.board.get_footprint_by_reference(part["reference"])
+            is_dnp = self.kicad.footprint.get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
             if part["lcsc"] and part["lcsc"] not in details:
                 details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
@@ -698,7 +722,7 @@ class JLCPCBTools(wx.Dialog):
                     part["exclude_from_pos"],
                     int(is_dnp),
                     str(self.get_correction(part, corrections)),
-                    str(fp.GetLayer()),
+                    str(self.kicad.footprint.get_layer(fp)),
                     params_for_part(details.get(part["lcsc"], {})),
                 ]
             )
@@ -782,18 +806,18 @@ class JLCPCBTools(wx.Dialog):
             self.select_alike_parts()
 
         # clear the present selections
-        selection = self.pcbnew.GetCurrentSelection()
+        selection = self.kicad.board.get_current_selection()
         for selected in selection:
-            selected.ClearSelected()
+            self.kicad.footprint.clear_selected(selected)
 
         # select all of the selected items in the footprint_list
         if self.footprint_list.GetSelectedItemsCount() > 0:
             for item in self.footprint_list.GetSelections():
                 ref = self.partlist_data_model.get_reference(item)
-                fp = self.pcbnew.GetBoard().FindFootprintByReference(ref)
-                fp.SetSelected()
+                fp = self.kicad.board.get_footprint_by_reference(ref)
+                self.kicad.footprint.set_selected(fp)
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
-            self.pcbnew.Refresh()
+            self.kicad.board.refresh_display()
 
     def enable_part_specific_toolbar_buttons(self, state):
         """Control the state of all the buttons that relate to parts in toolbar on the right side."""
@@ -813,10 +837,9 @@ class JLCPCBTools(wx.Dialog):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(ref)
-            bom = toggle_exclude_from_bom(fp)
-            pos = toggle_exclude_from_pos(fp)
+            fp = self.kicad.board.get_footprint_by_reference(ref)
+            bom = self.kicad.footprint.toggle_exclude_from_bom(fp)
+            pos = self.kicad.footprint.toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, int(bom))
             self.store.set_pos(ref, int(pos))
             self.partlist_data_model.toggle_bom_pos(item)
@@ -825,9 +848,8 @@ class JLCPCBTools(wx.Dialog):
         """Toggle the exclude from BOM attribute of a footprint."""
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(ref)
-            bom = toggle_exclude_from_bom(fp)
+            fp = self.kicad.board.get_footprint_by_reference(ref)
+            bom = self.kicad.footprint.toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, int(bom))
             self.partlist_data_model.toggle_bom(item)
 
@@ -835,9 +857,8 @@ class JLCPCBTools(wx.Dialog):
         """Toggle the exclude from POS attribute of a footprint."""
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(ref)
-            pos = toggle_exclude_from_pos(fp)
+            fp = self.kicad.board.get_footprint_by_reference(ref)
+            pos = self.kicad.footprint.toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, int(pos))
             self.partlist_data_model.toggle_pos(item)
 
@@ -847,9 +868,8 @@ class JLCPCBTools(wx.Dialog):
             ref = self.partlist_data_model.get_reference(item)
             self.store.set_lcsc(ref, "")
             self.store.set_stock(ref, None)
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(ref)
-            set_lcsc_value(fp, "")
+            fp = self.kicad.board.get_footprint_by_reference(ref)
+            self.kicad.footprint.set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
 
     def select_alike_parts(self, *_):
@@ -967,24 +987,31 @@ class JLCPCBTools(wx.Dialog):
     def count_order_number_placeholders(self):
         """Count the JLC order/serial number placeholders."""
         count = 0
-        for drawing in self.pcbnew.GetBoard().GetDrawings():
-            if drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or drawing.IsOnLayer(
-                kicad_pcbnew.B_SilkS
-            ):
-                if isinstance(drawing, kicad_pcbnew.PCB_TEXT):
+        pcb_constants = self.kicad.utility.get_pcb_constants()
+        f_silks = pcb_constants["F_SilkS"]
+        b_silks = pcb_constants["B_SilkS"]
+        pcb_text = pcb_constants["PCB_TEXT"]
+        pcb_shape = pcb_constants["PCB_SHAPE"]
+        s_rect = pcb_constants["S_RECT"]
+
+        for drawing in self.kicad.board.get_drawings():
+            if drawing.IsOnLayer(f_silks) or drawing.IsOnLayer(b_silks):
+                if isinstance(drawing, pcb_text):
                     if drawing.GetText().strip() == "JLCJLCJLCJLC":
                         self.logger.info(
                             "Found placeholder for order number at %.1f/%.1f.",
-                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
+                            self.kicad.utility.to_mm(drawing.GetCenter().x),
+                            self.kicad.utility.to_mm(drawing.GetCenter().y),
                         )
                         count += 1
 
                 if (
-                    isinstance(drawing, kicad_pcbnew.PCB_SHAPE)
-                    and drawing.GetShape() == kicad_pcbnew.S_RECT
-                    and ((hasattr(drawing, "IsFilled") and drawing.IsFilled())
-                    or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill()))
+                    isinstance(drawing, pcb_shape)
+                    and drawing.GetShape() == s_rect
+                    and (
+                        (hasattr(drawing, "IsFilled") and drawing.IsFilled())
+                        or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill())
+                    )
                 ):
                     corners = drawing.GetRectCorners()
 
@@ -992,8 +1019,8 @@ class JLCPCBTools(wx.Dialog):
                     top_left_y = min([p.y for p in corners], default=0)
                     bottom_right_x = max([p.x for p in corners], default=0)
                     bottom_right_y = max([p.y for p in corners], default=0)
-                    width = kicad_pcbnew.ToMM(bottom_right_x - top_left_x)
-                    height = kicad_pcbnew.ToMM(bottom_right_y - top_left_y)
+                    width = self.kicad.utility.to_mm(bottom_right_x - top_left_x)
+                    height = self.kicad.utility.to_mm(bottom_right_y - top_left_y)
 
                     if (
                         (width == 5 and height == 5)
@@ -1004,16 +1031,16 @@ class JLCPCBTools(wx.Dialog):
                             "Found placeholder for 2D barcode (%dmm x %dmm) at %.1f/%.1f.",
                             width,
                             height,
-                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
+                            self.kicad.utility.to_mm(drawing.GetCenter().x),
+                            self.kicad.utility.to_mm(drawing.GetCenter().y),
                         )
                         count += 1
 
                     if (width == 10 and height == 2) or (width == 2 and height == 10):
                         self.logger.info(
                             "Found placeholder for serial number at %.1f/%.1f.",
-                            kicad_pcbnew.ToMM(drawing.GetCenter().x),
-                            kicad_pcbnew.ToMM(drawing.GetCenter().y),
+                            self.kicad.utility.to_mm(drawing.GetCenter().x),
+                            self.kicad.utility.to_mm(drawing.GetCenter().y),
                         )
                         count += 1
 
@@ -1434,4 +1461,6 @@ class LogBoxHandler(logging.StreamHandler):
     def emit(self, record):
         """Marshal the event over to the main thread."""
         msg = self.format(record)
-        wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
+        # Destination window may already be destroyed during shutdown.
+        with suppress(RuntimeError):
+            wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))

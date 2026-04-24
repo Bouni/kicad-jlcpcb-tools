@@ -1,10 +1,13 @@
 """Contains the Action Plugin."""
 
+import logging
 import os
 
-from pcbnew import ActionPlugin  # pylint: disable=import-error
-
+from .kicad_api import KicadProvider, get_action_plugin_base
 from .mainwindow import JLCPCBTools
+
+logger = logging.getLogger(__name__)
+ActionPlugin = get_action_plugin_base()
 
 
 class JLCPCBPlugin(ActionPlugin):
@@ -25,6 +28,15 @@ class JLCPCBPlugin(ActionPlugin):
 
     def Run(self):
         """Overwrite Run."""
-        dialog = JLCPCBTools(None)
+        try:
+            # Initialize KiCad adapter set
+            adapter_set = KicadProvider.create_adapter_set()
+            logger.info("KiCad adapters initialized successfully")
+
+            # Create and show main dialog with adapters
+            dialog = JLCPCBTools(None, adapter_set=adapter_set)
+        except Exception as e:
+            logger.exception("Failed to initialize JLCPCB Tools: %s", str(e))
+            raise
         dialog.Center()
         dialog.Show()

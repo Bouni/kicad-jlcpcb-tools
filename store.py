@@ -10,10 +10,6 @@ from typing import Union
 
 from .helpers import (
     dict_factory,
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-    get_lcsc_value,
-    get_valid_footprints,
     natural_sort_collation,
 )
 
@@ -26,6 +22,9 @@ class Store:
     def __init__(self, parent, project_path, board):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
+        self.kicad = getattr(parent, "kicad", None)
+        if self.kicad is None:
+            raise ValueError("Store requires an initialized KiCad adapter set")
         self.project_path = project_path
         self.board = board
         self.datadir = os.path.join(self.project_path, "jlcpcb")
@@ -219,14 +218,22 @@ class Store:
 
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
-        for fp in get_valid_footprints(self.board):
+        footprint_api = self.kicad.footprint
+        for fp in self.kicad.board.get_all_footprints():
+            lcsc = footprint_api.get_lcsc_value(fp)
+            exclude_from_bom = footprint_api.get_exclude_from_bom(fp)
+            exclude_from_pos = footprint_api.get_exclude_from_pos(fp)
+            reference = footprint_api.get_reference(fp)
+            value = footprint_api.get_value(fp)
+            footprint_name = str(footprint_api.get_fpid_name(fp))
+
             board_part = {
-                "reference": fp.GetReference(),
-                "value": fp.GetValue(),
-                "footprint": str(fp.GetFPID().GetLibItemName()),
-                "lcsc": get_lcsc_value(fp),
-                "exclude_from_bom": get_exclude_from_bom(fp),
-                "exclude_from_pos": get_exclude_from_pos(fp),
+                "reference": reference,
+                "value": value,
+                "footprint": footprint_name,
+                "lcsc": lcsc,
+                "exclude_from_bom": exclude_from_bom,
+                "exclude_from_pos": exclude_from_pos,
             }
             db_part = self.get_part(board_part["reference"])
             # if part is not in the database yet, create it
@@ -286,7 +293,10 @@ class Store:
 
     def clean_database(self):
         """Delete all parts from the database that are no longer present on the board."""
-        refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(self.board)]
+        refs = [
+            f"'{self.kicad.footprint.get_reference(fp)}'"
+            for fp in self.kicad.board.get_footprints()
+        ]
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"

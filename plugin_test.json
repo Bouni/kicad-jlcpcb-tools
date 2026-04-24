@@ -1,0 +1,22 @@
+{
+  "$schema": "https://go.kicad.org/api/schemas/v1",
+  "identifier": "io.github.z2amiller.kicad-jlcpcb-tools-test",
+  "name": "JLCPCB Tools Test",
+  "description": "Test plugin to verify action button visibility",
+  "runtime": {
+    "type": "python",
+    "min_version": "3.9"
+  },
+  "actions": [
+    {
+      "identifier": "test-action",
+      "name": "Test Action",
+      "description": "Test action to verify button shows up",
+      "entrypoint": "ipc_plugin_main_test.py",
+      "show-button": true,
+      "scopes": ["pcb"],
+      "icons-light": ["jlcpcb-icon.png"],
+      "icons-dark": ["jlcpcb-icon.png"]
+    }
+  ]
+}

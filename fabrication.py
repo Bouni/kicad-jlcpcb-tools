@@ -1,58 +1,95 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
 import csv
-from importlib import import_module
 import logging
 import math
 import os
 from pathlib import Path
 import re
+from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from pcbnew import (  # pylint: disable=import-error
-    EXCELLON_WRITER,
-    PCB_PLOT_PARAMS,
-    PCB_VIA,
-    PLOT_CONTROLLER,
-    PLOT_FORMAT_GERBER,
-    VECTOR2I,
-    ZONE_FILLER,
-    B_Cu,
-    B_Mask,
-    B_Paste,
-    B_SilkS,
-    Edge_Cuts,
-    F_Cu,
-    F_Mask,
-    F_Paste,
-    F_SilkS,
-    FromMM,
-    Refresh,
-    ToMM,
-    wxPoint,
-)
-
-from .helpers import get_is_dnp
-
-# Compatibility hack for V6 / V7 / V7.99
 try:
-    from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE  # pylint: disable=import-error
-
-    NO_DRILL_SHAPE = DRILL_MARKS_NO_DRILL_SHAPE
-except ImportError:
-    NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
+    from .export_api import SWIGExportPlan, create_export_plan
+except ImportError:  # pragma: no cover - fallback for direct script imports/tests
+    from export_api import SWIGExportPlan, create_export_plan
 
 
 class Fabrication:
     """Contains all functionality to generate the JLCPCB production files."""
 
-    def __init__(self, parent, board):
+    def __init__(self, parent, board, adapter_set=None):
         self.parent = parent
         self.logger = logging.getLogger(__name__)
         self.board = board
+        self.kicad: Any = adapter_set or getattr(parent, "kicad", None)
+        if self.kicad is None:
+            raise ValueError("Fabrication requires an initialized KiCad adapter set")
         self.corrections = []
-        self.path, self.filename = os.path.split(self.board.GetFileName())
+        self.layer_count = None
+        board_filename = self.get_board_filename()
+        self.path, self.filename = os.path.split(board_filename)
         self.create_folders()
+        self.export_plan = create_export_plan(self)
+
+    def get_board_filename(self) -> str:
+        """Return the current board filename across SWIG and IPC backends."""
+        board_filename = ""
+        board_adapter = getattr(self.kicad, "board", None)
+        if board_adapter is not None and hasattr(board_adapter, "get_board_filename"):
+            board_filename = board_adapter.get_board_filename() or ""
+
+        if not board_filename and hasattr(self.board, "GetFileName"):
+            board_filename = self.board.GetFileName()
+
+        if not board_filename and isinstance(self.board, dict):
+            board_filename = str(self.board.get("path", ""))
+
+        if not board_filename:
+            project_path = getattr(self.parent, "project_path", "")
+            board_name = getattr(self.parent, "board_name", "")
+            if project_path and board_name:
+                board_filename = os.path.join(project_path, board_name)
+
+        if not board_filename:
+            return ""
+
+        if os.path.isabs(board_filename):
+            if os.path.exists(board_filename):
+                return board_filename
+
+        if board_filename and not os.path.isabs(board_filename):
+            kiprjmod = os.getenv("KIPRJMOD", "")
+            if kiprjmod:
+                candidate = os.path.abspath(os.path.join(kiprjmod, board_filename))
+                if os.path.exists(candidate):
+                    return candidate
+
+        project_path = getattr(self.parent, "project_path", "")
+        if project_path:
+            candidate = os.path.abspath(os.path.join(project_path, board_filename))
+            if os.path.exists(candidate):
+                return candidate
+
+        if not board_filename:
+            board_name = getattr(self.parent, "board_name", "")
+            kiprjmod = os.getenv("KIPRJMOD", "")
+            if board_name and kiprjmod:
+                candidate = os.path.abspath(os.path.join(kiprjmod, board_name))
+                if os.path.exists(candidate):
+                    return candidate
+
+        pcbnew_module = getattr(self.kicad, "pcbnew", None)
+        if pcbnew_module is not None and hasattr(pcbnew_module, "GetBoard"):
+            try:
+                swig_board = pcbnew_module.GetBoard()
+                swig_name = swig_board.GetFileName() if swig_board is not None else ""
+                if swig_name:
+                    return os.path.abspath(swig_name)
+            except Exception:  # noqa: BLE001
+                pass
+
+        return os.path.abspath(board_filename)
 
     def create_folders(self):
         """Create output folders if they not already exist."""
@@ -84,10 +121,7 @@ class Fabrication:
     def fill_zones(self):
         """Refill copper zones following user prompt."""
         if self.parent.settings.get("gerber", {}).get("fill_zones", True):
-            filler = ZONE_FILLER(self.board)
-            zones = self.board.Zones()
-            filler.Fill(zones)
-            Refresh()
+            self.kicad.utility.refill_zones(self.board)
 
     def _find_correction(self, value):
         """Return (rotation, offset) for the first correction matching value.
@@ -106,36 +140,31 @@ class Fabrication:
 
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
-        original = footprint.GetOrientation()
-        # `.AsDegrees()` added in KiCAD 6.99
-        try:
-            rotation = original.AsDegrees()
-        except AttributeError:
-            # we need to divide by 10 to get 180 out of 1800 for example.
-            # This might be a bug in 5.99 / 6.0 RC
-            rotation = original / 10
-        if footprint.GetLayer() != 0:
+        footprint_api = self.kicad.footprint
+        rotation = footprint_api.get_orientation(footprint)
+        if footprint_api.get_layer(footprint) != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
-        for getter in (
-            lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
-            lambda: str(footprint.GetFPID().GetLibItemName()),
+        for value in (
+            str(footprint_api.get_reference(footprint)),
+            str(footprint_api.get_value(footprint)),
+            str(footprint_api.get_fpid_name(footprint)),
         ):
-            match = self._find_correction(getter())
+            match = self._find_correction(value)
             if match:
                 return self.rotate(footprint, rotation, match[0])
         return rotation
 
     def rotate(self, footprint, rotation, correction):
         """Calculate the actual correction."""
+        footprint_api = self.kicad.footprint
         rotation = (rotation + int(correction)) % 360
         self.logger.info(
             "Fixed rotation of %s (%s / %s) on %s Layer by %d degrees",
-            footprint.GetReference(),
-            footprint.GetValue(),
-            footprint.GetFPID().GetLibItemName(),
-            "Top" if footprint.GetLayer() == 0 else "Bottom",
+            footprint_api.get_reference(footprint),
+            footprint_api.get_value(footprint),
+            footprint_api.get_fpid_name(footprint),
+            "Top" if footprint_api.get_layer(footprint) == 0 else "Bottom",
             correction,
         )
         return rotation
@@ -143,44 +172,43 @@ class Fabrication:
     def reposition(self, footprint, position, offset):
         """Adjust the position of the footprint, returning the new position as a wxPoint."""
         if offset[0] != 0 or offset[1] != 0:
-            original = footprint.GetOrientation()
-            # `.AsRadians()` added in KiCAD 6.99
-            try:
-                rotation = original.AsDegrees()
-            except AttributeError:
-                # we need to divide by 10 to get 180 out of 1800 for example.
-                # This might be a bug in 5.99 / 6.0 RC
-                rotation = original / 10
-            if footprint.GetLayer() != 0:
+            footprint_api = self.kicad.footprint
+            rotation = footprint_api.get_orientation(footprint)
+            if footprint_api.get_layer(footprint) != 0:
                 # bottom angles need to be mirrored on Y-axis
                 rotation = (180 - rotation) % 360
-            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(offset[1]) * math.sin(math.radians(rotation))
-            offset_y = - FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
-            if footprint.GetLayer() != 0:
+            offset_x = self.kicad.utility.from_mm(offset[0]) * math.cos(
+                math.radians(rotation)
+            ) + self.kicad.utility.from_mm(offset[1]) * math.sin(math.radians(rotation))
+            offset_y = -self.kicad.utility.from_mm(offset[0]) * math.sin(
+                math.radians(rotation)
+            ) + self.kicad.utility.from_mm(offset[1]) * math.cos(math.radians(rotation))
+            if footprint_api.get_layer(footprint) != 0:
                 # mirrored coordinate system needs to be taken into account on the bottom
                 offset_x = -offset_x
             self.logger.info(
                 "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
-                footprint.GetReference(),
-                footprint.GetValue(),
-                footprint.GetFPID().GetLibItemName(),
-                "Top" if footprint.GetLayer() == 0 else "Bottom",
+                footprint_api.get_reference(footprint),
+                footprint_api.get_value(footprint),
+                footprint_api.get_fpid_name(footprint),
+                "Top" if footprint_api.get_layer(footprint) == 0 else "Bottom",
                 offset[0],
                 offset[1],
             )
-            return wxPoint(
+            return self.kicad.utility.create_wx_point(
                 position.x + offset_x, position.y + offset_y
             )
         return position
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
-        for getter in (
-            lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
-            lambda: str(footprint.GetFPID().GetLibItemName()),
+        footprint_api = self.kicad.footprint
+        for value in (
+            str(footprint_api.get_reference(footprint)),
+            str(footprint_api.get_value(footprint)),
+            str(footprint_api.get_fpid_name(footprint)),
         ):
-            match = self._find_correction(getter())
+            match = self._find_correction(value)
             if match:
                 return self.reposition(footprint, position, match[1])
         return position
@@ -188,148 +216,35 @@ class Fabrication:
     def get_position(self, footprint):
         """Calculate position based on center of bounding box."""
         try:
-            pads = footprint.Pads()
+            pads = self.kicad.footprint.get_pads(footprint)
             bbox = pads[0].GetBoundingBox()
             for pad in pads:
                 bbox.Merge(pad.GetBoundingBox())
             return bbox.GetCenter()
         except:
             self.logger.info(
-                "WARNING footprint %s: original position used", footprint.GetReference()
+                "WARNING footprint %s: original position used",
+                self.kicad.footprint.get_reference(footprint),
             )
-            return footprint.GetPosition()
+            x_pos, y_pos = self.kicad.footprint.get_position(footprint)
+            return self.kicad.utility.create_vector2i(int(x_pos), int(y_pos))
 
     def generate_geber(self, layer_count=None):
         """Generate Gerber files."""
-        # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
+        self.layer_count = layer_count
+        self.export_plan.generate_gerbers(layer_count)
 
-        pctl = PLOT_CONTROLLER(self.board)
-        popt = pctl.GetPlotOptions()
-
-        # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
-        popt.SetOutputDirectory(self.gerberdir)
-
-        # Plot format to Gerber
-        # https://github.com/KiCad/kicad-source-mirror/blob/master/include/plotter.h#L67-L78
-        popt.SetFormat(1)
-
-        # General Options
-        popt.SetPlotValue(
-            self.parent.settings.get("gerber", {}).get("plot_values", True)
-        )
-        popt.SetPlotReference(
-            self.parent.settings.get("gerber", {}).get("plot_references", True)
-        )
-
-        popt.SetSketchPadsOnFabLayers(False)
-
-        # Gerber Options
-        popt.SetUseGerberProtelExtensions(False)
-
-        popt.SetCreateGerberJobFile(False)
-
-        popt.SetSubtractMaskFromSilk(True)
-
-        popt.SetUseAuxOrigin(True)
-
-        # Tented vias or not, selcted by user in settings
-        # Only possible via settings in KiCAD < 8.99
-        # In KiCAD 8.99 this must be set in the layer settings of KiCAD
-        if hasattr(PCB_VIA, "SetPlotViaOnMaskLayer"):
-            popt.SetPlotViaOnMaskLayer(
-                not self.parent.settings.get("gerber", {}).get("tented_vias", True)
-            )
-
-        popt.SetUseGerberX2format(True)
-
-        popt.SetIncludeGerberNetlistInfo(True)
-
-        popt.SetDisableGerberMacros(False)
-
-        popt.SetDrillMarksType(NO_DRILL_SHAPE)
-
-        popt.SetPlotFrameRef(False)
-
-        # delete all existing files in the output directory first
-        for f in os.listdir(self.gerberdir):
-            os.remove(os.path.join(self.gerberdir, f))
-
-        # if no layer_count is given, get the layer count from the board
-        if not layer_count:
-            layer_count = self.board.GetCopperLayerCount()
-
-        plot_plan_top = [
-            ("CuTop", F_Cu, "Top layer"),
-            ("SilkTop", F_SilkS, "Silk top"),
-            ("MaskTop", F_Mask, "Mask top"),
-            ("PasteTop", F_Paste, "Paste top"),
-        ]
-        plot_plan_bottom = [
-            ("CuBottom", B_Cu, "Bottom layer"),
-            ("SilkBottom", B_SilkS, "Silk bottom"),
-            ("MaskBottom", B_Mask, "Mask bottom"),
-            ("EdgeCuts", Edge_Cuts, "Edges"),
-            ("PasteBottom", B_Paste, "Paste bottom"),
-        ]
-
-        plot_plan = []
-
-        # Single sided PCB
-        if layer_count == 1:
-            plot_plan = plot_plan_top + plot_plan_bottom[-2:]
-        # Double sided PCB
-        elif layer_count == 2:
-            plot_plan = plot_plan_top + plot_plan_bottom
-        # Everything with inner layers
-        else:
-            plot_plan = (
-                plot_plan_top
-                + [
-                    (
-                        f"CuIn{layer}",
-                        getattr(import_module("pcbnew"), f"In{layer}_Cu"),
-                        f"Inner layer {layer}",
-                    )
-                    for layer in range(1, layer_count - 1)
-                ]
-                + plot_plan_bottom
-            )
-
-        # Add all JLC prefixed layers - layers must have "JLC_" in their name
-        jlc_layers_to_plot = []
-        enabled_layer_ids = list(self.board.GetEnabledLayers().Seq())
-        for enabled_layer_id in enabled_layer_ids:
-            layer_name_string = str(self.board.GetLayerName(enabled_layer_id)).upper()
-            if "JLC_" in layer_name_string:
-                plotter_info = (layer_name_string, enabled_layer_id, layer_name_string)
-                jlc_layers_to_plot.append(plotter_info)
-        plot_plan += jlc_layers_to_plot
-
-        for layer_info in plot_plan:
-            if layer_info[1] <= B_Cu:
-                popt.SetSkipPlotNPTH_Pads(True)
-            else:
-                popt.SetSkipPlotNPTH_Pads(False)
-            pctl.SetLayer(layer_info[1])
-            pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
-            if pctl.PlotLayer() is False:
-                self.logger.error("Error plotting %s", layer_info[2])
-            self.logger.info("Successfully plotted %s", layer_info[2])
-        pctl.ClosePlot()
+    def _generate_gerber_impl(self, layer_count=None):
+        """Compatibility shim; use `generate_geber()` / `export_plan` instead."""
+        SWIGExportPlan(self).generate_gerbers(layer_count)
 
     def generate_excellon(self):
         """Generate Excellon files."""
-        drlwriter = EXCELLON_WRITER(self.board)
-        mirror = False
-        minimalHeader = False
-        offset = self.board.GetDesignSettings().GetAuxOrigin()
-        mergeNPTH = False
-        drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
-        drlwriter.SetFormat(False)
-        genDrl = True
-        genMap = True
-        drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
-        self.logger.info("Finished generating Excellon files")
+        self.export_plan.generate_drill_files()
+
+    def _generate_excellon_impl(self):
+        """Compatibility shim; use `generate_excellon()` / `export_plan` instead."""
+        SWIGExportPlan(self).generate_drill_files()
 
     def zip_gerber_excellon(self):
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
@@ -352,7 +267,7 @@ class Fabrication:
         """Generate placement file (CPL)."""
         cpl_path = self.get_cpl_csv_path()
         self.corrections = self.parent.library.get_all_correction_data()
-        aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
+        aux_orgin = self.kicad.board.get_aux_origin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
@@ -361,15 +276,18 @@ class Fabrication:
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
-            footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
+            footprints = sorted(
+                self.kicad.board.get_footprints(),
+                key=lambda footprint: self.kicad.footprint.get_reference(footprint),
+            )
             for fp in footprints:
-                if get_is_dnp(fp):
+                if self.kicad.footprint.get_is_dnp(fp):
                     self.logger.info(
                         "Component %s has 'Do not place' enabled: removing from CPL",
-                        fp.GetReference(),
+                        self.kicad.footprint.get_reference(fp),
                     )
                     continue
-                part = self.parent.store.get_part(fp.GetReference())
+                part = self.parent.store.get_part(self.kicad.footprint.get_reference(fp))
                 if not part:  # No matching part in the database, continue
                     continue
                 if part["exclude_from_pos"] == 1:
@@ -381,17 +299,17 @@ class Fabrication:
                 except TypeError:  # Kicad 8.99
                     x1, y1 = self.get_position(fp)
                     x2, y2 = aux_orgin
-                    position = VECTOR2I(x1 - x2, y1 - y2)
+                    position = self.kicad.utility.create_vector2i(x1 - x2, y1 - y2)
                 position = self.fix_position(fp, position)
                 writer.writerow(
                     [
                         part["reference"],
                         part["value"],
                         part["footprint"],
-                        ToMM(position.x),
-                        ToMM(position.y) * -1,
+                        self.kicad.utility.to_mm(position.x),
+                        self.kicad.utility.to_mm(position.y) * -1,
                         self.fix_rotation(fp),
-                        "top" if fp.GetLayer() == 0 else "bottom",
+                        "top" if self.kicad.footprint.get_layer(fp) == 0 else "bottom",
                     ]
                 )
         self.logger.info("Finished generating CPL file %s", cpl_path)
@@ -402,7 +320,10 @@ class Fabrication:
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
-        footprints = {fp.GetReference(): fp for fp in self.board.Footprints()}
+        footprints = {
+            self.kicad.footprint.get_reference(fp): fp
+            for fp in self.kicad.board.get_footprints()
+        }
         with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
@@ -416,7 +337,7 @@ class Fabrication:
                 components = []
                 for component in part["refs"].split(","):
                     fp = footprints.get(component)
-                    if fp and get_is_dnp(fp):
+                    if fp and self.kicad.footprint.get_is_dnp(fp):
                         self.logger.info(
                             "Component %s has 'Do not place' enabled: removing from BOM",
                             component,

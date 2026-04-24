@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     app = wx.App(None)
 
-    dialog = JLCPCBTools(None, kicad_provider=standalone_impl.KicadStub())
+    dialog = JLCPCBTools(None, adapter_set=standalone_impl.create_adapter_set())
     dialog.Center()
     dialog.Show()
 

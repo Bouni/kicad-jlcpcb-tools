@@ -3,16 +3,17 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Kicad-jlcpcb-tools"
+name = "kicad-jlcpcb-tools"
 version = "2025.09.02"
 license = "MIT"
 description = "Plugin to generate BOM + CPL files for JLCPCB."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 keywords = ["kicad", "jlcpcb", "electronics", "pcb", "bom", "cpl"]
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -26,7 +27,11 @@ dependencies = [
     "tqdm>=4.0",
     "retry>=0.9.2",
     "split_file_reader>=0.1.4",
+    "kicad-python>=0.1.0",
 ]
+
+[project.scripts]
+kicad-jlcpcb-ipc = "ipc_plugin_main:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,6 +47,46 @@ Issues = "https://github.com/bouni/kicad-jlcpcb-tools/issues"
 
 [tool.setuptools]
 packages = ["db_build", "common"]
+py-modules = [
+    "__init__",
+    "__main__",
+    "corrections",
+    "datamodel",
+    "derive_params",
+    "events",
+    "export_api",
+    "fabrication",
+    "helpers",
+    "ipc_client",
+    "ipc_impl",
+    "ipc_plugin_main",
+    "kicad_api",
+    "lcsc_api",
+    "library",
+    "mainwindow",
+    "partdetails",
+    "partmapper",
+    "partselector",
+    "partselector_columns",
+    "plugin",
+    "schematicexport",
+    "settings",
+    "standalone_impl",
+    "store",
+    "unzip_parts",
+]
+include-package-data = true
+
+[tool.setuptools.data-files]
+"kicad-jlcpcb-tools" = [
+    "plugin.json",
+    "jlcpcb-icon.png",
+    "settings.json",
+    "VERSION",
+]
+"kicad-jlcpcb-tools/plugin_manifest" = [
+    "plugin_manifest/py.typed",
+]
 
 [tool.ruff.lint]
 
