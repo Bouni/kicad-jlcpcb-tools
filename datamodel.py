@@ -38,6 +38,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "PARAMS_COL": 11,
             "ENRICH_COL": 12,
             "PRICE_COL": 13,
+            "TRAILING_SPACER_COL": 14,
         }
 
         self.bom_pos_icons = [
@@ -107,6 +108,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "wxDataViewIconText",
             "string",
             "wxDataViewIconText",
+            "string",
             "string",
             "string",
             "string",
@@ -211,6 +213,10 @@ class PartListDataModel(dv.PyDataViewModel):
         """Add a new entry to the data model."""
         if len(data) <= self.columns["PRICE_COL"]:
             data.append("")
+        if len(data) <= self.columns["TRAILING_SPACER_COL"]:
+            data.append("")
+        else:
+            data[self.columns["TRAILING_SPACER_COL"]] = ""
 
         data[self.columns["BOM_COL"]] = self.get_bom_pos_icon(
             data[self.columns["BOM_COL"]]
