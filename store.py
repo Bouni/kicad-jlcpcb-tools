@@ -158,7 +158,9 @@ class Store:
         """Create a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "INSERT INTO part_info VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)",
+                "INSERT INTO part_info ("
+                "reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos"
+                ") VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)",
                 part,
             )
             cur.commit()
