@@ -1,6 +1,6 @@
 """Contains the main window of the plugin."""
 
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import datetime as dt
 import json
 import logging
@@ -596,6 +596,60 @@ class JLCPCBTools(wx.Dialog):
         self.gauge.SetRange(100)
         self.gauge.SetValue(0)
 
+    def report_generation_step(self, text: str):
+        """Report fabrication generation progress to the log and gauge."""
+        self.logger.info("[Generate] %s", text)
+        self.gauge.Pulse()
+        self.flush_generation_ui()
+
+    def flush_generation_ui(self):
+        """Force pending log/gauge UI updates to be painted."""
+        for handler in logging.getLogger().handlers:
+            if hasattr(handler, "flush"):
+                with suppress(Exception):
+                    handler.flush()
+
+        if hasattr(self, "logbox") and self.logbox is not None:
+            with suppress(Exception):
+                self.logbox.SetInsertionPointEnd()
+                self.logbox.ShowPosition(self.logbox.GetLastPosition())
+                self.logbox.Refresh()
+                self.logbox.Update()
+
+        if hasattr(self, "gauge") and self.gauge is not None:
+            with suppress(Exception):
+                self.gauge.Refresh()
+                self.gauge.Update()
+
+        with suppress(Exception):
+            self.Refresh()
+            self.Update()
+
+    @contextmanager
+    def generation_step(self, description: str):
+        """Wrap a fabrication generation step with start/end feedback."""
+        self._current_generation_step = description
+        self.report_generation_step(f"{description}...")
+        start = time.perf_counter()
+        completed = False
+        try:
+            yield
+            completed = True
+        finally:
+            if completed:
+                elapsed = time.perf_counter() - start
+                self.report_generation_step(f"{description} done ({elapsed:.1f}s)")
+
+    def run_generation_step(
+        self,
+        description: str,
+        func,
+        *args,
+    ):
+        """Run a callable inside a timed generation step wrapper."""
+        with self.generation_step(description):
+            return func(*args)
+
     def download_started(self, *_):
         """Initialize the gauge."""
         self.reset_gauge()
@@ -1078,84 +1132,143 @@ class JLCPCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
-        warnings = self.fabrication.get_part_consistency_warnings()
-        if warnings:
-            result = wx.MessageBox(
-                "There are items with identical LCSC number but different values in the list:\n"
-                + warnings
-                + "Continue?",
-                "Plausibility check",
-                wx.OK | wx.CANCEL | wx.CENTER,
+        self.generate_button.Enable(False)
+        self.reset_gauge()
+        wx.BeginBusyCursor()
+        self._current_generation_step = "initialization"
+        try:
+            warnings = self.run_generation_step(
+                "Checking part consistency",
+                self.fabrication.get_part_consistency_warnings,
             )
-            if result == wx.CANCEL:
+            if warnings:
+                result = wx.MessageBox(
+                    "There are items with identical LCSC number but different values in the list:\n"
+                    + warnings
+                    + "Continue?",
+                    "Plausibility check",
+                    wx.OK | wx.CANCEL | wx.CENTER,
+                )
+                if result == wx.CANCEL:
+                    self.report_generation_step(
+                        "Cancelled by user during plausibility check"
+                    )
+                    return
+
+            if self.settings.get("general", {}).get("order_number"):
+                count = self.run_generation_step(
+                    "Checking order/serial placeholders",
+                    self.count_order_number_placeholders,
+                )
+                if count == 0:
+                    result = wx.MessageBox(
+                        "JLC order/serial number placeholder not present! Continue?",
+                        "JLC order/serial number placeholder",
+                        wx.OK | wx.CANCEL | wx.CENTER,
+                    )
+                    if result == wx.CANCEL:
+                        self.report_generation_step(
+                            "Cancelled by user due to missing placeholder"
+                        )
+                        return
+                elif count > 1:
+                    result = wx.MessageBox(
+                        "Multiple order/serial number placeholders present! Continue?",
+                        "JLC order/serial number placeholder",
+                        wx.OK | wx.CANCEL | wx.CENTER,
+                    )
+                    if result == wx.CANCEL:
+                        self.report_generation_step(
+                            "Cancelled by user due to multiple placeholders"
+                        )
+                        return
+
+            self.run_generation_step(
+                "Filling copper zones",
+                self.fabrication.fill_zones,
+            )
+
+            drc_ok = self.run_generation_step(
+                "Running pre-export DRC check",
+                self.run_drc_before_gerber_export,
+            )
+            if not drc_ok:
+                self.report_generation_step("Export stopped by DRC check")
                 return
 
-        placeholder_count = None
-        if self.settings.get("general", {}).get("order_number"):
-            count = self.count_order_number_placeholders()
-            placeholder_count = count
-            if count == 0:
-                result = wx.MessageBox(
-                    "JLC order/serial number placeholder not present! Continue?",
-                    "JLC order/serial number placeholder",
-                    wx.OK | wx.CANCEL | wx.CENTER,
-                )
-                if result == wx.CANCEL:
-                    return
-            elif count > 1:
-                result = wx.MessageBox(
-                    "Multiple order/serial number placeholders present! Continue?",
-                    "JLC order/serial number placeholder",
-                    wx.OK | wx.CANCEL | wx.CENTER,
-                )
-                if result == wx.CANCEL:
-                    return
+            layer_selection = self.layer_selection.GetSelection()
+            number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
+            if number:
+                layer_count = int(number.group(0))
+            else:
+                layer_count = None
 
-        if placeholder_count is None:
-            placeholder_count = self.count_order_number_placeholders()
+            if self.settings.get("general", {}).get("order_number"):
+                placeholder_count = count
+            else:
+                placeholder_count = self.count_order_number_placeholders()
 
-        current_generation_count = self.store.get_generation_count()
-        pre_hook_env = self.build_generate_hook_env(
-            stage="pre",
-            placeholder_count=placeholder_count,
-            generation_count=current_generation_count,
-        )
-        if not self.run_generate_hook("pre", pre_hook_env, allow_continue=True):
-            return
-
-        self.fabrication.fill_zones()
-
-        if not self.run_drc_before_gerber_export():
-            return
-
-        layer_selection = self.layer_selection.GetSelection()
-        number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
-        if number:
-            layer_count = int(number.group(0))
-        else:
-            layer_count = None
-        try:
-            self.fabrication.generate_geber(layer_count)
-            self.fabrication.generate_excellon()
-            self.fabrication.zip_gerber_excellon()
-            self.fabrication.generate_cpl()
-            self.fabrication.generate_bom()
-        except Exception as exc:
-            self.logger.exception("Unexpected error while generating fabrication data")
-            wx.MessageBox(
-                f"Unexpected error while generating fabrication data: {exc}",
-                "Generation failed",
-                style=wx.ICON_ERROR,
+            current_generation_count = self.store.get_generation_count()
+            pre_hook_env = self.build_generate_hook_env(
+                stage="pre",
+                placeholder_count=placeholder_count,
+                generation_count=current_generation_count,
             )
-            return
+            if not self.run_generate_hook("pre", pre_hook_env, allow_continue=True):
+                return
 
-        generation_count = self.store.increment_generation_count()
-        post_hook_env = self.build_generate_hook_env(
-            stage="post",
-            placeholder_count=placeholder_count,
-            generation_count=generation_count,
-        )
-        self.run_generate_hook("post", post_hook_env, allow_continue=False)
+            self.run_generation_step(
+                "Plotting Gerbers",
+                self.fabrication.generate_geber,
+                layer_count,
+            )
+
+            self.run_generation_step(
+                "Generating Excellon drill/map files",
+                self.fabrication.generate_excellon,
+            )
+
+            self.run_generation_step(
+                "Creating Gerber archive (.zip)",
+                self.fabrication.zip_gerber_excellon,
+            )
+
+            self.run_generation_step(
+                "Generating placement file (CPL)",
+                self.fabrication.generate_cpl,
+            )
+
+            self.run_generation_step(
+                "Generating BOM",
+                self.fabrication.generate_bom,
+            )
+
+            generation_count = self.store.increment_generation_count()
+            post_hook_env = self.build_generate_hook_env(
+                stage="post",
+                placeholder_count=placeholder_count,
+                generation_count=generation_count,
+            )
+            self.run_generate_hook("post", post_hook_env, allow_continue=False)
+
+            self.report_generation_step("Fabrication data generation complete")
+            self.reset_gauge()
+        except Exception as exc:
+            self.logger.exception(
+                "Fabrication data generation failed during %s",
+                self._current_generation_step,
+            )
+            wx.MessageBox(
+                f"Fabrication data generation failed during: {self._current_generation_step}\n\n{exc}",
+                "Generate fabrication data",
+                wx.OK | wx.ICON_ERROR | wx.CENTER,
+            )
+        finally:
+            self._current_generation_step = "initialization"
+            self.reset_gauge()
+            if wx.IsBusy():
+                wx.EndBusyCursor()
+            self.generate_button.Enable(True)
 
     def save_board_for_drc(self):
         """Save the current board so DRC checks operate on latest board state."""
@@ -1206,6 +1319,7 @@ class JLCPCBTools(wx.Dialog):
                 pcbnew_module=self.pcbnew,
                 working_dir=self.project_path,
             )
+            self.flush_generation_ui()
             violation_count = drc_counter.get_violation_count(board_filename)
 
             if violation_count > 0:
@@ -1228,6 +1342,7 @@ class JLCPCBTools(wx.Dialog):
             return True
         except Exception as exc:
             self.logger.exception("Unexpected error while running forced DRC")
+            self.report_generation_step(f"DRC check failed: {exc}")
             wx.MessageBox(
                 f"Unexpected error while running DRC: {exc}",
                 "DRC check",
@@ -1433,5 +1548,8 @@ class LogBoxHandler(logging.StreamHandler):
 
     def emit(self, record):
         """Marshal the event over to the main thread."""
-        msg = self.format(record)
-        wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
+        try:
+            msg = self.format(record)
+            wx.QueueEvent(self.event_destination, LogboxAppendEvent(msg=f"{msg}\n"))
+        except Exception:
+            self.handleError(record)
