@@ -5,6 +5,12 @@ import re
 
 import wx.dataview as dv
 
+from .dataview_highlight import (
+    decode_highlighted_value,
+    encode_highlighted_value,
+    expand_footprint,
+    expand_value,
+)
 from .helpers import loadIconScaled
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
 
@@ -111,6 +117,26 @@ class PartListDataModel(dv.PyDataViewModel):
             return dv.DataViewIconText("", icon)
         return row[col]
 
+    def _encode_params_value(
+        self,
+        reference: str,
+        value: str,
+        footprint: str,
+        params: str,
+    ) -> str:
+        """Store params display text together with row-specific highlight terms."""
+        value_terms = expand_value(reference, value)
+        footprint_terms = expand_footprint(reference, footprint)
+        return encode_highlighted_value(
+            params,
+            [*value_terms, *footprint_terms],
+        )
+
+    @staticmethod
+    def _decode_params_value(value: str) -> str:
+        """Return only the visible params text from an encoded params cell value."""
+        return decode_highlighted_value(value)[0]
+
     def SetValue(self, value, item, col):
         """Set value of an item."""
         row = self.ItemToObject(item)
@@ -128,6 +154,10 @@ class PartListDataModel(dv.PyDataViewModel):
         """Override to implement natural sorting."""
         val1 = self.GetValue(item1, column)
         val2 = self.GetValue(item2, column)
+
+        if column == self.columns["PARAMS_COL"]:
+            val1 = self._decode_params_value(val1)
+            val2 = self._decode_params_value(val2)
 
         key1 = self.natural_sort_key(val1)
         key2 = self.natural_sort_key(val2)
@@ -154,6 +184,12 @@ class PartListDataModel(dv.PyDataViewModel):
 
     def AddEntry(self, data: list):
         """Add a new entry to the data model."""
+        data[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            data[self.columns["REF_COL"]],
+            data[self.columns["VALUE_COL"]],
+            data[self.columns["FP_COL"]],
+            data[self.columns["PARAMS_COL"]],
+        )
         data[self.columns["BOM_COL"]] = self.get_bom_pos_icon(
             data[self.columns["BOM_COL"]]
         )
@@ -211,7 +247,12 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["LCSC_COL"]] = lcsc
         item[self.columns["TYPE_COL"]] = type
         item[self.columns["STOCK_COL"]] = stock
-        item[self.columns["PARAMS_COL"]] = params
+        item[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            item[self.columns["REF_COL"]],
+            item[self.columns["VALUE_COL"]],
+            item[self.columns["FP_COL"]],
+            params,
+        )
         self.ItemChanged(self.ObjectToItem(item))
 
     def remove_lcsc_number(self, item):
@@ -220,7 +261,12 @@ class PartListDataModel(dv.PyDataViewModel):
         obj[self.columns["LCSC_COL"]] = ""
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""
-        obj[self.columns["PARAMS_COL"]] = ""
+        obj[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            obj[self.columns["REF_COL"]],
+            obj[self.columns["VALUE_COL"]],
+            obj[self.columns["FP_COL"]],
+            "",
+        )
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_bom(self, item):

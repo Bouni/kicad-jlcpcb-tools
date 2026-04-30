@@ -7,12 +7,12 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
 from .datamodel import PartSelectorDataModel
+from .dataview_highlight import HighlightedTextRenderer
 from .derive_params import params_for_part  # pylint: disable=import-error
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
 from .partselector_columns import DB_FIELDS, PARAMS_COLUMN_KEY, PARTSELECTOR_COLUMNS
-from .partselector_highlight import HighlightedTextRenderer
 
 HIGHLIGHTED_COLUMN_KEYS = {
     "lcsc",
