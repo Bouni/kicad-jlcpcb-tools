@@ -42,6 +42,50 @@ try:
 except ImportError:
     NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
 
+# JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
+# 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
+# Quantity) so the Designator chunk alone is capped at 1920 characters.
+_BOM_DESIGNATOR_MAX_LEN = 1920  # 2048 - 128 padding for remaining CSV fields
+
+
+def split_bom_designators(
+    designators: list, max_len: int = _BOM_DESIGNATOR_MAX_LEN
+) -> list:
+    """Split a list of reference designators into chunks whose joined length fits within *max_len*.
+
+    JLCPCB rejects BOM rows whose total row length exceeds 2048 characters.
+    The Designator field is capped below that limit to leave headroom for the
+    other fields (Comment, Footprint, LCSC, Quantity).  When a single part has
+    more references than fit in the limit, the row is duplicated with the
+    designators spread across copies; each copy carries only its own count.
+
+    Args:
+        designators: Ordered list of reference strings, e.g. ``["R1", "R2", ...]``.
+        max_len: Maximum allowed byte-length of the comma-joined designator string.
+
+    Returns:
+        A list of non-empty lists, each safe to pass to ``",".join()``.
+
+    """
+    if not designators:
+        return []
+    chunks = []
+    current: list = []
+    current_len = 0
+    for ref in designators:
+        # Length if this ref were appended: len(ref) plus the comma separator
+        added = len(ref) if not current else len(ref) + 1
+        if current and current_len + added > max_len:
+            chunks.append(current)
+            current = [ref]
+            current_len = len(ref)
+        else:
+            current.append(ref)
+            current_len += added
+    if current:
+        chunks.append(current)
+    return chunks
+
 
 class Fabrication:
     """Contains all functionality to generate the JLCPCB production files."""
@@ -425,15 +469,16 @@ class Fabrication:
                     components.append(component)
                 if not components:
                     continue
-                writer.writerow(
-                    [
-                        part["value"],
-                        ",".join(components),
-                        part["footprint"],
-                        part["lcsc"],
-                        len(components),
-                    ]
-                )
+                for chunk in split_bom_designators(components):
+                    writer.writerow(
+                        [
+                            part["value"],
+                            ",".join(chunk),
+                            part["footprint"],
+                            part["lcsc"],
+                            len(chunk),
+                        ]
+                    )
         self.logger.info("Finished generating BOM file %s", bom_path)
 
     def get_part_consistency_warnings(self) -> str:
