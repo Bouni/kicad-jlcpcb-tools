@@ -196,3 +196,39 @@ def test_set_lcsc_resets_cached_assembly_metadata(tmp_path):
     assert row[1] == ""
     assert row[2] is None
 
+
+def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
+    """Rows missing any required enrichment field should be selected."""
+    s = _store_obj()
+    s.logger = logging.getLogger(__name__)
+    s.dbfile = str(tmp_path / "project.db")
+
+    s.create_db()
+
+    with contextlib.closing(sqlite3.connect(s.dbfile)) as con, con as cur:
+        cur.execute(
+            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
+            "VALUES ('R1', '10k', 'R_0603', 'C1', 1, 0, 0, '', NULL)"
+        )
+        cur.execute(
+            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
+            "VALUES ('R2', '1u', 'C_0603', 'C2', 1, 0, 0, 'SMT', NULL)"
+        )
+        cur.execute(
+            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
+            "VALUES ('R3', '100n', 'C_0603', 'C3', 1, 0, 0, '', 0)"
+        )
+        cur.execute(
+            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
+            "VALUES ('R4', '47k', 'R_0603', 'C4', 1, 0, 0, 'SMT', 0)"
+        )
+        cur.commit()
+
+    targets = s.get_assembly_enrichment_targets()
+
+    assert targets == {
+        "C1": ["R1"],
+        "C2": ["R2"],
+        "C3": ["R3"],
+    }
+
