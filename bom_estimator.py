@@ -443,21 +443,32 @@ def format_bom_estimate_summary(
         f"Missing prices {summary.missing_prices}"
     )
 
-    displayed_fixed_cost = summary.fixed_cost + summary.extended_cost
+    displayed_fixed_cost = (
+        summary.fixed_cost
+        + summary.extended_cost
+        + summary.standard_part_surcharge_cost
+    )
     displayed_setup_cost = summary.economic_setup_cost + summary.standard_setup_cost
+    displayed_joint_assembly_cost = (
+        summary.variable_assembly_cost - summary.standard_part_surcharge_cost
+    )
+    if displayed_joint_assembly_cost < 0:
+        displayed_joint_assembly_cost = 0.0
 
     # Assembly cost includes variable joint fees and surcharges (extended + standard)
     # We show them separately in the breakdown for clarity
     surcharge_breakdown = f"extended: ${summary.extended_cost:.2f}"
     if summary.standard_part_surcharge_cost > 0:
-        surcharge_breakdown += f", standard: ${summary.standard_part_surcharge_cost:.2f}"
+        surcharge_breakdown += (
+            f", std-parts: ${summary.standard_part_surcharge_cost:.2f}"
+        )
 
     details_line = (
         f"Direct BOM Cost: ${summary.component_cost:.2f} | "
         f"Fixed ${displayed_fixed_cost:.2f} "
         f"({surcharge_breakdown}, setup: ${displayed_setup_cost:.2f}, "
         f"stencil: ${summary.stencil_cost:.2f}, tht: ${summary.tht_setup_cost:.2f}) | "
-        f"Assembly ${summary.variable_assembly_cost:.2f} "
+        f"Assembly ${displayed_joint_assembly_cost:.2f} "
         f"(smt: {summary.smt_joint_count} joints, tht: {summary.tht_joint_count} joints)"
     )
 
