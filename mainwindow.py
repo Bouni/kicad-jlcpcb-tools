@@ -167,6 +167,10 @@ class JLCPCBTools(wx.Dialog):
             general_settings.get("bom_estimator_show", True)
         )
         general_settings["bom_estimator_show"] = self.bom_estimator_show
+        self.highlight_standard_parts = bool(
+            general_settings.get("highlight_standard_parts", True)
+        )
+        general_settings["highlight_standard_parts"] = self.highlight_standard_parts
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
