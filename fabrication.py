@@ -272,7 +272,9 @@ class Fabrication:
 
         popt.SetCreateGerberJobFile(False)
 
-        popt.SetSubtractMaskFromSilk(True)
+        popt.SetSubtractMaskFromSilk(
+            self.parent.settings.get("gerber", {}).get("subtract_mask_from_silk", True)
+        )
 
         popt.SetUseAuxOrigin(True)
 
