@@ -1475,6 +1475,12 @@ class JLCPCBTools(wx.Dialog):
                 self.bom_estimator_show = bool(e.value)
                 self.estimator_sizer.ShowItems(self.bom_estimator_show)
                 self.Layout()
+            elif e.setting == "highlight_standard_parts":
+                self.highlight_standard_parts = bool(e.value)
+                self.partlist_data_model.set_standard_trigger_highlighting_enabled(
+                    self.highlight_standard_parts
+                )
+                self.footprint_list.Refresh()
 
         self.save_settings()
 
