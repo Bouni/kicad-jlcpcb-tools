@@ -3,7 +3,6 @@
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 
 from contextlib import suppress
-from collections.abc import Iterable
 from datetime import datetime as dt
 import json
 import logging
@@ -19,7 +18,12 @@ import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
-from .bom_estimator import calculate_bom_estimate, fetch_assembly_processes
+from .bom_estimator import (
+    calculate_bom_estimate,
+    fetch_assembly_processes,
+    format_bom_estimate_summary,
+    prepare_bom_price_labels,
+)
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
 from .dataview_highlight import (
@@ -160,14 +164,10 @@ class JLCPCBTools(wx.Dialog):
             1,
             minimum=1,
         )
-        self.highlight_standard_parts = bool(
-            general_settings.get("highlight_standard_parts", True)
+        self.bom_estimator_show = bool(
+            general_settings.get("bom_estimator_show", True)
         )
-        general_settings["highlight_standard_parts"] = self.highlight_standard_parts
-        self.enrichment_enabled = bool(
-            general_settings.get("enrichment_enabled", True)
-        )
-        general_settings["enrichment_enabled"] = self.enrichment_enabled
+        general_settings["bom_estimator_show"] = self.bom_estimator_show
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -428,11 +428,8 @@ class JLCPCBTools(wx.Dialog):
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
 
-        table_scroller = wx.ScrolledWindow(self, style=wx.HSCROLL | wx.VSCROLL)
-        table_scroller.SetScrollRate(20, 20)
-
         self.footprint_list = dv.DataViewCtrl(
-            table_scroller,
+            self,
             style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_MULTIPLE,
         )
 
@@ -483,6 +480,13 @@ class JLCPCBTools(wx.Dialog):
         dnp = self.footprint_list.AppendIconTextColumn(
             "POP", 8, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
+        price = self.footprint_list.AppendTextColumn(
+            "BOM Price",
+            13,
+            width=100,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
         correction = self.footprint_list.AppendTextColumn(
             "Correction",
             9,
@@ -500,6 +504,13 @@ class JLCPCBTools(wx.Dialog):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
+        trailing_spacer = self.footprint_list.AppendTextColumn(
+            " ",
+            14,
+            width=24,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
 
         reference.SetSortable(True)
         value.SetSortable(True)
@@ -507,19 +518,17 @@ class JLCPCBTools(wx.Dialog):
         lcsc.SetSortable(True)
         type.SetSortable(True)
         stock.SetSortable(True)
+        price.SetSortable(True)
         bom.SetSortable(True)
         pos.SetSortable(False)
         dnp.SetSortable(True)
+        enrichment.SetSortable(True)
         correction.SetSortable(True)
         side.SetSortable(True)
         params.SetSortable(True)
-        enrichment.SetSortable(True)
+        trailing_spacer.SetSortable(False)
 
-        scrolled_sizer = wx.BoxSizer(wx.VERTICAL)
-        scrolled_sizer.Add(self.footprint_list, 1, wx.EXPAND)
-        table_scroller.SetSizer(scrolled_sizer)
-
-        table_sizer.Add(table_scroller, 20, wx.ALL | wx.EXPAND, 5)
+        table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
 
         self.footprint_list.Bind(
             dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
@@ -557,7 +566,8 @@ class JLCPCBTools(wx.Dialog):
         # ---------------------- BOM Cost Estimator ---------------------------
         # ---------------------------------------------------------------------
 
-        estimator_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.estimator_sizer = wx.BoxSizer(wx.VERTICAL)
+        estimator_sizer = self.estimator_sizer
 
         estimator_controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
         estimator_controls_sizer.Add(
@@ -574,13 +584,21 @@ class JLCPCBTools(wx.Dialog):
             initial=self.bom_estimator_board_count,
             size=HighResWxSize(self.window, wx.Size(90, -1)),
         )
+        if hasattr(self.bom_estimator_boards_input, "SetIncrement"):
+            self.bom_estimator_boards_input.SetIncrement(5)
+        self.bom_estimator_text_timer = wx.Timer(self)
+        self.Bind(
+            wx.EVT_TIMER,
+            self.on_bom_estimator_board_count_text_timer,
+            self.bom_estimator_text_timer,
+        )
         self.bom_estimator_boards_input.Bind(
             wx.EVT_SPINCTRL,
-            self.on_bom_estimator_board_count_changed,
+            self.on_bom_estimator_board_count_spinctrl,
         )
         self.bom_estimator_boards_input.Bind(
             wx.EVT_TEXT,
-            self.on_bom_estimator_board_count_changed,
+            self.on_bom_estimator_board_count_text,
         )
         estimator_controls_sizer.Add(
             self.bom_estimator_boards_input,
@@ -631,6 +649,8 @@ class JLCPCBTools(wx.Dialog):
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
+        self.Layout()
+        self.estimator_sizer.ShowItems(self.bom_estimator_show)
         self.Layout()
         self.Centre(wx.BOTH)
 
@@ -725,8 +745,7 @@ class JLCPCBTools(wx.Dialog):
         self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
-            if self.enrichment_enabled:
-                self.start_assembly_enrichment()
+            self.start_assembly_enrichment()
             self.recompute_bom_estimate()
 
     def init_fabrication(self):
@@ -841,17 +860,35 @@ class JLCPCBTools(wx.Dialog):
         self.start_assembly_enrichment(e.references)
         self.recompute_bom_estimate()
 
-    def on_bom_estimator_board_count_changed(self, e):
-        """Persist board count changes and update BOM estimate."""
-        value = self._normalize_board_count(e.GetEventObject().GetValue())
-        if e.GetEventObject().GetValue() != value:
-            e.GetEventObject().SetValue(value)
+    def _set_bom_estimator_board_count(self, value: int) -> None:
+        """Persist board count and update estimate when value changed."""
         if value == self.bom_estimator_board_count:
             return
         self.bom_estimator_board_count = value
         self.settings.setdefault("general", {})["bom_estimator_boards"] = value
         self.save_settings()
         self.recompute_bom_estimate()
+
+    def on_bom_estimator_board_count_spinctrl(self, e):
+        """Handle SpinCtrl arrows immediately, using step=5 increments."""
+        value = self._normalize_board_count(e.GetEventObject().GetValue())
+        if e.GetEventObject().GetValue() != value:
+            e.GetEventObject().SetValue(value)
+        self._set_bom_estimator_board_count(value)
+
+    def on_bom_estimator_board_count_text(self, *_):
+        """Debounce manual text entry to avoid recompute flicker while typing."""
+        if hasattr(self.bom_estimator_text_timer, "StartOnce"):
+            self.bom_estimator_text_timer.StartOnce(300)
+        else:
+            self.bom_estimator_text_timer.Start(300, oneShot=True)
+
+    def on_bom_estimator_board_count_text_timer(self, *_):
+        """Apply board count from text field after debounce delay."""
+        value = self._normalize_board_count(self.bom_estimator_boards_input.GetValue())
+        if self.bom_estimator_boards_input.GetValue() != value:
+            self.bom_estimator_boards_input.SetValue(value)
+        self._set_bom_estimator_board_count(value)
 
     def _normalize_board_count(self, value) -> int:
         """Normalize board count to a minimum of 5 boards."""
@@ -900,21 +937,16 @@ class JLCPCBTools(wx.Dialog):
     def _board_has_v_cut_drawings(self) -> bool:
         """Detect whether the board contains drawings on any V-cut layer."""
         board = self.pcbnew.GetBoard()
-        get_drawings = getattr(board, "GetDrawings", None)
-        if not callable(get_drawings):
-            return False
-        with suppress(TypeError):
-            drawings = cast(Iterable, get_drawings())
-            for drawing in drawings:
-                get_layer = getattr(drawing, "GetLayer", None)
-                if not callable(get_layer):
-                    continue
-                layer_id = get_layer()
-                with suppress(Exception):  # pylint: disable=broad-exception-caught
-                    layer_name = str(board.GetLayerName(layer_id)).upper()
-                    normalized = layer_name.replace("-", "_")
-                    if "V_CUT" in normalized or "VCUT" in normalized:
-                        return True
+        for drawing in board.GetDrawings():
+            get_layer = getattr(drawing, "GetLayer", None)
+            if not callable(get_layer):
+                continue
+            layer_id = get_layer()
+            with suppress(Exception):  # pylint: disable=broad-exception-caught
+                layer_name = str(board.GetLayerName(layer_id)).upper()
+                normalized = layer_name.replace("-", "_")
+                if "V_CUT" in normalized or "VCUT" in normalized:
+                    return True
         return False
 
     def _get_board_standard_context(self, parts, board_count: int) -> dict:
@@ -1037,32 +1069,24 @@ class JLCPCBTools(wx.Dialog):
             if standard_context["board_standard"]
             else set()
         )
+        for reference, price_label in prepare_bom_price_labels(
+            parts,
+            board_count,
+            self.library.get_part_details,
+        ).items():
+            self.partlist_data_model.set_bom_price(reference, price_label)
         self.partlist_data_model.set_standard_trigger_refs(highlight_refs)
         self.footprint_list.Refresh()
-        overview_line = (
-            f"BOM Estimate ({board_count} boards): Mode {mode} | "
-            f"Total ${summary['total_cost']:.2f} | "
-            f"Per board ${summary['cost_per_board']:.2f} | "
-            f"Triggers {reason_text}"
-        )
-        details_line = (
-            f"Direct BOM ${summary['component_cost']:.2f} | "
-            f"Fixed ${summary['fixed_cost']:.2f} "
-            f"(tht ${summary['tht_setup_cost']:.2f}, eco ${summary['economic_setup_cost']:.2f}, "
-            f"std ${summary['standard_setup_cost']:.2f}, stencil ${summary['stencil_cost']:.2f}, "
-            f"policy ${summary['policy_cost']:.2f}) | "
-            f"Extended ${summary['extended_cost']:.2f} | "
-            f"Assembly var ${summary['variable_assembly_cost']:.2f} | "
-            f"Assembly ${summary['assembly_cost']:.2f} | "
-            f"Missing prices {summary['missing_prices']} | "
-            f"Standard parts {summary['standard_part_count']}"
+        overview_line, details_line = format_bom_estimate_summary(
+            summary,
+            board_count,
+            mode,
+            reason_text,
         )
         self.bom_estimator_summary.SetLabel(f"{overview_line}\n{details_line}")
 
     def _get_enrichment_status_label(self, part: dict) -> str:
         """Build UI status text for per-part assembly enrichment state."""
-        if not self.enrichment_enabled:
-            return ""
         lcsc = str(part.get("lcsc") or "")
         if not lcsc:
             return ""
@@ -1074,8 +1098,6 @@ class JLCPCBTools(wx.Dialog):
 
     def start_assembly_enrichment(self, references=None):
         """Start background enrichment for missing assembly process metadata."""
-        if not self.enrichment_enabled:
-            return
         targets = self.store.get_assembly_enrichment_targets(references)
         targets = {
             lcsc: refs
@@ -1131,8 +1153,6 @@ class JLCPCBTools(wx.Dialog):
             if assembly_process or component_product_type is not None
             else "No data"
         )
-        if not self.enrichment_enabled:
-            status = ""
 
         for reference in refs:
             self.store.set_assembly_metadata(
@@ -1179,9 +1199,10 @@ class JLCPCBTools(wx.Dialog):
         if not self.store:
             self.init_store()
         self.partlist_data_model.RemoveAll()
+        parts = self.store.read_all()
         details = {}
         corrections = self.library.get_all_correction_data()
-        for part in self.store.read_all():
+        for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
@@ -1208,6 +1229,7 @@ class JLCPCBTools(wx.Dialog):
                     str(fp.GetLayer()),
                     params_for_part(details.get(part["lcsc"], {})),
                     self._get_enrichment_status_label(part),  # enrichment
+                    "",  # bom price label
                 ]
             )
         self.recompute_bom_estimate()
@@ -1446,18 +1468,10 @@ class JLCPCBTools(wx.Dialog):
                     minimum=1,
                 )
                 self.recompute_bom_estimate()
-            elif e.setting == "highlight_standard_parts":
-                self.highlight_standard_parts = bool(e.value)
-                self.partlist_data_model.set_standard_trigger_highlighting_enabled(
-                    self.highlight_standard_parts
-                )
-                self.footprint_list.Refresh()
-            elif e.setting == "enrichment_enabled":
-                self.enrichment_enabled = bool(e.value)
-                self.pending_assembly_enrichment.clear()
-                self.populate_footprint_list()
-                if self.enrichment_enabled:
-                    self.start_assembly_enrichment()
+            elif e.setting == "bom_estimator_show":
+                self.bom_estimator_show = bool(e.value)
+                self.estimator_sizer.ShowItems(self.bom_estimator_show)
+                self.Layout()
 
         self.save_settings()
 

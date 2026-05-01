@@ -100,6 +100,21 @@ class BoardStub:
         """Get a list of footprints that match a reference."""
         return Footprint_Stub(reference, "stub", 100)
 
+    def GetDrawings(self):
+        """Return board drawings.
+
+        Standalone mode has no real drawing geometry, so expose an empty list.
+        """
+        return []
+
+    def GetLayerName(self, _layer_id):
+        """Return a layer name for a layer id.
+
+        Included for compatibility with code paths that inspect drawing layers
+        (e.g. V-cut detection).
+        """
+        return "Dwgs.User"
+
 
 class PcbnewStub:
     """Stub implementation of pcbnew."""

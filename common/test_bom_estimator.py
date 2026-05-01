@@ -760,6 +760,23 @@ def test_prepare_bom_price_labels_deduplicates_detail_fetches():
     assert call_count[0] == 1
 
 
+def test_prepare_bom_price_labels_uses_aggregate_lcsc_quantity_tiers():
+    """Rows sharing an LCSC use tier selected from aggregated quantity."""
+    parts = [
+        {"reference": "R1", "lcsc": "C1", "exclude_from_bom": 0},
+        {"reference": "R2", "lcsc": "C1", "exclude_from_bom": 0},
+    ]
+
+    labels = prepare_bom_price_labels(
+        parts,
+        board_count=5,
+        get_part_details=lambda _lcsc: {"price": "1-9:1.00,10-:0.50"},
+    )
+
+    # Aggregate qty is 10 across both rows -> unit price 0.50, per-row label is 5 * 0.50
+    assert labels == {"R1": "$2.5000", "R2": "$2.5000"}
+
+
 def test_prepare_bom_price_labels_skips_excluded_and_unassigned_parts():
     """Excluded and LCSC-less parts produce empty labels, not missing keys."""
     parts = [

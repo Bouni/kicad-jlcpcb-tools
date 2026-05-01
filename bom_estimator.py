@@ -617,19 +617,33 @@ def prepare_bom_price_labels(
     Pure function — no UI or wx dependencies.  Callers are responsible for
     applying the resulting labels to the data model.
     """
+    part_rows = [part for part in parts if part.get("reference")]
+    billable_rows = [
+        part
+        for part in part_rows
+        if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
+    ]
+    lcsc_quantities = _build_lcsc_quantities(billable_rows, board_count)
+
     details_cache: dict = {}
     result: dict = {}
-    for part in parts:
+    for part in part_rows:
         reference = part.get("reference")
-        if not reference:
-            continue
-
         lcsc = str(part.get("lcsc") or "")
         details: dict = {}
         if lcsc:
             if lcsc not in details_cache:
                 details_cache[lcsc] = get_part_details(lcsc)
             details = details_cache[lcsc]
+
+        if not part.get("exclude_from_bom") and lcsc:
+            quantity = lcsc_quantities.get(lcsc, board_count)
+            unit_price = get_unit_price(quantity, str(details.get("price") or ""))
+            if unit_price < 0:
+                result[reference] = "N/A"
+            else:
+                result[reference] = f"${unit_price * board_count:.4f}"
+            continue
 
         result[reference] = format_part_bom_price_label(part, details, board_count)
 
