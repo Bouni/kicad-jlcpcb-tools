@@ -218,7 +218,7 @@ class SettingsDialog(wx.Dialog):
 
         self.subtract_mask_from_silk_setting.SetToolTip(
             wx.ToolTip(
-                "Whether silkscreen should be clipped where soldermask openings are present"
+                "Whether silkscreen should be removed where soldermask openings are present"
             )
         )
 
