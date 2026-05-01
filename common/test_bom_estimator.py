@@ -593,7 +593,8 @@ def test_format_bom_estimate_summary_with_standard_surcharge():
     assert "Triggers standard parts" in overview
     assert "Missing prices 2" in overview
 
-    assert "extended: $3.00, std-parts: $1.50" in details
+    assert "std-parts: $1.50" in details
+    assert "extended:" not in details
     assert "Assembly $10.70" in details
     assert "setup: $25.00" in details
     assert "50 joints, tht: 10 joints" in details

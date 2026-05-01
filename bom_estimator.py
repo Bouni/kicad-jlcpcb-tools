@@ -443,11 +443,14 @@ def format_bom_estimate_summary(
         f"Missing prices {summary.missing_prices}"
     )
 
-    displayed_fixed_cost = (
-        summary.fixed_cost
-        + summary.extended_cost
-        + summary.standard_part_surcharge_cost
-    )
+    mode_is_standard = str(mode).strip().lower() == "standard"
+    mode_surcharge_cost = 0.0
+    if mode_is_standard:
+        mode_surcharge_cost += summary.standard_part_surcharge_cost
+    else:
+        mode_surcharge_cost += summary.extended_cost
+
+    displayed_fixed_cost = summary.fixed_cost + mode_surcharge_cost
     displayed_setup_cost = summary.economic_setup_cost + summary.standard_setup_cost
     displayed_joint_assembly_cost = (
         summary.variable_assembly_cost - summary.standard_part_surcharge_cost
@@ -457,11 +460,14 @@ def format_bom_estimate_summary(
 
     # Assembly cost includes variable joint fees and surcharges (extended + standard)
     # We show them separately in the breakdown for clarity
-    surcharge_breakdown = f"extended: ${summary.extended_cost:.2f}"
-    if summary.standard_part_surcharge_cost > 0:
-        surcharge_breakdown += (
-            f", std-parts: ${summary.standard_part_surcharge_cost:.2f}"
+    surcharge_labels = []
+    if not mode_is_standard and summary.extended_cost > 0:
+        surcharge_labels.append(f"extended: ${summary.extended_cost:.2f}")
+    if mode_is_standard and summary.standard_part_surcharge_cost > 0:
+        surcharge_labels.append(
+            f"std-parts: ${summary.standard_part_surcharge_cost:.2f}"
         )
+    surcharge_breakdown = ", ".join(surcharge_labels) if surcharge_labels else "surcharges: $0.00"
 
     details_line = (
         f"Direct BOM Cost: ${summary.component_cost:.2f} | "
