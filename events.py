@@ -1,6 +1,19 @@
 """Events used througout the plugin."""
 
-from wx.lib.newevent import NewEvent  # pylint: disable=import-error
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
+try:
+    from wx.lib.newevent import NewEvent  # pylint: disable=import-error
+except ImportError:  # pragma: no cover - test environments may not have wx
+    def NewEvent():
+        """Fallback event factory for non-wx test environments."""
+
+        class _DummyEvent:
+            def __init__(self, **kwargs):
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+        return _DummyEvent, object()
 
 DownloadStartedEvent, EVT_DOWNLOAD_STARTED_EVENT = NewEvent()
 DownloadProgressEvent, EVT_DOWNLOAD_PROGRESS_EVENT = NewEvent()

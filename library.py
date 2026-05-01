@@ -496,7 +496,7 @@ class Library:
             cur = con.cursor()
             query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type,
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
-                "First Category" as category
+                "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
             cur.execute(query, {"number": number})
             return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
