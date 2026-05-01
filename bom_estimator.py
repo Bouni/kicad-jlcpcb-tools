@@ -18,9 +18,9 @@ class AssemblyPricing:
     """
 
     # THT assembly
-    tht_setup_fee: float = 3.50
+    tht_setup_fee: float = 3.55
     """One-time THT setup charge per order."""
-    tht_per_joint_fee: float = 0.0157
+    tht_per_joint_fee: float = 0.0163
     """Per-pad fee for wave/THT soldering."""
 
     # SMT assembly (joint-level)
@@ -28,21 +28,21 @@ class AssemblyPricing:
     """Per-pad fee for SMT placement."""
 
     # Extended part surcharge (Economic mode only)
-    extended_part_fee: float = 3.00
+    extended_part_fee: float = 3.04
     """Per distinct extended-part LCSC code fee in Economic mode."""
 
     # Standard mode fixed fees
-    standard_setup_fee: float = 25.0
+    standard_setup_fee: float = 25.4
     """Per-populated-SMT-side setup fee in Standard mode."""
-    standard_part_fee: float = 1.5
+    standard_part_fee: float = 1.52
     """Per distinct SMT LCSC code fee in Standard mode."""
     standard_stencil_fee: float = 7.8
     """Per-populated-SMT-side stencil fee in Standard mode."""
 
     # Economic mode fixed fees
-    economic_setup_fee: float = 8.0
+    economic_setup_fee: float = 8.12
     """One-time setup fee in Economic mode."""
-    economic_stencil_fee: float = 1.5
+    economic_stencil_fee: float = 1.52
     """One-time stencil fee in Economic mode."""
 
 
@@ -207,7 +207,9 @@ def _create_empty_summary() -> BomEstimateSummary:
     return BomEstimateSummary()
 
 
-def _collect_billable_bom_parts(parts: Iterable[Mapping[str, object]]) -> list[Mapping[str, object]]:
+def _collect_billable_bom_parts(
+    parts: Iterable[Mapping[str, object]],
+) -> list[Mapping[str, object]]:
     """Filter parts down to BOM-assigned, non-DNP rows."""
     bom_parts: list[Mapping[str, object]] = []
     for part in parts:
@@ -377,7 +379,9 @@ def calculate_bom_estimate(
     if scan.tht_present:
         summary.tht_setup_cost += _tht_setup_fee
 
-    board_is_standard = scan.standard_present if board_standard is None else board_standard
+    board_is_standard = (
+        scan.standard_present if board_standard is None else board_standard
+    )
     if not board_is_standard and scan.populated_part_present:
         summary.economic_setup_cost += _economic_setup_fee
 
@@ -410,9 +414,7 @@ def calculate_bom_estimate(
         summary.extended_cost += len(scan.extended_lcsc) * _extended_part_fee
 
     summary.assembly_cost = (
-        summary.fixed_cost
-        + summary.extended_cost
-        + summary.variable_assembly_cost
+        summary.fixed_cost + summary.extended_cost + summary.variable_assembly_cost
     )
     summary.total_cost = summary.component_cost + summary.assembly_cost
     if board_count > 0:
@@ -467,7 +469,9 @@ def format_bom_estimate_summary(
         surcharge_labels.append(
             f"std-parts: ${summary.standard_part_surcharge_cost:.2f}"
         )
-    surcharge_breakdown = ", ".join(surcharge_labels) if surcharge_labels else "surcharges: $0.00"
+    surcharge_breakdown = (
+        ", ".join(surcharge_labels) if surcharge_labels else "surcharges: $0.00"
+    )
 
     details_line = (
         f"Direct BOM Cost: ${summary.component_cost:.2f} | "
