@@ -237,6 +237,12 @@ class PartListDataModel(dv.PyDataViewModel):
         data[self.columns["SIDE_COL"]] = self.get_side_icon(
             data[self.columns["SIDE_COL"]]
         )
+        data[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            reference=str(data[self.columns["REF_COL"]] or ""),
+            value=str(data[self.columns["VALUE_COL"]] or ""),
+            footprint=str(data[self.columns["FP_COL"]] or ""),
+            params=str(data[self.columns["PARAMS_COL"]] or ""),
+        )
         self.data.append(data)
         self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
 
@@ -282,7 +288,12 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["LCSC_COL"]] = lcsc
         item[self.columns["TYPE_COL"]] = type
         item[self.columns["STOCK_COL"]] = stock
-        item[self.columns["PARAMS_COL"]] = params
+        item[self.columns["PARAMS_COL"]] = self._encode_params_value(
+            reference=str(item[self.columns["REF_COL"]] or ""),
+            value=str(item[self.columns["VALUE_COL"]] or ""),
+            footprint=str(item[self.columns["FP_COL"]] or ""),
+            params=str(params or ""),
+        )
         item[self.columns["ENRICH_COL"]] = ""
         item[self.columns["PRICE_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(item))

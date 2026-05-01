@@ -454,7 +454,7 @@ class JLCPCBTools(wx.Dialog):
             align=wx.ALIGN_CENTER,
         )
         params_renderer = HighlightedTextRenderer(
-            value_decoder=decode_highlighted_value,
+            value_decoder=self.decode_mainwindow_highlight_value,
             align=wx.ALIGN_CENTER,
         )
         params = dv.DataViewColumn(
@@ -1481,6 +1481,8 @@ class JLCPCBTools(wx.Dialog):
                     self.highlight_standard_parts
                 )
                 self.footprint_list.Refresh()
+        elif e.section == "highlighting" and e.setting == "matches":
+            self.footprint_list.Refresh()
 
         self.save_settings()
 

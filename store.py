@@ -282,8 +282,8 @@ class Store:
             "SELECT reference, lcsc FROM part_info "
             "WHERE lcsc IS NOT NULL AND lcsc != '' "
             "AND ("
-            "assembly_process IS NULL OR assembly_process = '' "
-            "OR component_product_type IS NULL"
+            "(assembly_process IS NULL OR assembly_process = '') "
+            "AND component_product_type IS NULL"
             ")"
         )
         params = []
