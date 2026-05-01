@@ -27,9 +27,9 @@ class AssemblyPricing:
     smt_per_joint_fee: float = 0.0016
     """Per-pad fee for SMT placement."""
 
-    # Extended part surcharge
+    # Extended part surcharge (Economic mode only)
     extended_part_fee: float = 3.00
-    """Per distinct extended-part LCSC code fee."""
+    """Per distinct extended-part LCSC code fee in Economic mode."""
 
     # Standard mode fixed fees
     standard_setup_fee: float = 25.0
@@ -401,10 +401,13 @@ def calculate_bom_estimate(
     summary.tht_joint_count = scan.tht_joints
     summary.variable_assembly_cost += scan.tht_joints * _tht_per_joint_fee
     summary.variable_assembly_cost += scan.smt_joints * _smt_per_joint_fee
-    summary.extended_cost += len(scan.extended_lcsc) * _extended_part_fee
+    # In Standard mode, JLC applies per-distinct-SMT-part surcharge regardless of
+    # Extended/Basic classification. The Extended surcharge is Economic-only.
     if board_is_standard:
         summary.standard_part_surcharge_cost += len(scan.smt_lcsc) * _standard_part_fee
         summary.variable_assembly_cost += summary.standard_part_surcharge_cost
+    else:
+        summary.extended_cost += len(scan.extended_lcsc) * _extended_part_fee
 
     summary.assembly_cost = (
         summary.fixed_cost

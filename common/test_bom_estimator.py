@@ -364,6 +364,55 @@ def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
     assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
 
 
+def test_standard_mode_does_not_charge_extended_surcharge():
+    """Standard mode should use per-SMT-part surcharge instead of Extended fee."""
+    parts = [
+        {
+            "lcsc": "CEXT1",
+            "exclude_from_bom": 0,
+            "pad_count": 2,
+            "has_tht": 0,
+            "assembly_process": "SMT",
+            "component_product_type": 2,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+        },
+        {
+            "lcsc": "CBAS1",
+            "exclude_from_bom": 0,
+            "pad_count": 1,
+            "has_tht": 0,
+            "assembly_process": "SMT",
+            "component_product_type": 0,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+        },
+    ]
+
+    def get_details(lcsc):
+        return {
+            "price": "1-:1.00",
+            "type": "Extended" if lcsc == "CEXT1" else "Basic",
+        }
+
+    summary = calculate_bom_estimate(
+        parts,
+        board_count=1,
+        get_part_details=get_details,
+        board_standard=True,
+        smt_populated_sides=1,
+    )
+
+    P = DEFAULT_PRICING
+    expected_assembly = (
+        P.standard_setup_fee
+        + P.standard_stencil_fee
+        + 2 * P.standard_part_fee
+        + 3 * P.smt_per_joint_fee
+    )
+    assert round(summary["extended_cost"], 3) == 0.000
+    assert round(summary["standard_part_surcharge_cost"], 3) == round(2 * P.standard_part_fee, 3)
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
+
+
 def test_cost_breakdown_fields_sum_to_total_and_per_board():
     """Breakdown buckets should reconcile with assembly and total costs."""
     parts = [
