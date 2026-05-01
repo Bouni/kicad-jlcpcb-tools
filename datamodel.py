@@ -296,13 +296,6 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["ENRICH_COL"]] = status
         self.ItemChanged(self.ObjectToItem(item))
 
-    def set_enrichment_status(self, ref, status):
-        """Set enrichment status text for a given part reference."""
-        if (index := self.find_index(ref)) is None:
-            return
-        item = self.data[index]
-        item[self.columns["ENRICH_COL"]] = status
-        self.ItemChanged(self.ObjectToItem(item))
     def remove_lcsc_number(self, item):
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)

@@ -2,7 +2,7 @@
 
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import datetime as dt
 import json
 import logging
@@ -11,7 +11,6 @@ import re
 import sys
 from threading import Thread
 import time
-from typing import cast
 
 import pcbnew as kicad_pcbnew
 import wx  # pylint: disable=import-error
