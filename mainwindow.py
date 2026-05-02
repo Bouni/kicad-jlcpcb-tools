@@ -922,7 +922,12 @@ class JLCPCBTools(wx.Dialog):
         ).start()
 
     def _assembly_enrichment_worker(self, targets: dict):
-        """Fetch assembly metadata values from LCSC API in a worker thread."""
+        """Fetch assembly metadata values from LCSC API in a worker thread.
+
+        Thread ownership stays in mainwindow. This worker must not mutate store,
+        datamodel, or BOM UI state directly; it only posts progress events back
+        to the UI thread.
+        """
         provider = LCSCAssemblyMetadataProvider(min_interval_seconds=1.0)
         for lcsc, metadata in provider.fetch_iter(list(targets.keys())):
             refs = targets[lcsc]
@@ -956,10 +961,19 @@ class JLCPCBTools(wx.Dialog):
             self.partlist_data_model.set_enrichment_status(reference, status)
 
         self.pending_assembly_enrichment.discard(lcsc)
-        self.recompute_bom_estimate()
+        self._refresh_bom_after_enrichment_update()
 
     def on_assembly_enrichment_completed(self, e):
         """Compatibility handler for old-style batch enrichment events (now unused)."""
+        self._refresh_bom_after_enrichment_update()
+
+    def _refresh_bom_after_enrichment_update(self):
+        """Main-thread boundary after enrichment updates.
+
+        Called only from enrichment event handlers after per-row store/datamodel
+        updates are applied on the UI thread. Delegates BOM rendering/recompute
+        through the BOM controller path.
+        """
         self.recompute_bom_estimate()
 
     def display_message(self, e):

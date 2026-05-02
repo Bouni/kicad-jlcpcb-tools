@@ -230,7 +230,12 @@ class BomEstimatorController:
         return [label for key, label in reason_map if signals.get(key)]
 
     def recompute(self, board_count: int):
-        """Recompute and apply estimated BOM+assembly UI/model updates."""
+        """Recompute and apply estimated BOM+assembly UI/model updates.
+
+        This method is synchronous and must be called on the UI/main thread.
+        It performs no background work and relies only on injected callbacks
+        for store reads and UI/datamodel updates.
+        """
         raw_parts = self._read_parts()
         parts = raw_parts if isinstance(raw_parts, list) else []
         if not parts:
