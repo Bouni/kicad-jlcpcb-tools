@@ -1,5 +1,15 @@
 """Generic provider interfaces for part metadata enrichment.
 
+"Enrichment" is the process of looking up additional metadata for parts in the
+project.  Not all of the data is stored in the main parts database - e.g. some
+fields are only available in the parts detail API call which is too slow to call
+for all 7 million parts.
+
+These lookups happen in the background when users select new LCSC parts.  When
+the plugin is opened, the store should also check for any new fields that are
+missing enrichment data.  Ideally callers should wrap this in a background
+thread so these rate-limited calls don't block the UI.
+
 This module intentionally defines a provider contract that can be reused for
 future metadata sources (for example, EasyEDA) while keeping only the existing
 LCSC-backed implementation for now.
@@ -32,13 +42,7 @@ class AssemblyMetadataProvider(Protocol):
         ...
 
     def fetch_many(self, part_codes: Iterable[str]) -> dict[str, dict[str, object]]:
-        """Return normalized metadata by part code.
-
-        Normalized payload keys:
-        - `assembly_process`: str
-        - `component_product_type`: int | None
-        - `is_standard_assembly`: bool
-        """
+        """Return normalized metadata by part code as a key/value dict."""
         ...
 
 
