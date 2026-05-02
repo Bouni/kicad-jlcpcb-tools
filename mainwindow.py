@@ -52,17 +52,19 @@ from .events import (
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
+from .footprint_helpers import (
+    get_is_dnp,
+    set_lcsc_value,
+    toggle_exclude_from_bom,
+    toggle_exclude_from_pos,
+)
 from .generate_hooks import format_hook_error, run_configured_hook
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
     HighResWxSize,
-    get_is_dnp,
     getVersion,
     loadBitmapScaled,
-    set_lcsc_value,
-    toggle_exclude_from_bom,
-    toggle_exclude_from_pos,
 )
 from .kicad_drc import DRCViolationCounter
 from .library import Library, LibraryState
@@ -634,9 +636,11 @@ class JLCPCBTools(wx.Dialog):
         )
         self.footprint_list.AssociateModel(self.partlist_data_model)
         self.bom_estimator_controller = BomEstimatorController(
-            read_parts=lambda: self.store.read_all()
-            if hasattr(self, "store") and self.store is not None
-            else [],
+            read_parts=lambda: (
+                self.store.read_all()
+                if hasattr(self, "store") and self.store is not None
+                else []
+            ),
             get_part_details=self._bom_get_part_details,
             get_board=self._get_current_board,
             is_force_standard_enabled=lambda: self.bom_estimator_force_standard,

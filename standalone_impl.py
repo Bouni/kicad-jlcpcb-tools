@@ -110,8 +110,8 @@ class BoardStub:
     def GetLayerName(self, _layer_id):
         """Return a layer name for a layer id.
 
-        Included for compatibility with code paths that inspect drawing layers
-        (e.g. V-cut detection).
+        Included for compatibility with code paths that inspect board layer
+        names in standalone mode.
         """
         return "Dwgs.User"
 

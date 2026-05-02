@@ -136,21 +136,6 @@ class BomEstimatorController:
                 return True
         return str(footprint.GetLayer()) != "0"
 
-    @staticmethod
-    def _board_has_v_cut_drawings(board) -> bool:
-        """Detect whether the board contains drawings on any V-cut layer."""
-        for drawing in board.GetDrawings():
-            get_layer = getattr(drawing, "GetLayer", None)
-            if not callable(get_layer):
-                continue
-            layer_id = get_layer()
-            with suppress(Exception):  # pylint: disable=broad-exception-caught
-                layer_name = str(board.GetLayerName(layer_id)).upper()
-                normalized = layer_name.replace("-", "_")
-                if "V_CUT" in normalized or "VCUT" in normalized:
-                    return True
-        return False
-
     def _get_board_standard_context(
         self,
         parts: list[Mapping[str, object]],
@@ -202,7 +187,6 @@ class BomEstimatorController:
         signals = {
             "manual_enabled": bool(self._is_force_standard_enabled()),
             "qty_50_plus": board_count >= 50,
-            "v_cut_drawings": self._board_has_v_cut_drawings(board),
             "standard_part_present": standard_part_present,
             "multi_side_populated": len(populated_sides) > 1,
         }
@@ -223,7 +207,6 @@ class BomEstimatorController:
         reason_map = [
             ("manual_enabled", "manual"),
             ("qty_50_plus", "qty≥50"),
-            ("v_cut_drawings", "V-cut layer"),
             ("standard_part_present", "standard part"),
             ("multi_side_populated", "both sides populated"),
         ]

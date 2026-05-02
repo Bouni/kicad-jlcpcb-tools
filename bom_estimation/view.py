@@ -74,7 +74,6 @@ def standard_signal_reasons(signals: Mapping[str, object]) -> list[str]:
     reason_map = [
         ("manual_enabled", "manual"),
         ("qty_50_plus", "qty≥50"),
-        ("v_cut_drawings", "V-cut layer"),
         ("standard_part_present", "standard part"),
         ("multi_side_populated", "both sides populated"),
     ]
@@ -174,7 +173,6 @@ def build_standard_mode_context(
     *,
     manual_enabled: bool,
     board_count: int,
-    has_v_cut_drawings: bool,
     populated_refs: Iterable[str],
     populated_sides: Iterable[str],
     smt_populated_sides: Iterable[str],
@@ -193,7 +191,6 @@ def build_standard_mode_context(
     signals = {
         "manual_enabled": bool(manual_enabled),
         "qty_50_plus": board_count >= 50,
-        "v_cut_drawings": bool(has_v_cut_drawings),
         "standard_part_present": bool(standard_part_refs),
         "multi_side_populated": len(populated_sides) > 1,
     }

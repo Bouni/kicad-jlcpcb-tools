@@ -80,7 +80,6 @@ def test_standard_signal_reasons_orders_labels_consistently():
             "qty_50_plus": True,
             "manual_enabled": True,
             "multi_side_populated": True,
-            "v_cut_drawings": False,
             "standard_part_present": True,
         }
     )
@@ -146,7 +145,6 @@ def test_build_standard_mode_context_highlights_standard_parts_and_multiside_ref
     context = build_standard_mode_context(
         manual_enabled=False,
         board_count=5,
-        has_v_cut_drawings=False,
         populated_refs={"R1", "R2", "R3"},
         populated_sides={"top", "bottom"},
         smt_populated_sides={"top", "bottom"},

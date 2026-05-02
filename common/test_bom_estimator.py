@@ -406,7 +406,6 @@ def test_build_standard_mode_context_combines_policy_signals():
     context = build_standard_mode_context(
         manual_enabled=False,
         board_count=50,
-        has_v_cut_drawings=True,
         populated_refs={"R1", "R2"},
         populated_sides={"top", "bottom"},
         smt_populated_sides={"top"},
@@ -417,7 +416,6 @@ def test_build_standard_mode_context_combines_policy_signals():
     assert context["signals"] == {
         "manual_enabled": False,
         "qty_50_plus": True,
-        "v_cut_drawings": True,
         "standard_part_present": True,
         "multi_side_populated": True,
     }
@@ -429,7 +427,6 @@ def test_build_standard_mode_context_highlights_standard_parts_and_multiside_ref
     context = build_standard_mode_context(
         manual_enabled=False,
         board_count=5,
-        has_v_cut_drawings=False,
         populated_refs={"R1", "R2", "R3"},
         populated_sides={"top", "bottom"},
         smt_populated_sides={"top", "bottom"},
@@ -441,7 +438,6 @@ def test_build_standard_mode_context_highlights_standard_parts_and_multiside_ref
     single_side_context = build_standard_mode_context(
         manual_enabled=False,
         board_count=5,
-        has_v_cut_drawings=False,
         populated_refs={"R1", "R2", "R3"},
         populated_sides={"top"},
         smt_populated_sides={"top"},

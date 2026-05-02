@@ -17,9 +17,9 @@ _pkg = types.ModuleType("kicadplugin")
 _pkg.__path__ = [str(_ROOT)]
 sys.modules["kicadplugin"] = _pkg
 
-_helpers = types.ModuleType("kicadplugin.helpers")
-_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
-sys.modules["kicadplugin.helpers"] = _helpers
+_footprint_helpers = types.ModuleType("kicadplugin.footprint_helpers")
+_footprint_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
+sys.modules["kicadplugin.footprint_helpers"] = _footprint_helpers
 
 _spec = importlib.util.spec_from_file_location(
     "kicadplugin.fabrication", _ROOT / "fabrication.py"
@@ -50,38 +50,46 @@ class TestFindCorrectionConflictResolution:
 
     def test_specific_pattern_wins_over_prefix(self):
         """SOT-23-3 correction wins over the shorter SOT-23 pattern."""
-        fab = make_fab([
-            ("SOT-23", 10, (0.0, 0.0)),
-            ("SOT-23-3", 20, (0.0, 0.0)),
-        ])
+        fab = make_fab(
+            [
+                ("SOT-23", 10, (0.0, 0.0)),
+                ("SOT-23-3", 20, (0.0, 0.0)),
+            ]
+        )
         rotation, _ = fab._find_correction("SOT-23-3")
         assert rotation == 20
 
     def test_shorter_pattern_still_matches_its_own_value(self):
         """SOT-23 correction is used when the value is exactly SOT-23."""
-        fab = make_fab([
-            ("SOT-23", 10, (0.0, 0.0)),
-            ("SOT-23-3", 20, (0.0, 0.0)),
-        ])
+        fab = make_fab(
+            [
+                ("SOT-23", 10, (0.0, 0.0)),
+                ("SOT-23-3", 20, (0.0, 0.0)),
+            ]
+        )
         rotation, _ = fab._find_correction("SOT-23")
         assert rotation == 10
 
     def test_order_in_list_does_not_matter(self):
         """Anchored match wins regardless of which pattern is listed first."""
-        fab = make_fab([
-            ("SOT-23-3", 20, (0.0, 0.0)),
-            ("SOT-23", 10, (0.0, 0.0)),
-        ])
+        fab = make_fab(
+            [
+                ("SOT-23-3", 20, (0.0, 0.0)),
+                ("SOT-23", 10, (0.0, 0.0)),
+            ]
+        )
         rotation, _ = fab._find_correction("SOT-23-3")
         assert rotation == 20
 
     def test_three_way_conflict_most_specific_wins(self):
         """Most specific (longest exact-suffix) pattern wins in a three-way conflict."""
-        fab = make_fab([
-            ("SOT", 5, (0.0, 0.0)),
-            ("SOT-23", 10, (0.0, 0.0)),
-            ("SOT-23-3", 20, (0.0, 0.0)),
-        ])
+        fab = make_fab(
+            [
+                ("SOT", 5, (0.0, 0.0)),
+                ("SOT-23", 10, (0.0, 0.0)),
+                ("SOT-23-3", 20, (0.0, 0.0)),
+            ]
+        )
         rotation, _ = fab._find_correction("SOT-23-3")
         assert rotation == 20
 
@@ -133,10 +141,12 @@ class TestFindCorrectionAlternation:
 
     def test_alternation_anchored_does_not_match_extended_value(self):
         """SOT-23-3|SOT-23-5 does not match SOT-23-30 via the first branch."""
-        fab = make_fab([
-            ("SOT-23-3|SOT-23-5", 20, (0.0, 0.0)),
-            ("SOT-23-30", 30, (0.0, 0.0)),
-        ])
+        fab = make_fab(
+            [
+                ("SOT-23-3|SOT-23-5", 20, (0.0, 0.0)),
+                ("SOT-23-30", 30, (0.0, 0.0)),
+            ]
+        )
         rotation, _ = fab._find_correction("SOT-23-30")
         assert rotation == 30
 
@@ -168,10 +178,12 @@ class TestFindCorrectionExistingAnchors:
 
     def test_pre_anchored_and_unanchored_coexist(self):
         """Pre-anchored SOT-23$ and unanchored SOT-23-3 resolve correctly."""
-        fab = make_fab([
-            ("SOT-23$", 10, (0.0, 0.0)),
-            ("SOT-23-3", 20, (0.0, 0.0)),
-        ])
+        fab = make_fab(
+            [
+                ("SOT-23$", 10, (0.0, 0.0)),
+                ("SOT-23-3", 20, (0.0, 0.0)),
+            ]
+        )
         assert fab._find_correction("SOT-23")[0] == 10
         assert fab._find_correction("SOT-23-3")[0] == 20
 
