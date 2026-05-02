@@ -37,7 +37,7 @@ from .dataview_highlight import (
     simplify_footprint_name,
 )
 from .derive_params import params_for_part
-from .enrichment.providers import fetch_assembly_processes
+from .enrichment.providers import LCSCAssemblyMetadataProvider
 from .events import (
     EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
     EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT,
@@ -1165,21 +1165,9 @@ class JLCPCBTools(wx.Dialog):
 
     def _assembly_enrichment_worker(self, targets: dict):
         """Fetch assembly metadata values from LCSC API in a worker thread."""
-        next_allowed_request = 0.0
-
-        for lcsc, refs in targets.items():
-            try:
-                delay_seconds = max(0.0, next_allowed_request - time.monotonic())
-                if delay_seconds > 0:
-                    time.sleep(delay_seconds)
-
-                metadata = fetch_assembly_processes([lcsc]).get(lcsc, {})
-                next_allowed_request = time.monotonic() + 1.0
-            except Exception:  # pylint: disable=broad-exception-caught
-                self.logger.exception("Assembly enrichment worker failed for %s", lcsc)
-                metadata = {}
-                next_allowed_request = time.monotonic() + 1.0
-
+        provider = LCSCAssemblyMetadataProvider(min_interval_seconds=1.0)
+        for lcsc, metadata in provider.fetch_iter(list(targets.keys())):
+            refs = targets[lcsc]
             wx.PostEvent(
                 self,
                 AssemblyEnrichmentProgressEvent(
