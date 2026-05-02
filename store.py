@@ -9,11 +9,9 @@ import sqlite3
 from typing import Union
 
 from .footprint_metadata import (
-    count_pad,
     footprint_has_tht,
     get_assembly_flags,
     get_footprint_pad_count,
-    get_footprint_pads,
 )
 from .footprint_helpers import (
     get_exclude_from_bom,
@@ -310,26 +308,6 @@ class Store:
                 targets[lcsc] = []
             targets[lcsc].append(reference)
         return targets
-
-    def get_footprint_pad_count(self, footprint) -> int:
-        """Count pads that likely correspond to electrical solder joints."""
-        return get_footprint_pad_count(footprint)
-
-    def get_footprint_pads(self, footprint):
-        """Return an iterable of pads for a footprint across KiCad API variants."""
-        return get_footprint_pads(footprint)
-
-    def count_pad(self, pad) -> bool:
-        """Return True when a pad should count as a solder joint."""
-        return count_pad(pad)
-
-    def footprint_has_tht(self, footprint) -> bool:
-        """Heuristically determine if a footprint has through-hole pads."""
-        return footprint_has_tht(footprint)
-
-    def get_assembly_flags(self, footprint) -> str:
-        """Build assembly-related footprint flags for estimator persistence."""
-        return get_assembly_flags(footprint)
 
     def set_estimator_metadata(
         self,
