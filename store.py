@@ -293,6 +293,8 @@ class Store:
         )
         params = []
         if references:
+            # The f-string only injects ?-placeholders; the actual reference
+            # values are bound through `params` below, never interpolated.
             placeholders = ",".join("?" for _ in references)
             query += f" AND reference IN ({placeholders})"
             params.extend(references)

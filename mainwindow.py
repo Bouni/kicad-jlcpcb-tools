@@ -140,6 +140,10 @@ class JLCPCBTools(wx.Dialog):
         self.store: Store
         self.settings = {}
         self.load_settings()
+        # Normalize and write-back BOM-estimator settings into the in-memory
+        # dict so subsequent reads see canonical values. The on-disk JSON is
+        # not rewritten here — the next save_settings() call (e.g. when the
+        # user changes a setting via the UI) persists these defaults.
         general_settings = self.settings.setdefault("general", {})
         raw_board_count = general_settings.get("bom_estimator_boards", 5)
         try:
@@ -485,7 +489,7 @@ class JLCPCBTools(wx.Dialog):
         )
         price = self.footprint_list.AppendTextColumn(
             "BOM Price",
-            13,
+            self.partlist_data_model.columns["PRICE_COL"],
             width=100,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
@@ -502,14 +506,14 @@ class JLCPCBTools(wx.Dialog):
         )
         enrichment = self.footprint_list.AppendTextColumn(
             "Enrichment",
-            12,
+            self.partlist_data_model.columns["ENRICH_COL"],
             width=110,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
         trailing_spacer = self.footprint_list.AppendTextColumn(
             " ",
-            14,
+            self.partlist_data_model.columns["TRAILING_SPACER_COL"],
             width=24,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,

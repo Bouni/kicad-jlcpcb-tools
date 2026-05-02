@@ -2,10 +2,13 @@
 
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 
+from __future__ import annotations
+
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 import json
 
+import pcbnew  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
 from .bom_estimation.pricing import calculate_bom_estimate
@@ -135,11 +138,16 @@ class BomEstimatorController:
 
     @staticmethod
     def _is_on_bottom_side(footprint) -> bool:
-        """Return True when a footprint is on the bottom side."""
-        with suppress(Exception):  # pylint: disable=broad-exception-caught
+        """Return True when a footprint is on the bottom side.
+
+        Catches AttributeError (older pcbnew API without IsFlipped) and
+        RuntimeError (footprint object destroyed by SWIG between layout
+        rebuilds) — narrower than the previous broad suppress(Exception).
+        """
+        with suppress(AttributeError, RuntimeError):
             if bool(footprint.IsFlipped()):
                 return True
-        return str(footprint.GetLayer()) != "0"
+        return footprint.GetLayer() != pcbnew.F_Cu
 
     def _get_board_standard_context(
         self,
