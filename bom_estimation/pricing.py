@@ -125,6 +125,11 @@ def get_unit_price(quantity: int, prices: str) -> float:
     The expected encoding is ``"min-max:price"`` comma-separated, e.g.
     ``"1-9:0.12,10-99:0.08,100-:0.05"`` where ``100-`` means open-ended.
 
+    Bounds are **closed on both ends**: ``"1-9"`` covers ``q in [1, 9]``,
+    ``"10-99"`` covers ``q in [10, 99]``, and so on. This matches JLC's
+    ``qFrom``/``qTo`` bracket convention (see ``common/translate.py``)
+    where the next bracket starts at ``qTo + 1``.
+
     Returns ``-1.0`` when no valid tier can be resolved.
     """
     if not prices:
@@ -154,7 +159,7 @@ def get_unit_price(quantity: int, prices: str) -> float:
     for lower, upper, unit_price in bands:
         if upper is None and quantity >= lower:
             return unit_price
-        if upper is not None and lower <= quantity < upper:
+        if upper is not None and lower <= quantity <= upper:
             return unit_price
 
     return -1.0

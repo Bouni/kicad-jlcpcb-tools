@@ -48,6 +48,7 @@ from .events import (
     EVT_UNZIP_EXTRACTING_PROGRESS_EVENT,
     EVT_UNZIP_EXTRACTING_STARTED_EVENT,
     EVT_UPDATE_SETTING,
+    AssemblyEnrichmentCompletedEvent,
     AssemblyEnrichmentProgressEvent,
     LogboxAppendEvent,
 )
@@ -166,6 +167,12 @@ class JLCPCBTools(wx.Dialog):
         )
         self.select_alike_in_progress = False
         self.pending_assembly_enrichment = set()
+        # Monotonic counter incremented each time assembly enrichment is started.
+        # Worker threads capture the value at spawn; progress events with a stale
+        # generation are discarded by on_assembly_enrichment_progress so that a
+        # mid-flight reassignment of a reference cannot have stale metadata
+        # written back to it.
+        self.assembly_enrichment_generation = 0
         self.Bind(wx.EVT_CLOSE, self.quit_dialog)
 
         # ---------------------------------------------------------------------
@@ -919,18 +926,21 @@ class JLCPCBTools(wx.Dialog):
             for reference in refs:
                 self.partlist_data_model.set_enrichment_status(reference, "Pending")
 
+        self.assembly_enrichment_generation += 1
+        generation = self.assembly_enrichment_generation
         Thread(
             target=self._assembly_enrichment_worker,
-            args=(targets,),
+            args=(targets, generation),
             daemon=True,
         ).start()
 
-    def _assembly_enrichment_worker(self, targets: dict):
+    def _assembly_enrichment_worker(self, targets: dict, generation: int):
         """Fetch assembly metadata values from LCSC API in a worker thread.
 
         Thread ownership stays in mainwindow. This worker must not mutate store,
         datamodel, or BOM UI state directly; it only posts progress events back
-        to the UI thread.
+        to the UI thread. The generation passed in is echoed back on every event
+        so the UI thread can discard results from a superseded run.
         """
         provider = LCSCAssemblyMetadataProvider(min_interval_seconds=1.0)
         for lcsc, metadata in provider.fetch_iter(list(targets.keys())):
@@ -938,12 +948,22 @@ class JLCPCBTools(wx.Dialog):
             wx.PostEvent(
                 self,
                 AssemblyEnrichmentProgressEvent(
-                    lcsc=lcsc, refs=refs, metadata=metadata
+                    lcsc=lcsc, refs=refs, metadata=metadata, generation=generation
                 ),
             )
+        wx.PostEvent(
+            self,
+            AssemblyEnrichmentCompletedEvent(generation=generation),
+        )
 
     def on_assembly_enrichment_progress(self, e):
         """Persist one enrichment result and update row-level feedback."""
+        # Drop events from superseded enrichment runs. A reassignment between
+        # spawn and event delivery would otherwise let stale metadata for the
+        # old LCSC be written to a reference that now points elsewhere.
+        generation = getattr(e, "generation", None)
+        if generation is not None and generation != self.assembly_enrichment_generation:
+            return
         lcsc = getattr(e, "lcsc", "")
         refs = getattr(e, "refs", [])
         metadata = getattr(e, "metadata", {}) or {}
@@ -965,10 +985,18 @@ class JLCPCBTools(wx.Dialog):
             self.partlist_data_model.set_enrichment_status(reference, status)
 
         self.pending_assembly_enrichment.discard(lcsc)
-        self._refresh_bom_after_enrichment_update()
 
     def on_assembly_enrichment_completed(self, e):
-        """Compatibility handler for old-style batch enrichment events (now unused)."""
+        """Run a single BOM recompute after a worker finishes its batch.
+
+        Per-progress events update store/datamodel rows individually but no
+        longer trigger a recompute of their own; the cost estimate is refreshed
+        once, here, when the worker's fetch_iter exhausts. Stale completion
+        events from superseded runs are dropped.
+        """
+        generation = getattr(e, "generation", None)
+        if generation is not None and generation != self.assembly_enrichment_generation:
+            return
         self._refresh_bom_after_enrichment_update()
 
     def _refresh_bom_after_enrichment_update(self):
