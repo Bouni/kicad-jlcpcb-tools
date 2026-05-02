@@ -100,7 +100,13 @@ class _AssemblyScan:
 
 
 def get_unit_price(quantity: int, prices: str) -> float:
-    """Resolve quantity-tiered unit price from encoded price bands."""
+    """Resolve quantity-tiered unit price from encoded price bands.
+
+    The expected encoding is ``"min-max:price"`` comma-separated, e.g.
+    ``"1-9:0.12,10-99:0.08,100-:0.05"`` where ``100-`` means open-ended.
+
+    Returns ``-1.0`` when no valid tier can be resolved.
+    """
     if not prices:
         return -1.0
 
@@ -278,7 +284,16 @@ def calculate_bom_estimate(
     panelization_per_board_fee: float = 0.0,
     panelization_threshold_boards: int = 1,
 ) -> BomEstimateSummary:
-    """Calculate BOM and assembly estimate totals."""
+    """Calculate BOM and assembly estimate totals.
+
+    The calculation proceeds in phases:
+    1) sanitize policy knobs (order/panelization),
+    2) collect billable BOM rows,
+    3) compute direct component costs,
+    4) scan assembly metadata/joint counts,
+    5) apply mode-specific setup/surcharge rules,
+    6) roll up totals and per-board value.
+    """
     p = pricing if pricing is not None else DEFAULT_PRICING
     _tht_setup_fee = p.tht_setup_fee
     _tht_per_joint_fee = p.tht_per_joint_fee
@@ -291,6 +306,7 @@ def calculate_bom_estimate(
     _standard_stencil_fee = p.standard_stencil_fee
     summary = _create_empty_summary()
 
+    # Phase 1: normalize policy fees and threshold values.
     try:
         order_fee = max(0.0, float(order_handling_fee))
     except (TypeError, ValueError):
@@ -308,6 +324,7 @@ def calculate_bom_estimate(
     if board_count >= panel_threshold:
         summary.policy_cost += panel_fee * board_count
 
+    # Phase 2: keep only BOM-eligible rows with assigned LCSC code.
     bom_parts = _collect_billable_bom_parts(parts)
     summary.bom_part_count = len(bom_parts)
     if not bom_parts:
@@ -317,6 +334,7 @@ def calculate_bom_estimate(
 
     details_cache: dict[str, dict] = {}
 
+    # Phase 3: direct component cost from quantity-tier prices.
     component_cost, missing_prices = _calculate_component_costs(
         lcsc_quantities,
         details_cache=details_cache,
@@ -325,6 +343,7 @@ def calculate_bom_estimate(
     summary.component_cost = component_cost
     summary.missing_prices = missing_prices
 
+    # Phase 4: assembly mode signals, joints, and surcharge sets.
     scan = _scan_assembly_state(
         bom_parts,
         board_count,
@@ -333,6 +352,7 @@ def calculate_bom_estimate(
     )
     summary.standard_part_count = scan.standard_part_count
 
+    # Phase 5: fixed fees and stencil/setup rules by mode.
     if scan.tht_present:
         summary.tht_setup_cost += _tht_setup_fee
 
@@ -371,6 +391,7 @@ def calculate_bom_estimate(
     else:
         summary.extended_cost += len(scan.extended_lcsc) * _extended_part_fee
 
+    # Phase 6: final totals.
     summary.assembly_cost = (
         summary.fixed_cost + summary.extended_cost + summary.variable_assembly_cost
     )

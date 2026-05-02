@@ -928,7 +928,11 @@ class SettingsDialog(wx.Dialog):
             self.bom_estimator_show_setting.SetLabel("Hide BOM cost estimator")
 
     def show_bom_estimator_help(self, *_):
-        """Show shared BOM estimator help text."""
+        """Show shared BOM estimator help text.
+
+        Kept in sync with main window help by sourcing text from
+        `bom_estimation.help_text`.
+        """
         wx.MessageBox(
             get_bom_estimator_help_text(),
             BOM_ESTIMATOR_HELP_TITLE,

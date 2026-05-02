@@ -105,7 +105,15 @@ def build_bom_estimate_view_model(
     get_part_details: Callable[[str], dict],
     standard_context: Mapping[str, object],
 ) -> dict:
-    """Build a pure BOM estimate view model for UI consumption."""
+    """Build a pure BOM estimate view model for UI consumption.
+
+    Returned mapping keys:
+    - ``summary``: ``BomEstimateSummary`` or ``None`` when insufficient data
+    - ``mode``: ``"Standard"`` / ``"Economic"`` / ``None``
+    - ``reason_text``: comma-separated trigger labels
+    - ``highlight_refs``: references to emphasize for Standard triggers
+    - ``summary_label``: two-line user-facing summary text
+    """
     parts = list(parts)
     if not parts:
         return {
@@ -172,7 +180,11 @@ def build_standard_mode_context(
     smt_populated_sides: Iterable[str],
     standard_part_refs: Iterable[str],
 ) -> dict:
-    """Build pure Standard/Economic policy context from normalized board facts."""
+    """Build Standard/Economic policy context from normalized board facts.
+
+    This function is intentionally side-effect free so policy decisions can be
+    unit-tested without UI or board-object dependencies.
+    """
     populated_refs = set(populated_refs)
     populated_sides = set(populated_sides)
     smt_populated_sides = set(smt_populated_sides)
@@ -202,7 +214,11 @@ def prepare_bom_price_labels(
     board_count: int,
     get_part_details: Callable[[str], dict],
 ) -> dict:
-    """Return a {reference: label} mapping for BOM price column population."""
+    """Return ``{reference: label}`` mapping for BOM price column population.
+
+    Labels are per-reference display values, while quantity-tier pricing is
+    resolved per unique LCSC code using aggregated board quantity.
+    """
     part_rows = [part for part in parts if part.get("reference")]
     billable_rows = [
         part

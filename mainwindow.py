@@ -956,7 +956,11 @@ class JLCPCBTools(wx.Dialog):
         self.recompute_bom_estimate()
 
     def show_bom_estimator_help(self, *_):
-        """Show shared BOM estimator help text."""
+        """Show shared BOM estimator help text.
+
+        Text is sourced from `bom_estimation.help_text` so wording matches the
+        settings dialog and can be reviewed in one place.
+        """
         wx.MessageBox(
             get_bom_estimator_help_text(),
             BOM_ESTIMATOR_HELP_TITLE,

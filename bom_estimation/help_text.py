@@ -1,4 +1,8 @@
-"""Shared help text for BOM estimator UI surfaces."""
+"""Shared help text for BOM estimator UI surfaces.
+
+Keep this text centralized so main-window and settings help dialogs stay in
+sync and reviewers can validate wording in one place.
+"""
 
 BOM_ESTIMATOR_HELP_TITLE = "BOM estimator help"
 
@@ -12,5 +16,5 @@ BOM_ESTIMATOR_HELP_TEXT = (
 
 
 def get_bom_estimator_help_text() -> str:
-    """Return the shared explanatory text for BOM estimator help popups."""
+    """Return BOM estimator help text used by all UI help popups."""
     return BOM_ESTIMATOR_HELP_TEXT

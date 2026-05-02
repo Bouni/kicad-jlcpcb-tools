@@ -32,7 +32,11 @@ class AssemblyMetadataProvider(Protocol):
 
 
 class LCSCAssemblyMetadataProvider:
-    """LCSC-backed implementation of AssemblyMetadataProvider."""
+    """LCSC-backed implementation of `AssemblyMetadataProvider`.
+
+    Converts heterogeneous API payloads into the normalized contract consumed
+    by BOM enrichment code and tests.
+    """
 
     def __init__(self, api=None):
         self._api = api or LCSC_API()
@@ -81,7 +85,8 @@ def fetch_assembly_processes(
 ) -> dict[str, dict[str, object]]:
     """Compatibility helper used by BOM enrichment worker.
 
-    Uses LCSC provider by default and keeps existing payload contract.
+    Uses the LCSC provider by default and preserves the legacy return shape
+    expected by existing call sites.
     """
     effective_provider = provider or LCSCAssemblyMetadataProvider()
     return effective_provider.fetch_many(lcsc_codes)
