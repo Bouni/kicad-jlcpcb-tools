@@ -19,32 +19,33 @@ from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
 class PartListDataModel(dv.PyDataViewModel):
     """Datamodel for use with the DataViewCtrl of the mainwindow."""
 
+    # The TRAILING_SPACER_COL is used to ensure that the last visible column
+    # (PRICE_COL) doesn't stretch when the control is wider than the total
+    # column width. It contains an empty string and is hidden from view, but
+    # it allows the PRICE_COL to maintain a consistent width.
+    columns = {
+        "REF_COL": 0,
+        "VALUE_COL": 1,
+        "FP_COL": 2,
+        "LCSC_COL": 3,
+        "TYPE_COL": 4,
+        "STOCK_COL": 5,
+        "BOM_COL": 6,
+        "POS_COL": 7,
+        "DNP_COL": 8,
+        "ROT_COL": 9,
+        "SIDE_COL": 10,
+        "PARAMS_COL": 11,
+        "ENRICH_COL": 12,
+        "PRICE_COL": 13,
+        "TRAILING_SPACER_COL": 14,
+    }
+
     def __init__(self, scale_factor):
         super().__init__()
         self.data = []
         self.standard_trigger_refs = set()
         self.standard_trigger_highlighting_enabled = True
-        # The TRAILING_SPACER_COL is used to ensure that the last visible column
-        # (PRICE_COL) doesn't stretch when the control is wider than the total
-        # column width. It contains an empty string and is hidden from view, but
-        # it allows the PRICE_COL to maintain a consistent width.
-        self.columns = {
-            "REF_COL": 0,
-            "VALUE_COL": 1,
-            "FP_COL": 2,
-            "LCSC_COL": 3,
-            "TYPE_COL": 4,
-            "STOCK_COL": 5,
-            "BOM_COL": 6,
-            "POS_COL": 7,
-            "DNP_COL": 8,
-            "ROT_COL": 9,
-            "SIDE_COL": 10,
-            "PARAMS_COL": 11,
-            "ENRICH_COL": 12,
-            "PRICE_COL": 13,
-            "TRAILING_SPACER_COL": 14,
-        }
 
         self.bom_pos_icons = [
             loadIconScaled(

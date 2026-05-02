@@ -489,7 +489,7 @@ class JLCPCBTools(wx.Dialog):
         )
         price = self.footprint_list.AppendTextColumn(
             "BOM Price",
-            self.partlist_data_model.columns["PRICE_COL"],
+            PartListDataModel.columns["PRICE_COL"],
             width=100,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
@@ -506,14 +506,14 @@ class JLCPCBTools(wx.Dialog):
         )
         enrichment = self.footprint_list.AppendTextColumn(
             "Enrichment",
-            self.partlist_data_model.columns["ENRICH_COL"],
+            PartListDataModel.columns["ENRICH_COL"],
             width=110,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
         trailing_spacer = self.footprint_list.AppendTextColumn(
             " ",
-            self.partlist_data_model.columns["TRAILING_SPACER_COL"],
+            PartListDataModel.columns["TRAILING_SPACER_COL"],
             width=24,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
