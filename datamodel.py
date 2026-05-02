@@ -24,6 +24,10 @@ class PartListDataModel(dv.PyDataViewModel):
         self.data = []
         self.standard_trigger_refs = set()
         self.standard_trigger_highlighting_enabled = True
+        # The TRAILING_SPACER_COL is used to ensure that the last visible column
+        # (PRICE_COL) doesn't stretch when the control is wider than the total
+        # column width. It contains an empty string and is hidden from view, but
+        # it allows the PRICE_COL to maintain a consistent width.
         self.columns = {
             "REF_COL": 0,
             "VALUE_COL": 1,
@@ -64,6 +68,9 @@ class PartListDataModel(dv.PyDataViewModel):
         ]
         self.logger = logging.getLogger(__name__)
 
+    # The following methods implement row-level highlighting for parts that
+    # trigger the Standard mode pricing.  (e.g. parts on more than one side,
+    # or parts that are flagged by JLC as 'standard assembly')
     def set_standard_trigger_refs(self, refs):
         """Set references that should be highlighted as Standard-mode triggers."""
         self.standard_trigger_refs = set(refs or [])
