@@ -19,7 +19,6 @@ import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
 from .bom_estimation.help_text import show_bom_estimator_help
-from .bom_estimation.settings_migration import drop_legacy_bom_settings
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
@@ -1359,10 +1358,6 @@ class JLCPCBTools(wx.Dialog):
 
         if "subtract_mask_from_silk" not in gerber_settings:
             gerber_settings["subtract_mask_from_silk"] = True
-            migrated = True
-
-        general_settings = self.settings.setdefault("general", {})
-        if drop_legacy_bom_settings(general_settings):
             migrated = True
 
         if migrated:
