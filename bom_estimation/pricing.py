@@ -60,7 +60,7 @@ class BomEstimateSummary:
     """Typed result payload for BOM estimate totals and diagnostics.
 
     Buckets are designed to let UI show non-overlapping categories while still
-    preserving fields needed for policy troubleshooting and tests.
+    preserving fields needed for pricing diagnostics and tests.
     """
 
     component_cost: float = 0.0
@@ -69,7 +69,6 @@ class BomEstimateSummary:
     economic_setup_cost: float = 0.0
     standard_setup_cost: float = 0.0
     stencil_cost: float = 0.0
-    policy_cost: float = 0.0
     extended_cost: float = 0.0
     standard_part_surcharge_cost: float = 0.0
     variable_assembly_cost: float = 0.0
@@ -302,19 +301,15 @@ def calculate_bom_estimate(
     pricing: AssemblyPricing | None = None,
     board_standard: bool | None = None,
     smt_populated_sides: int = 0,
-    order_handling_fee: float = 0.0,
-    panelization_per_board_fee: float = 0.0,
-    panelization_threshold_boards: int = 1,
 ) -> BomEstimateSummary:
     """Calculate BOM and assembly estimate totals.
 
     The calculation proceeds in phases:
-    1) sanitize policy knobs (order/panelization),
-    2) collect billable BOM rows,
-    3) compute direct component costs,
-    4) scan assembly metadata/joint counts,
-    5) apply mode-specific setup/surcharge rules,
-    6) roll up totals and per-board value.
+    1) collect billable BOM rows,
+    2) compute direct component costs,
+    3) scan assembly metadata/joint counts,
+    4) apply mode-specific setup/surcharge rules,
+    5) roll up totals and per-board value.
     """
     p = pricing if pricing is not None else DEFAULT_PRICING
     _tht_setup_fee = p.tht_setup_fee
@@ -328,25 +323,7 @@ def calculate_bom_estimate(
     _standard_stencil_fee = p.standard_stencil_fee
     summary = _create_empty_summary()
 
-    # Phase 1: normalize policy fees and threshold values.
-    try:
-        order_fee = max(0.0, float(order_handling_fee))
-    except (TypeError, ValueError):
-        order_fee = 0.0
-    try:
-        panel_fee = max(0.0, float(panelization_per_board_fee))
-    except (TypeError, ValueError):
-        panel_fee = 0.0
-    try:
-        panel_threshold = max(1, int(panelization_threshold_boards))
-    except (TypeError, ValueError):
-        panel_threshold = 1
-
-    summary.policy_cost += order_fee
-    if board_count >= panel_threshold:
-        summary.policy_cost += panel_fee * board_count
-
-    # Phase 2: keep only BOM-eligible rows with assigned LCSC code.
+    # Phase 1: keep only BOM-eligible rows with assigned LCSC code.
     bom_parts = _collect_billable_bom_parts(parts)
     summary.bom_part_count = len(bom_parts)
     if not bom_parts:
@@ -356,7 +333,7 @@ def calculate_bom_estimate(
 
     run_context = _PricingRunContext(get_part_details=get_part_details)
 
-    # Phase 3: direct component cost from quantity-tier prices.
+    # Phase 2: direct component cost from quantity-tier prices.
     component_cost, missing_prices = _calculate_component_costs(
         lcsc_quantities,
         run_context=run_context,
@@ -364,7 +341,7 @@ def calculate_bom_estimate(
     summary.component_cost = component_cost
     summary.missing_prices = missing_prices
 
-    # Phase 4: assembly mode signals, joints, and surcharge sets.
+    # Phase 3: assembly mode signals, joints, and surcharge sets.
     scan = _scan_assembly_state(
         bom_parts,
         board_count,
@@ -372,7 +349,7 @@ def calculate_bom_estimate(
     )
     summary.standard_part_count = scan.standard_part_count
 
-    # Phase 5: fixed fees and stencil/setup rules by mode.
+    # Phase 4: fixed fees and stencil/setup rules by mode.
     if scan.tht_present:
         summary.tht_setup_cost += _tht_setup_fee
 
@@ -395,7 +372,6 @@ def calculate_bom_estimate(
         + summary.economic_setup_cost
         + summary.standard_setup_cost
         + summary.stencil_cost
-        + summary.policy_cost
     )
 
     summary.smt_joint_count = scan.smt_joints
@@ -411,7 +387,7 @@ def calculate_bom_estimate(
     else:
         summary.extended_cost += len(scan.extended_lcsc) * _extended_part_fee
 
-    # Phase 6: final totals.
+    # Phase 5: final totals.
     summary.assembly_cost = (
         summary.fixed_cost + summary.extended_cost + summary.variable_assembly_cost
     )

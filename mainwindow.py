@@ -18,17 +18,11 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
-from .bom_estimation.pricing import (
-    calculate_bom_estimate,
-)
 from .bom_estimation.help_text import (
     BOM_ESTIMATOR_HELP_TITLE,
     get_bom_estimator_help_text,
 )
-from .bom_estimation.view import (
-    format_bom_estimate_summary,
-    prepare_bom_price_labels,
-)
+from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
 from .dataview_highlight import (
@@ -158,19 +152,6 @@ class JLCPCBTools(wx.Dialog):
         )
         general_settings["bom_estimator_force_standard"] = (
             self.bom_estimator_force_standard
-        )
-        self.bom_order_handling_fee = self._get_general_float_setting(
-            "bom_order_handling_fee",
-            0.0,
-        )
-        self.bom_panelization_per_board_fee = self._get_general_float_setting(
-            "bom_panelization_per_board_fee",
-            0.0,
-        )
-        self.bom_panelization_threshold_boards = self._get_general_int_setting(
-            "bom_panelization_threshold_boards",
-            1,
-            minimum=1,
         )
         self.bom_estimator_show = bool(general_settings.get("bom_estimator_show", True))
         general_settings["bom_estimator_show"] = self.bom_estimator_show
@@ -576,93 +557,26 @@ class JLCPCBTools(wx.Dialog):
         # ---------------------- BOM Cost Estimator ---------------------------
         # ---------------------------------------------------------------------
 
-        self.estimator_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.bom_widget = BomEstimatorWidget(
+            self,
+            window=self.window,
+            board_count=self.bom_estimator_board_count,
+            force_standard=self.bom_estimator_force_standard,
+            on_board_count_spin=self.on_bom_estimator_board_count_spinctrl,
+            on_board_count_text=self.on_bom_estimator_board_count_text,
+            on_board_count_text_timer=self.on_bom_estimator_board_count_text_timer,
+            on_force_standard_changed=self.on_bom_estimator_force_standard_changed,
+            on_help=self.show_bom_estimator_help,
+        )
+
+        # Backward-compatible aliases while BOM logic is still in this class.
+        self.estimator_sizer = self.bom_widget.sizer
         estimator_sizer = self.estimator_sizer
-
-        estimator_controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        estimator_controls_sizer.Add(
-            wx.StaticText(self, wx.ID_ANY, "Boards:"),
-            0,
-            wx.LEFT | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
-            5,
-        )
-        self.bom_estimator_boards_input = wx.SpinCtrl(
-            self,
-            wx.ID_ANY,
-            min=5,
-            max=10000,
-            initial=self.bom_estimator_board_count,
-            size=HighResWxSize(self.window, wx.Size(90, -1)),
-        )
-        if hasattr(self.bom_estimator_boards_input, "SetIncrement"):
-            self.bom_estimator_boards_input.SetIncrement(5)
-        self.bom_estimator_text_timer = wx.Timer(self)
-        self.Bind(
-            wx.EVT_TIMER,
-            self.on_bom_estimator_board_count_text_timer,
-            self.bom_estimator_text_timer,
-        )
-        self.bom_estimator_boards_input.Bind(
-            wx.EVT_SPINCTRL,
-            self.on_bom_estimator_board_count_spinctrl,
-        )
-        self.bom_estimator_boards_input.Bind(
-            wx.EVT_TEXT,
-            self.on_bom_estimator_board_count_text,
-        )
-        estimator_controls_sizer.Add(
-            self.bom_estimator_boards_input,
-            0,
-            wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
-            10,
-        )
-        self.bom_estimator_standard_checkbox = wx.CheckBox(
-            self,
-            wx.ID_ANY,
-            "Force Standard",
-        )
-        self.bom_estimator_standard_checkbox.SetValue(self.bom_estimator_force_standard)
-        self.bom_estimator_standard_checkbox.Bind(
-            wx.EVT_CHECKBOX,
-            self.on_bom_estimator_force_standard_changed,
-        )
-        estimator_controls_sizer.Add(
-            self.bom_estimator_standard_checkbox,
-            0,
-            wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
-            10,
-        )
-        self.bom_estimator_help_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Help",
-        )
-        self.bom_estimator_help_button.SetToolTip(
-            wx.ToolTip("Show BOM estimator assumptions and limitations")
-        )
-        self.bom_estimator_help_button.Bind(
-            wx.EVT_BUTTON,
-            self.show_bom_estimator_help,
-        )
-        estimator_controls_sizer.Add(
-            self.bom_estimator_help_button,
-            0,
-            wx.ALIGN_CENTER_VERTICAL,
-            0,
-        )
-        estimator_sizer.Add(estimator_controls_sizer, 0, wx.EXPAND)
-
-        self.bom_estimator_summary = wx.StaticText(
-            self,
-            wx.ID_ANY,
-            "BOM Estimate: waiting for assigned LCSC parts\nAssign LCSC parts to calculate cost details",
-        )
-        estimator_sizer.Add(
-            self.bom_estimator_summary,
-            0,
-            wx.LEFT | wx.RIGHT | wx.TOP | wx.EXPAND,
-            5,
-        )
+        self.bom_estimator_boards_input = self.bom_widget.boards_input
+        self.bom_estimator_text_timer = self.bom_widget.text_timer
+        self.bom_estimator_standard_checkbox = self.bom_widget.standard_checkbox
+        self.bom_estimator_help_button = self.bom_widget.help_button
+        self.bom_estimator_summary = self.bom_widget.summary_label
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
@@ -678,7 +592,7 @@ class JLCPCBTools(wx.Dialog):
 
         self.SetSizer(layout)
         self.Layout()
-        self.estimator_sizer.ShowItems(self.bom_estimator_show)
+        self.bom_widget.set_visible(self.bom_estimator_show)
         self.Layout()
         self.Centre(wx.BOTH)
 
@@ -719,6 +633,18 @@ class JLCPCBTools(wx.Dialog):
             self.highlight_standard_parts
         )
         self.footprint_list.AssociateModel(self.partlist_data_model)
+        self.bom_estimator_controller = BomEstimatorController(
+            read_parts=lambda: self.store.read_all()
+            if hasattr(self, "store") and self.store is not None
+            else [],
+            get_part_details=self._bom_get_part_details,
+            get_board=self._get_current_board,
+            is_force_standard_enabled=lambda: self.bom_estimator_force_standard,
+            set_price_label=self.partlist_data_model.set_bom_price,
+            set_trigger_refs=self.partlist_data_model.set_standard_trigger_refs,
+            refresh_rows=self.footprint_list.Refresh,
+            set_summary_text=self.bom_widget.set_summary_text,
+        )
 
         self.init_data()
 
@@ -733,6 +659,16 @@ class JLCPCBTools(wx.Dialog):
         self.library.create_mapping_table()
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
+
+    def _get_current_board(self):
+        """Return current board instance for BOM controller callbacks."""
+        return self.pcbnew.GetBoard()
+
+    def _bom_get_part_details(self, lcsc: str) -> dict:
+        """Safely proxy part-detail lookups for BOM controller callbacks."""
+        if not hasattr(self, "library") or self.library is None:
+            return {}
+        return self.library.get_part_details(lcsc)
 
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
@@ -922,29 +858,6 @@ class JLCPCBTools(wx.Dialog):
         """Normalize board count to a minimum of 5 boards."""
         return max(5, int(value))
 
-    def _get_general_float_setting(self, key: str, default: float) -> float:
-        """Read a numeric general setting as float with safe fallback."""
-        general_settings = self.settings.setdefault("general", {})
-        raw_value = general_settings.get(key, default)
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            value = default
-        general_settings[key] = value
-        return value
-
-    def _get_general_int_setting(self, key: str, default: int, minimum: int = 0) -> int:
-        """Read an integer general setting with clamping and safe fallback."""
-        general_settings = self.settings.setdefault("general", {})
-        raw_value = general_settings.get(key, default)
-        try:
-            value = int(raw_value)
-        except (TypeError, ValueError):
-            value = default
-        value = max(minimum, value)
-        general_settings[key] = value
-        return value
-
     def on_bom_estimator_force_standard_changed(self, e):
         """Persist standard override preference and update BOM estimate."""
         value = bool(e.GetEventObject().GetValue())
@@ -967,165 +880,10 @@ class JLCPCBTools(wx.Dialog):
             style=wx.OK | wx.ICON_INFORMATION,
         )
 
-    def _is_on_bottom_side(self, footprint) -> bool:
-        """Return True when a footprint is on the bottom side."""
-        with suppress(Exception):  # pylint: disable=broad-exception-caught
-            if bool(footprint.IsFlipped()):
-                return True
-        return str(footprint.GetLayer()) != "0"
-
-    def _board_has_v_cut_drawings(self) -> bool:
-        """Detect whether the board contains drawings on any V-cut layer."""
-        board = self.pcbnew.GetBoard()
-        for drawing in board.GetDrawings():
-            get_layer = getattr(drawing, "GetLayer", None)
-            if not callable(get_layer):
-                continue
-            layer_id = get_layer()
-            with suppress(Exception):  # pylint: disable=broad-exception-caught
-                layer_name = str(board.GetLayerName(layer_id)).upper()
-                normalized = layer_name.replace("-", "_")
-                if "V_CUT" in normalized or "VCUT" in normalized:
-                    return True
-        return False
-
-    def _get_board_standard_context(self, parts, board_count: int) -> dict:
-        """Compute standard-mode trigger signals and assembly side usage."""
-        board = self.pcbnew.GetBoard()
-        populated_sides = set()
-        populated_refs = set()
-        smt_populated_sides = set()
-        standard_part_present = False
-        standard_part_refs = set()
-
-        for part in parts:
-            if part.get("exclude_from_bom") or not str(part.get("lcsc") or ""):
-                continue
-
-            flags = {}
-            with suppress(TypeError, ValueError, json.JSONDecodeError):
-                flags = json.loads(part.get("assembly_flags") or "{}")
-            if bool(flags.get("is_dnp", False)) or bool(
-                flags.get("exclude_from_pos", False)
-            ):
-                continue
-
-            reference = part.get("reference")
-            if not reference:
-                continue
-
-            footprint = board.FindFootprintByReference(reference)
-            if not footprint:
-                continue
-
-            side = "bottom" if self._is_on_bottom_side(footprint) else "top"
-            populated_sides.add(side)
-            populated_refs.add(reference)
-
-            is_tht = False
-            with suppress(TypeError, ValueError):
-                is_tht = bool(int(part.get("has_tht") or 0))
-            if not is_tht:
-                smt_populated_sides.add(side)
-
-            with suppress(TypeError, ValueError):
-                if int(part.get("component_product_type")) != 0:
-                    standard_part_present = True
-                    standard_part_refs.add(reference)
-
-        signals = {
-            "manual_enabled": bool(self.bom_estimator_force_standard),
-            "qty_50_plus": board_count >= 50,
-            "v_cut_drawings": self._board_has_v_cut_drawings(),
-            "standard_part_present": standard_part_present,
-            "multi_side_populated": len(populated_sides) > 1,
-        }
-        trigger_references = set(standard_part_refs)
-        if signals["multi_side_populated"]:
-            trigger_references.update(populated_refs)
-
-        return {
-            "signals": signals,
-            "board_standard": any(signals.values()),
-            "smt_populated_sides": len(smt_populated_sides),
-            "trigger_references": trigger_references,
-        }
-
-    def _standard_signal_reasons(self, signals: dict) -> list:
-        """Build user-facing reason labels for active Standard-mode triggers."""
-        reason_map = [
-            ("manual_enabled", "manual"),
-            ("qty_50_plus", "qty≥50"),
-            ("v_cut_drawings", "V-cut layer"),
-            ("standard_part_present", "standard part"),
-            ("multi_side_populated", "both sides populated"),
-        ]
-        return [label for key, label in reason_map if signals.get(key)]
-
     def recompute_bom_estimate(self):
         """Recompute and display estimated BOM+assembly cost."""
-        if not hasattr(self, "store") or self.store is None:
-            return
-
-        parts = self.store.read_all()
         board_count = self._normalize_board_count(self.bom_estimator_board_count)
-        if not parts:
-            self.partlist_data_model.set_standard_trigger_refs(set())
-            self.footprint_list.Refresh()
-            self.bom_estimator_summary.SetLabel(
-                f"BOM Estimate ({board_count} boards): no parts"
-            )
-            return
-
-        bom_parts = [
-            part
-            for part in parts
-            if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
-        ]
-        if not bom_parts:
-            self.partlist_data_model.set_standard_trigger_refs(set())
-            self.footprint_list.Refresh()
-            self.bom_estimator_summary.SetLabel(
-                f"BOM Estimate ({board_count} boards): no assigned BOM parts"
-            )
-            return
-
-        standard_context = self._get_board_standard_context(parts, board_count)
-
-        summary = calculate_bom_estimate(
-            parts=parts,
-            board_count=board_count,
-            get_part_details=self.library.get_part_details,
-            board_standard=standard_context["board_standard"],
-            smt_populated_sides=standard_context["smt_populated_sides"],
-            order_handling_fee=self.bom_order_handling_fee,
-            panelization_per_board_fee=self.bom_panelization_per_board_fee,
-            panelization_threshold_boards=self.bom_panelization_threshold_boards,
-        )
-
-        mode = "Standard" if standard_context["board_standard"] else "Economic"
-        reasons = self._standard_signal_reasons(standard_context["signals"])
-        reason_text = ", ".join(reasons) if reasons else "none"
-        highlight_refs = (
-            standard_context["trigger_references"]
-            if standard_context["board_standard"]
-            else set()
-        )
-        for reference, price_label in prepare_bom_price_labels(
-            parts,
-            board_count,
-            self.library.get_part_details,
-        ).items():
-            self.partlist_data_model.set_bom_price(reference, price_label)
-        self.partlist_data_model.set_standard_trigger_refs(highlight_refs)
-        self.footprint_list.Refresh()
-        overview_line, details_line = format_bom_estimate_summary(
-            summary,
-            board_count,
-            mode,
-            reason_text,
-        )
-        self.bom_estimator_summary.SetLabel(f"{overview_line}\n{details_line}")
+        self.bom_estimator_controller.recompute(board_count)
 
     def _get_enrichment_status_label(self, part: dict) -> str:
         """Build UI status text for per-part assembly enrichment state."""
@@ -1484,28 +1242,9 @@ class JLCPCBTools(wx.Dialog):
         self.settings[e.section][e.setting] = e.value
 
         if e.section == "general":
-            if e.setting == "bom_order_handling_fee":
-                self.bom_order_handling_fee = self._get_general_float_setting(
-                    "bom_order_handling_fee",
-                    0.0,
-                )
-                self.recompute_bom_estimate()
-            elif e.setting == "bom_panelization_per_board_fee":
-                self.bom_panelization_per_board_fee = self._get_general_float_setting(
-                    "bom_panelization_per_board_fee",
-                    0.0,
-                )
-                self.recompute_bom_estimate()
-            elif e.setting == "bom_panelization_threshold_boards":
-                self.bom_panelization_threshold_boards = self._get_general_int_setting(
-                    "bom_panelization_threshold_boards",
-                    1,
-                    minimum=1,
-                )
-                self.recompute_bom_estimate()
-            elif e.setting == "bom_estimator_show":
+            if e.setting == "bom_estimator_show":
                 self.bom_estimator_show = bool(e.value)
-                self.estimator_sizer.ShowItems(self.bom_estimator_show)
+                self.bom_widget.set_visible(self.bom_estimator_show)
                 self.Layout()
             elif e.setting == "highlight_standard_parts":
                 self.highlight_standard_parts = bool(e.value)
@@ -1555,6 +1294,16 @@ class JLCPCBTools(wx.Dialog):
         if "subtract_mask_from_silk" not in gerber_settings:
             gerber_settings["subtract_mask_from_silk"] = True
             migrated = True
+
+        general_settings = self.settings.setdefault("general", {})
+        for legacy_key in (
+            "bom_order_handling_fee",
+            "bom_panelization_per_board_fee",
+            "bom_panelization_threshold_boards",
+        ):
+            if legacy_key in general_settings:
+                general_settings.pop(legacy_key, None)
+                migrated = True
 
         if migrated:
             self.save_settings()
