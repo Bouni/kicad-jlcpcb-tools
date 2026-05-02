@@ -157,8 +157,3 @@ dev
 
 # Local Claude Code project instructions (use CLAUDE.md for project-wide instructions)
 CLAUDE.local.md
-
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
