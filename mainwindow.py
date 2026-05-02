@@ -19,6 +19,7 @@ import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
 from .bom_estimation.help_text import show_bom_estimator_help
+from .bom_estimation.settings_migration import drop_legacy_bom_settings
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
@@ -1365,14 +1366,8 @@ class JLCPCBTools(wx.Dialog):
             migrated = True
 
         general_settings = self.settings.setdefault("general", {})
-        for legacy_key in (
-            "bom_order_handling_fee",
-            "bom_panelization_per_board_fee",
-            "bom_panelization_threshold_boards",
-        ):
-            if legacy_key in general_settings:
-                general_settings.pop(legacy_key, None)
-                migrated = True
+        if drop_legacy_bom_settings(general_settings):
+            migrated = True
 
         if migrated:
             self.save_settings()

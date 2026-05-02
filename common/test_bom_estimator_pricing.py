@@ -1,9 +1,6 @@
 """Tests for BOM estimator pricing/core logic."""
 
-from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pytest
 
 from bom_estimation.pricing import (  # pylint: disable=import-error
     DEFAULT_PRICING,
@@ -23,6 +20,60 @@ def test_get_unit_price_quantity_tiers():
     assert get_unit_price(1, "1-9:0.12,10-99:0.08,100-:0.05") == 0.12
     assert get_unit_price(10, "1-9:0.12,10-99:0.08,100-:0.05") == 0.08
     assert get_unit_price(250, "1-9:0.12,10-99:0.08,100-:0.05") == 0.05
+
+
+def test_get_unit_price_band_boundaries_are_closed_on_both_ends():
+    """Tier bounds are inclusive on both ends; bands are non-overlapping.
+
+    JLC's qFrom/qTo brackets are inclusive: a `1-9` band covers q in [1, 9]
+    and the next bracket starts at q=10. The previous half-open implementation
+    returned -1.0 at every band's upper boundary (q=9, q=99).
+    """
+    bands = "1-9:0.12,10-99:0.08,100-999:0.05,1000-:0.02"
+
+    # Band 1-9 (closed both ends): just below lower clamps to first band,
+    # then 1, 9, just-over (10) crosses into next band.
+    assert get_unit_price(0, bands) == 0.12  # below first lower → first price
+    assert get_unit_price(1, bands) == 0.12  # exact lower
+    assert get_unit_price(9, bands) == 0.12  # exact upper (was the off-by-one)
+    assert get_unit_price(10, bands) == 0.08  # exact next lower
+
+    # Band 10-99: lower, just-over, just-under upper, exact upper
+    assert get_unit_price(11, bands) == 0.08  # just over lower
+    assert get_unit_price(98, bands) == 0.08  # just under upper
+    assert get_unit_price(99, bands) == 0.08  # exact upper
+    assert get_unit_price(100, bands) == 0.05  # exact next lower
+
+    # Band 100-999: middle band, both boundaries inclusive
+    assert get_unit_price(100, bands) == 0.05
+    assert get_unit_price(500, bands) == 0.05
+    assert get_unit_price(999, bands) == 0.05  # exact upper
+    assert get_unit_price(1000, bands) == 0.02  # exact next lower
+
+    # Open-ended last band
+    assert get_unit_price(1000, bands) == 0.02
+    assert get_unit_price(99999, bands) == 0.02
+
+
+def test_get_unit_price_drops_malformed_tokens_and_resolves_valid_bands():
+    """Garbage tokens are dropped silently and valid bands still resolve."""
+    # Mix of valid and malformed tokens; valid bands should still produce
+    # the right price.
+    mixed = "junk,1-9:0.50,no-colon,abc-9:0.10,10-99:0.30,100-:bad,200-:0.05"
+    assert get_unit_price(1, mixed) == 0.50
+    assert get_unit_price(9, mixed) == 0.50
+    assert get_unit_price(10, mixed) == 0.30
+    assert get_unit_price(99, mixed) == 0.30
+    # 200- is the only valid open-ended band; "100-:bad" was dropped.
+    assert get_unit_price(500, mixed) == 0.05
+
+
+def test_get_unit_price_returns_negative_one_for_fully_malformed_string():
+    """Wholly malformed input returns the -1.0 sentinel."""
+    assert get_unit_price(5, "garbage,nope,also-bad") == -1.0
+    assert get_unit_price(5, "") == -1.0
+    assert get_unit_price(5, "1-9") == -1.0  # no colon
+    assert get_unit_price(5, "abc-def:0.10") == -1.0  # non-int range
 
 
 def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
@@ -56,8 +107,8 @@ def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
         + p.extended_part_fee
         + 10 * p.smt_per_joint_fee
     )
-    assert round(summary.component_cost, 3) == 2.000
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
+    assert summary.component_cost == pytest.approx(2.000, abs=1e-3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
 
 
 def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
@@ -82,8 +133,8 @@ def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
     expected_assembly = (
         p.economic_setup_fee + p.tht_setup_fee + 10 * p.tht_per_joint_fee
     )
-    assert round(summary.component_cost, 3) == 2.500
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
+    assert summary.component_cost == pytest.approx(2.500, abs=1e-3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
 
 
 def test_standard_mode_does_not_charge_extended_surcharge():
@@ -128,10 +179,10 @@ def test_standard_mode_does_not_charge_extended_surcharge():
         + 3 * p.smt_per_joint_fee
     )
     assert round(summary.extended_cost, 3) == 0.000
-    assert round(summary.standard_part_surcharge_cost, 3) == round(
-        2 * p.standard_part_fee, 3
+    assert summary.standard_part_surcharge_cost == pytest.approx(
+        2 * p.standard_part_fee, abs=1e-3
     )
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
 
 
 def test_get_assembly_flags_handles_bad_json():
@@ -167,7 +218,7 @@ def test_assembly_pricing_custom_instance_overrides_defaults():
         pricing=cheap,
     )
     expected_assembly = 1.0 + 0.5 + 10 * 0.001
-    assert round(summary.assembly_cost, 4) == round(expected_assembly, 4)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-4)
 
 
 def test_collect_billable_bom_parts_filters_excluded_unassigned_and_dnp():

@@ -1,10 +1,5 @@
 """Tests for BOM estimator presentation/view helpers."""
 
-from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from bom_estimation.pricing import (  # pylint: disable=import-error
     BomEstimateSummary,
     calculate_part_bom_cost,

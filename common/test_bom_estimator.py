@@ -1,10 +1,6 @@
 """Tests for BOM estimator business logic."""
 
-from pathlib import Path
-import sys
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pytest
 
 from bom_estimation import (
     DEFAULT_PRICING,
@@ -96,8 +92,8 @@ def test_standard_fees_apply_for_standard_smt_part():
 
     # 4.0 setup + 1.2 stencil + 0.5 standard_part + 4*0.0016 smt joints
     expected_assembly = 4.0 + 1.2 + 0.5 + 4 * DEFAULT_PRICING.smt_per_joint_fee
-    assert round(summary.component_cost, 3) == 2.000
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
+    assert summary.component_cost == pytest.approx(2.000, abs=1e-3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
 
 
 def test_standard_fees_are_orthogonal_to_tht_fees():
@@ -148,8 +144,8 @@ def test_standard_fees_are_orthogonal_to_tht_fees():
         + 6 * DEFAULT_PRICING.tht_per_joint_fee
         + 3 * DEFAULT_PRICING.smt_per_joint_fee
     )
-    assert round(summary.component_cost, 3) == 4.800
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
+    assert summary.component_cost == pytest.approx(4.800, abs=1e-3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
 
 
 def test_standard_fees_do_not_apply_for_non_standard_parts():
@@ -185,8 +181,8 @@ def test_standard_fees_do_not_apply_for_non_standard_parts():
     expected_assembly = (
         P.economic_setup_fee + P.economic_stencil_fee + 4 * P.smt_per_joint_fee
     )
-    assert round(summary.component_cost, 3) == 2.000
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
+    assert summary.component_cost == pytest.approx(2.000, abs=1e-3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
 
 
 def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
@@ -230,8 +226,8 @@ def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
         + 2 * P.standard_part_fee
         + 3 * P.smt_per_joint_fee
     )
-    assert round(summary.component_cost, 3) == 2.000
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
+    assert summary.component_cost == pytest.approx(2.000, abs=1e-3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
 
 
 def test_cost_breakdown_fields_sum_to_total_and_per_board():
@@ -259,18 +255,18 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
     )
 
     P = DEFAULT_PRICING
-    assert round(summary.component_cost, 3) == 5.000
-    assert round(summary.fixed_cost, 3) == round(
-        P.economic_setup_fee + P.economic_stencil_fee, 3
+    assert summary.component_cost == pytest.approx(5.000, abs=1e-3)
+    assert summary.fixed_cost == pytest.approx(
+        P.economic_setup_fee + P.economic_stencil_fee, abs=1e-3
     )
-    assert round(summary.economic_setup_cost, 3) == round(P.economic_setup_fee, 3)
-    assert round(summary.stencil_cost, 3) == round(P.economic_stencil_fee, 3)
+    assert summary.economic_setup_cost == pytest.approx(P.economic_setup_fee, abs=1e-3)
+    assert summary.stencil_cost == pytest.approx(P.economic_stencil_fee, abs=1e-3)
     assert round(summary.tht_setup_cost, 3) == 0.000
     assert round(summary.standard_setup_cost, 3) == 0.000
-    assert round(summary.extended_cost, 3) == round(P.extended_part_fee, 3)
+    assert summary.extended_cost == pytest.approx(P.extended_part_fee, abs=1e-3)
     assert round(summary.standard_part_surcharge_cost, 3) == 0.000
-    assert round(summary.variable_assembly_cost, 3) == round(
-        10 * P.smt_per_joint_fee, 3
+    assert summary.variable_assembly_cost == pytest.approx(
+        10 * P.smt_per_joint_fee, abs=1e-3
     )
     assert summary.smt_joint_count == 10
     assert summary.tht_joint_count == 0
@@ -280,9 +276,9 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
         + P.extended_part_fee
         + 10 * P.smt_per_joint_fee
     )
-    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
-    assert round(summary.total_cost, 3) == round(5.0 + expected_assembly, 3)
-    assert round(summary.cost_per_board, 3) == round((5.0 + expected_assembly) / 5, 3)
+    assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
+    assert summary.total_cost == pytest.approx(5.0 + expected_assembly, abs=1e-3)
+    assert summary.cost_per_board == pytest.approx((5.0 + expected_assembly) / 5, abs=1e-3)
 
 
 def test_standard_surcharge_and_joint_counts_are_reported_separately():
@@ -321,8 +317,8 @@ def test_standard_surcharge_and_joint_counts_are_reported_separately():
 
     assert summary.smt_joint_count == 4
     assert summary.tht_joint_count == 2
-    assert round(summary.standard_part_surcharge_cost, 3) == round(
-        DEFAULT_PRICING.standard_part_fee, 3
+    assert summary.standard_part_surcharge_cost == pytest.approx(
+        DEFAULT_PRICING.standard_part_fee, abs=1e-3
     )
 
 
@@ -359,7 +355,7 @@ def test_dnp_parts_are_excluded_from_bom_estimator_counts():
         board_standard=False,
     )
 
-    assert round(summary.component_cost, 3) == 5.000
+    assert summary.component_cost == pytest.approx(5.000, abs=1e-3)
 
 
 def test_build_bom_estimate_view_model_handles_empty_parts():

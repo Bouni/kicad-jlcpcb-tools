@@ -230,3 +230,156 @@ def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
         "C3": ["R3"],
     }
 
+
+# ---------------------------------------------------------------------------
+# backfill_estimator_metadata tests (B5.5)
+# ---------------------------------------------------------------------------
+
+
+class _BackfillFootprint:
+    """Minimal footprint stub for backfill_estimator_metadata tests."""
+
+    def __init__(
+        self,
+        *,
+        reference="R1",
+        pads=None,
+        attributes=0,
+        is_dnp=False,
+    ):
+        self._reference = reference
+        self._pads = pads or []
+        self._attributes = attributes
+        self._is_dnp = is_dnp
+
+    def GetReference(self):
+        return self._reference
+
+    def Pads(self):
+        return self._pads
+
+    def GetAttributes(self):
+        return self._attributes
+
+    def IsDNP(self):
+        return self._is_dnp
+
+
+def _backfill_store():
+    """Build a Store with a recording stub for set_estimator_metadata."""
+    s = _store_obj()
+    s.logger = logging.getLogger(__name__)
+    s.update_calls = []
+
+    def _record(ref, pad_count, has_tht, assembly_flags):
+        s.update_calls.append((ref, pad_count, has_tht, assembly_flags))
+
+    s.set_estimator_metadata = _record
+    return s
+
+
+def test_backfill_skips_update_when_all_metadata_matches():
+    """Backfill must not call set_estimator_metadata when nothing changed."""
+    s = _backfill_store()
+    fp = _BackfillFootprint(reference="R1", pads=[_Pad(), _Pad()])
+    expected_flags = footprint_metadata_module.get_assembly_flags(fp)
+
+    db_part = {
+        "pad_count": 2,
+        "has_tht": 0,
+        "assembly_flags": expected_flags,
+    }
+
+    s.backfill_estimator_metadata(fp, db_part)
+
+    assert s.update_calls == []
+
+
+def test_backfill_writes_when_pad_count_differs():
+    """A stale pad_count triggers a single update."""
+    s = _backfill_store()
+    fp = _BackfillFootprint(reference="R1", pads=[_Pad(), _Pad(), _Pad()])
+    expected_flags = footprint_metadata_module.get_assembly_flags(fp)
+
+    db_part = {
+        "pad_count": 1,  # outdated
+        "has_tht": 0,
+        "assembly_flags": expected_flags,
+    }
+
+    s.backfill_estimator_metadata(fp, db_part)
+
+    assert len(s.update_calls) == 1
+    ref, pad_count, _has_tht, _flags = s.update_calls[0]
+    assert ref == "R1"
+    assert pad_count == 3
+
+
+def test_backfill_writes_when_has_tht_was_none():
+    """Existing rows with NULL has_tht always backfill."""
+    s = _backfill_store()
+    fp = _BackfillFootprint(reference="R1", pads=[_Pad()])
+    expected_flags = footprint_metadata_module.get_assembly_flags(fp)
+
+    db_part = {
+        "pad_count": 1,
+        "has_tht": None,  # never set
+        "assembly_flags": expected_flags,
+    }
+
+    s.backfill_estimator_metadata(fp, db_part)
+
+    assert len(s.update_calls) == 1
+
+
+def test_backfill_writes_when_assembly_flags_differ():
+    """Stale assembly_flags JSON triggers an update."""
+    s = _backfill_store()
+    fp = _BackfillFootprint(reference="R1", pads=[_Pad()])
+
+    db_part = {
+        "pad_count": 1,
+        "has_tht": 0,
+        "assembly_flags": '{"is_dnp": true}',  # outdated content
+    }
+
+    s.backfill_estimator_metadata(fp, db_part)
+
+    assert len(s.update_calls) == 1
+    _ref, _pad_count, _has_tht, flags = s.update_calls[0]
+    # Fresh flags should match what footprint_metadata builds for this fp.
+    assert flags == footprint_metadata_module.get_assembly_flags(fp)
+
+
+def test_backfill_returns_silently_when_db_part_empty():
+    """Missing db_part with no fallback row available is a no-op."""
+    s = _backfill_store()
+    s.get_part = lambda _ref: None
+    fp = _BackfillFootprint(reference="R-MISSING", pads=[_Pad()])
+
+    s.backfill_estimator_metadata(fp, {})
+
+    assert s.update_calls == []
+
+
+# ---------------------------------------------------------------------------
+# assembly_flags JSON round-trip (B5.7)
+# ---------------------------------------------------------------------------
+
+
+def test_assembly_flags_round_trip_writer_keys_match_reader_expectations():
+    """Keys produced by footprint_metadata.get_assembly_flags must parse back via pricing.get_assembly_flags."""
+    from bom_estimation.pricing import (  # pylint: disable=import-outside-toplevel
+        get_assembly_flags as parse_assembly_flags,
+    )
+
+    fp = _BackfillFootprint(reference="R1", pads=[_Pad()], is_dnp=True)
+    flags_json = footprint_metadata_module.get_assembly_flags(fp)
+
+    parsed = parse_assembly_flags({"assembly_flags": flags_json})
+
+    # Writer should emit all three keys, and reader should parse them back.
+    assert set(parsed) == {"exclude_from_bom", "exclude_from_pos", "is_dnp"}
+    # is_dnp came from the footprint stub.
+    assert parsed["is_dnp"] is True
+

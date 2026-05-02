@@ -1,10 +1,5 @@
 """Tests for shared BOM estimator help text."""
 
-from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from bom_estimation.help_text import (  # pylint: disable=import-error
     BOM_ESTIMATOR_HELP_TITLE,
     get_bom_estimator_help_text,
