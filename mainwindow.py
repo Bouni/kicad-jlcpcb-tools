@@ -1,25 +1,31 @@
 """Contains the main window of the plugin."""
 
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
+# ruff: noqa: I001
 
 from contextlib import contextmanager, suppress
 from datetime import datetime as dt
+from threading import Thread
 import json
 import logging
 import os
 import re
 import sys
-from threading import Thread
 import time
 
 import pcbnew as kicad_pcbnew
 import wx  # pylint: disable=import-error
-from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
+from wx import adv  # pylint: disable=import-error
 
-from .bom_estimator import (
+from .bom_estimation.pricing import (
     calculate_bom_estimate,
-    fetch_assembly_processes,
+)
+from .bom_estimation.help_text import (
+    BOM_ESTIMATOR_HELP_TITLE,
+    get_bom_estimator_help_text,
+)
+from .bom_estimation.view import (
     format_bom_estimate_summary,
     prepare_bom_price_labels,
 )
@@ -31,6 +37,7 @@ from .dataview_highlight import (
     simplify_footprint_name,
 )
 from .derive_params import params_for_part
+from .enrichment.providers import fetch_assembly_processes
 from .events import (
     EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
     EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT,
@@ -140,7 +147,9 @@ class JLCPCBTools(wx.Dialog):
         general_settings = self.settings.setdefault("general", {})
         raw_board_count = general_settings.get("bom_estimator_boards", 5)
         try:
-            self.bom_estimator_board_count = self._normalize_board_count(raw_board_count)
+            self.bom_estimator_board_count = self._normalize_board_count(
+                raw_board_count
+            )
         except (TypeError, ValueError):
             self.bom_estimator_board_count = 5
         general_settings["bom_estimator_boards"] = self.bom_estimator_board_count
@@ -163,9 +172,7 @@ class JLCPCBTools(wx.Dialog):
             1,
             minimum=1,
         )
-        self.bom_estimator_show = bool(
-            general_settings.get("bom_estimator_show", True)
-        )
+        self.bom_estimator_show = bool(general_settings.get("bom_estimator_show", True))
         general_settings["bom_estimator_show"] = self.bom_estimator_show
         self.highlight_standard_parts = bool(
             general_settings.get("highlight_standard_parts", True)
@@ -625,6 +632,24 @@ class JLCPCBTools(wx.Dialog):
             wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
             10,
         )
+        self.bom_estimator_help_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Help",
+        )
+        self.bom_estimator_help_button.SetToolTip(
+            wx.ToolTip("Show BOM estimator assumptions and limitations")
+        )
+        self.bom_estimator_help_button.Bind(
+            wx.EVT_BUTTON,
+            self.show_bom_estimator_help,
+        )
+        estimator_controls_sizer.Add(
+            self.bom_estimator_help_button,
+            0,
+            wx.ALIGN_CENTER_VERTICAL,
+            0,
+        )
         estimator_sizer.Add(estimator_controls_sizer, 0, wx.EXPAND)
 
         self.bom_estimator_summary = wx.StaticText(
@@ -930,6 +955,14 @@ class JLCPCBTools(wx.Dialog):
         self.save_settings()
         self.recompute_bom_estimate()
 
+    def show_bom_estimator_help(self, *_):
+        """Show shared BOM estimator help text."""
+        wx.MessageBox(
+            get_bom_estimator_help_text(),
+            BOM_ESTIMATOR_HELP_TITLE,
+            style=wx.OK | wx.ICON_INFORMATION,
+        )
+
     def _is_on_bottom_side(self, footprint) -> bool:
         """Return True when a footprint is on the bottom side."""
         with suppress(Exception):  # pylint: disable=broad-exception-caught
@@ -968,7 +1001,9 @@ class JLCPCBTools(wx.Dialog):
             flags = {}
             with suppress(TypeError, ValueError, json.JSONDecodeError):
                 flags = json.loads(part.get("assembly_flags") or "{}")
-            if bool(flags.get("is_dnp", False)) or bool(flags.get("exclude_from_pos", False)):
+            if bool(flags.get("is_dnp", False)) or bool(
+                flags.get("exclude_from_pos", False)
+            ):
                 continue
 
             reference = part.get("reference")
@@ -1095,7 +1130,10 @@ class JLCPCBTools(wx.Dialog):
             return ""
         if lcsc in self.pending_assembly_enrichment:
             return "Pending"
-        if str(part.get("assembly_process") or "") or part.get("component_product_type") is not None:
+        if (
+            str(part.get("assembly_process") or "")
+            or part.get("component_product_type") is not None
+        ):
             return "Done"
         return "Queued"
 
@@ -1140,7 +1178,9 @@ class JLCPCBTools(wx.Dialog):
 
             wx.PostEvent(
                 self,
-                AssemblyEnrichmentProgressEvent(lcsc=lcsc, refs=refs, metadata=metadata),
+                AssemblyEnrichmentProgressEvent(
+                    lcsc=lcsc, refs=refs, metadata=metadata
+                ),
             )
 
     def on_assembly_enrichment_progress(self, e):
@@ -1523,9 +1563,7 @@ class JLCPCBTools(wx.Dialog):
         if migrated:
             self.save_settings()
 
-    def decode_mainwindow_highlight_value(
-        self, value: str
-    ) -> tuple[str, list[str]]:
+    def decode_mainwindow_highlight_value(self, value: str) -> tuple[str, list[str]]:
         """Decode params cell text, optionally disabling highlight terms by setting."""
         text, terms = decode_highlighted_value(value)
         if not self.settings.get("highlighting", {}).get("matches", True):

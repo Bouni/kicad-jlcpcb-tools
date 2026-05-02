@@ -1,4 +1,8 @@
-"""BOM estimator logic extracted from UI for testability."""
+"""Pricing models and cost-calculation engine for BOM estimation.
+
+This module is intentionally pure and UI-agnostic so pricing behavior can be
+reviewed and tested independently from enrichment transport and presentation.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +10,15 @@ from collections.abc import Callable, Iterable, Mapping
 import contextlib
 from dataclasses import dataclass, field
 import json
-from typing import Protocol, cast
 
 
 @dataclass
 class AssemblyPricing:
-    """JLC assembly fee schedule.
+    """JLC assembly fee schedule in USD.
 
-    All values are in USD.  Update this class when JLC changes their prices —
-    the rest of the estimator and its tests derive from these constants.
+    Each field represents one pricing rule input to the estimator.
+    Update this dataclass when JLC pricing changes; estimator tests should then
+    be updated to document the new expected totals.
     """
 
     # THT assembly
@@ -48,7 +52,11 @@ class AssemblyPricing:
 
 @dataclass
 class BomEstimateSummary:
-    """Typed BOM estimate result payload."""
+    """Typed result payload for BOM estimate totals and diagnostics.
+
+    Buckets are designed to let UI show non-overlapping categories while still
+    preserving fields needed for policy troubleshooting and tests.
+    """
 
     component_cost: float = 0.0
     fixed_cost: float = 0.0
@@ -76,23 +84,10 @@ class BomEstimateSummary:
 
 DEFAULT_PRICING = AssemblyPricing()
 
-try:
-    from .lcsc_api import LCSC_API
-except ImportError:  # pragma: no cover - test import fallback
-    from lcsc_api import LCSC_API
-
-
-class _AssemblyApi(Protocol):
-    """Protocol for API clients used by assembly enrichment logic."""
-
-    def get_part_data(self, lcsc: str) -> dict:
-        """Fetch part details for an LCSC number."""
-        ...
-
 
 @dataclass
 class _AssemblyScan:
-    """Intermediate assembly scan state for BOM estimate aggregation."""
+    """Intermediate state gathered while scanning BOM rows."""
 
     tht_present: bool = False
     standard_present: bool = False
@@ -168,38 +163,6 @@ def _safe_int(value: object, default: int = 0) -> int:
         with contextlib.suppress(ValueError, TypeError):
             return int(value)
     return default
-
-
-def fetch_assembly_processes(
-    lcsc_codes: Iterable[str],
-    api: _AssemblyApi | None = None,
-) -> dict[str, dict[str, object]]:
-    """Fetch assembly metadata values from LCSC API for the given part numbers."""
-    client = api or LCSC_API()
-    results = {}
-    for lcsc in lcsc_codes:
-        assembly_process = ""
-        component_product_type = None
-        try:
-            part_data = client.get_part_data(lcsc)
-            if part_data.get("success"):
-                payload = part_data.get("data", {}).get("data", {})
-                assembly_process = payload.get("assemblyProcess", "")
-                component_product_type = payload.get("componentProductType")
-        except Exception:  # pylint: disable=broad-exception-caught
-            assembly_process = ""
-            component_product_type = None
-
-        is_standard = False
-        with contextlib.suppress(ValueError, TypeError):
-            is_standard = _safe_int(component_product_type) != 0
-
-        results[lcsc] = {
-            "assembly_process": assembly_process,
-            "component_product_type": component_product_type,
-            "is_standard_assembly": is_standard,
-        }
-    return results
 
 
 def _create_empty_summary() -> BomEstimateSummary:
@@ -315,13 +278,7 @@ def calculate_bom_estimate(
     panelization_per_board_fee: float = 0.0,
     panelization_threshold_boards: int = 1,
 ) -> BomEstimateSummary:
-    """Calculate BOM and assembly estimate totals.
-
-    Pass a custom ``pricing`` instance to override the fee schedule.
-
-    Returns a summary object with totals and diagnostics.
-
-    """
+    """Calculate BOM and assembly estimate totals."""
     p = pricing if pricing is not None else DEFAULT_PRICING
     _tht_setup_fee = p.tht_setup_fee
     _tht_per_joint_fee = p.tht_per_joint_fee
@@ -405,6 +362,7 @@ def calculate_bom_estimate(
     summary.tht_joint_count = scan.tht_joints
     summary.variable_assembly_cost += scan.tht_joints * _tht_per_joint_fee
     summary.variable_assembly_cost += scan.smt_joints * _smt_per_joint_fee
+
     # In Standard mode, JLC applies per-distinct-SMT-part surcharge regardless of
     # Extended/Basic classification. The Extended surcharge is Economic-only.
     if board_is_standard:
@@ -420,81 +378,6 @@ def calculate_bom_estimate(
     if board_count > 0:
         summary.cost_per_board = summary.total_cost / board_count
     return summary
-
-
-def format_bom_estimate_summary(
-    summary: BomEstimateSummary, board_count: int, mode: str, reason_text: str
-) -> tuple[str, str]:
-    """Format BOM estimate summary into display lines.
-
-    Args:
-        summary: BOM estimate from calculate_bom_estimate()
-        board_count: Number of boards
-        mode: "Standard" or "Economic" mode string
-        reason_text: Comma-joined reason text for triggers (or "none")
-
-    Returns:
-        (overview_line, details_line) tuple for two-line display
-
-    """
-    overview_line = (
-        f"BOM Estimate ({board_count} boards): Mode {mode} | "
-        f"Total ${summary.total_cost:.2f} | "
-        f"Per board ${summary.cost_per_board:.2f} | "
-        f"Triggers {reason_text} | "
-        f"Missing prices {summary.missing_prices}"
-    )
-
-    mode_is_standard = str(mode).strip().lower() == "standard"
-    mode_surcharge_cost = 0.0
-    if mode_is_standard:
-        mode_surcharge_cost += summary.standard_part_surcharge_cost
-    else:
-        mode_surcharge_cost += summary.extended_cost
-
-    displayed_fixed_cost = summary.fixed_cost + mode_surcharge_cost
-    displayed_setup_cost = summary.economic_setup_cost + summary.standard_setup_cost
-    displayed_joint_assembly_cost = (
-        summary.variable_assembly_cost - summary.standard_part_surcharge_cost
-    )
-    if displayed_joint_assembly_cost < 0:
-        displayed_joint_assembly_cost = 0.0
-
-    # Assembly cost includes variable joint fees and surcharges (extended + standard)
-    # We show them separately in the breakdown for clarity
-    surcharge_labels = []
-    if not mode_is_standard and summary.extended_cost > 0:
-        surcharge_labels.append(f"extended: ${summary.extended_cost:.2f}")
-    if mode_is_standard and summary.standard_part_surcharge_cost > 0:
-        surcharge_labels.append(
-            f"std-parts: ${summary.standard_part_surcharge_cost:.2f}"
-        )
-    surcharge_breakdown = (
-        ", ".join(surcharge_labels) if surcharge_labels else "surcharges: $0.00"
-    )
-
-    details_line = (
-        f"Direct BOM Cost: ${summary.component_cost:.2f} | "
-        f"Fixed ${displayed_fixed_cost:.2f} "
-        f"({surcharge_breakdown}, setup: ${displayed_setup_cost:.2f}, "
-        f"stencil: ${summary.stencil_cost:.2f}, tht: ${summary.tht_setup_cost:.2f}) | "
-        f"Assembly ${displayed_joint_assembly_cost:.2f} "
-        f"(smt: {summary.smt_joint_count} joints, tht: {summary.tht_joint_count} joints)"
-    )
-
-    return overview_line, details_line
-
-
-def standard_signal_reasons(signals: Mapping[str, object]) -> list[str]:
-    """Build user-facing reason labels for active Standard-mode triggers."""
-    reason_map = [
-        ("manual_enabled", "manual"),
-        ("qty_50_plus", "qty≥50"),
-        ("v_cut_drawings", "V-cut layer"),
-        ("standard_part_present", "standard part"),
-        ("multi_side_populated", "both sides populated"),
-    ]
-    return [label for key, label in reason_map if signals.get(key)]
 
 
 def calculate_part_bom_cost(
@@ -513,162 +396,3 @@ def calculate_part_bom_cost(
         return None
 
     return unit_price * board_count
-
-
-def format_part_bom_price_label(
-    part: Mapping[str, object], details: Mapping[str, object], board_count: int
-) -> str:
-    """Build per-part BOM contribution label for UI display."""
-    if part.get("exclude_from_bom"):
-        return ""
-
-    lcsc = str(part.get("lcsc") or "")
-    if not lcsc:
-        return ""
-
-    contribution = calculate_part_bom_cost(part, details, board_count)
-    if contribution is None:
-        return "N/A"
-
-    return f"${contribution:.4f}"
-
-
-def build_bom_estimate_view_model(
-    parts: Iterable[Mapping[str, object]],
-    board_count: int,
-    get_part_details: Callable[[str], dict],
-    standard_context: Mapping[str, object],
-) -> dict:
-    """Build a pure BOM estimate view model for UI consumption."""
-    parts = list(parts)
-    if not parts:
-        return {
-            "summary": None,
-            "mode": None,
-            "reason_text": "none",
-            "highlight_refs": set(),
-            "summary_label": f"BOM Estimate ({board_count} boards): no parts",
-        }
-
-    bom_parts = [
-        part
-        for part in parts
-        if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
-    ]
-    if not bom_parts:
-        return {
-            "summary": None,
-            "mode": None,
-            "reason_text": "none",
-            "highlight_refs": set(),
-            "summary_label": f"BOM Estimate ({board_count} boards): no assigned BOM parts",
-        }
-
-    board_standard = bool(standard_context.get("board_standard"))
-    smt_side_count = _safe_int(standard_context.get("smt_populated_sides"))
-    signals = cast(Mapping[str, object], standard_context.get("signals", {}))
-    trigger_references = cast(
-        Iterable[str], standard_context.get("trigger_references", set())
-    )
-    summary = calculate_bom_estimate(
-        parts=parts,
-        board_count=board_count,
-        get_part_details=get_part_details,
-        board_standard=board_standard,
-        smt_populated_sides=smt_side_count,
-    )
-
-    mode = "Standard" if board_standard else "Economic"
-    reason_text = ", ".join(standard_signal_reasons(signals)) or "none"
-    highlight_refs = set(trigger_references) if board_standard else set()
-    overview_line, details_line = format_bom_estimate_summary(
-        summary,
-        board_count,
-        mode,
-        reason_text,
-    )
-    return {
-        "summary": summary,
-        "mode": mode,
-        "reason_text": reason_text,
-        "highlight_refs": highlight_refs,
-        "summary_label": f"{overview_line}\n{details_line}",
-    }
-
-
-def build_standard_mode_context(
-    *,
-    manual_enabled: bool,
-    board_count: int,
-    has_v_cut_drawings: bool,
-    populated_refs: Iterable[str],
-    populated_sides: Iterable[str],
-    smt_populated_sides: Iterable[str],
-    standard_part_refs: Iterable[str],
-) -> dict:
-    """Build pure Standard/Economic policy context from normalized board facts."""
-    populated_refs = set(populated_refs)
-    populated_sides = set(populated_sides)
-    smt_populated_sides = set(smt_populated_sides)
-    standard_part_refs = set(standard_part_refs)
-
-    signals = {
-        "manual_enabled": bool(manual_enabled),
-        "qty_50_plus": board_count >= 50,
-        "v_cut_drawings": bool(has_v_cut_drawings),
-        "standard_part_present": bool(standard_part_refs),
-        "multi_side_populated": len(populated_sides) > 1,
-    }
-    trigger_references = set(standard_part_refs)
-    if signals["multi_side_populated"]:
-        trigger_references.update(populated_refs)
-
-    return {
-        "signals": signals,
-        "board_standard": any(signals.values()),
-        "smt_populated_sides": len(smt_populated_sides),
-        "trigger_references": trigger_references,
-    }
-
-
-def prepare_bom_price_labels(
-    parts: Iterable[Mapping[str, object]],
-    board_count: int,
-    get_part_details: Callable[[str], dict],
-) -> dict:
-    """Return a {reference: label} mapping for BOM price column population.
-
-    Pure function — no UI or wx dependencies.  Callers are responsible for
-    applying the resulting labels to the data model.
-    """
-    part_rows = [part for part in parts if part.get("reference")]
-    billable_rows = [
-        part
-        for part in part_rows
-        if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
-    ]
-    lcsc_quantities = _build_lcsc_quantities(billable_rows, board_count)
-
-    details_cache: dict = {}
-    result: dict = {}
-    for part in part_rows:
-        reference = part.get("reference")
-        lcsc = str(part.get("lcsc") or "")
-        details: dict = {}
-        if lcsc:
-            if lcsc not in details_cache:
-                details_cache[lcsc] = get_part_details(lcsc)
-            details = details_cache[lcsc]
-
-        if not part.get("exclude_from_bom") and lcsc:
-            quantity = lcsc_quantities.get(lcsc, board_count)
-            unit_price = get_unit_price(quantity, str(details.get("price") or ""))
-            if unit_price < 0:
-                result[reference] = "N/A"
-            else:
-                result[reference] = f"${unit_price * board_count:.4f}"
-            continue
-
-        result[reference] = format_part_bom_price_label(part, details, board_count)
-
-    return result

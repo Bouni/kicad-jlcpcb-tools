@@ -6,6 +6,10 @@ import logging
 import wx  # pylint: disable=import-error
 
 # Import library configuration to populate choices
+from .bom_estimation.help_text import (
+    BOM_ESTIMATOR_HELP_TITLE,
+    get_bom_estimator_help_text,
+)
 from .dblib import LIBRARY_CONFIGS
 from .events import UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
@@ -165,7 +169,9 @@ class SettingsDialog(wx.Dialog):
         self.force_drc_image = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            loadBitmapScaled("bug-check-outline.png", self.parent.scale_factor, static=True),
+            loadBitmapScaled(
+                "bug-check-outline.png", self.parent.scale_factor, static=True
+            ),
             wx.DefaultPosition,
             wx.DefaultSize,
             0,
@@ -399,7 +405,9 @@ class SettingsDialog(wx.Dialog):
             0,
         )
 
-        self.highlight_standard_parts_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+        self.highlight_standard_parts_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
 
         highlight_standard_parts_sizer = wx.BoxSizer(wx.HORIZONTAL)
         highlight_standard_parts_sizer.Add(
@@ -593,7 +601,9 @@ class SettingsDialog(wx.Dialog):
         self.timeout_seconds_image = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            loadBitmapScaled("mdi-hourglass-top.png", self.parent.scale_factor, static=True),
+            loadBitmapScaled(
+                "mdi-hourglass-top.png", self.parent.scale_factor, static=True
+            ),
             wx.DefaultPosition,
             wx.DefaultSize,
             0,
@@ -605,9 +615,7 @@ class SettingsDialog(wx.Dialog):
         timeout_sizer.Add(
             self.timeout_seconds_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
         )
-        timeout_sizer.Add(
-            hook_timeout_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
+        timeout_sizer.Add(hook_timeout_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         timeout_sizer.Add(
             self.timeout_seconds_setting, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
         )
@@ -630,7 +638,9 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.bom_estimator_show_setting.SetToolTip(
-            wx.ToolTip("Whether the BOM cost estimator panel is shown in the main window")
+            wx.ToolTip(
+                "Whether the BOM cost estimator panel is shown in the main window"
+            )
         )
 
         self.bom_estimator_show_image = wx.StaticBitmap(
@@ -643,10 +653,32 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.bom_estimator_show_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+        self.bom_estimator_help_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Help",
+        )
+        self.bom_estimator_help_button.SetToolTip(
+            wx.ToolTip("Show BOM estimator assumptions and limitations")
+        )
+        self.bom_estimator_help_button.Bind(
+            wx.EVT_BUTTON,
+            self.show_bom_estimator_help,
+        )
 
         bom_estimator_show_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        bom_estimator_show_sizer.Add(self.bom_estimator_show_image, 10, wx.ALL | wx.EXPAND, 5)
-        bom_estimator_show_sizer.Add(self.bom_estimator_show_setting, 100, wx.ALL | wx.EXPAND, 5)
+        bom_estimator_show_sizer.Add(
+            self.bom_estimator_show_image, 10, wx.ALL | wx.EXPAND, 5
+        )
+        bom_estimator_show_sizer.Add(
+            self.bom_estimator_show_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+        bom_estimator_show_sizer.Add(
+            self.bom_estimator_help_button,
+            0,
+            wx.ALL | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
@@ -895,6 +927,14 @@ class SettingsDialog(wx.Dialog):
         else:
             self.bom_estimator_show_setting.SetLabel("Hide BOM cost estimator")
 
+    def show_bom_estimator_help(self, *_):
+        """Show shared BOM estimator help text."""
+        wx.MessageBox(
+            get_bom_estimator_help_text(),
+            BOM_ESTIMATOR_HELP_TITLE,
+            style=wx.OK | wx.ICON_INFORMATION,
+        )
+
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
@@ -925,7 +965,9 @@ class SettingsDialog(wx.Dialog):
             self.parent.settings.get("highlighting", {}).get("matches", True)
         )
         self.update_highlight_standard_parts(
-            self.parent.settings.get("general", {}).get("highlight_standard_parts", True)
+            self.parent.settings.get("general", {}).get(
+                "highlight_standard_parts", True
+            )
         )
         self.update_subtract_mask_from_silk(
             self.parent.settings.get("gerber", {}).get("subtract_mask_from_silk", True)
@@ -941,7 +983,9 @@ class SettingsDialog(wx.Dialog):
         self.update_data_path(
             self.parent.settings.get("library", {}).get("data_path", "")
         )
-        self.update_pre_script(self.parent.settings.get("hooks", {}).get("pre_script", ""))
+        self.update_pre_script(
+            self.parent.settings.get("hooks", {}).get("pre_script", "")
+        )
         self.update_post_script(
             self.parent.settings.get("hooks", {}).get("post_script", "")
         )
