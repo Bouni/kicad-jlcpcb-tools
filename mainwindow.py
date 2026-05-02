@@ -1552,6 +1552,10 @@ class JLCPCBTools(wx.Dialog):
             gerber_settings["fill_zones"] = True
             migrated = True
 
+        if "subtract_mask_from_silk" not in gerber_settings:
+            gerber_settings["subtract_mask_from_silk"] = True
+            migrated = True
+
         if migrated:
             self.save_settings()
 

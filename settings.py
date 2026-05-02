@@ -247,6 +247,31 @@ class SettingsDialog(wx.Dialog):
             self.plot_references_setting, 100, wx.ALL | wx.EXPAND, 5
         )
 
+        ##### Subtract mask from silkscreen #####
+
+        self.subtract_mask_from_silk_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Subtract soldermask from silkscreen",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_subtract_mask_from_silk",
+        )
+
+        self.subtract_mask_from_silk_setting.SetToolTip(
+            wx.ToolTip(
+                "Whether silkscreen should be removed where soldermask openings are present"
+            )
+        )
+
+        self.subtract_mask_from_silk_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        subtract_mask_from_silk_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        subtract_mask_from_silk_sizer.Add(
+            self.subtract_mask_from_silk_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
         ##### LCSC priority #####
 
         self.lcsc_priority_setting = wx.CheckBox(
@@ -691,6 +716,7 @@ class SettingsDialog(wx.Dialog):
         settings_grid.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(subtract_mask_from_silk_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -817,6 +843,18 @@ class SettingsDialog(wx.Dialog):
             self.plot_references_setting.SetLabel("Don't plot references on silkscreen")
             self.plot_references_image.SetBitmap(
                 loadBitmapScaled("no_refs.png", self.parent.scale_factor, static=True)
+            )
+
+    def update_subtract_mask_from_silk(self, enabled):
+        """Update subtract-mask-from-silk setting label/value."""
+        self.subtract_mask_from_silk_setting.SetValue(bool(enabled))
+        if enabled:
+            self.subtract_mask_from_silk_setting.SetLabel(
+                "Subtract soldermask from silkscreen"
+            )
+        else:
+            self.subtract_mask_from_silk_setting.SetLabel(
+                "Do not subtract soldermask from silkscreen"
             )
 
     def update_lcsc_priority(self, priority):
@@ -955,6 +993,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_plot_references(
             self.parent.settings.get("gerber", {}).get("plot_references", True)
+        )
+        self.update_subtract_mask_from_silk(
+            self.parent.settings.get("gerber", {}).get("subtract_mask_from_silk", True)
         )
         self.update_lcsc_priority(
             self.parent.settings.get("general", {}).get("lcsc_priority", True)
