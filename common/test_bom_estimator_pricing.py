@@ -55,8 +55,8 @@ def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
         + p.extended_part_fee
         + 10 * p.smt_per_joint_fee
     )
-    assert round(summary["component_cost"], 3) == 2.000
-    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
+    assert round(summary.component_cost, 3) == 2.000
+    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
 
 
 def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
@@ -81,8 +81,8 @@ def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
     expected_assembly = (
         p.economic_setup_fee + p.tht_setup_fee + 10 * p.tht_per_joint_fee
     )
-    assert round(summary["component_cost"], 3) == 2.500
-    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
+    assert round(summary.component_cost, 3) == 2.500
+    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
 
 
 def test_standard_mode_does_not_charge_extended_surcharge():
@@ -126,11 +126,11 @@ def test_standard_mode_does_not_charge_extended_surcharge():
         + 2 * p.standard_part_fee
         + 3 * p.smt_per_joint_fee
     )
-    assert round(summary["extended_cost"], 3) == 0.000
-    assert round(summary["standard_part_surcharge_cost"], 3) == round(
+    assert round(summary.extended_cost, 3) == 0.000
+    assert round(summary.standard_part_surcharge_cost, 3) == round(
         2 * p.standard_part_fee, 3
     )
-    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
+    assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
 
 
 def test_get_assembly_flags_handles_bad_json():
@@ -166,7 +166,7 @@ def test_assembly_pricing_custom_instance_overrides_defaults():
         pricing=cheap,
     )
     expected_assembly = 1.0 + 0.5 + 10 * 0.001
-    assert round(summary["assembly_cost"], 4) == round(expected_assembly, 4)
+    assert round(summary.assembly_cost, 4) == round(expected_assembly, 4)
 
 
 def test_collect_billable_bom_parts_filters_excluded_unassigned_and_dnp():

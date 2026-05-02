@@ -22,20 +22,24 @@ class AssemblyPricing:
     """
 
     # THT assembly
+    #
     tht_setup_fee: float = 3.55
     """One-time THT setup charge per order."""
     tht_per_joint_fee: float = 0.0163
     """Per-pad fee for wave/THT soldering."""
 
     # SMT assembly (joint-level)
+    #
     smt_per_joint_fee: float = 0.0016
     """Per-pad fee for SMT placement."""
 
     # Extended part surcharge (Economic mode only)
+    #
     extended_part_fee: float = 3.04
     """Per distinct extended-part LCSC code fee in Economic mode."""
 
     # Standard mode fixed fees
+    #
     standard_setup_fee: float = 25.4
     """Per-populated-SMT-side setup fee in Standard mode."""
     standard_part_fee: float = 1.52
@@ -44,6 +48,7 @@ class AssemblyPricing:
     """Per-populated-SMT-side stencil fee in Standard mode."""
 
     # Economic mode fixed fees
+    #
     economic_setup_fee: float = 8.12
     """One-time setup fee in Economic mode."""
     economic_stencil_fee: float = 1.52
@@ -77,10 +82,6 @@ class BomEstimateSummary:
     smt_joint_count: int = 0
     tht_joint_count: int = 0
 
-    def __getitem__(self, key: str):
-        """Temporary mapping-style access during migration from dict summaries."""
-        return getattr(self, key)
-
 
 DEFAULT_PRICING = AssemblyPricing()
 
@@ -97,6 +98,26 @@ class _AssemblyScan:
     standard_part_count: int = 0
     extended_lcsc: set[str] = field(default_factory=set)
     smt_lcsc: set[str] = field(default_factory=set)
+
+
+@dataclass
+class _PricingRunContext:
+    """Per-estimate runtime state for part-detail lookups.
+
+    Keeps one callback and one in-memory cache so helper functions can share
+    detail fetches without repeatedly threading both objects through signatures.
+    """
+
+    get_part_details: Callable[[str], dict]
+    details_cache: dict[str, dict] = field(default_factory=dict)
+
+    def get_cached_part_details(self, lcsc: str) -> dict:
+        """Fetch and cache part details by LCSC code."""
+        details = self.details_cache.get(lcsc)
+        if details is None:
+            details = self.get_part_details(lcsc)
+            self.details_cache[lcsc] = details
+        return details
 
 
 def get_unit_price(quantity: int, prices: str) -> float:
@@ -191,19 +212,6 @@ def _collect_billable_bom_parts(
     return bom_parts
 
 
-def _get_cached_part_details(
-    lcsc: str,
-    details_cache: dict[str, dict],
-    get_part_details: Callable[[str], dict],
-) -> dict:
-    """Fetch and cache part details by LCSC code."""
-    details = details_cache.get(lcsc)
-    if details is None:
-        details = get_part_details(lcsc)
-        details_cache[lcsc] = details
-    return details
-
-
 def _build_lcsc_quantities(
     bom_parts: Iterable[Mapping[str, object]], board_count: int
 ) -> dict[str, int]:
@@ -218,14 +226,13 @@ def _build_lcsc_quantities(
 def _calculate_component_costs(
     lcsc_quantities: Mapping[str, int],
     *,
-    details_cache: dict[str, dict],
-    get_part_details: Callable[[str], dict],
+    run_context: _PricingRunContext,
 ) -> tuple[float, int]:
     """Calculate direct component cost and missing-price count."""
     component_cost = 0.0
     missing_prices = 0
     for lcsc, quantity in lcsc_quantities.items():
-        details = _get_cached_part_details(lcsc, details_cache, get_part_details)
+        details = run_context.get_cached_part_details(lcsc)
         unit_price = get_unit_price(quantity, str(details.get("price") or ""))
         if unit_price < 0:
             missing_prices += 1
@@ -238,15 +245,30 @@ def _scan_assembly_state(
     bom_parts: Iterable[Mapping[str, object]],
     board_count: int,
     *,
-    details_cache: dict[str, dict],
-    get_part_details: Callable[[str], dict],
+    run_context: _PricingRunContext | None = None,
+    details_cache: dict[str, dict] | None = None,
+    get_part_details: Callable[[str], dict] | None = None,
 ) -> _AssemblyScan:
-    """Scan BOM rows to collect assembly-mode and surcharge metrics."""
+    """Scan BOM rows to collect assembly-mode and surcharge metrics.
+
+    Accepts either a `_PricingRunContext` (preferred) or legacy
+    `details_cache`+`get_part_details` kwargs for compatibility.
+    """
+    if run_context is None:
+        if get_part_details is None:
+            raise ValueError(
+                "get_part_details is required when run_context is not provided"
+            )
+        run_context = _PricingRunContext(
+            get_part_details=get_part_details,
+            details_cache={} if details_cache is None else details_cache,
+        )
+
     scan = _AssemblyScan()
 
     for part in bom_parts:
         lcsc = str(part.get("lcsc") or "")
-        details = _get_cached_part_details(lcsc, details_cache, get_part_details)
+        details = run_context.get_cached_part_details(lcsc)
 
         if _safe_int(part.get("component_product_type")) != 0:
             scan.standard_present = True
@@ -332,13 +354,12 @@ def calculate_bom_estimate(
 
     lcsc_quantities = _build_lcsc_quantities(bom_parts, board_count)
 
-    details_cache: dict[str, dict] = {}
+    run_context = _PricingRunContext(get_part_details=get_part_details)
 
     # Phase 3: direct component cost from quantity-tier prices.
     component_cost, missing_prices = _calculate_component_costs(
         lcsc_quantities,
-        details_cache=details_cache,
-        get_part_details=get_part_details,
+        run_context=run_context,
     )
     summary.component_cost = component_cost
     summary.missing_prices = missing_prices
@@ -347,8 +368,7 @@ def calculate_bom_estimate(
     scan = _scan_assembly_state(
         bom_parts,
         board_count,
-        details_cache=details_cache,
-        get_part_details=get_part_details,
+        run_context=run_context,
     )
     summary.standard_part_count = scan.standard_part_count
 
