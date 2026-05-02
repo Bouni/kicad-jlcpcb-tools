@@ -60,7 +60,8 @@ def test_calculate_bom_estimate_computes_fixed_cost_without_policy_kwargs():
     )
 
     assert summary.fixed_cost > 0
-    assert summary.fixed_cost == summary.assembly_cost
+    assert summary.assembly_cost >= summary.fixed_cost
+    assert summary.variable_assembly_cost > 0
 
 
 def test_standard_fees_apply_for_standard_smt_part():
