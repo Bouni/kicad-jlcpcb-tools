@@ -6,7 +6,7 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from bom_estimator import (
+from bom_estimation import (
     DEFAULT_PRICING,
     AssemblyPricing,
     build_bom_estimate_view_model,
@@ -38,8 +38,8 @@ def test_calculate_bom_estimate_missing_price_counts_unknown_lcsc_price():
     assert summary.missing_prices == 1
 
 
-def test_calculate_bom_estimate_accepts_policy_kwargs_and_reports_policy_cost():
-    """Policy kwargs are accepted and included in fixed/policy cost totals."""
+def test_calculate_bom_estimate_computes_fixed_cost_without_policy_kwargs():
+    """Fixed costs are computed via the current pricing model inputs only."""
     parts = [
         {
             "lcsc": "C100",
@@ -57,13 +57,10 @@ def test_calculate_bom_estimate_accepts_policy_kwargs_and_reports_policy_cost():
         parts,
         board_count=10,
         get_part_details=get_details,
-        order_handling_fee=2.5,
-        panelization_per_board_fee=0.1,
-        panelization_threshold_boards=5,
     )
 
-    assert round(summary.policy_cost, 3) == 3.5
-    assert summary.fixed_cost >= summary.policy_cost
+    assert summary.fixed_cost > 0
+    assert summary.fixed_cost == summary.assembly_cost
 
 
 def test_standard_fees_apply_for_standard_smt_part():
