@@ -113,6 +113,7 @@ def _make_controller(
 
 
 def test_recompute_empty_parts_short_circuits_with_no_parts_summary():
+    """Empty input emits the 'no parts' summary and clears trigger refs."""
     controller, captured = _make_controller(parts=[])
     controller.recompute(board_count=10)
 
@@ -123,6 +124,7 @@ def test_recompute_empty_parts_short_circuits_with_no_parts_summary():
 
 
 def test_recompute_all_excluded_from_bom_short_circuits_with_no_assigned_summary():
+    """All-excluded input emits the 'no assigned BOM parts' summary."""
     parts = [
         {
             "reference": "R1",
@@ -152,9 +154,12 @@ def test_recompute_all_excluded_from_bom_short_circuits_with_no_assigned_summary
 
 
 def test_recompute_all_dnp_short_circuits_when_all_rows_filtered():
-    # Parts that survive the bom_parts filter (have lcsc, not excluded) but are
-    # all DNP — billable filter inside calculate_bom_estimate drops them but
-    # the controller still runs through to the summary path.
+    """All-DNP rows still produce a summary line and per-part labels.
+
+    Rows with is_dnp pass the bom_parts filter (have lcsc, not excluded) so
+    the controller does not short-circuit; calculate_bom_estimate drops them
+    later in its billable filter, yielding zero assembly cost.
+    """
     parts = [
         {
             "reference": "R1",
@@ -182,6 +187,7 @@ def test_recompute_all_dnp_short_circuits_when_all_rows_filtered():
 
 
 def test_recompute_normal_mixed_emits_summary_and_per_part_price_labels():
+    """A normal mixed BOM produces a multi-line summary and one label per ref."""
     parts = [
         {
             "reference": "R1",
@@ -296,9 +302,12 @@ def test_get_board_standard_context_unified_side_does_not_trigger_multi_side():
 
 
 def test_recompute_enrichment_pending_uses_available_metadata_and_no_assembly_data():
-    # Simulates the enrichment-pending state: get_part_details returns price
-    # info but the part rows themselves have no assembly_process / product_type
-    # (those would be filled in by enrichment).
+    """Recompute still produces a summary while assembly enrichment is pending.
+
+    Simulates the enrichment-pending state: get_part_details returns price
+    info but the part rows themselves have no assembly_process / product_type
+    (those would be filled in once enrichment finishes).
+    """
     parts = [
         {
             "reference": "R1",

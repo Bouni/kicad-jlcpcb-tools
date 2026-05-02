@@ -1026,9 +1026,7 @@ class JLCPCBTools(wx.Dialog):
         updates are applied on the UI thread. Delegates BOM rendering/recompute
         through the BOM controller path.
         """
-        wx.PostEvent(
-            self, BomDataChangedEvent(source="enrichment_update")
-        )
+        wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -1093,9 +1091,7 @@ class JLCPCBTools(wx.Dialog):
                     "",  # bom price label
                 ]
             )
-        wx.PostEvent(
-            self, BomDataChangedEvent(source="populate_footprint_list")
-        )
+        wx.PostEvent(self, BomDataChangedEvent(source="populate_footprint_list"))
 
     def OnBomHide(self, *_):
         """Hide all parts from the list that have 'in BOM' set to No."""

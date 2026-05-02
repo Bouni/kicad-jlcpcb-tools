@@ -46,6 +46,12 @@ get_footprint_pad_count = footprint_metadata_module.get_footprint_pad_count
 get_footprint_pads = footprint_metadata_module.get_footprint_pads
 footprint_has_tht = footprint_metadata_module.footprint_has_tht
 
+# Imported here for the round-trip test below; the import sits below the
+# package bootstrap so bom_estimation resolves correctly.
+from bom_estimation.pricing import (  # noqa: E402  pylint: disable=wrong-import-position,import-error
+    get_assembly_flags as parse_assembly_flags,
+)
+
 
 class _Drill:
     def __init__(self, x=0, y=0):
@@ -369,10 +375,6 @@ def test_backfill_returns_silently_when_db_part_empty():
 
 def test_assembly_flags_round_trip_writer_keys_match_reader_expectations():
     """Keys produced by footprint_metadata.get_assembly_flags must parse back via pricing.get_assembly_flags."""
-    from bom_estimation.pricing import (  # pylint: disable=import-outside-toplevel
-        get_assembly_flags as parse_assembly_flags,
-    )
-
     fp = _BackfillFootprint(reference="R1", pads=[_Pad()], is_dnp=True)
     flags_json = footprint_metadata_module.get_assembly_flags(fp)
 
