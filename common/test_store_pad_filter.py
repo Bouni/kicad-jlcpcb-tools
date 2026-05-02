@@ -384,4 +384,3 @@ def test_assembly_flags_round_trip_writer_keys_match_reader_expectations():
     assert set(parsed) == {"exclude_from_bom", "exclude_from_pos", "is_dnp"}
     # is_dnp came from the footprint stub.
     assert parsed["is_dnp"] is True
-

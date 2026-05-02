@@ -278,7 +278,9 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
     )
     assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-3)
     assert summary.total_cost == pytest.approx(5.0 + expected_assembly, abs=1e-3)
-    assert summary.cost_per_board == pytest.approx((5.0 + expected_assembly) / 5, abs=1e-3)
+    assert summary.cost_per_board == pytest.approx(
+        (5.0 + expected_assembly) / 5, abs=1e-3
+    )
 
 
 def test_standard_surcharge_and_joint_counts_are_reported_separately():
