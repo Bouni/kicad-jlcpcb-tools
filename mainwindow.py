@@ -36,6 +36,7 @@ from .events import (
     EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
     EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT,
     EVT_ASSIGN_PARTS_EVENT,
+    EVT_BOM_DATA_CHANGED_EVENT,
     EVT_DOWNLOAD_COMPLETED_EVENT,
     EVT_DOWNLOAD_PROGRESS_EVENT,
     EVT_DOWNLOAD_STARTED_EVENT,
@@ -50,6 +51,7 @@ from .events import (
     EVT_UPDATE_SETTING,
     AssemblyEnrichmentCompletedEvent,
     AssemblyEnrichmentProgressEvent,
+    BomDataChangedEvent,
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
@@ -173,6 +175,10 @@ class JLCPCBTools(wx.Dialog):
         # mid-flight reassignment of a reference cannot have stale metadata
         # written back to it.
         self.assembly_enrichment_generation = 0
+        # Latch used by on_bom_data_changed to coalesce a burst of mutations
+        # into a single recompute. SQLite commits are synchronous, so async
+        # event dispatch is safe to defer here.
+        self._bom_recompute_scheduled = False
         self.Bind(wx.EVT_CLOSE, self.quit_dialog)
 
         # ---------------------------------------------------------------------
@@ -633,6 +639,7 @@ class JLCPCBTools(wx.Dialog):
             EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
             self.on_assembly_enrichment_completed,
         )
+        self.Bind(EVT_BOM_DATA_CHANGED_EVENT, self.on_bom_data_changed)
 
         self.enable_part_specific_toolbar_buttons(False)
 
@@ -833,7 +840,7 @@ class JLCPCBTools(wx.Dialog):
                 reference, e.lcsc, e.type, e.stock, params
             )
         self.start_assembly_enrichment(e.references)
-        self.recompute_bom_estimate()
+        wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
 
     def _set_bom_estimator_board_count(self, value: int) -> None:
         """Persist board count and update estimate when value changed."""
@@ -895,6 +902,25 @@ class JLCPCBTools(wx.Dialog):
         """Recompute and display estimated BOM+assembly cost."""
         board_count = self._normalize_board_count(self.bom_estimator_board_count)
         self.bom_estimator_controller.recompute(board_count)
+
+    def on_bom_data_changed(self, _e):
+        """Coalesce a burst of BomDataChangedEvent posts into one recompute.
+
+        Mutation handlers signal "BOM data changed" by posting an event rather
+        than calling recompute directly. Many UI actions (e.g. multi-select
+        toggle, populate_footprint_list) emit several posts in one event tick;
+        the latch + CallAfter pattern collapses them so we recompute once per
+        idle drain instead of once per mutation.
+        """
+        if self._bom_recompute_scheduled:
+            return
+        self._bom_recompute_scheduled = True
+        wx.CallAfter(self._run_coalesced_bom_recompute)
+
+    def _run_coalesced_bom_recompute(self):
+        """Drain the coalesced recompute latch and run a single estimate."""
+        self._bom_recompute_scheduled = False
+        self.recompute_bom_estimate()
 
     def _get_enrichment_status_label(self, part: dict) -> str:
         """Build UI status text for per-part assembly enrichment state."""
@@ -1006,7 +1032,9 @@ class JLCPCBTools(wx.Dialog):
         updates are applied on the UI thread. Delegates BOM rendering/recompute
         through the BOM controller path.
         """
-        self.recompute_bom_estimate()
+        wx.PostEvent(
+            self, BomDataChangedEvent(source="enrichment_update")
+        )
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -1071,7 +1099,9 @@ class JLCPCBTools(wx.Dialog):
                     "",  # bom price label
                 ]
             )
-        self.recompute_bom_estimate()
+        wx.PostEvent(
+            self, BomDataChangedEvent(source="populate_footprint_list")
+        )
 
     def OnBomHide(self, *_):
         """Hide all parts from the list that have 'in BOM' set to No."""
@@ -1190,7 +1220,7 @@ class JLCPCBTools(wx.Dialog):
             self.store.set_bom(ref, int(bool(bom)))
             self.store.set_pos(ref, int(bool(pos)))
             self.partlist_data_model.toggle_bom_pos(item)
-        self.recompute_bom_estimate()
+        wx.PostEvent(self, BomDataChangedEvent(source="toggle_bom_pos"))
 
     def toggle_bom(self, *_):
         """Toggle the exclude from BOM attribute of a footprint."""
@@ -1201,7 +1231,7 @@ class JLCPCBTools(wx.Dialog):
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, int(bool(bom)))
             self.partlist_data_model.toggle_bom(item)
-        self.recompute_bom_estimate()
+        wx.PostEvent(self, BomDataChangedEvent(source="toggle_bom"))
 
     def toggle_pos(self, *_):
         """Toggle the exclude from POS attribute of a footprint."""
@@ -1212,7 +1242,7 @@ class JLCPCBTools(wx.Dialog):
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, int(bool(pos)))
             self.partlist_data_model.toggle_pos(item)
-        self.recompute_bom_estimate()
+        wx.PostEvent(self, BomDataChangedEvent(source="toggle_pos"))
 
     def remove_lcsc_number(self, *_):
         """Remove an assigned a LCSC Part number to a footprint."""
@@ -1224,7 +1254,7 @@ class JLCPCBTools(wx.Dialog):
             fp = board.FindFootprintByReference(ref)
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
-        self.recompute_bom_estimate()
+        wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
 
     def select_alike_parts(self, *_):
         """Select all alike parts, starting from a single selected part."""
@@ -1744,7 +1774,7 @@ class JLCPCBTools(wx.Dialog):
                     self.store.set_lcsc(reference, lcsc)
                     updated_references.append(reference)
                 self.start_assembly_enrichment(updated_references)
-                self.recompute_bom_estimate()
+                wx.PostEvent(self, BomDataChangedEvent(source="paste_part_lcsc"))
 
     def add_correction(self, e):
         """Add part correction for the current part."""
