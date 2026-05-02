@@ -77,7 +77,6 @@ class BomEstimateSummary:
     cost_per_board: float = 0.0
     missing_prices: int = 0
     bom_part_count: int = 0
-    standard_part_count: int = 0
     smt_joint_count: int = 0
     tht_joint_count: int = 0
 
@@ -94,7 +93,6 @@ class _AssemblyScan:
     populated_part_present: bool = False
     tht_joints: int = 0
     smt_joints: int = 0
-    standard_part_count: int = 0
     extended_lcsc: set[str] = field(default_factory=set)
     smt_lcsc: set[str] = field(default_factory=set)
 
@@ -249,25 +247,9 @@ def _scan_assembly_state(
     bom_parts: Iterable[Mapping[str, object]],
     board_count: int,
     *,
-    run_context: _PricingRunContext | None = None,
-    details_cache: dict[str, dict] | None = None,
-    get_part_details: Callable[[str], dict] | None = None,
+    run_context: _PricingRunContext,
 ) -> _AssemblyScan:
-    """Scan BOM rows to collect assembly-mode and surcharge metrics.
-
-    Accepts either a `_PricingRunContext` (preferred) or legacy
-    `details_cache`+`get_part_details` kwargs for compatibility.
-    """
-    if run_context is None:
-        if get_part_details is None:
-            raise ValueError(
-                "get_part_details is required when run_context is not provided"
-            )
-        run_context = _PricingRunContext(
-            get_part_details=get_part_details,
-            details_cache={} if details_cache is None else details_cache,
-        )
-
+    """Scan BOM rows to collect assembly-mode and surcharge metrics."""
     scan = _AssemblyScan()
 
     for part in bom_parts:
@@ -276,7 +258,6 @@ def _scan_assembly_state(
 
         if _safe_int(part.get("component_product_type")) != 0:
             scan.standard_present = True
-            scan.standard_part_count += 1
 
         flags = get_assembly_flags(part)
         exclude_from_pos = bool(flags.get("exclude_from_pos", False))
@@ -352,8 +333,6 @@ def calculate_bom_estimate(
         board_count,
         run_context=run_context,
     )
-    summary.standard_part_count = scan.standard_part_count
-
     # Phase 4: fixed fees and stencil/setup rules by mode.
     if scan.tht_present:
         summary.tht_setup_cost += _tht_setup_fee

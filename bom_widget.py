@@ -9,7 +9,12 @@ import json
 import wx  # pylint: disable=import-error
 
 from .bom_estimation.pricing import calculate_bom_estimate
-from .bom_estimation.view import format_bom_estimate_summary, prepare_bom_price_labels
+from .bom_estimation.view import (
+    build_standard_mode_context,
+    format_bom_estimate_summary,
+    prepare_bom_price_labels,
+    standard_signal_reasons,
+)
 from .helpers import HighResWxSize
 
 
@@ -141,13 +146,17 @@ class BomEstimatorController:
         parts: list[Mapping[str, object]],
         board_count: int,
     ) -> dict[str, object]:
-        """Compute standard-mode trigger signals and assembly side usage."""
+        """Compute standard-mode trigger signals and assembly side usage.
+
+        Walks the board to extract per-reference facts (sides, SMT vs THT,
+        standard-part membership), then delegates the policy-decision portion
+        to ``build_standard_mode_context`` so the signal contract has one home.
+        """
         board = self._get_board()
-        populated_sides = set()
-        populated_refs = set()
-        smt_populated_sides = set()
-        standard_part_present = False
-        standard_part_refs = set()
+        populated_sides: set[str] = set()
+        populated_refs: set[str] = set()
+        smt_populated_sides: set[str] = set()
+        standard_part_refs: set[str] = set()
 
         for part in parts:
             if part.get("exclude_from_bom") or not str(part.get("lcsc") or ""):
@@ -171,7 +180,7 @@ class BomEstimatorController:
 
             side = "bottom" if self._is_on_bottom_side(footprint) else "top"
             populated_sides.add(side)
-            populated_refs.add(reference)
+            populated_refs.add(str(reference))
 
             is_tht = False
             with suppress(TypeError, ValueError):
@@ -181,36 +190,16 @@ class BomEstimatorController:
 
             with suppress(TypeError, ValueError):
                 if int(part.get("component_product_type")) != 0:
-                    standard_part_present = True
-                    standard_part_refs.add(reference)
+                    standard_part_refs.add(str(reference))
 
-        signals = {
-            "manual_enabled": bool(self._is_force_standard_enabled()),
-            "qty_50_plus": board_count >= 50,
-            "standard_part_present": standard_part_present,
-            "multi_side_populated": len(populated_sides) > 1,
-        }
-        trigger_references = set(standard_part_refs)
-        if signals["multi_side_populated"]:
-            trigger_references.update(populated_refs)
-
-        return {
-            "signals": signals,
-            "board_standard": any(signals.values()),
-            "smt_populated_sides": len(smt_populated_sides),
-            "trigger_references": trigger_references,
-        }
-
-    @staticmethod
-    def _standard_signal_reasons(signals: Mapping[str, object]) -> list[str]:
-        """Build user-facing reason labels for active Standard-mode triggers."""
-        reason_map = [
-            ("manual_enabled", "manual"),
-            ("qty_50_plus", "qty≥50"),
-            ("standard_part_present", "standard part"),
-            ("multi_side_populated", "both sides populated"),
-        ]
-        return [label for key, label in reason_map if signals.get(key)]
+        return build_standard_mode_context(
+            manual_enabled=bool(self._is_force_standard_enabled()),
+            board_count=board_count,
+            populated_refs=populated_refs,
+            populated_sides=populated_sides,
+            smt_populated_sides=smt_populated_sides,
+            standard_part_refs=standard_part_refs,
+        )
 
     def recompute(self, board_count: int):
         """Recompute and apply estimated BOM+assembly UI/model updates.
@@ -251,7 +240,7 @@ class BomEstimatorController:
         )
 
         mode = "Standard" if standard_context["board_standard"] else "Economic"
-        reasons = self._standard_signal_reasons(standard_context["signals"])
+        reasons = standard_signal_reasons(standard_context["signals"])
         reason_text = ", ".join(reasons) if reasons else "none"
         highlight_refs = (
             standard_context["trigger_references"]

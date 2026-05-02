@@ -18,3 +18,19 @@ BOM_ESTIMATOR_HELP_TEXT = (
 def get_bom_estimator_help_text() -> str:
     """Return BOM estimator help text used by all UI help popups."""
     return BOM_ESTIMATOR_HELP_TEXT
+
+
+def show_bom_estimator_help(parent) -> None:
+    """Display the BOM estimator help dialog with shared text and title.
+
+    `wx` is imported lazily so this module stays importable from non-wx test
+    environments (per the bom_estimation package's wx-free contract).
+    """
+    import wx  # noqa: PLC0415  # pylint: disable=import-outside-toplevel,import-error
+
+    wx.MessageBox(
+        BOM_ESTIMATOR_HELP_TEXT,
+        BOM_ESTIMATOR_HELP_TITLE,
+        style=wx.OK | wx.ICON_INFORMATION,
+        parent=parent,
+    )

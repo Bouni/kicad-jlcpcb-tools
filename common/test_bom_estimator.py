@@ -98,7 +98,6 @@ def test_standard_fees_apply_for_standard_smt_part():
     expected_assembly = 4.0 + 1.2 + 0.5 + 4 * DEFAULT_PRICING.smt_per_joint_fee
     assert round(summary.component_cost, 3) == 2.000
     assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
-    assert summary.standard_part_count == 1
 
 
 def test_standard_fees_are_orthogonal_to_tht_fees():
@@ -151,7 +150,6 @@ def test_standard_fees_are_orthogonal_to_tht_fees():
     )
     assert round(summary.component_cost, 3) == 4.800
     assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
-    assert summary.standard_part_count == 1
 
 
 def test_standard_fees_do_not_apply_for_non_standard_parts():
@@ -189,7 +187,6 @@ def test_standard_fees_do_not_apply_for_non_standard_parts():
     )
     assert round(summary.component_cost, 3) == 2.000
     assert round(summary.assembly_cost, 3) == round(expected_assembly, 3)
-    assert summary.standard_part_count == 0
 
 
 def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
@@ -363,7 +360,6 @@ def test_dnp_parts_are_excluded_from_bom_estimator_counts():
     )
 
     assert round(summary.component_cost, 3) == 5.000
-    assert summary.standard_part_count == 0
 
 
 def test_build_bom_estimate_view_model_handles_empty_parts():

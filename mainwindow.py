@@ -18,10 +18,7 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
-from .bom_estimation.help_text import (
-    BOM_ESTIMATOR_HELP_TITLE,
-    get_bom_estimator_help_text,
-)
+from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
@@ -887,16 +884,8 @@ class JLCPCBTools(wx.Dialog):
         self.recompute_bom_estimate()
 
     def show_bom_estimator_help(self, *_):
-        """Show shared BOM estimator help text.
-
-        Text is sourced from `bom_estimation.help_text` so wording matches the
-        settings dialog and can be reviewed in one place.
-        """
-        wx.MessageBox(
-            get_bom_estimator_help_text(),
-            BOM_ESTIMATOR_HELP_TITLE,
-            style=wx.OK | wx.ICON_INFORMATION,
-        )
+        """Show shared BOM estimator help text via the help_text helper."""
+        show_bom_estimator_help(self)
 
     def recompute_bom_estimate(self):
         """Recompute and display estimated BOM+assembly cost."""

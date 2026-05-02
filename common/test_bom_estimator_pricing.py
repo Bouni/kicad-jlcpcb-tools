@@ -9,6 +9,7 @@ from bom_estimation.pricing import (  # pylint: disable=import-error
     DEFAULT_PRICING,
     AssemblyPricing,
     _collect_billable_bom_parts,
+    _PricingRunContext,
     _scan_assembly_state,
     calculate_bom_estimate,
     get_assembly_flags,
@@ -234,12 +235,10 @@ def test_scan_assembly_state_reports_joints_standard_and_extended_sets():
     scan = _scan_assembly_state(
         bom_parts,
         board_count=5,
-        details_cache={},
-        get_part_details=lambda lcsc: details_map[lcsc],
+        run_context=_PricingRunContext(get_part_details=lambda lcsc: details_map[lcsc]),
     )
 
     assert scan.standard_present is True
-    assert scan.standard_part_count == 1
     assert scan.populated_part_present is True
     assert scan.tht_present is True
     assert scan.smt_joints == 10

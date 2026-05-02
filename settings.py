@@ -6,10 +6,7 @@ import logging
 import wx  # pylint: disable=import-error
 
 # Import library configuration to populate choices
-from .bom_estimation.help_text import (
-    BOM_ESTIMATOR_HELP_TITLE,
-    get_bom_estimator_help_text,
-)
+from .bom_estimation.help_text import show_bom_estimator_help
 from .dblib import LIBRARY_CONFIGS
 from .events import UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
@@ -916,16 +913,8 @@ class SettingsDialog(wx.Dialog):
             self.bom_estimator_show_setting.SetLabel("Hide BOM cost estimator")
 
     def show_bom_estimator_help(self, *_):
-        """Show shared BOM estimator help text.
-
-        Kept in sync with main window help by sourcing text from
-        `bom_estimation.help_text`.
-        """
-        wx.MessageBox(
-            get_bom_estimator_help_text(),
-            BOM_ESTIMATOR_HELP_TITLE,
-            style=wx.OK | wx.ICON_INFORMATION,
-        )
+        """Show shared BOM estimator help text via the help_text helper."""
+        show_bom_estimator_help(self)
 
     def load_settings(self):
         """Load settings and set checkboxes accordingly."""

@@ -9,8 +9,6 @@ from .pricing import (
     DEFAULT_PRICING,
     AssemblyPricing,
     BomEstimateSummary,
-    _collect_billable_bom_parts,
-    _scan_assembly_state,
     calculate_bom_estimate,
     calculate_part_bom_cost,
     get_assembly_flags,
@@ -44,6 +42,4 @@ __all__ = [
     "build_bom_estimate_view_model",
     "build_standard_mode_context",
     "prepare_bom_price_labels",
-    "_collect_billable_bom_parts",
-    "_scan_assembly_state",
 ]
