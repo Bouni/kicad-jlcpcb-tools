@@ -8,21 +8,18 @@ from pathlib import Path
 import sqlite3
 from typing import Union
 
-from .footprint_metadata import (
-    footprint_has_tht,
-    get_assembly_flags,
-    get_footprint_pad_count,
-)
 from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_lcsc_value,
     get_valid_footprints,
 )
-from .helpers import (
-    dict_factory,
-    natural_sort_collation,
+from .footprint_metadata import (
+    footprint_has_tht,
+    get_assembly_flags,
+    get_footprint_pad_count,
 )
+from .helpers import dict_factory, natural_sort_collation
 
 
 class Store:
