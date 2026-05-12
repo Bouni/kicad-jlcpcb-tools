@@ -4,14 +4,10 @@ from datetime import date
 from pathlib import Path
 import shutil
 import sqlite3
-import sys
 import tempfile
 from unittest.mock import Mock, patch
 
 import pytest
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common.partsdb import _CREATE_STATEMENTS, Generate, PartsDatabase
 from common.progress import NoOpProgressBar

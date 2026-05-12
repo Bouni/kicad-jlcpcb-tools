@@ -32,7 +32,7 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
-from .helpers import get_is_dnp
+from .footprint_helpers import get_is_dnp
 
 # Compatibility hack for V6 / V7 / V7.99
 try:
@@ -198,8 +198,12 @@ class Fabrication:
             if footprint.GetLayer() != 0:
                 # bottom angles need to be mirrored on Y-axis
                 rotation = (180 - rotation) % 360
-            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(offset[1]) * math.sin(math.radians(rotation))
-            offset_y = - FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
+            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(
+                offset[1]
+            ) * math.sin(math.radians(rotation))
+            offset_y = -FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(
+                offset[1]
+            ) * math.cos(math.radians(rotation))
             if footprint.GetLayer() != 0:
                 # mirrored coordinate system needs to be taken into account on the bottom
                 offset_x = -offset_x
@@ -212,9 +216,7 @@ class Fabrication:
                 offset[0],
                 offset[1],
             )
-            return wxPoint(
-                position.x + offset_x, position.y + offset_y
-            )
+            return wxPoint(position.x + offset_x, position.y + offset_y)
         return position
 
     def fix_position(self, footprint, position):

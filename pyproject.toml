@@ -135,6 +135,7 @@ ignore = [
     "PLW2901", # Outer {outer_kind} variable {name} overwritten by inner {inner_kind} target
     "UP006", # keep type annotation style as is
     "UP007", # keep type annotation style as is
+    "UP038", # `isinstance(x, A | B)` requires Python 3.10+; KiCad bundles 3.9
 ]
 
 

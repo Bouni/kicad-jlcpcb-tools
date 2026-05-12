@@ -1,14 +1,9 @@
 """Tests for the jlcapi module."""
 
 import json
-from pathlib import Path
-import sys
 from unittest import mock
 
 import pytest
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common.jlcapi import ApiCategory, CategoryFetch, Component, JlcApi, LcscId
 

@@ -4,12 +4,8 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
-import sys
 import tempfile
 import time
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 

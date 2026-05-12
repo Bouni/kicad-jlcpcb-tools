@@ -1,7 +1,11 @@
 """Contains the main window of the plugin."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+# ruff: noqa: I001
+
 from contextlib import contextmanager, suppress
 from datetime import datetime as dt
+from threading import Thread
 import json
 import logging
 import os
@@ -11,9 +15,11 @@ import time
 
 import pcbnew as kicad_pcbnew
 import wx  # pylint: disable=import-error
-from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
+from wx import adv  # pylint: disable=import-error
 
+from .bom_estimation.help_text import show_bom_estimator_help
+from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
 from .dataview_highlight import (
@@ -22,8 +28,12 @@ from .dataview_highlight import (
     simplify_footprint_name,
 )
 from .derive_params import params_for_part
+from .enrichment.providers import LCSCAssemblyMetadataProvider
 from .events import (
+    EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
+    EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT,
     EVT_ASSIGN_PARTS_EVENT,
+    EVT_BOM_DATA_CHANGED_EVENT,
     EVT_DOWNLOAD_COMPLETED_EVENT,
     EVT_DOWNLOAD_PROGRESS_EVENT,
     EVT_DOWNLOAD_STARTED_EVENT,
@@ -36,20 +46,25 @@ from .events import (
     EVT_UNZIP_EXTRACTING_PROGRESS_EVENT,
     EVT_UNZIP_EXTRACTING_STARTED_EVENT,
     EVT_UPDATE_SETTING,
+    AssemblyEnrichmentCompletedEvent,
+    AssemblyEnrichmentProgressEvent,
+    BomDataChangedEvent,
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
+from .footprint_helpers import (
+    get_is_dnp,
+    set_lcsc_value,
+    toggle_exclude_from_bom,
+    toggle_exclude_from_pos,
+)
 from .generate_hooks import format_hook_error, run_configured_hook
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
     HighResWxSize,
-    get_is_dnp,
     getVersion,
     loadBitmapScaled,
-    set_lcsc_value,
-    toggle_exclude_from_bom,
-    toggle_exclude_from_pos,
 )
 from .kicad_drc import DRCViolationCounter
 from .library import Library, LibraryState
@@ -125,10 +140,46 @@ class JLCPCBTools(wx.Dialog):
         self.store: Store
         self.settings = {}
         self.load_settings()
+        # Normalize and write-back BOM-estimator settings into the in-memory
+        # dict so subsequent reads see canonical values. The on-disk JSON is
+        # not rewritten here — the next save_settings() call (e.g. when the
+        # user changes a setting via the UI) persists these defaults.
+        general_settings = self.settings.setdefault("general", {})
+        raw_board_count = general_settings.get("bom_estimator_boards", 5)
+        try:
+            self.bom_estimator_board_count = self._normalize_board_count(
+                raw_board_count
+            )
+        except (TypeError, ValueError):
+            self.bom_estimator_board_count = 5
+        general_settings["bom_estimator_boards"] = self.bom_estimator_board_count
+        self.bom_estimator_force_standard = bool(
+            general_settings.get("bom_estimator_force_standard", False)
+        )
+        general_settings["bom_estimator_force_standard"] = (
+            self.bom_estimator_force_standard
+        )
+        self.bom_estimator_show = bool(general_settings.get("bom_estimator_show", True))
+        general_settings["bom_estimator_show"] = self.bom_estimator_show
+        self.highlight_standard_parts = bool(
+            general_settings.get("highlight_standard_parts", True)
+        )
+        general_settings["highlight_standard_parts"] = self.highlight_standard_parts
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
         self.select_alike_in_progress = False
+        self.pending_assembly_enrichment = set()
+        # Monotonic counter incremented each time assembly enrichment is started.
+        # Worker threads capture the value at spawn; progress events with a stale
+        # generation are discarded by on_assembly_enrichment_progress so that a
+        # mid-flight reassignment of a reference cannot have stale metadata
+        # written back to it.
+        self.assembly_enrichment_generation = 0
+        # Latch used by on_bom_data_changed to coalesce a burst of mutations
+        # into a single recompute. SQLite commits are synchronous, so async
+        # event dispatch is safe to defer here.
+        self._bom_recompute_scheduled = False
         self.Bind(wx.EVT_CLOSE, self.quit_dialog)
 
         # ---------------------------------------------------------------------
@@ -384,11 +435,8 @@ class JLCPCBTools(wx.Dialog):
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
 
-        table_scroller = wx.ScrolledWindow(self, style=wx.HSCROLL | wx.VSCROLL)
-        table_scroller.SetScrollRate(20, 20)
-
         self.footprint_list = dv.DataViewCtrl(
-            table_scroller,
+            self,
             style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_MULTIPLE,
         )
 
@@ -410,7 +458,7 @@ class JLCPCBTools(wx.Dialog):
             align=wx.ALIGN_CENTER,
         )
         params_renderer = HighlightedTextRenderer(
-            value_decoder=decode_highlighted_value,
+            value_decoder=self.decode_mainwindow_highlight_value,
             align=wx.ALIGN_CENTER,
         )
         params = dv.DataViewColumn(
@@ -439,6 +487,13 @@ class JLCPCBTools(wx.Dialog):
         dnp = self.footprint_list.AppendIconTextColumn(
             "POP", 8, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
+        price = self.footprint_list.AppendTextColumn(
+            "BOM Price",
+            PartListDataModel.columns["PRICE_COL"],
+            width=100,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
         correction = self.footprint_list.AppendTextColumn(
             "Correction",
             9,
@@ -449,6 +504,20 @@ class JLCPCBTools(wx.Dialog):
         side = self.footprint_list.AppendIconTextColumn(
             "Side", 10, width=50, mode=dv.DATAVIEW_CELL_INERT
         )
+        enrichment = self.footprint_list.AppendTextColumn(
+            "Enrichment",
+            PartListDataModel.columns["ENRICH_COL"],
+            width=110,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
+        trailing_spacer = self.footprint_list.AppendTextColumn(
+            " ",
+            PartListDataModel.columns["TRAILING_SPACER_COL"],
+            width=24,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
 
         reference.SetSortable(True)
         value.SetSortable(True)
@@ -456,18 +525,17 @@ class JLCPCBTools(wx.Dialog):
         lcsc.SetSortable(True)
         type.SetSortable(True)
         stock.SetSortable(True)
+        price.SetSortable(True)
         bom.SetSortable(True)
         pos.SetSortable(False)
         dnp.SetSortable(True)
+        enrichment.SetSortable(True)
         correction.SetSortable(True)
         side.SetSortable(True)
         params.SetSortable(True)
+        trailing_spacer.SetSortable(False)
 
-        scrolled_sizer = wx.BoxSizer(wx.VERTICAL)
-        scrolled_sizer.Add(self.footprint_list, 1, wx.EXPAND)
-        table_scroller.SetSizer(scrolled_sizer)
-
-        table_sizer.Add(table_scroller, 20, wx.ALL | wx.EXPAND, 5)
+        table_sizer.Add(self.footprint_list, 20, wx.ALL | wx.EXPAND, 5)
 
         self.footprint_list.Bind(
             dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
@@ -502,17 +570,45 @@ class JLCPCBTools(wx.Dialog):
         self.gauge.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 5)))
 
         # ---------------------------------------------------------------------
+        # ---------------------- BOM Cost Estimator ---------------------------
+        # ---------------------------------------------------------------------
+
+        self.bom_widget = BomEstimatorWidget(
+            self,
+            window=self.window,
+            board_count=self.bom_estimator_board_count,
+            force_standard=self.bom_estimator_force_standard,
+            on_board_count_spin=self.on_bom_estimator_board_count_spinctrl,
+            on_board_count_text=self.on_bom_estimator_board_count_text,
+            on_board_count_text_timer=self.on_bom_estimator_board_count_text_timer,
+            on_force_standard_changed=self.on_bom_estimator_force_standard_changed,
+            on_help=self.show_bom_estimator_help,
+        )
+
+        # Backward-compatible aliases while BOM logic is still in this class.
+        self.estimator_sizer = self.bom_widget.sizer
+        estimator_sizer = self.estimator_sizer
+        self.bom_estimator_boards_input = self.bom_widget.boards_input
+        self.bom_estimator_text_timer = self.bom_widget.text_timer
+        self.bom_estimator_standard_checkbox = self.bom_widget.standard_checkbox
+        self.bom_estimator_help_button = self.bom_widget.help_button
+        self.bom_estimator_summary = self.bom_widget.summary_label
+
+        # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
         self.SetSizeHints(HighResWxSize(self.window, wx.Size(1000, -1)), wx.DefaultSize)
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(self.upper_toolbar, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(estimator_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
+        self.Layout()
+        self.bom_widget.set_visible(self.bom_estimator_show)
         self.Layout()
         self.Centre(wx.BOTH)
 
@@ -536,12 +632,38 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_UNZIP_EXTRACTING_COMPLETED_EVENT, self.unzip_extracting_completed)
 
         self.Bind(EVT_LOGBOX_APPEND_EVENT, self.logbox_append)
+        self.Bind(
+            EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT,
+            self.on_assembly_enrichment_progress,
+        )
+        self.Bind(
+            EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
+            self.on_assembly_enrichment_completed,
+        )
+        self.Bind(EVT_BOM_DATA_CHANGED_EVENT, self.on_bom_data_changed)
 
         self.enable_part_specific_toolbar_buttons(False)
 
         self.init_logger()
         self.partlist_data_model = PartListDataModel(self.scale_factor)
+        self.partlist_data_model.set_standard_trigger_highlighting_enabled(
+            self.highlight_standard_parts
+        )
         self.footprint_list.AssociateModel(self.partlist_data_model)
+        self.bom_estimator_controller = BomEstimatorController(
+            read_parts=lambda: (
+                self.store.read_all()
+                if hasattr(self, "store") and self.store is not None
+                else []
+            ),
+            get_part_details=self._bom_get_part_details,
+            get_board=self._get_current_board,
+            is_force_standard_enabled=lambda: self.bom_estimator_force_standard,
+            set_price_label=self.partlist_data_model.set_bom_price,
+            set_trigger_refs=self.partlist_data_model.set_standard_trigger_refs,
+            refresh_rows=self.footprint_list.Refresh,
+            set_summary_text=self.bom_widget.set_summary_text,
+        )
 
         self.init_data()
 
@@ -556,6 +678,16 @@ class JLCPCBTools(wx.Dialog):
         self.library.create_mapping_table()
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
+
+    def _get_current_board(self):
+        """Return current board instance for BOM controller callbacks."""
+        return self.pcbnew.GetBoard()
+
+    def _bom_get_part_details(self, lcsc: str) -> dict:
+        """Safely proxy part-detail lookups for BOM controller callbacks."""
+        if not hasattr(self, "library") or self.library is None:
+            return {}
+        return self.library.get_part_details(lcsc)
 
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
@@ -596,6 +728,8 @@ class JLCPCBTools(wx.Dialog):
         self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
+            self.start_assembly_enrichment()
+            self.recompute_bom_estimate()
 
     def init_fabrication(self):
         """Initialize the fabrication."""
@@ -695,16 +829,203 @@ class JLCPCBTools(wx.Dialog):
 
     def assign_parts(self, e):
         """Assign a selected LCSC number to parts."""
+        details = self.library.get_part_details(e.lcsc)
+        params = params_for_part(details)
         for reference in e.references:
             self.store.set_lcsc(reference, e.lcsc)
             self.store.set_stock(reference, int(e.stock))
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(reference)
             set_lcsc_value(fp, e.lcsc)
-            params = params_for_part(self.library.get_part_details(e.lcsc))
             self.partlist_data_model.set_lcsc(
                 reference, e.lcsc, e.type, e.stock, params
             )
+        self.start_assembly_enrichment(e.references)
+        wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
+
+    def _set_bom_estimator_board_count(self, value: int) -> None:
+        """Persist board count and update estimate when value changed."""
+        if value == self.bom_estimator_board_count:
+            return
+        self.bom_estimator_board_count = value
+        self.settings.setdefault("general", {})["bom_estimator_boards"] = value
+        self.save_settings()
+        self.recompute_bom_estimate()
+
+    def on_bom_estimator_board_count_spinctrl(self, e):
+        """Handle SpinCtrl arrows immediately, using step=5 increments."""
+        value = self._normalize_board_count(e.GetEventObject().GetValue())
+        if e.GetEventObject().GetValue() != value:
+            e.GetEventObject().SetValue(value)
+        self._set_bom_estimator_board_count(value)
+
+    def on_bom_estimator_board_count_text(self, *_):
+        """Debounce manual text entry to avoid recompute flicker while typing."""
+        if hasattr(self.bom_estimator_text_timer, "StartOnce"):
+            self.bom_estimator_text_timer.StartOnce(300)
+        else:
+            self.bom_estimator_text_timer.Start(300, oneShot=True)
+
+    def on_bom_estimator_board_count_text_timer(self, *_):
+        """Apply board count from text field after debounce delay."""
+        value = self._normalize_board_count(self.bom_estimator_boards_input.GetValue())
+        if self.bom_estimator_boards_input.GetValue() != value:
+            self.bom_estimator_boards_input.SetValue(value)
+        self._set_bom_estimator_board_count(value)
+
+    def _normalize_board_count(self, value) -> int:
+        """Normalize board count to a minimum of 5 boards."""
+        return max(5, int(value))
+
+    def on_bom_estimator_force_standard_changed(self, e):
+        """Persist standard override preference and update BOM estimate."""
+        value = bool(e.GetEventObject().GetValue())
+        if value == self.bom_estimator_force_standard:
+            return
+        self.bom_estimator_force_standard = value
+        self.settings.setdefault("general", {})["bom_estimator_force_standard"] = value
+        self.save_settings()
+        self.recompute_bom_estimate()
+
+    def show_bom_estimator_help(self, *_):
+        """Show shared BOM estimator help text via the help_text helper."""
+        show_bom_estimator_help(self)
+
+    def recompute_bom_estimate(self):
+        """Recompute and display estimated BOM+assembly cost."""
+        board_count = self._normalize_board_count(self.bom_estimator_board_count)
+        self.bom_estimator_controller.recompute(board_count)
+
+    def on_bom_data_changed(self, _e):
+        """Coalesce a burst of BomDataChangedEvent posts into one recompute.
+
+        Mutation handlers signal "BOM data changed" by posting an event rather
+        than calling recompute directly. Many UI actions (e.g. multi-select
+        toggle, populate_footprint_list) emit several posts in one event tick;
+        the latch + CallAfter pattern collapses them so we recompute once per
+        idle drain instead of once per mutation.
+        """
+        if self._bom_recompute_scheduled:
+            return
+        self._bom_recompute_scheduled = True
+        wx.CallAfter(self._run_coalesced_bom_recompute)
+
+    def _run_coalesced_bom_recompute(self):
+        """Drain the coalesced recompute latch and run a single estimate."""
+        self._bom_recompute_scheduled = False
+        self.recompute_bom_estimate()
+
+    def _get_enrichment_status_label(self, part: dict) -> str:
+        """Build UI status text for per-part assembly enrichment state."""
+        lcsc = str(part.get("lcsc") or "")
+        if not lcsc:
+            return ""
+        if lcsc in self.pending_assembly_enrichment:
+            return "Pending"
+        if (
+            str(part.get("assembly_process") or "")
+            or part.get("component_product_type") is not None
+        ):
+            return "Done"
+        return "Queued"
+
+    def start_assembly_enrichment(self, references=None):
+        """Start background enrichment for missing assembly process metadata."""
+        targets = self.store.get_assembly_enrichment_targets(references)
+        targets = {
+            lcsc: refs
+            for lcsc, refs in targets.items()
+            if lcsc not in self.pending_assembly_enrichment
+        }
+        if not targets:
+            return
+
+        self.pending_assembly_enrichment.update(targets.keys())
+        for refs in targets.values():
+            for reference in refs:
+                self.partlist_data_model.set_enrichment_status(reference, "Pending")
+
+        self.assembly_enrichment_generation += 1
+        generation = self.assembly_enrichment_generation
+        Thread(
+            target=self._assembly_enrichment_worker,
+            args=(targets, generation),
+            daemon=True,
+        ).start()
+
+    def _assembly_enrichment_worker(self, targets: dict, generation: int):
+        """Fetch assembly metadata values from LCSC API in a worker thread.
+
+        Thread ownership stays in mainwindow. This worker must not mutate store,
+        datamodel, or BOM UI state directly; it only posts progress events back
+        to the UI thread. The generation passed in is echoed back on every event
+        so the UI thread can discard results from a superseded run.
+        """
+        provider = LCSCAssemblyMetadataProvider(min_interval_seconds=1.0)
+        for lcsc, metadata in provider.fetch_iter(list(targets.keys())):
+            refs = targets[lcsc]
+            wx.PostEvent(
+                self,
+                AssemblyEnrichmentProgressEvent(
+                    lcsc=lcsc, refs=refs, metadata=metadata, generation=generation
+                ),
+            )
+        wx.PostEvent(
+            self,
+            AssemblyEnrichmentCompletedEvent(generation=generation),
+        )
+
+    def on_assembly_enrichment_progress(self, e):
+        """Persist one enrichment result and update row-level feedback."""
+        # Drop events from superseded enrichment runs. A reassignment between
+        # spawn and event delivery would otherwise let stale metadata for the
+        # old LCSC be written to a reference that now points elsewhere.
+        generation = getattr(e, "generation", None)
+        if generation is not None and generation != self.assembly_enrichment_generation:
+            return
+        lcsc = getattr(e, "lcsc", "")
+        refs = getattr(e, "refs", [])
+        metadata = getattr(e, "metadata", {}) or {}
+
+        assembly_process = metadata.get("assembly_process", "")
+        component_product_type = metadata.get("component_product_type")
+        status = (
+            "Done"
+            if assembly_process or component_product_type is not None
+            else "No data"
+        )
+
+        for reference in refs:
+            self.store.set_assembly_metadata(
+                reference,
+                assembly_process,
+                component_product_type,
+            )
+            self.partlist_data_model.set_enrichment_status(reference, status)
+
+        self.pending_assembly_enrichment.discard(lcsc)
+
+    def on_assembly_enrichment_completed(self, e):
+        """Run a single BOM recompute after a worker finishes its batch.
+
+        Per-progress events update store/datamodel rows individually but no
+        longer trigger a recompute of their own; the cost estimate is refreshed
+        once, here, when the worker's fetch_iter exhausts. Stale completion
+        events from superseded runs are dropped.
+        """
+        generation = getattr(e, "generation", None)
+        if generation is not None and generation != self.assembly_enrichment_generation:
+            return
+        self._refresh_bom_after_enrichment_update()
+
+    def _refresh_bom_after_enrichment_update(self):
+        """Main-thread boundary after enrichment updates.
+
+        Called only from enrichment event handlers after per-row store/datamodel
+        updates are applied on the UI thread. Delegates BOM rendering/recompute
+        through the BOM controller path.
+        """
+        wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -736,9 +1057,10 @@ class JLCPCBTools(wx.Dialog):
         if not self.store:
             self.init_store()
         self.partlist_data_model.RemoveAll()
+        parts = self.store.read_all()
         details = {}
         corrections = self.library.get_all_correction_data()
-        for part in self.store.read_all():
+        for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
@@ -764,8 +1086,11 @@ class JLCPCBTools(wx.Dialog):
                     str(self.get_correction(part, corrections)),
                     str(fp.GetLayer()),
                     params_for_part(details.get(part["lcsc"], {})),
+                    self._get_enrichment_status_label(part),  # enrichment
+                    "",  # bom price label
                 ]
             )
+        wx.PostEvent(self, BomDataChangedEvent(source="populate_footprint_list"))
 
     def OnBomHide(self, *_):
         """Hide all parts from the list that have 'in BOM' set to No."""
@@ -881,9 +1206,10 @@ class JLCPCBTools(wx.Dialog):
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
-            self.store.set_bom(ref, int(bom))
-            self.store.set_pos(ref, int(pos))
+            self.store.set_bom(ref, int(bool(bom)))
+            self.store.set_pos(ref, int(bool(pos)))
             self.partlist_data_model.toggle_bom_pos(item)
+        wx.PostEvent(self, BomDataChangedEvent(source="toggle_bom_pos"))
 
     def toggle_bom(self, *_):
         """Toggle the exclude from BOM attribute of a footprint."""
@@ -892,8 +1218,9 @@ class JLCPCBTools(wx.Dialog):
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             bom = toggle_exclude_from_bom(fp)
-            self.store.set_bom(ref, int(bom))
+            self.store.set_bom(ref, int(bool(bom)))
             self.partlist_data_model.toggle_bom(item)
+        wx.PostEvent(self, BomDataChangedEvent(source="toggle_bom"))
 
     def toggle_pos(self, *_):
         """Toggle the exclude from POS attribute of a footprint."""
@@ -902,8 +1229,9 @@ class JLCPCBTools(wx.Dialog):
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             pos = toggle_exclude_from_pos(fp)
-            self.store.set_pos(ref, int(pos))
+            self.store.set_pos(ref, int(bool(pos)))
             self.partlist_data_model.toggle_pos(item)
+        wx.PostEvent(self, BomDataChangedEvent(source="toggle_pos"))
 
     def remove_lcsc_number(self, *_):
         """Remove an assigned a LCSC Part number to a footprint."""
@@ -915,6 +1243,7 @@ class JLCPCBTools(wx.Dialog):
             fp = board.FindFootprintByReference(ref)
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
+        wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
 
     def select_alike_parts(self, *_):
         """Select all alike parts, starting from a single selected part."""
@@ -976,6 +1305,21 @@ class JLCPCBTools(wx.Dialog):
         if e.section not in self.settings:
             self.settings[e.section] = {}
         self.settings[e.section][e.setting] = e.value
+
+        if e.section == "general":
+            if e.setting == "bom_estimator_show":
+                self.bom_estimator_show = bool(e.value)
+                self.bom_widget.set_visible(self.bom_estimator_show)
+                self.Layout()
+            elif e.setting == "highlight_standard_parts":
+                self.highlight_standard_parts = bool(e.value)
+                self.partlist_data_model.set_standard_trigger_highlighting_enabled(
+                    self.highlight_standard_parts
+                )
+                self.footprint_list.Refresh()
+        elif e.section == "highlighting" and e.setting == "matches":
+            self.footprint_list.Refresh()
+
         self.save_settings()
 
         # Refresh library configuration if relevant library settings changed
@@ -1019,9 +1363,7 @@ class JLCPCBTools(wx.Dialog):
         if migrated:
             self.save_settings()
 
-    def decode_mainwindow_highlight_value(
-        self, value: str
-    ) -> tuple[str, list[str]]:
+    def decode_mainwindow_highlight_value(self, value: str) -> tuple[str, list[str]]:
         """Decode params cell text, optionally disabling highlight terms by setting."""
         text, terms = decode_highlighted_value(value)
         if not self.settings.get("highlighting", {}).get("matches", True):
@@ -1071,8 +1413,10 @@ class JLCPCBTools(wx.Dialog):
                 if (
                     isinstance(drawing, kicad_pcbnew.PCB_SHAPE)
                     and drawing.GetShape() == kicad_pcbnew.S_RECT
-                    and ((hasattr(drawing, "IsFilled") and drawing.IsFilled())
-                    or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill()))
+                    and (
+                        (hasattr(drawing, "IsFilled") and drawing.IsFilled())
+                        or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill())
+                    )
                 ):
                     corners = drawing.GetRectCorners()
 
@@ -1362,10 +1706,7 @@ class JLCPCBTools(wx.Dialog):
                     f"DRC found {violation_count} error violation(s).\n\n"
                     "Resolve or exclude DRC errors before manufacturing whenever possible.",
                     "DRC violations found",
-                    wx.YES_NO
-                    | wx.NO_DEFAULT
-                    | wx.ICON_WARNING
-                    | wx.CENTER,
+                    wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
                 )
                 dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
                 result = dialog.ShowModal()
@@ -1395,11 +1736,13 @@ class JLCPCBTools(wx.Dialog):
     def paste_part_lcsc(self, *_):
         """Paste a lcsc number from the clipboard to the current part."""
         text_data = wx.TextDataObject()
+        success = False
         if wx.TheClipboard.Open():
             success = wx.TheClipboard.GetData(text_data)
             wx.TheClipboard.Close()
         if success:
             if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
+                updated_references = []
                 for item in self.footprint_list.GetSelections():
                     details = self.library.get_part_details(lcsc)
                     params = params_for_part(details)
@@ -1408,6 +1751,9 @@ class JLCPCBTools(wx.Dialog):
                         reference, lcsc, details["type"], details["stock"], params
                     )
                     self.store.set_lcsc(reference, lcsc)
+                    updated_references.append(reference)
+                self.start_assembly_enrichment(updated_references)
+                wx.PostEvent(self, BomDataChangedEvent(source="paste_part_lcsc"))
 
     def add_correction(self, e):
         """Add part correction for the current part."""
@@ -1482,6 +1828,8 @@ class JLCPCBTools(wx.Dialog):
                     self.partlist_data_model.set_lcsc(
                         reference, lcsc, details["type"], details["stock"], params
                     )
+                    self.start_assembly_enrichment([reference])
+        self.recompute_bom_estimate()
 
     def sanitize_lcsc(self, lcsc_PN):
         """Sanitize a given LCSC number using a regex."""

@@ -8,20 +8,31 @@ from pathlib import Path
 import sqlite3
 from typing import Union
 
-from .helpers import (
-    dict_factory,
+from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_lcsc_value,
     get_valid_footprints,
-    natural_sort_collation,
 )
+from .footprint_metadata import (
+    footprint_has_tht,
+    get_assembly_flags,
+    get_footprint_pad_count,
+)
+from .helpers import dict_factory, natural_sort_collation
 
 
 class Store:
     """A storage class to get data from a sqlite database and write it back."""
 
     GENERATION_COUNT_KEY = "generation_count"
+    PART_INFO_ESTIMATOR_COLUMNS = {
+        "pad_count": "INTEGER",
+        "has_tht": "NUMERIC",
+        "assembly_process": "TEXT",
+        "component_product_type": "INTEGER",
+        "assembly_flags": "TEXT",
+    }
 
     def __init__(self, parent, project_path, board):
         self.logger = logging.getLogger(__name__)
@@ -83,6 +94,7 @@ class Store:
                 "exclude_from_pos NUMERIC DEFAULT 0"
                 ")",
             )
+            self.ensure_part_info_columns(cur)
             cur.execute(
                 "CREATE TABLE IF NOT EXISTS metadata ("
                 "key TEXT NOT NULL PRIMARY KEY,"
@@ -90,6 +102,18 @@ class Store:
                 ")",
             )
             cur.commit()
+
+    def ensure_part_info_columns(self, cur):
+        """Idempotently ensure estimator metadata columns exist in part_info."""
+        existing_columns = {
+            row[1] for row in cur.execute("PRAGMA table_info(part_info)").fetchall()
+        }
+        for column_name, column_type in self.PART_INFO_ESTIMATOR_COLUMNS.items():
+            if column_name in existing_columns:
+                continue
+            cur.execute(
+                f"ALTER TABLE part_info ADD COLUMN {column_name} {column_type}",
+            )
 
     def get_generation_count(self) -> int:
         """Return the per-project generation counter."""
@@ -159,8 +183,12 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 "INSERT INTO part_info ("
-                "reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos"
-                ") VALUES (:reference, :value, :footprint, :lcsc, '', :exclude_from_bom, :exclude_from_pos)",
+                "reference, value, footprint, lcsc, stock, exclude_from_bom, "
+                "exclude_from_pos"
+                ") VALUES ("
+                ":reference, :value, :footprint, :lcsc, '', :exclude_from_bom, "
+                ":exclude_from_pos"
+                ")",
                 part,
             )
             cur.commit()
@@ -169,7 +197,10 @@ class Store:
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info set value = :value, footprint = :footprint, lcsc = :lcsc, exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos WHERE reference = :reference",
+                "UPDATE part_info set "
+                "value = :value, footprint = :footprint, lcsc = :lcsc, "
+                "exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos "
+                "WHERE reference = :reference",
                 part,
             )
             cur.commit()
@@ -214,10 +245,119 @@ class Store:
         """Change the LCSC attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
-                "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference",
-                {"reference": ref, "lcsc": lcsc},
+                "UPDATE part_info SET "
+                "lcsc = :lcsc, "
+                "assembly_process = '', "
+                "component_product_type = NULL "
+                "WHERE reference = :reference",
+                {
+                    "reference": ref,
+                    "lcsc": lcsc,
+                },
             )
             cur.commit()
+
+    def set_assembly_metadata(
+        self,
+        ref: str,
+        assembly_process: str,
+        component_product_type,
+    ):
+        """Persist assembly metadata for a part."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                "UPDATE part_info SET "
+                "assembly_process = :assembly_process, "
+                "component_product_type = :component_product_type "
+                "WHERE reference = :reference",
+                {
+                    "reference": ref,
+                    "assembly_process": assembly_process,
+                    "component_product_type": component_product_type,
+                },
+            )
+            cur.commit()
+
+    def get_assembly_enrichment_targets(self, references=None) -> dict:
+        """Get references grouped by LCSC that still need assembly process enrichment."""
+        query = (
+            "SELECT reference, lcsc FROM part_info "
+            "WHERE lcsc IS NOT NULL AND lcsc != '' "
+            "AND ("
+            "assembly_process IS NULL OR assembly_process = '' "
+            "OR component_product_type IS NULL"
+            ")"
+        )
+        params = []
+        if references:
+            # The f-string only injects ?-placeholders; the actual reference
+            # values are bound through `params` below, never interpolated.
+            placeholders = ",".join("?" for _ in references)
+            query += f" AND reference IN ({placeholders})"
+            params.extend(references)
+
+        query += " ORDER BY lcsc, reference"
+
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            rows = cur.execute(query, params).fetchall()
+
+        targets = {}
+        for reference, lcsc in rows:
+            if lcsc not in targets:
+                targets[lcsc] = []
+            targets[lcsc].append(reference)
+        return targets
+
+    def set_estimator_metadata(
+        self,
+        ref: str,
+        pad_count: int,
+        has_tht: bool,
+        assembly_flags: str,
+    ):
+        """Persist estimator metadata for one part reference."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                "UPDATE part_info SET "
+                "pad_count = :pad_count, has_tht = :has_tht, assembly_flags = :assembly_flags "
+                "WHERE reference = :reference",
+                {
+                    "reference": ref,
+                    "pad_count": pad_count,
+                    "has_tht": int(bool(has_tht)),
+                    "assembly_flags": assembly_flags,
+                },
+            )
+            cur.commit()
+
+    def backfill_estimator_metadata(self, footprint, db_part: dict):
+        """Backfill estimator metadata when missing or stale."""
+        pad_count = get_footprint_pad_count(footprint)
+        has_tht = footprint_has_tht(footprint)
+        assembly_flags = get_assembly_flags(footprint)
+
+        ref = footprint.GetReference()
+        if not db_part:
+            db_part = self.get_part(ref)
+        if not db_part:
+            return
+
+        current_has_tht = db_part.get("has_tht")
+        if current_has_tht is None:
+            has_tht_changed = True
+        else:
+            has_tht_changed = bool(current_has_tht) != bool(has_tht)
+
+        should_update = (
+            db_part.get("pad_count") != pad_count
+            or has_tht_changed
+            or db_part.get("assembly_flags") != assembly_flags
+        )
+        if not should_update:
+            return
+
+        self.set_estimator_metadata(ref, pad_count, has_tht, assembly_flags)
+        self.logger.debug("Updated estimator metadata for %s", ref)
 
     def update_from_board(self):
         """Read all footprints from the board and insert them into the database if they do not exist."""
@@ -283,6 +423,7 @@ class Store:
                     board_part["reference"],
                 )
                 self.update_part(board_part)
+            self.backfill_estimator_metadata(fp, db_part)
         self.import_legacy_assignments()
         self.clean_database()
 

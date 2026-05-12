@@ -31,9 +31,9 @@ _pkg = types.ModuleType("kicadplugin")
 _pkg.__path__ = [str(_ROOT)]
 sys.modules["kicadplugin"] = _pkg
 
-_helpers = types.ModuleType("kicadplugin.helpers")
-_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
-sys.modules["kicadplugin.helpers"] = _helpers
+_footprint_helpers = types.ModuleType("kicadplugin.footprint_helpers")
+_footprint_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
+sys.modules["kicadplugin.footprint_helpers"] = _footprint_helpers
 
 _spec = importlib.util.spec_from_file_location(
     "kicadplugin.fabrication", _ROOT / "fabrication.py"

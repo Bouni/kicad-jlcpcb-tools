@@ -2,12 +2,7 @@
 
 # ruff: noqa: D102
 
-from pathlib import Path
 import sqlite3
-import sys
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from search_escape import (
     escape_fts_phrase as _escape_fts_phrase,
