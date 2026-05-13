@@ -51,6 +51,11 @@ class PartSelectorDialog(wx.Dialog):
         self.search_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.search)
 
+        # The default EVT_CLOSE handler for a modeless wx.Dialog hides the
+        # window instead of destroying it. Override so X-button / Close() do
+        # what we want — actually destroy, so the singleton ref clears.
+        self.Bind(wx.EVT_CLOSE, self._on_close)
+
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
         # ---------------------------------------------------------------------
@@ -580,9 +585,28 @@ class PartSelectorDialog(wx.Dialog):
         return list(s)[0]
 
     def quit_dialog(self, *_):
-        """Close this window."""
+        """Close this window (via EVT_CLOSE → _on_close → Destroy)."""
+        self.Close()
+
+    def _on_close(self, _event):
+        """Destroy on close and clear the parent's singleton ref."""
+        # Tell the main window we're going away so it doesn't try to update
+        # a destroyed dialog the next time "Select Part" is clicked.
+        if getattr(self.parent, "_part_selector", None) is self:
+            self.parent._part_selector = None
         self.Destroy()
-        self.EndModal(0)
+
+    def update_for(self, parts):
+        """Re-target this open selector at a new set of footprints.
+
+        Called when the user invokes "Select Part" again from the main window
+        while the selector is already open. We swap in the new parts, refresh
+        the initial search keyword, and re-run the search so the visible list
+        reflects what the user just clicked.
+        """
+        self.parts = parts
+        self.keyword.ChangeValue(self.get_existing_selection(parts))
+        self.search(None)
 
     def OnSortPartList(self, e):
         """Set order_by to the clicked column and trigger list refresh."""
@@ -737,7 +761,7 @@ class PartSelectorDialog(wx.Dialog):
                     references=self.parts.keys(),
                 ),
             )
-            self.EndModal(wx.ID_OK)
+            self.Close()
 
     def get_part_details(self, *_):
         """Fetch part details from LCSC and show them in a modeless dialog."""
