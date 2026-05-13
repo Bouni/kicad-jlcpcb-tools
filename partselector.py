@@ -740,13 +740,11 @@ class PartSelectorDialog(wx.Dialog):
             self.EndModal(wx.ID_OK)
 
     def get_part_details(self, *_):
-        """Fetch part details from LCSC and show them in a modal."""
+        """Fetch part details from LCSC and show them in a modeless dialog."""
         if self.part_list.GetSelectedItemsCount() > 0:
             item = self.part_list.GetSelection()
-            busy_cursor = wx.BusyCursor()
             dialog = PartDetailsDialog(self.parent, self.part_list_model.get_lcsc(item))
-            del busy_cursor
-            dialog.ShowModal()
+            dialog.Show()
 
     def help(self, *_):
         """Show message box with help instructions."""

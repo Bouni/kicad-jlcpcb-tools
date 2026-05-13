@@ -1270,19 +1270,15 @@ class JLCPCBTools(wx.Dialog):
             self.select_alike_parts()
 
     def get_part_details(self, *_):
-        """Fetch part details from LCSC and show them one after another each in a modal."""
+        """Show Part Details for each selected footprint (modeless windows)."""
         for item in self.footprint_list.GetSelections():
             if lcsc := self.partlist_data_model.get_lcsc(item):
                 self.show_part_details_dialog(lcsc)
 
     def show_part_details_dialog(self, part):
-        """Show the part details modal dialog."""
-        wx.BeginBusyCursor()
-        try:
-            dialog = PartDetailsDialog(self, part)
-            dialog.ShowModal()
-        finally:
-            wx.EndBusyCursor()
+        """Show the part details dialog (modeless so it doesn't block the app)."""
+        dialog = PartDetailsDialog(self, part)
+        dialog.Show()
 
     def update_library(self, *_):
         """Update the library from the JLCPCB CSV file."""

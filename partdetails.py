@@ -1,4 +1,4 @@
-"""Contains the part details modal dialog."""
+"""Contains the part details dialog."""
 
 import logging
 from pathlib import Path
@@ -23,7 +23,7 @@ class PartDetailsDialog(wx.Dialog):
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
             size=HighResWxSize(parent.window, wx.Size(1000, 800)),
-            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.STAY_ON_TOP,
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
 
         self.logger = logging.getLogger(__name__)
@@ -34,6 +34,12 @@ class PartDetailsDialog(wx.Dialog):
         self.pdfurl = ""
         self.pageurl = ""
         self.picture = None
+
+        # The default EVT_CLOSE handler for a modeless wx.Dialog hides the
+        # window instead of destroying it. Override so the X-button actually
+        # destroys, otherwise hidden dialogs accumulate every time the user
+        # closes one via the title bar.
+        self.Bind(wx.EVT_CLOSE, self._on_close)
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -160,9 +166,12 @@ class PartDetailsDialog(wx.Dialog):
         self.get_part_data()
 
     def quit_dialog(self, *_):
-        """Close the dialog."""
+        """Close the dialog (via EVT_CLOSE → _on_close → Destroy)."""
+        self.Close()
+
+    def _on_close(self, _event):
+        """Destroy on close so a modeless wx.Dialog doesn't merely hide."""
         self.Destroy()
-        self.EndModal(0)
 
     def savepdf(self, *_):
         """Download a datasheet from The LCSC API."""
@@ -312,4 +321,4 @@ class PartDetailsDialog(wx.Dialog):
             "Error",
             style=wx.ICON_ERROR,
         )
-        self.EndModal(-1)
+        self.Destroy()
