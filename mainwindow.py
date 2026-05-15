@@ -169,6 +169,10 @@ class JLCPCBTools(wx.Dialog):
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
         self.select_alike_in_progress = False
+        # Singleton reference for the modeless PartSelectorDialog. Re-invoking
+        # "Select Part" while one is open re-targets it instead of opening a
+        # second window.
+        self._part_selector = None
         self.pending_assembly_enrichment = set()
         # Monotonic counter incremented each time assembly enrichment is started.
         # Worker threads capture the value at spawn; progress events with a stale
@@ -1270,19 +1274,15 @@ class JLCPCBTools(wx.Dialog):
             self.select_alike_parts()
 
     def get_part_details(self, *_):
-        """Fetch part details from LCSC and show them one after another each in a modal."""
+        """Show Part Details for each selected footprint (modeless windows)."""
         for item in self.footprint_list.GetSelections():
             if lcsc := self.partlist_data_model.get_lcsc(item):
                 self.show_part_details_dialog(lcsc)
 
     def show_part_details_dialog(self, part):
-        """Show the part details modal dialog."""
-        wx.BeginBusyCursor()
-        try:
-            dialog = PartDetailsDialog(self, part)
-            dialog.ShowModal()
-        finally:
-            wx.EndBusyCursor()
+        """Show the part details dialog (modeless so it doesn't block the app)."""
+        dialog = PartDetailsDialog(self, part)
+        dialog.Show()
 
     def update_library(self, *_):
         """Update the library from the JLCPCB CSV file."""
@@ -1392,7 +1392,17 @@ class JLCPCBTools(wx.Dialog):
             if simplified_footprint := simplify_footprint_name(footprint):
                 value += f" {simplified_footprint}"
             selection[ref] = value
-        PartSelectorDialog(self, selection).ShowModal()
+        if self._part_selector is not None:
+            # Already open — re-target it at the new selection rather than
+            # spawning a second window.
+            self._part_selector.update_for(selection)
+            self._part_selector.Raise()
+            return
+        # The selector clears self._part_selector itself from its EVT_CLOSE
+        # handler before it destroys — no need for a destroy hook here.
+        self._part_selector = PartSelectorDialog(self, selection)
+        self._part_selector.Show()
+        self._part_selector.Raise()
 
     def count_order_number_placeholders(self):
         """Count the JLC order/serial number placeholders."""

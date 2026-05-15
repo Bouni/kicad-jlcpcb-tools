@@ -1,7 +1,8 @@
-"""Contains the part details modal dialog."""
+"""Contains the part details dialog."""
 
 import logging
 from pathlib import Path
+import threading
 import webbrowser
 
 import wx  # pylint: disable=import-error
@@ -23,7 +24,7 @@ class PartDetailsDialog(wx.Dialog):
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
             size=HighResWxSize(parent.window, wx.Size(1000, 800)),
-            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.STAY_ON_TOP,
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
 
         self.logger = logging.getLogger(__name__)
@@ -34,6 +35,12 @@ class PartDetailsDialog(wx.Dialog):
         self.pdfurl = ""
         self.pageurl = ""
         self.picture = None
+
+        # The default EVT_CLOSE handler for a modeless wx.Dialog hides the
+        # window instead of destroying it. Override so the X-button actually
+        # destroys, otherwise hidden dialogs accumulate every time the user
+        # closes one via the title bar.
+        self.Bind(wx.EVT_CLOSE, self._on_close)
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -157,12 +164,23 @@ class PartDetailsDialog(wx.Dialog):
         self.Layout()
         self.Centre(wx.BOTH)
 
-        self.get_part_data()
+        # Show a loading placeholder row; the fetch runs on a background
+        # thread and replaces this once the API responds. Keeps the dialog
+        # paintable and closeable while the network call is in flight.
+        self.data_list.AppendItem(["Status", "Loading part details…"])
+        threading.Thread(
+            target=self._fetch_part_data,
+            name="PartDetailsFetch",
+            daemon=True,
+        ).start()
 
     def quit_dialog(self, *_):
-        """Close the dialog."""
+        """Close the dialog (via EVT_CLOSE → _on_close → Destroy)."""
+        self.Close()
+
+    def _on_close(self, _event):
+        """Destroy on close so a modeless wx.Dialog doesn't merely hide."""
         self.Destroy()
-        self.EndModal(0)
 
     def savepdf(self, *_):
         """Download a datasheet from The LCSC API."""
@@ -199,19 +217,58 @@ class PartDetailsDialog(wx.Dialog):
         self.logger.info("opening LCSC page for %s", str(self.part))
         webbrowser.open(str(self.pageurl))
 
-    def get_scaled_bitmap(self, url, width, height):
-        """Download a picture from a URL and convert it into a wx Bitmap."""
-        io_bytes = self.lcsc_api.download_bitmap(url)
-        image = wx.Image(io_bytes)
-        image = image.Scale(width, height, wx.IMAGE_QUALITY_HIGH)
-        result = wx.Bitmap(image)
-        return result
+    def _fetch_part_data(self):
+        """Fetch part data and image bytes on a background thread.
 
-    def get_part_data(self):
-        """Get part data from JLCPCB API and parse it into the table, set picture and PDF link."""
-        result = self.lcsc_api.get_part_data(self.part)
-        if not result["success"]:
-            self.report_part_data_fetch_error(result["msg"])
+        Network work happens off the UI thread so the dialog can paint and
+        stay responsive while the API call is in flight. Results are handed
+        back to the UI thread via wx.CallAfter.
+        """
+        try:
+            result = self.lcsc_api.get_part_data(self.part)
+        except Exception as exc:
+            self.logger.exception("Part data fetch failed")
+            result = {"success": False, "msg": str(exc)}
+        image_bytes = None
+        if result.get("success"):
+            url = self._picture_url(result)
+            if url:
+                try:
+                    image_bytes = self.lcsc_api.download_bitmap(url)
+                except Exception as exc:
+                    self.logger.warning("Part image fetch failed: %s", exc)
+        wx.CallAfter(self._apply_part_data, result, image_bytes)
+
+    @staticmethod
+    def _picture_url(result):
+        """Extract the part picture URL from the API response, if any."""
+        data = result["data"].get("data", {})
+        picture = data.get("minImage")
+        if picture:
+            # Substitute the full resolution image for the thumbnail.
+            return picture.replace("96x96", "900x900")
+        image_id = data.get("productBigImageAccessId")
+        if image_id:
+            return f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{image_id}"
+        return None
+
+    def _apply_part_data(self, result, image_bytes):
+        """Populate the dialog from fetched data. Runs on the UI thread.
+
+        Scheduled via wx.CallAfter from the background thread, so by the time
+        this runs the user may have already closed the dialog.
+        """
+        if not self:
+            # The underlying wx.Dialog has been destroyed (user closed before
+            # the fetch returned). wxPython's bool override on the Python
+            # proxy returns False once the C++ window is gone.
+            return
+
+        # Drop the "Loading…" placeholder row.
+        self.data_list.DeleteAllItems()
+
+        if not result.get("success"):
+            self.report_part_data_fetch_error(result.get("msg", "unknown error"))
             return
 
         parameters = {
@@ -230,86 +287,49 @@ class PartDetailsDialog(wx.Dialog):
             "leastNumber": "Minimal Quantity",
             "leastNumberPrice": "Minimum price",
         }
-        parttype = result["data"].get("data", {}).get("componentLibraryType")
-        if parttype and parttype == "base":
+        data = result["data"].get("data", {})
+        parttype = data.get("componentLibraryType")
+        if parttype == "base":
             self.data_list.AppendItem(["Type", "Basic"])
-        elif parttype and parttype == "expand":
+        elif parttype == "expand":
             self.data_list.AppendItem(["Type", "Extended"])
-        for k, v in parameters.items():
-            val = result["data"].get("data", {}).get(k)
+        for k, label in parameters.items():
+            val = data.get(k)
             if val:
-                self.data_list.AppendItem([v, str(val)])
-        prices = result["data"].get("data", {}).get("jlcPrices", [])
-        if prices:
-            for price in prices:
-                start = price.get("startNumber")
-                end = price.get("endNumber")
-                if end == -1:
-                    self.data_list.AppendItem(
-                        [
-                            f"JLC Price for >{start}",
-                            str(price.get("productPrice")),
-                        ]
-                    )
-                else:
-                    self.data_list.AppendItem(
-                        [
-                            f"JLC Price for {start}-{end}",
-                            str(price.get("productPrice")),
-                        ]
-                    )
-        prices = result["data"].get("data", {}).get("prices", [])
-        if prices:
-            for price in prices:
-                start = price.get("startNumber")
-                end = price.get("endNumber")
-                if end == -1:
-                    self.data_list.AppendItem(
-                        [
-                            f"LCSC Price for >{start}",
-                            str(price.get("productPrice")),
-                        ]
-                    )
-                else:
-                    self.data_list.AppendItem(
-                        [
-                            f"LCSC Price for {start}-{end}",
-                            str(price.get("productPrice")),
-                        ]
-                    )
-        for attribute in result["data"].get("data", {}).get("attributes", []):
+                self.data_list.AppendItem([label, str(val)])
+        for price in data.get("jlcPrices", []) or []:
+            start = price.get("startNumber")
+            end = price.get("endNumber")
+            label = f"JLC Price for >{start}" if end == -1 else f"JLC Price for {start}-{end}"
+            self.data_list.AppendItem([label, str(price.get("productPrice"))])
+        for price in data.get("prices", []) or []:
+            start = price.get("startNumber")
+            end = price.get("endNumber")
+            label = f"LCSC Price for >{start}" if end == -1 else f"LCSC Price for {start}-{end}"
+            self.data_list.AppendItem([label, str(price.get("productPrice"))])
+        for attribute in data.get("attributes", []) or []:
             self.data_list.AppendItem(
                 [
                     attribute.get("attribute_name_en"),
                     str(attribute.get("attribute_value_name")),
                 ]
             )
-        picture = result["data"].get("data", {}).get("minImage")
-        if picture:
-            # get the full resolution image instead of the thumbnail
-            picture = picture.replace("96x96", "900x900")
-        else:
-            imageId = result["data"].get("data", {}).get("productBigImageAccessId")
-            picture = (
-                f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{imageId}"
-            )
-        self.image.SetBitmap(
-            self.get_scaled_bitmap(
-                picture,
-                int(200 * self.parent.scale_factor),
-                int(200 * self.parent.scale_factor),
-            )
-        )
 
-        self.pdfurl = result["data"].get("data", {}).get("dataManualUrl")
-        self.pageurl = result["data"].get("data", {}).get("lcscGoodsUrl")
+        if image_bytes is not None:
+            image = wx.Image(image_bytes)
+            size = int(200 * self.parent.scale_factor)
+            image = image.Scale(size, size, wx.IMAGE_QUALITY_HIGH)
+            self.image.SetBitmap(wx.Bitmap(image))
+
+        self.pdfurl = data.get("dataManualUrl")
+        self.pageurl = data.get("lcscGoodsUrl")
 
     def report_part_data_fetch_error(self, reason):
-        """Spawn a message box with an erro message if the fetch fails."""
+        """Spawn a message box with an error message if the fetch fails."""
         wx.MessageBox(
             f"Failed to download part detail from the JLCPCB API ({reason})\r\n"
             f"We looked for a part named:\r\n{self.part}\r\n[hint: did you fill in the LCSC field correctly?]",
             "Error",
             style=wx.ICON_ERROR,
         )
-        self.EndModal(-1)
+        self.Destroy()
