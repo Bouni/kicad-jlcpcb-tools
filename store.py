@@ -12,7 +12,9 @@ from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_lcsc_value,
+    get_resolved_value,
     get_valid_footprints,
+    lcsc_override_cleared,
 )
 from .footprint_metadata import (
     footprint_has_tht,
@@ -364,7 +366,7 @@ class Store:
         for fp in get_valid_footprints(self.board):
             board_part = {
                 "reference": fp.GetReference(),
-                "value": fp.GetValue(),
+                "value": get_resolved_value(fp),
                 "footprint": str(fp.GetFPID().GetLibItemName()),
                 "lcsc": get_lcsc_value(fp),
                 "exclude_from_bom": get_exclude_from_bom(fp),
@@ -415,6 +417,13 @@ class Store:
                             "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
                             board_part["reference"],
                         )
+                    self.update_part(board_part)
+                # the active design variant explicitly clears the part
+                elif db_part and db_part["lcsc"] and lcsc_override_cleared(fp):
+                    self.logger.debug(
+                        "Part %s has its lcsc value explicitly cleared in the active design variant, clearing it in the database.",
+                        board_part["reference"],
+                    )
                     self.update_part(board_part)
             else:
                 # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board

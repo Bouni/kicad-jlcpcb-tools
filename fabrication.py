@@ -32,7 +32,7 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
-from .footprint_helpers import get_is_dnp
+from .footprint_helpers import get_is_dnp, get_resolved_value
 
 # Compatibility hack for V6 / V7 / V7.99
 try:
@@ -163,7 +163,7 @@ class Fabrication:
             rotation = (180 - rotation) % 360
         for getter in (
             lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
+            lambda: str(get_resolved_value(footprint)),
             lambda: str(footprint.GetFPID().GetLibItemName()),
         ):
             match = self._find_correction(getter())
@@ -177,7 +177,7 @@ class Fabrication:
         self.logger.info(
             "Fixed rotation of %s (%s / %s) on %s Layer by %d degrees",
             footprint.GetReference(),
-            footprint.GetValue(),
+            get_resolved_value(footprint),
             footprint.GetFPID().GetLibItemName(),
             "Top" if footprint.GetLayer() == 0 else "Bottom",
             correction,
@@ -210,7 +210,7 @@ class Fabrication:
             self.logger.info(
                 "Fixed position of %s (%s / %s) on %s Layer by %f/%f",
                 footprint.GetReference(),
-                footprint.GetValue(),
+                get_resolved_value(footprint),
                 footprint.GetFPID().GetLibItemName(),
                 "Top" if footprint.GetLayer() == 0 else "Bottom",
                 offset[0],
@@ -223,7 +223,7 @@ class Fabrication:
         """Fix the position of footprints in order to be correct for JLCPCB."""
         for getter in (
             lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
+            lambda: str(get_resolved_value(footprint)),
             lambda: str(footprint.GetFPID().GetLibItemName()),
         ):
             match = self._find_correction(getter())
