@@ -312,19 +312,26 @@ class Fabrication:
             ("MaskTop", F_Mask, "Mask top"),
             ("PasteTop", F_Paste, "Paste top"),
         ]
+        # Silkscreen needs no copper under it, so JLCPCB prints a bottom legend
+        # even on a board with a single copper layer.
+        # https://jlcpcb.com/blog/single-sided-pcb-design
+        plot_plan_bottom_silk = ("SilkBottom", B_SilkS, "Silk bottom")
         plot_plan_bottom = [
             ("CuBottom", B_Cu, "Bottom layer"),
-            ("SilkBottom", B_SilkS, "Silk bottom"),
+            plot_plan_bottom_silk,
             ("MaskBottom", B_Mask, "Mask bottom"),
-            ("EdgeCuts", Edge_Cuts, "Edges"),
             ("PasteBottom", B_Paste, "Paste bottom"),
         ]
+        # Edge cuts are not a side, so they are added to every plan.
+        plot_plan_edges = [("EdgeCuts", Edge_Cuts, "Edges")]
 
         plot_plan = []
 
-        # Single sided PCB
+        # Single sided PCB, so bottom copper, mask and paste describe a side that
+        # is not manufactured. JLCPCB publishes no layer set for a 1-layer order,
+        # so this follows from the board rather than from their spec.
         if layer_count == 1:
-            plot_plan = plot_plan_top + plot_plan_bottom[-2:]
+            plot_plan = plot_plan_top + [plot_plan_bottom_silk]
         # Double sided PCB
         elif layer_count == 2:
             plot_plan = plot_plan_top + plot_plan_bottom
@@ -342,6 +349,8 @@ class Fabrication:
                 ]
                 + plot_plan_bottom
             )
+
+        plot_plan = plot_plan + plot_plan_edges
 
         # Add all JLC prefixed layers - layers must have "JLC_" in their name
         jlc_layers_to_plot = []
