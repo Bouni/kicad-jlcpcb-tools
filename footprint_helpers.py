@@ -23,6 +23,8 @@ def get_lcsc_value(fp):
 
 def set_lcsc_value(fp, lcsc: str):
     """Set an lcsc number on the footprint, using LCSC as property name if needed."""
+    if not fp:
+        return
     lcsc_field = None
     for field in fp.GetFields():
         if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and re.match(

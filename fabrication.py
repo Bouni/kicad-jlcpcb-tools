@@ -473,7 +473,13 @@ class Fabrication:
                 components = []
                 for component in part["refs"].split(","):
                     fp = footprints.get(component)
-                    if fp and get_is_dnp(fp):
+                    if fp is None:
+                        self.logger.info(
+                            "Component %s is no longer on the board: removing from BOM",
+                            component,
+                        )
+                        continue
+                    if get_is_dnp(fp):
                         self.logger.info(
                             "Component %s has 'Do not place' enabled: removing from BOM",
                             component,
