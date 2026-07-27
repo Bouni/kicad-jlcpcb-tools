@@ -1575,10 +1575,33 @@ class JLCPCBTools(wx.Dialog):
                         )
                         return
 
-            self.run_generation_step(
-                "Filling copper zones",
+            refill = self.settings.get("gerber", {}).get("fill_zones", True)
+            empty_pours = self.run_generation_step(
+                "Filling copper zones" if refill else "Checking copper zone fills",
                 self.fabrication.fill_zones,
             )
+            if empty_pours:
+                listed = "\n".join(f"  {pour}" for pour in empty_pours)
+                dialog = wx.MessageDialog(
+                    self,
+                    f"These copper zones contain no filled copper:\n\n{listed}\n\n"
+                    "Plotting now ships the board without that copper.",
+                    "Empty copper zones",
+                    wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+                )
+                try:
+                    dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
+                    result = dialog.ShowModal()
+                finally:
+                    dialog.Destroy()
+                self.logger.warning(
+                    "Copper zones with no filled copper, user chose to %s export:\n%s",
+                    "continue" if result == wx.ID_YES else "stop",
+                    listed,
+                )
+                if result != wx.ID_YES:
+                    self.report_generation_step("Export stopped by empty copper zones")
+                    return
 
             drc_ok = self.run_generation_step(
                 "Running pre-export DRC check",
