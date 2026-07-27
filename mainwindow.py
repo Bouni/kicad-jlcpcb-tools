@@ -839,16 +839,23 @@ class JLCPCBTools(wx.Dialog):
         """Assign a selected LCSC number to parts."""
         details = self.library.get_part_details(e.lcsc)
         params = params_for_part(details)
-        for reference in e.references:
+        board = self.pcbnew.GetBoard()
+        # A row outlives its footprint until the next board sync, so only
+        # references that still resolve are assigned.
+        footprints = {
+            reference: board.FindFootprintByReference(reference)
+            for reference in e.references
+        }
+        footprints = {ref: fp for ref, fp in footprints.items() if fp is not None}
+        for reference, fp in footprints.items():
             self.store.set_lcsc(reference, e.lcsc)
             self.store.set_stock(reference, int(e.stock))
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(reference)
             set_lcsc_value(fp, e.lcsc)
             self.partlist_data_model.set_lcsc(
                 reference, e.lcsc, e.type, e.stock, params
             )
-        self.start_assembly_enrichment(e.references)
+        if footprints:
+            self.start_assembly_enrichment(list(footprints))
         wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
 
     def _set_bom_estimator_board_count(self, value: int) -> None:
@@ -1070,6 +1077,8 @@ class JLCPCBTools(wx.Dialog):
         corrections = self.library.get_all_correction_data()
         for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
+            if fp is None:
+                continue
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
             if part["lcsc"] and part["lcsc"] not in details:
@@ -1188,7 +1197,8 @@ class JLCPCBTools(wx.Dialog):
             for item in self.footprint_list.GetSelections():
                 ref = self.partlist_data_model.get_reference(item)
                 fp = self.pcbnew.GetBoard().FindFootprintByReference(ref)
-                fp.SetSelected()
+                if fp:
+                    fp.SetSelected()
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
             self.pcbnew.Refresh()
 
@@ -1212,6 +1222,8 @@ class JLCPCBTools(wx.Dialog):
             ref = self.partlist_data_model.get_reference(item)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
+            if fp is None:
+                continue
             bom = toggle_exclude_from_bom(fp)
             pos = toggle_exclude_from_pos(fp)
             self.store.set_bom(ref, int(bool(bom)))
@@ -1225,6 +1237,8 @@ class JLCPCBTools(wx.Dialog):
             ref = self.partlist_data_model.get_reference(item)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
+            if fp is None:
+                continue
             bom = toggle_exclude_from_bom(fp)
             self.store.set_bom(ref, int(bool(bom)))
             self.partlist_data_model.toggle_bom(item)
@@ -1236,6 +1250,8 @@ class JLCPCBTools(wx.Dialog):
             ref = self.partlist_data_model.get_reference(item)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
+            if fp is None:
+                continue
             pos = toggle_exclude_from_pos(fp)
             self.store.set_pos(ref, int(bool(pos)))
             self.partlist_data_model.toggle_pos(item)
@@ -1245,10 +1261,12 @@ class JLCPCBTools(wx.Dialog):
         """Remove an assigned a LCSC Part number to a footprint."""
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
-            self.store.set_lcsc(ref, "")
-            self.store.set_stock(ref, None)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
+            if fp is None:
+                continue
+            self.store.set_lcsc(ref, "")
+            self.store.set_stock(ref, None)
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
         wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
