@@ -127,12 +127,28 @@ class Fabrication:
         }
 
     def fill_zones(self):
-        """Refill copper zones following user prompt."""
+        """Refill copper zones, returning the zone layers that poured no copper."""
+        zones = self.board.Zones()
+        # Refilling mutates the board, reporting does not, so only the refill is optional.
         if self.parent.settings.get("gerber", {}).get("fill_zones", True):
-            filler = ZONE_FILLER(self.board)
-            zones = self.board.Zones()
-            filler.Fill(zones)
+            ZONE_FILLER(self.board).Fill(zones)
             Refresh()
+
+        empty_pours = []
+        for zone in zones:
+            # Rule areas are keepouts, so they never hold copper.
+            if zone.GetIsRuleArea():
+                continue
+            # The filler pours each layer of a zone separately, so check them the same way.
+            for layer in zone.GetLayerSet().Seq():
+                # Zones on technical layers are graphics, not copper.
+                if not IsCopperLayer(layer):
+                    continue
+                if zone.GetFilledPolysList(layer).Area() > 0:
+                    continue
+                name = self.board.GetLayerName(layer)
+                empty_pours.append(f"{zone.GetNetname() or 'no net'} on {name}")
+        return empty_pours
 
     def _find_correction(self, value):
         """Return (rotation, offset) for the first correction matching value.
