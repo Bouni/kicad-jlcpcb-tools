@@ -373,7 +373,9 @@ class Fabrication:
         offset = self.board.GetDesignSettings().GetAuxOrigin()
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
-        drlwriter.SetFormat(False)
+        # JLCPCB asks for Excellon drill data in metric units.
+        metric = True
+        drlwriter.SetFormat(metric)
         genDrl = True
         genMap = True
         drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
