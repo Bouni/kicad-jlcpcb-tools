@@ -1929,18 +1929,6 @@ class JLCPCBTools(wx.Dialog):
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
 
-        copy_lcsc = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_COPY_LCSC, "Copy LCSC"
-        )
-        right_click_menu.Append(copy_lcsc)
-        right_click_menu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
-
-        paste_lcsc = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_PASTE_LCSC, "Paste LCSC"
-        )
-        right_click_menu.Append(paste_lcsc)
-        right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
-
         assign_same_value = wx.MenuItem(
             right_click_menu,
             ID_CONTEXT_MENU_ASSIGN_SAME_VALUE,
@@ -1952,6 +1940,18 @@ class JLCPCBTools(wx.Dialog):
             self.assign_to_all_same_value,
             assign_same_value,
         )
+
+        copy_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_COPY_LCSC, "Copy LCSC"
+        )
+        right_click_menu.Append(copy_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.copy_part_lcsc, copy_lcsc)
+
+        paste_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_PASTE_LCSC, "Paste LCSC"
+        )
+        right_click_menu.Append(paste_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
 
         correction_by_reference = wx.MenuItem(
             right_click_menu,
