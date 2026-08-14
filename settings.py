@@ -317,6 +317,27 @@ class SettingsDialog(wx.Dialog):
             self.export_schematic_pdf_setting, 100, wx.ALL | wx.EXPAND, 5
         )
 
+        ##### Export PCB layer PDFs #####
+
+        self.export_pcb_layer_pdfs_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Export one PDF for each PCB layer",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_export_pcb_layer_pdfs",
+        )
+        self.export_pcb_layer_pdfs_setting.SetToolTip(
+            wx.ToolTip("Export one PDF file for each plotted PCB layer")
+        )
+        self.export_pcb_layer_pdfs_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        export_pcb_layer_pdfs_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        export_pcb_layer_pdfs_sizer.Add(
+            self.export_pcb_layer_pdfs_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
         ##### Check if order/serial number placeholder is present #####
 
         self.order_number_setting = wx.CheckBox(
@@ -700,6 +721,7 @@ class SettingsDialog(wx.Dialog):
         settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(export_schematic_pdf_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(export_pcb_layer_pdfs_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(highlight_standard_parts_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -886,6 +908,18 @@ class SettingsDialog(wx.Dialog):
         else:
             self.export_schematic_pdf_setting.SetLabel("Do not export schematic PDF")
 
+    def update_export_pcb_layer_pdfs(self, enabled):
+        """Update the PCB layer PDF export setting."""
+        self.export_pcb_layer_pdfs_setting.SetValue(bool(enabled))
+        if enabled:
+            self.export_pcb_layer_pdfs_setting.SetLabel(
+                "Export one PDF for each PCB layer"
+            )
+        else:
+            self.export_pcb_layer_pdfs_setting.SetLabel(
+                "Do not export PCB layer PDFs"
+            )
+
     def update_order_number(self, check):
         """Update settings dialog according to the settings."""
         self.logger.debug(check)
@@ -974,6 +1008,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_export_schematic_pdf(
             self.parent.settings.get("gerber", {}).get("export_schematic_pdf", False)
+        )
+        self.update_export_pcb_layer_pdfs(
+            self.parent.settings.get("gerber", {}).get("export_pcb_layer_pdfs", False)
         )
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)

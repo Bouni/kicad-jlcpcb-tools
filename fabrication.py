@@ -16,6 +16,7 @@ from pcbnew import (  # pylint: disable=import-error
     PCB_VIA,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
+    PLOT_FORMAT_PDF,
     VECTOR2I,
     ZONE_FILLER,
     B_Cu,
@@ -121,6 +122,10 @@ class Fabrication:
     def get_schematic_pdf_path(self):
         """Return the full path to the generated schematic PDF."""
         return os.path.join(self.outputdir, f"Schematic-{Path(self.filename).stem}.pdf")
+
+    def get_pcb_layer_pdf_dir(self):
+        """Return the directory containing generated PCB layer PDFs."""
+        return os.path.join(self.outputdir, "pcb_layers")
 
     def get_artifact_paths(self):
         """Return all generated production artifact paths."""
@@ -399,6 +404,75 @@ class Fabrication:
             raise RuntimeError(f"kicad-cli schematic PDF export failed: {message}") from error
 
         self.logger.info("Finished generating schematic PDF: %s", output_path)
+
+    def generate_pcb_layer_pdfs(self, layer_count=None):
+        """Generate one PDF file for each plotted PCB layer."""
+        if not layer_count:
+            layer_count = self.board.GetCopperLayerCount()
+
+        plot_plan_top = [
+            ("CuTop", F_Cu, "Top layer"),
+            ("SilkTop", F_SilkS, "Silk top"),
+            ("MaskTop", F_Mask, "Mask top"),
+            ("PasteTop", F_Paste, "Paste top"),
+        ]
+        plot_plan_bottom = [
+            ("CuBottom", B_Cu, "Bottom layer"),
+            ("SilkBottom", B_SilkS, "Silk bottom"),
+            ("MaskBottom", B_Mask, "Mask bottom"),
+            ("EdgeCuts", Edge_Cuts, "Edges"),
+            ("PasteBottom", B_Paste, "Paste bottom"),
+        ]
+        if layer_count == 1:
+            plot_plan = plot_plan_top + plot_plan_bottom[-2:]
+        elif layer_count == 2:
+            plot_plan = plot_plan_top + plot_plan_bottom
+        else:
+            plot_plan = (
+                plot_plan_top
+                + [
+                    (
+                        f"CuIn{layer}",
+                        getattr(import_module("pcbnew"), f"In{layer}_Cu"),
+                        f"Inner layer {layer}",
+                    )
+                    for layer in range(1, layer_count - 1)
+                ]
+                + plot_plan_bottom
+            )
+
+        for enabled_layer_id in self.board.GetEnabledLayers().Seq():
+            layer_name = str(self.board.GetLayerName(enabled_layer_id)).upper()
+            if "JLC_" in layer_name:
+                plot_plan.append((layer_name, enabled_layer_id, layer_name))
+
+        pdf_dir = self.get_pcb_layer_pdf_dir()
+        Path(pdf_dir).mkdir(parents=True, exist_ok=True)
+        for filename in Path(pdf_dir).glob("*.pdf"):
+            filename.unlink()
+
+        plot_controller = PLOT_CONTROLLER(self.board)
+        plot_options = plot_controller.GetPlotOptions()
+        plot_options.SetOutputDirectory(pdf_dir)
+        plot_options.SetPlotValue(
+            self.parent.settings.get("gerber", {}).get("plot_values", True)
+        )
+        plot_options.SetPlotReference(
+            self.parent.settings.get("gerber", {}).get("plot_references", True)
+        )
+        plot_options.SetPlotFrameRef(True)
+        plot_options.SetDrillMarksType(NO_DRILL_SHAPE)
+        plot_options.SetSketchPadsOnFabLayers(False)
+
+        for filename, layer_id, description in plot_plan:
+            plot_options.SetSkipPlotNPTH_Pads(layer_id <= B_Cu)
+            plot_controller.SetLayer(layer_id)
+            plot_controller.OpenPlotfile(filename, PLOT_FORMAT_PDF, description)
+            if plot_controller.PlotLayer() is False:
+                self.logger.error("Error plotting PDF for %s", description)
+            else:
+                self.logger.info("Successfully plotted PDF for %s", description)
+            plot_controller.ClosePlot()
 
     def generate_excellon(self):
         """Generate Excellon files."""

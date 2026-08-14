@@ -1614,6 +1614,13 @@ class JLCPCBTools(wx.Dialog):
                 layer_count,
             )
 
+            if self.settings.get("gerber", {}).get("export_pcb_layer_pdfs", False):
+                self.run_generation_step(
+                    "Exporting PCB layer PDFs",
+                    self.fabrication.generate_pcb_layer_pdfs,
+                    layer_count,
+                )
+
             self.run_generation_step(
                 "Generating Excellon drill/map files",
                 self.fabrication.generate_excellon,
