@@ -604,6 +604,38 @@ class JLCPCBTools(wx.Dialog):
         self.bom_estimator_help_button = self.bom_widget.help_button
         self.bom_estimator_summary = self.bom_widget.summary_label
 
+        self.component_status_box = wx.StaticBoxSizer(
+            wx.VERTICAL,
+            self,
+            "Component status",
+        )
+        self.component_status_assigned = wx.StaticText(self, wx.ID_ANY, "Assigned: 0")
+        self.component_status_missing = wx.StaticText(self, wx.ID_ANY, "Missing LCSC: 0")
+        self.component_status_excluded = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Excluded from BOM: 0",
+        )
+        for label, color in (
+            (self.component_status_assigned, wx.Colour(0, 120, 0)),
+            (self.component_status_missing, wx.Colour(180, 0, 0)),
+            (self.component_status_excluded, wx.Colour(100, 100, 100)),
+        ):
+            label.SetForegroundColour(color)
+            font = label.GetFont()
+            font.SetWeight(wx.FONTWEIGHT_BOLD)
+            label.SetFont(font)
+            self.component_status_box.Add(label, 0, wx.ALL, 2)
+
+        top_status_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        top_status_sizer.Add(estimator_sizer, 1, wx.EXPAND)
+        top_status_sizer.Add(
+            self.component_status_box,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            5,
+        )
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -611,7 +643,7 @@ class JLCPCBTools(wx.Dialog):
         self.SetSizeHints(HighResWxSize(self.window, wx.Size(1000, -1)), wx.DefaultSize)
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(self.upper_toolbar, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(estimator_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+        layout.Add(top_status_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
@@ -975,6 +1007,7 @@ class JLCPCBTools(wx.Dialog):
         the latch + CallAfter pattern collapses them so we recompute once per
         idle drain instead of once per mutation.
         """
+        self.update_component_status()
         if self._bom_recompute_scheduled:
             return
         self._bom_recompute_scheduled = True
@@ -984,6 +1017,27 @@ class JLCPCBTools(wx.Dialog):
         """Drain the coalesced recompute latch and run a single estimate."""
         self._bom_recompute_scheduled = False
         self.recompute_bom_estimate()
+
+    def update_component_status(self):
+        """Refresh the color-coded LCSC assignment status summary."""
+        if not hasattr(self, "store") or self.store is None:
+            return
+
+        parts = self.store.read_all()
+        excluded = sum(bool(part.get("exclude_from_bom")) for part in parts)
+        assigned = sum(
+            bool(str(part.get("lcsc") or ""))
+            and not bool(part.get("exclude_from_bom"))
+            for part in parts
+        )
+        missing = sum(
+            not bool(str(part.get("lcsc") or ""))
+            and not bool(part.get("exclude_from_bom"))
+            for part in parts
+        )
+        self.component_status_assigned.SetLabel(f"Assigned: {assigned}")
+        self.component_status_missing.SetLabel(f"Missing LCSC: {missing}")
+        self.component_status_excluded.SetLabel(f"Excluded from BOM: {excluded}")
 
     def _get_enrichment_status_label(self, part: dict) -> str:
         """Build UI status text for per-part assembly enrichment state."""
