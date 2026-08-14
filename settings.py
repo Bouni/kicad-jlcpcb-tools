@@ -265,6 +265,29 @@ class SettingsDialog(wx.Dialog):
         lcsc_priority_sizer.Add(self.lcsc_priority_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_priority_sizer.Add(self.lcsc_priority_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Auto-generate selector keywords #####
+
+        self.auto_search_keywords_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Auto-generate part search keywords",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_auto_search_keywords",
+        )
+        self.auto_search_keywords_setting.SetToolTip(
+            wx.ToolTip(
+                "Use component values and reference designators to initialize part searches"
+            )
+        )
+        self.auto_search_keywords_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        auto_search_keywords_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        auto_search_keywords_sizer.Add(
+            self.auto_search_keywords_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
         ##### Only parts with LCSC number in BOM/CPL #####
 
         self.lcsc_bom_cpl_setting = wx.CheckBox(
@@ -295,6 +318,48 @@ class SettingsDialog(wx.Dialog):
         lcsc_bom_cpl_sizer = wx.BoxSizer(wx.HORIZONTAL)
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
+
+        ##### Export schematic PDF #####
+
+        self.export_schematic_pdf_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Export schematic PDF",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_export_schematic_pdf",
+        )
+        self.export_schematic_pdf_setting.SetToolTip(
+            wx.ToolTip("Export a schematic PDF with kicad-cli during fabrication generation")
+        )
+        self.export_schematic_pdf_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        export_schematic_pdf_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        export_schematic_pdf_sizer.Add(
+            self.export_schematic_pdf_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
+        ##### Export PCB layer PDFs #####
+
+        self.export_pcb_layer_pdfs_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Export one PDF for each PCB layer",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_export_pcb_layer_pdfs",
+        )
+        self.export_pcb_layer_pdfs_setting.SetToolTip(
+            wx.ToolTip("Export one PDF file for each plotted PCB layer")
+        )
+        self.export_pcb_layer_pdfs_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        export_pcb_layer_pdfs_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        export_pcb_layer_pdfs_sizer.Add(
+            self.export_pcb_layer_pdfs_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
 
         ##### Check if order/serial number placeholder is present #####
 
@@ -677,7 +742,10 @@ class SettingsDialog(wx.Dialog):
         settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(subtract_mask_from_silk_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(auto_search_keywords_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(export_schematic_pdf_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(export_pcb_layer_pdfs_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(highlight_standard_parts_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -837,6 +905,18 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_auto_search_keywords(self, enabled):
+        """Update the automatic selector keyword setting."""
+        self.auto_search_keywords_setting.SetValue(bool(enabled))
+        if enabled:
+            self.auto_search_keywords_setting.SetLabel(
+                "Auto-generate part search keywords"
+            )
+        else:
+            self.auto_search_keywords_setting.SetLabel(
+                "Do not auto-generate part search keywords"
+            )
+
     def update_lcsc_bom_cpl(self, add):
         """Update settings dialog according to the settings."""
         if add:
@@ -854,6 +934,26 @@ class SettingsDialog(wx.Dialog):
             )
             self.lcsc_bom_cpl_image.SetBitmap(
                 loadBitmapScaled("no_bom.png", self.parent.scale_factor, static=True)
+            )
+
+    def update_export_schematic_pdf(self, enabled):
+        """Update the schematic PDF export setting."""
+        self.export_schematic_pdf_setting.SetValue(bool(enabled))
+        if enabled:
+            self.export_schematic_pdf_setting.SetLabel("Export schematic PDF")
+        else:
+            self.export_schematic_pdf_setting.SetLabel("Do not export schematic PDF")
+
+    def update_export_pcb_layer_pdfs(self, enabled):
+        """Update the PCB layer PDF export setting."""
+        self.export_pcb_layer_pdfs_setting.SetValue(bool(enabled))
+        if enabled:
+            self.export_pcb_layer_pdfs_setting.SetLabel(
+                "Export one PDF for each PCB layer"
+            )
+        else:
+            self.export_pcb_layer_pdfs_setting.SetLabel(
+                "Do not export PCB layer PDFs"
             )
 
     def update_order_number(self, check):
@@ -939,8 +1039,17 @@ class SettingsDialog(wx.Dialog):
         self.update_lcsc_priority(
             self.parent.settings.get("general", {}).get("lcsc_priority", True)
         )
+        self.update_auto_search_keywords(
+            self.parent.settings.get("general", {}).get("auto_search_keywords", True)
+        )
         self.update_lcsc_bom_cpl(
             self.parent.settings.get("gerber", {}).get("lcsc_bom_cpl", True)
+        )
+        self.update_export_schematic_pdf(
+            self.parent.settings.get("gerber", {}).get("export_schematic_pdf", False)
+        )
+        self.update_export_pcb_layer_pdfs(
+            self.parent.settings.get("gerber", {}).get("export_pcb_layer_pdfs", False)
         )
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)

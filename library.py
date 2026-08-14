@@ -320,7 +320,10 @@ class Library:
                 query += " AND "
             query += " AND ".join(query_chunks)
 
-        query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+        query += ' ORDER BY CAST("Stock" AS INTEGER) > 0 DESC'
+        if self.order_by != "Stock":
+            query += f', "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+        query += ', CAST("Stock" AS INTEGER) DESC'
         query += " LIMIT 1000"
 
         self.logger.debug("query '%s'", query)

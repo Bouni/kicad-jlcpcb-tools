@@ -72,6 +72,7 @@ from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
+from .search_keywords import build_search_keywords
 from .settings import SettingsDialog
 from .store import Store
 
@@ -97,6 +98,7 @@ ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
+ID_CONTEXT_MENU_ASSIGN_SAME_VALUE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
@@ -165,6 +167,10 @@ class JLCPCBTools(wx.Dialog):
             general_settings.get("highlight_standard_parts", True)
         )
         general_settings["highlight_standard_parts"] = self.highlight_standard_parts
+        self.auto_search_keywords = bool(
+            general_settings.get("auto_search_keywords", True)
+        )
+        general_settings["auto_search_keywords"] = self.auto_search_keywords
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -598,6 +604,38 @@ class JLCPCBTools(wx.Dialog):
         self.bom_estimator_help_button = self.bom_widget.help_button
         self.bom_estimator_summary = self.bom_widget.summary_label
 
+        self.component_status_box = wx.StaticBoxSizer(
+            wx.VERTICAL,
+            self,
+            "Component status",
+        )
+        self.component_status_assigned = wx.StaticText(self, wx.ID_ANY, "Assigned: 0")
+        self.component_status_missing = wx.StaticText(self, wx.ID_ANY, "Missing LCSC: 0")
+        self.component_status_excluded = wx.StaticText(
+            self,
+            wx.ID_ANY,
+            "Excluded from BOM: 0",
+        )
+        for label, color in (
+            (self.component_status_assigned, wx.Colour(0, 120, 0)),
+            (self.component_status_missing, wx.Colour(180, 0, 0)),
+            (self.component_status_excluded, wx.Colour(100, 100, 100)),
+        ):
+            label.SetForegroundColour(color)
+            font = label.GetFont()
+            font.SetWeight(wx.FONTWEIGHT_BOLD)
+            label.SetFont(font)
+            self.component_status_box.Add(label, 0, wx.ALL, 2)
+
+        top_status_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        top_status_sizer.Add(estimator_sizer, 1, wx.EXPAND)
+        top_status_sizer.Add(
+            self.component_status_box,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            5,
+        )
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -605,7 +643,7 @@ class JLCPCBTools(wx.Dialog):
         self.SetSizeHints(HighResWxSize(self.window, wx.Size(1000, -1)), wx.DefaultSize)
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(self.upper_toolbar, 0, wx.ALL | wx.EXPAND, 5)
-        layout.Add(estimator_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+        layout.Add(top_status_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
@@ -847,6 +885,66 @@ class JLCPCBTools(wx.Dialog):
         self.start_assembly_enrichment(e.references)
         wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
 
+    def assign_to_all_same_value(self, *_):
+        """Assign the selected part's LCSC number to matching value and footprint rows."""
+        selections = self.footprint_list.GetSelections()
+        if not selections:
+            return
+
+        source_item = selections[0]
+        source_ref = self.partlist_data_model.get_reference(source_item)
+        source_value = self.partlist_data_model.get_value(source_item)
+        source_footprint = self.partlist_data_model.get_footprint(source_item)
+        source_lcsc = self.partlist_data_model.get_lcsc(source_item)
+        if not source_lcsc:
+            wx.MessageBox(
+                "The selected part has no LCSC number assigned.",
+                "No LCSC Number",
+                wx.OK | wx.ICON_WARNING,
+            )
+            return
+
+        matching_references = [
+            row[self.partlist_data_model.columns["REF_COL"]]
+            for row in self.partlist_data_model.get_all()
+            if (
+                row[self.partlist_data_model.columns["VALUE_COL"]] == source_value
+                and row[self.partlist_data_model.columns["FP_COL"]] == source_footprint
+                and row[self.partlist_data_model.columns["LCSC_COL"]] != source_lcsc
+            )
+        ]
+        if not matching_references:
+            wx.MessageBox(
+                "No other parts with the same value and footprint need updating.",
+                "No Matching Parts",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        references_text = ", ".join(matching_references[:10])
+        if len(matching_references) > 10:
+            references_text += ", ..."
+        if wx.MessageBox(
+            f"Assign {source_lcsc} from {source_ref} to {len(matching_references)} matching part(s)?\n\n{references_text}",
+            "Assign LCSC to Matching Parts",
+            wx.YES_NO | wx.ICON_QUESTION,
+        ) != wx.YES:
+            return
+
+        details = self.library.get_part_details(source_lcsc)
+        params = params_for_part(details)
+        stock = details.get("stock", "")
+        board = self.pcbnew.GetBoard()
+        for reference in matching_references:
+            self.store.set_lcsc(reference, source_lcsc)
+            self.store.set_stock(reference, int(stock) if str(stock).isdigit() else 0)
+            set_lcsc_value(board.FindFootprintByReference(reference), source_lcsc)
+            self.partlist_data_model.set_lcsc(
+                reference, source_lcsc, details.get("type", ""), stock, params
+            )
+        self.start_assembly_enrichment(matching_references)
+        wx.PostEvent(self, BomDataChangedEvent(source="assign_same_value"))
+
     def _set_bom_estimator_board_count(self, value: int) -> None:
         """Persist board count and update estimate when value changed."""
         if value == self.bom_estimator_board_count:
@@ -909,6 +1007,7 @@ class JLCPCBTools(wx.Dialog):
         the latch + CallAfter pattern collapses them so we recompute once per
         idle drain instead of once per mutation.
         """
+        self.update_component_status()
         if self._bom_recompute_scheduled:
             return
         self._bom_recompute_scheduled = True
@@ -918,6 +1017,27 @@ class JLCPCBTools(wx.Dialog):
         """Drain the coalesced recompute latch and run a single estimate."""
         self._bom_recompute_scheduled = False
         self.recompute_bom_estimate()
+
+    def update_component_status(self):
+        """Refresh the color-coded LCSC assignment status summary."""
+        if not hasattr(self, "store") or self.store is None:
+            return
+
+        parts = self.store.read_all()
+        excluded = sum(bool(part.get("exclude_from_bom")) for part in parts)
+        assigned = sum(
+            bool(str(part.get("lcsc") or ""))
+            and not bool(part.get("exclude_from_bom"))
+            for part in parts
+        )
+        missing = sum(
+            not bool(str(part.get("lcsc") or ""))
+            and not bool(part.get("exclude_from_bom"))
+            for part in parts
+        )
+        self.component_status_assigned.SetLabel(f"Assigned: {assigned}")
+        self.component_status_missing.SetLabel(f"Missing LCSC: {missing}")
+        self.component_status_excluded.SetLabel(f"Excluded from BOM: {excluded}")
 
     def _get_enrichment_status_label(self, part: dict) -> str:
         """Build UI status text for per-part assembly enrichment state."""
@@ -1317,6 +1437,8 @@ class JLCPCBTools(wx.Dialog):
                     self.highlight_standard_parts
                 )
                 self.footprint_list.Refresh()
+            elif e.setting == "auto_search_keywords":
+                self.auto_search_keywords = bool(e.value)
         elif e.section == "highlighting" and e.setting == "matches":
             self.footprint_list.Refresh()
 
@@ -1380,27 +1502,47 @@ class JLCPCBTools(wx.Dialog):
     def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
         selection = {}
+        initial_category = ""
+        initial_package = ""
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
-            if ref.startswith("R"):
+            if self.auto_search_keywords:
+                value, category, package = build_search_keywords(ref, value, footprint)
+                if not initial_category:
+                    initial_category = category
+                if not initial_package:
+                    initial_package = package
+            elif ref.startswith("R"):
                 """ Auto remove alphabet unit if applicable """
                 if value.endswith("R") or value.endswith("r") or value.endswith("o"):
                     value = value[:-1]
                 value += "Ω"
-            if simplified_footprint := simplify_footprint_name(footprint):
+            if (
+                not self.auto_search_keywords
+                and (simplified_footprint := simplify_footprint_name(footprint))
+            ):
                 value += f" {simplified_footprint}"
             selection[ref] = value
         if self._part_selector is not None:
             # Already open — re-target it at the new selection rather than
             # spawning a second window.
-            self._part_selector.update_for(selection)
+            self._part_selector.update_for(
+                selection,
+                initial_category,
+                initial_package,
+            )
             self._part_selector.Raise()
             return
         # The selector clears self._part_selector itself from its EVT_CLOSE
         # handler before it destroys — no need for a destroy hook here.
-        self._part_selector = PartSelectorDialog(self, selection)
+        self._part_selector = PartSelectorDialog(
+            self,
+            selection,
+            initial_category,
+            initial_package,
+        )
         self._part_selector.Show()
         self._part_selector.Raise()
 
@@ -1478,6 +1620,9 @@ class JLCPCBTools(wx.Dialog):
                 "JLCPCB_ARTIFACT_GERBER_ZIP": artifact_paths["gerber_zip"],
                 "JLCPCB_ARTIFACT_BOM_CSV": artifact_paths["bom_csv"],
                 "JLCPCB_ARTIFACT_CPL_CSV": artifact_paths["cpl_csv"],
+                "JLCPCB_ARTIFACT_SCHEMATIC_PDF": artifact_paths.get(
+                    "schematic_pdf", ""
+                ),
             }
         )
         return env
@@ -1611,6 +1756,13 @@ class JLCPCBTools(wx.Dialog):
                 layer_count,
             )
 
+            if self.settings.get("gerber", {}).get("export_pcb_layer_pdfs", False):
+                self.run_generation_step(
+                    "Exporting PCB layer PDFs",
+                    self.fabrication.generate_pcb_layer_pdfs,
+                    layer_count,
+                )
+
             self.run_generation_step(
                 "Generating Excellon drill/map files",
                 self.fabrication.generate_excellon,
@@ -1630,6 +1782,12 @@ class JLCPCBTools(wx.Dialog):
                 "Generating BOM",
                 self.fabrication.generate_bom,
             )
+
+            if self.settings.get("gerber", {}).get("export_schematic_pdf", False):
+                self.run_generation_step(
+                    "Exporting schematic PDF",
+                    self.fabrication.generate_schematic_pdf,
+                )
 
             generation_count = self.store.increment_generation_count()
             post_hook_env = self.build_generate_hook_env(
@@ -1851,6 +2009,18 @@ class JLCPCBTools(wx.Dialog):
     def OnRightDown(self, *_):
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
+
+        assign_same_value = wx.MenuItem(
+            right_click_menu,
+            ID_CONTEXT_MENU_ASSIGN_SAME_VALUE,
+            "Assign LCSC to matching value and footprint",
+        )
+        right_click_menu.Append(assign_same_value)
+        right_click_menu.Bind(
+            wx.EVT_MENU,
+            self.assign_to_all_same_value,
+            assign_same_value,
+        )
 
         copy_lcsc = wx.MenuItem(
             right_click_menu, ID_CONTEXT_MENU_COPY_LCSC, "Copy LCSC"
