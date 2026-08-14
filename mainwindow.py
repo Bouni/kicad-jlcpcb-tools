@@ -97,6 +97,7 @@ ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
+ID_CONTEXT_MENU_ASSIGN_SAME_VALUE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
@@ -846,6 +847,66 @@ class JLCPCBTools(wx.Dialog):
             )
         self.start_assembly_enrichment(e.references)
         wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
+
+    def assign_to_all_same_value(self, *_):
+        """Assign the selected part's LCSC number to matching value and footprint rows."""
+        selections = self.footprint_list.GetSelections()
+        if not selections:
+            return
+
+        source_item = selections[0]
+        source_ref = self.partlist_data_model.get_reference(source_item)
+        source_value = self.partlist_data_model.get_value(source_item)
+        source_footprint = self.partlist_data_model.get_footprint(source_item)
+        source_lcsc = self.partlist_data_model.get_lcsc(source_item)
+        if not source_lcsc:
+            wx.MessageBox(
+                "The selected part has no LCSC number assigned.",
+                "No LCSC Number",
+                wx.OK | wx.ICON_WARNING,
+            )
+            return
+
+        matching_references = [
+            row[self.partlist_data_model.columns["REF_COL"]]
+            for row in self.partlist_data_model.get_all()
+            if (
+                row[self.partlist_data_model.columns["VALUE_COL"]] == source_value
+                and row[self.partlist_data_model.columns["FP_COL"]] == source_footprint
+                and row[self.partlist_data_model.columns["LCSC_COL"]] != source_lcsc
+            )
+        ]
+        if not matching_references:
+            wx.MessageBox(
+                "No other parts with the same value and footprint need updating.",
+                "No Matching Parts",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        references_text = ", ".join(matching_references[:10])
+        if len(matching_references) > 10:
+            references_text += ", ..."
+        if wx.MessageBox(
+            f"Assign {source_lcsc} from {source_ref} to {len(matching_references)} matching part(s)?\n\n{references_text}",
+            "Assign LCSC to Matching Parts",
+            wx.YES_NO | wx.ICON_QUESTION,
+        ) != wx.YES:
+            return
+
+        details = self.library.get_part_details(source_lcsc)
+        params = params_for_part(details)
+        stock = details.get("stock", "")
+        board = self.pcbnew.GetBoard()
+        for reference in matching_references:
+            self.store.set_lcsc(reference, source_lcsc)
+            self.store.set_stock(reference, int(stock) if str(stock).isdigit() else 0)
+            set_lcsc_value(board.FindFootprintByReference(reference), source_lcsc)
+            self.partlist_data_model.set_lcsc(
+                reference, source_lcsc, details.get("type", ""), stock, params
+            )
+        self.start_assembly_enrichment(matching_references)
+        wx.PostEvent(self, BomDataChangedEvent(source="assign_same_value"))
 
     def _set_bom_estimator_board_count(self, value: int) -> None:
         """Persist board count and update estimate when value changed."""
@@ -1879,6 +1940,18 @@ class JLCPCBTools(wx.Dialog):
         )
         right_click_menu.Append(paste_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
+
+        assign_same_value = wx.MenuItem(
+            right_click_menu,
+            ID_CONTEXT_MENU_ASSIGN_SAME_VALUE,
+            "Assign LCSC to matching value and footprint",
+        )
+        right_click_menu.Append(assign_same_value)
+        right_click_menu.Bind(
+            wx.EVT_MENU,
+            self.assign_to_all_same_value,
+            assign_same_value,
+        )
 
         correction_by_reference = wx.MenuItem(
             right_click_menu,
