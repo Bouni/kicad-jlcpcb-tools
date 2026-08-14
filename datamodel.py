@@ -83,19 +83,39 @@ class PartListDataModel(dv.PyDataViewModel):
     def GetAttr(self, item, col, attr):
         """Apply row attributes for Standard-mode trigger highlighting."""
         del col
-        if not self.standard_trigger_highlighting_enabled:
-            return False
         row = self.ItemToObject(item)
         if not row:
             return False
         ref = str(row[self.columns["REF_COL"]] or "")
-        if ref not in self.standard_trigger_refs:
-            return False
+        if (
+            self.standard_trigger_highlighting_enabled
+            and ref in self.standard_trigger_refs
+        ):
+            attr.SetColour(wx.Colour(120, 0, 0))
+            if hasattr(attr, "SetBold"):
+                attr.SetBold(True)
+            return True
 
-        attr.SetColour(wx.Colour(120, 0, 0))
-        if hasattr(attr, "SetBold"):
-            attr.SetBold(True)
-        return True
+        if row[self.columns["BOM_COL"]] == self.bom_pos_icons[1]:
+            attr.SetColour(wx.Colour(120, 120, 120))
+            return True
+        if not str(row[self.columns["LCSC_COL"]] or ""):
+            attr.SetColour(wx.Colour(180, 0, 0))
+            if hasattr(attr, "SetBold"):
+                attr.SetBold(True)
+            return True
+
+        try:
+            stock = int(str(row[self.columns["STOCK_COL"]] or "").replace(",", ""))
+        except ValueError:
+            return False
+        if stock < 100:
+            attr.SetColour(wx.Colour(150, 100, 0))
+            return True
+        if stock > 10000:
+            attr.SetColour(wx.Colour(0, 120, 0))
+            return True
+        return False
 
     @staticmethod
     def natural_sort_key(s):
