@@ -1478,6 +1478,9 @@ class JLCPCBTools(wx.Dialog):
                 "JLCPCB_ARTIFACT_GERBER_ZIP": artifact_paths["gerber_zip"],
                 "JLCPCB_ARTIFACT_BOM_CSV": artifact_paths["bom_csv"],
                 "JLCPCB_ARTIFACT_CPL_CSV": artifact_paths["cpl_csv"],
+                "JLCPCB_ARTIFACT_SCHEMATIC_PDF": artifact_paths.get(
+                    "schematic_pdf", ""
+                ),
             }
         )
         return env
@@ -1630,6 +1633,12 @@ class JLCPCBTools(wx.Dialog):
                 "Generating BOM",
                 self.fabrication.generate_bom,
             )
+
+            if self.settings.get("gerber", {}).get("export_schematic_pdf", False):
+                self.run_generation_step(
+                    "Exporting schematic PDF",
+                    self.fabrication.generate_schematic_pdf,
+                )
 
             generation_count = self.store.increment_generation_count()
             post_hook_env = self.build_generate_hook_env(

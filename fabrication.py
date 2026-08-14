@@ -7,6 +7,7 @@ import math
 import os
 from pathlib import Path
 import re
+import subprocess
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from pcbnew import (  # pylint: disable=import-error
@@ -117,13 +118,21 @@ class Fabrication:
         """Return the full path to the generated BOM CSV file."""
         return os.path.join(self.outputdir, f"BOM-{Path(self.filename).stem}.csv")
 
+    def get_schematic_pdf_path(self):
+        """Return the full path to the generated schematic PDF."""
+        return os.path.join(self.outputdir, f"Schematic-{Path(self.filename).stem}.pdf")
+
     def get_artifact_paths(self):
         """Return all generated production artifact paths."""
-        return {
+        artifacts = {
             "gerber_zip": self.get_gerber_zip_path(),
             "cpl_csv": self.get_cpl_csv_path(),
             "bom_csv": self.get_bom_csv_path(),
         }
+        schematic_pdf_path = self.get_schematic_pdf_path()
+        if os.path.isfile(schematic_pdf_path):
+            artifacts["schematic_pdf"] = schematic_pdf_path
+        return artifacts
 
     def fill_zones(self):
         """Refill copper zones following user prompt."""
@@ -364,6 +373,32 @@ class Fabrication:
                 self.logger.error("Error plotting %s", layer_info[2])
             self.logger.info("Successfully plotted %s", layer_info[2])
         pctl.ClosePlot()
+
+    def generate_schematic_pdf(self):
+        """Generate a schematic PDF with KiCad's command-line interface."""
+        schematic_path = os.path.join(self.path, f"{Path(self.filename).stem}.kicad_sch")
+        if not os.path.isfile(schematic_path):
+            raise RuntimeError(f"Schematic file not found: {schematic_path}")
+
+        output_path = self.get_schematic_pdf_path()
+        command = [
+            "kicad-cli",
+            "sch",
+            "export",
+            "pdf",
+            "--output",
+            output_path,
+            schematic_path,
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError as error:
+            raise RuntimeError("kicad-cli is required to export schematic PDFs") from error
+        except subprocess.CalledProcessError as error:
+            message = error.stderr.strip() or error.stdout.strip() or str(error)
+            raise RuntimeError(f"kicad-cli schematic PDF export failed: {message}") from error
+
+        self.logger.info("Finished generating schematic PDF: %s", output_path)
 
     def generate_excellon(self):
         """Generate Excellon files."""
