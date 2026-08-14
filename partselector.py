@@ -32,7 +32,7 @@ def _format_duration(seconds: float) -> str:
 class PartSelectorDialog(wx.Dialog):
     """The part selector window."""
 
-    def __init__(self, parent, parts, initial_category=''):
+    def __init__(self, parent, parts, initial_category='', initial_package=''):
         wx.Dialog.__init__(
             self,
             parent,
@@ -47,6 +47,7 @@ class PartSelectorDialog(wx.Dialog):
         self.parent = parent
         self.parts = parts
         self.initial_category = initial_category
+        self.initial_package = initial_package
         lcsc_selection = self.get_existing_selection(parts)
 
         self.search_timer = wx.Timer(self)
@@ -142,6 +143,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.TE_PROCESS_ENTER,
         )
         self.package.SetHint("e.g. 0603")
+        self.package.SetValue(self.initial_package)
 
         category_label = wx.StaticText(
             self,
@@ -599,7 +601,7 @@ class PartSelectorDialog(wx.Dialog):
             self.parent._part_selector = None
         self.Destroy()
 
-    def update_for(self, parts, initial_category=''):
+    def update_for(self, parts, initial_category='', initial_package=''):
         """Re-target this open selector at a new set of footprints.
 
         Called when the user invokes "Select Part" again from the main window
@@ -609,7 +611,9 @@ class PartSelectorDialog(wx.Dialog):
         """
         self.parts = parts
         self.initial_category = initial_category
+        self.initial_package = initial_package
         self.keyword.ChangeValue(self.get_existing_selection(parts))
+        self.package.ChangeValue(self.initial_package)
         if self.initial_category in self.parent.library.categories:
             self.category.SetValue(self.initial_category)
         else:

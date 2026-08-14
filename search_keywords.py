@@ -18,12 +18,13 @@ def _normalize_resistance(value: str) -> str:
     return re.sub(r'(?i)^(\d+)r(\d+)$', r'\1.\2Ω', value)
 
 
-def build_search_keywords(reference: str, value: str, footprint: str) -> tuple[str, str]:
-    """Return normalized keyword text and a suggested category for a component.
+def build_search_keywords(reference: str, value: str, footprint: str) -> tuple[str, str, str]:
+    """Return normalized keywords, category, and package suggestions.
 
     Value segments separated by ``/`` or ``_`` remain searchable individually,
     so values such as ``100nF/16V`` retain both capacitance and voltage ratings.
-    The footprint is included when it has a compact package-size suffix.
+    A compact package-size suffix is returned separately for the selector's
+    package filter instead of being added to the free-text keyword search.
     """
     prefix = re.sub(r'\d+$', '', reference.strip()).upper()
     category = _CATEGORY_BY_REFERENCE_PREFIX.get(prefix, '')
@@ -32,7 +33,6 @@ def build_search_keywords(reference: str, value: str, footprint: str) -> tuple[s
         values = [_normalize_resistance(segment) for segment in values]
 
     package_sizes = re.findall(r'(?<!\d)(\d{4})(?!\d)', footprint)
-    if package_sizes:
-        values.append(package_sizes[0])
+    package = package_sizes[0] if package_sizes else ''
 
-    return ' '.join(values), category
+    return ' '.join(values), category, package
