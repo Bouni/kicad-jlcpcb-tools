@@ -296,6 +296,27 @@ class SettingsDialog(wx.Dialog):
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Export schematic PDF #####
+
+        self.export_schematic_pdf_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Export schematic PDF",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_export_schematic_pdf",
+        )
+        self.export_schematic_pdf_setting.SetToolTip(
+            wx.ToolTip("Export a schematic PDF with kicad-cli during fabrication generation")
+        )
+        self.export_schematic_pdf_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        export_schematic_pdf_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        export_schematic_pdf_sizer.Add(
+            self.export_schematic_pdf_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
         ##### Check if order/serial number placeholder is present #####
 
         self.order_number_setting = wx.CheckBox(
@@ -678,6 +699,7 @@ class SettingsDialog(wx.Dialog):
         settings_grid.Add(subtract_mask_from_silk_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(export_schematic_pdf_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(highlight_standard_parts_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -856,6 +878,14 @@ class SettingsDialog(wx.Dialog):
                 loadBitmapScaled("no_bom.png", self.parent.scale_factor, static=True)
             )
 
+    def update_export_schematic_pdf(self, enabled):
+        """Update the schematic PDF export setting."""
+        self.export_schematic_pdf_setting.SetValue(bool(enabled))
+        if enabled:
+            self.export_schematic_pdf_setting.SetLabel("Export schematic PDF")
+        else:
+            self.export_schematic_pdf_setting.SetLabel("Do not export schematic PDF")
+
     def update_order_number(self, check):
         """Update settings dialog according to the settings."""
         self.logger.debug(check)
@@ -941,6 +971,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_lcsc_bom_cpl(
             self.parent.settings.get("gerber", {}).get("lcsc_bom_cpl", True)
+        )
+        self.update_export_schematic_pdf(
+            self.parent.settings.get("gerber", {}).get("export_schematic_pdf", False)
         )
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)
