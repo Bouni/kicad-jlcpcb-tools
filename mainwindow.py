@@ -72,6 +72,7 @@ from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
+from .search_keywords import build_search_keywords
 from .settings import SettingsDialog
 from .store import Store
 
@@ -166,6 +167,10 @@ class JLCPCBTools(wx.Dialog):
             general_settings.get("highlight_standard_parts", True)
         )
         general_settings["highlight_standard_parts"] = self.highlight_standard_parts
+        self.auto_search_keywords = bool(
+            general_settings.get("auto_search_keywords", True)
+        )
+        general_settings["auto_search_keywords"] = self.auto_search_keywords
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -1378,6 +1383,8 @@ class JLCPCBTools(wx.Dialog):
                     self.highlight_standard_parts
                 )
                 self.footprint_list.Refresh()
+            elif e.setting == "auto_search_keywords":
+                self.auto_search_keywords = bool(e.value)
         elif e.section == "highlighting" and e.setting == "matches":
             self.footprint_list.Refresh()
 
@@ -1441,27 +1448,35 @@ class JLCPCBTools(wx.Dialog):
     def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
         selection = {}
+        initial_category = ""
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
-            if ref.startswith("R"):
+            if self.auto_search_keywords:
+                value, category = build_search_keywords(ref, value, footprint)
+                if not initial_category:
+                    initial_category = category
+            elif ref.startswith("R"):
                 """ Auto remove alphabet unit if applicable """
                 if value.endswith("R") or value.endswith("r") or value.endswith("o"):
                     value = value[:-1]
                 value += "Ω"
-            if simplified_footprint := simplify_footprint_name(footprint):
+            if (
+                not self.auto_search_keywords
+                and (simplified_footprint := simplify_footprint_name(footprint))
+            ):
                 value += f" {simplified_footprint}"
             selection[ref] = value
         if self._part_selector is not None:
             # Already open — re-target it at the new selection rather than
             # spawning a second window.
-            self._part_selector.update_for(selection)
+            self._part_selector.update_for(selection, initial_category)
             self._part_selector.Raise()
             return
         # The selector clears self._part_selector itself from its EVT_CLOSE
         # handler before it destroys — no need for a destroy hook here.
-        self._part_selector = PartSelectorDialog(self, selection)
+        self._part_selector = PartSelectorDialog(self, selection, initial_category)
         self._part_selector.Show()
         self._part_selector.Raise()
 

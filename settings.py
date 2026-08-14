@@ -265,6 +265,29 @@ class SettingsDialog(wx.Dialog):
         lcsc_priority_sizer.Add(self.lcsc_priority_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_priority_sizer.Add(self.lcsc_priority_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Auto-generate selector keywords #####
+
+        self.auto_search_keywords_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Auto-generate part search keywords",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_auto_search_keywords",
+        )
+        self.auto_search_keywords_setting.SetToolTip(
+            wx.ToolTip(
+                "Use component values and reference designators to initialize part searches"
+            )
+        )
+        self.auto_search_keywords_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        auto_search_keywords_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        auto_search_keywords_sizer.Add(
+            self.auto_search_keywords_setting, 100, wx.ALL | wx.EXPAND, 5
+        )
+
         ##### Only parts with LCSC number in BOM/CPL #####
 
         self.lcsc_bom_cpl_setting = wx.CheckBox(
@@ -719,6 +742,7 @@ class SettingsDialog(wx.Dialog):
         settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(subtract_mask_from_silk_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        settings_grid.Add(auto_search_keywords_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(export_schematic_pdf_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(export_pcb_layer_pdfs_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -881,6 +905,18 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_auto_search_keywords(self, enabled):
+        """Update the automatic selector keyword setting."""
+        self.auto_search_keywords_setting.SetValue(bool(enabled))
+        if enabled:
+            self.auto_search_keywords_setting.SetLabel(
+                "Auto-generate part search keywords"
+            )
+        else:
+            self.auto_search_keywords_setting.SetLabel(
+                "Do not auto-generate part search keywords"
+            )
+
     def update_lcsc_bom_cpl(self, add):
         """Update settings dialog according to the settings."""
         if add:
@@ -1002,6 +1038,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_lcsc_priority(
             self.parent.settings.get("general", {}).get("lcsc_priority", True)
+        )
+        self.update_auto_search_keywords(
+            self.parent.settings.get("general", {}).get("auto_search_keywords", True)
         )
         self.update_lcsc_bom_cpl(
             self.parent.settings.get("gerber", {}).get("lcsc_bom_cpl", True)
