@@ -1449,14 +1449,17 @@ class JLCPCBTools(wx.Dialog):
         """Select a part from the library and assign it to the selected footprint(s)."""
         selection = {}
         initial_category = ""
+        initial_package = ""
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
             if self.auto_search_keywords:
-                value, category = build_search_keywords(ref, value, footprint)
+                value, category, package = build_search_keywords(ref, value, footprint)
                 if not initial_category:
                     initial_category = category
+                if not initial_package:
+                    initial_package = package
             elif ref.startswith("R"):
                 """ Auto remove alphabet unit if applicable """
                 if value.endswith("R") or value.endswith("r") or value.endswith("o"):
@@ -1471,12 +1474,21 @@ class JLCPCBTools(wx.Dialog):
         if self._part_selector is not None:
             # Already open — re-target it at the new selection rather than
             # spawning a second window.
-            self._part_selector.update_for(selection, initial_category)
+            self._part_selector.update_for(
+                selection,
+                initial_category,
+                initial_package,
+            )
             self._part_selector.Raise()
             return
         # The selector clears self._part_selector itself from its EVT_CLOSE
         # handler before it destroys — no need for a destroy hook here.
-        self._part_selector = PartSelectorDialog(self, selection, initial_category)
+        self._part_selector = PartSelectorDialog(
+            self,
+            selection,
+            initial_category,
+            initial_package,
+        )
         self._part_selector.Show()
         self._part_selector.Raise()
 
