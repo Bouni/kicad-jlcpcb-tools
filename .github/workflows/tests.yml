@@ -15,9 +15,5 @@ jobs:
         run: pip install pytest
       - name: Install python packages
         run: pip install .
-      - name: Run core tests
-        working-directory: core
-        run: pytest version.py
-      - name: Run common tests
-        working-directory: common
+      - name: Run tests
         run: pytest
