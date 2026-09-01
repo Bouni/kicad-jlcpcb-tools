@@ -57,16 +57,6 @@ class PartListDataModel(dv.PyDataViewModel):
                 scale_factor,
             ),
         ]
-        self.side_icons = [
-            loadIconScaled(
-                "TOP.png",
-                scale_factor,
-            ),
-            loadIconScaled(
-                "BOT.png",
-                scale_factor,
-            ),
-        ]
         self.logger = logging.getLogger(__name__)
 
     # The following methods implement row-level highlighting for parts that
@@ -81,8 +71,23 @@ class PartListDataModel(dv.PyDataViewModel):
         self.standard_trigger_highlighting_enabled = bool(enabled)
 
     def GetAttr(self, item, col, attr):
-        """Apply row attributes for Standard-mode trigger highlighting."""
-        del col
+        """Apply side colors and Standard-mode trigger highlighting."""
+        if col == self.columns["SIDE_COL"]:
+            row = self.ItemToObject(item)
+            if not row:
+                return False
+            side_colours = {
+                "TOP": wx.Colour(200, 52, 52),
+                "BOT": wx.Colour(77, 127, 196),
+            }
+            colour = side_colours.get(row[col])
+            if colour is None:
+                return False
+            attr.SetColour(colour)
+            if hasattr(attr, "SetBold"):
+                attr.SetBold(True)
+            return True
+
         if not self.standard_trigger_highlighting_enabled:
             return False
         row = self.ItemToObject(item)
@@ -122,7 +127,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "wxDataViewIconText",
             "wxDataViewIconText",
             "string",
-            "wxDataViewIconText",
+            "string",
             "string",
             "string",
             "string",
@@ -153,7 +158,6 @@ class PartListDataModel(dv.PyDataViewModel):
             self.columns["BOM_COL"],
             self.columns["POS_COL"],
             self.columns["DNP_COL"],
-            self.columns["SIDE_COL"],
         ]:
             icon = row[col]
             return dv.DataViewIconText("", icon)
@@ -220,9 +224,10 @@ class PartListDataModel(dv.PyDataViewModel):
         """Get an icon for a state."""
         return self.bom_pos_icons[int(state)]
 
-    def get_side_icon(self, side: str):
-        """Get The side for a layer number."""
-        return self.side_icons[0] if side == "0" else self.side_icons[1]
+    @staticmethod
+    def get_side_label(side: str) -> str:
+        """Get the display label for a layer number."""
+        return "TOP" if side == "0" else "BOT"
 
     def AddEntry(self, data: list):
         """Add a new entry to the data model."""
@@ -242,7 +247,7 @@ class PartListDataModel(dv.PyDataViewModel):
         data[self.columns["DNP_COL"]] = self.get_bom_pos_icon(
             data[self.columns["DNP_COL"]]
         )
-        data[self.columns["SIDE_COL"]] = self.get_side_icon(
+        data[self.columns["SIDE_COL"]] = self.get_side_label(
             data[self.columns["SIDE_COL"]]
         )
         data[self.columns["PARAMS_COL"]] = self._encode_params_value(

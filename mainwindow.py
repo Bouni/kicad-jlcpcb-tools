@@ -505,8 +505,12 @@ class JLCPCBTools(wx.Dialog):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
-        side = self.footprint_list.AppendIconTextColumn(
-            "Side", 10, width=50, mode=dv.DATAVIEW_CELL_INERT
+        side = self.footprint_list.AppendTextColumn(
+            "Side",
+            10,
+            width=50,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
         )
         enrichment = self.footprint_list.AppendTextColumn(
             "Enrichment",
