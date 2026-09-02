@@ -15,16 +15,150 @@ class SchematicExport:
 
     # This only works with KiCad v6/v7/v8 files, if the format changes, this will probably break
 
+    _IN_BOM_RX = re.compile(r"^(\s*)\(in_bom\s+(yes|no)\)")
+    _REFERENCE_RX = re.compile(r'\(property\s+"Reference"\s+"([^"]*)"')
+    _INSTANCE_REF_RX = re.compile(r'\(reference\s+"([^"]*)"\)')
+    _PROJECT_RX = re.compile(r'\(project\s+"([^"]*)"')
+    _UUID_RX = re.compile(r'\(uuid\s+"?([^"\s)]*)"?\)')
+    _PATH_RX = re.compile(r'\(path\s+"([^"]*)"')
+
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
+
+    def _resolved_bom(self, refs, store_parts):
+        """Return a shared exclude-from-BOM state, or None when it is unsafe."""
+        matched = {
+            part["reference"]: bool(part["exclude_from_bom"])
+            for part in store_parts
+            if part["reference"] in refs
+        }
+        if not matched:
+            return None
+        if set(matched) != refs:
+            self.logger.warning(
+                "Not updating BOM state for %s; PCB data is missing %s",
+                sorted(refs),
+                sorted(refs - set(matched)),
+            )
+            return None
+        states = set(matched.values())
+        if len(states) != 1:
+            self.logger.warning(
+                "Not updating BOM state for %s; instances disagree", sorted(refs)
+            )
+            return None
+        return states.pop()
+
+    def _symbol_instances6(self):
+        """Read KiCad 6's project-level symbol instance references by UUID."""
+        root_name = os.path.splitext(self.parent.board_name)[0] + ".kicad_sch"
+        path = os.path.join(self.parent.project_path, root_name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+        except OSError:
+            lines = []
+
+        refs = {}
+        in_instances = False
+        symbol_uuid = ""
+        for line in lines:
+            if "(symbol_instances" in line:
+                in_instances = True
+                continue
+            if not in_instances:
+                continue
+            if match := self._PATH_RX.search(line):
+                symbol_uuid = match.group(1).rsplit("/", 1)[-1]
+            if symbol_uuid and (match := self._INSTANCE_REF_RX.search(line)):
+                refs.setdefault(symbol_uuid, set()).add(match.group(1))
+                symbol_uuid = ""
+        if in_instances:
+            return refs
+
+        self.logger.warning(
+            "Unable to find KiCad 6 symbol instances; BOM states will not be updated"
+        )
+        return {}
+
+    def _bom_updates(self, lines, store_parts, split_symbol=False, instance_refs=None):
+        """Return in_bom line updates that are safe for every symbol instance."""
+        project_name = os.path.splitext(self.parent.board_name)[0]
+        symbols = []
+        symbol = None
+        symbol_end = ""
+        project = None
+
+        for index, line in enumerate(lines):
+            in_line = line.rstrip()
+            symbol_start = (
+                "(symbol" in in_line
+                and index + 1 < len(lines)
+                and "(lib_id" in lines[index + 1]
+                if split_symbol
+                else "(symbol (lib_id" in in_line
+            )
+            if symbol_start:
+                symbol = {
+                    "bom_line": None,
+                    "uuid": "",
+                    "reference": "",
+                    "instances": None,
+                }
+                symbols.append(symbol)
+                symbol_end = in_line[: in_line.index("(symbol")] + ")"
+                project = None
+                continue
+            if symbol is None:
+                continue
+            if in_line == symbol_end:
+                symbol = None
+                project = None
+                continue
+            if symbol["bom_line"] is None and self._IN_BOM_RX.search(in_line):
+                symbol["bom_line"] = index
+            if not symbol["uuid"] and (match := self._UUID_RX.search(in_line)):
+                symbol["uuid"] = match.group(1)
+            if match := self._REFERENCE_RX.search(in_line):
+                symbol["reference"] = match.group(1)
+            if instance_refs is None:
+                if "(instances" in in_line:
+                    symbol["instances"] = {}
+                if match := self._PROJECT_RX.search(in_line):
+                    project = match.group(1)
+                    if symbol["instances"] is None:
+                        symbol["instances"] = {}
+                    symbol["instances"].setdefault(project, set())
+                if project is not None and (
+                    match := self._INSTANCE_REF_RX.search(in_line)
+                ):
+                    symbol["instances"][project].add(match.group(1))
+
+        updates = {}
+        for symbol in symbols:
+            if instance_refs is not None:
+                refs = instance_refs.get(symbol["uuid"], set())
+            elif symbol["instances"] is None:
+                refs = {symbol["reference"]}
+            else:
+                refs = symbol["instances"].get(project_name)
+                if refs is None and set(symbol["instances"]) == {""}:
+                    refs = symbol["instances"][""]
+                if refs is None:
+                    refs = set()
+            bom = self._resolved_bom(refs, store_parts)
+            if bom is not None and symbol["bom_line"] is not None:
+                updates[symbol["bom_line"]] = "no" if bom else "yes"
+        return updates
 
     def load_schematic(self, paths):
         """Load schematic file."""
         if is_version6(GetBuildVersion()):
             self.logger.info("Kicad 6...")
+            instance_refs = self._symbol_instances6()
             for path in paths:
-                self._update_schematic6(path)
+                self._update_schematic6(path, instance_refs)
         elif is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")
             for path in paths:
@@ -34,7 +168,7 @@ class SchematicExport:
             for path in paths:
                 self._update_schematic(path)
 
-    def _update_schematic6(self, path):
+    def _update_schematic6(self, path, instance_refs):
         """Only works with KiCad V6 files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
@@ -56,6 +190,11 @@ class SchematicExport:
         newlines = []
         with open(path, encoding="utf-8") as f:
             lines = f.readlines()
+
+        for index, desired in self._bom_updates(
+            lines, store_parts, instance_refs=instance_refs
+        ).items():
+            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
 
         if os.path.exists(path + "_old"):
             os.remove(path + "_old")
@@ -133,6 +272,9 @@ class SchematicExport:
         with open(path, encoding="utf-8") as f:
             lines = f.readlines()
 
+        for index, desired in self._bom_updates(lines, store_parts).items():
+            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
+
         if os.path.exists(path + "_old"):
             os.remove(path + "_old")
         os.rename(path, path + "_old")
@@ -205,6 +347,11 @@ class SchematicExport:
         newlines = []
         with open(path, encoding="utf-8") as f:
             lines = f.readlines()
+
+        for index, desired in self._bom_updates(
+            lines, store_parts, split_symbol=True
+        ).items():
+            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
 
         partSection = False
         files_seen = set()  # keeps sheet files already processed.
