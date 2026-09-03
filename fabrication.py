@@ -27,6 +27,7 @@ from pcbnew import (  # pylint: disable=import-error
     F_Paste,
     F_SilkS,
     FromMM,
+    IsCopperLayer,
     Refresh,
     ToMM,
     wxPoint,
@@ -363,10 +364,7 @@ class Fabrication:
         plot_plan += jlc_layers_to_plot
 
         for layer_info in plot_plan:
-            if layer_info[1] <= B_Cu:
-                popt.SetSkipPlotNPTH_Pads(True)
-            else:
-                popt.SetSkipPlotNPTH_Pads(False)
+            popt.SetSkipPlotNPTH_Pads(IsCopperLayer(layer_info[1]))
             pctl.SetLayer(layer_info[1])
             pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
             if pctl.PlotLayer() is False:
