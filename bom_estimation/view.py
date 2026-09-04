@@ -73,7 +73,7 @@ def standard_signal_reasons(signals: Mapping[str, object]) -> list[str]:
     """Build user-facing reason labels for active Standard-mode triggers."""
     reason_map = [
         ("manual_enabled", "manual"),
-        ("qty_50_plus", "qty≥50"),
+        ("quantity_over_50", "qty>50"),
         ("standard_part_present", "standard part"),
         ("multi_side_populated", "both sides populated"),
     ]
@@ -190,7 +190,7 @@ def build_standard_mode_context(
 
     signals = {
         "manual_enabled": bool(manual_enabled),
-        "qty_50_plus": board_count >= 50,
+        "quantity_over_50": board_count > 50,
         "standard_part_present": bool(standard_part_refs),
         "multi_side_populated": len(populated_sides) > 1,
     }

@@ -6,14 +6,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-import json
 
 import pcbnew  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
-from .bom_estimation.pricing import calculate_bom_estimate
+from .bom_estimation.assembly_mode import (
+    AssemblyModeDecision,
+    classify_component_product_type,
+)
+from .bom_estimation.pricing import calculate_bom_estimate, get_assembly_flags
 from .bom_estimation.view import (
-    build_standard_mode_context,
     format_bom_estimate_summary,
     prepare_bom_price_labels,
     standard_signal_reasons,
@@ -153,28 +155,28 @@ class BomEstimatorController:
         self,
         parts: list[Mapping[str, object]],
         board_count: int,
-    ) -> dict[str, object]:
+    ) -> AssemblyModeDecision:
         """Compute standard-mode trigger signals and assembly side usage.
 
         Walks the board to extract per-reference facts (sides, SMT vs THT,
-        standard-part membership), then delegates the policy-decision portion
-        to ``build_standard_mode_context`` so the signal contract has one home.
+        and JLC assembly classification), then delegates the policy decision to
+        ``AssemblyModeDecision`` so the signal contract has one home.
         """
         board = self._get_board()
-        populated_sides: set[str] = set()
-        populated_refs: set[str] = set()
+        top_refs: set[str] = set()
+        bottom_refs: set[str] = set()
         smt_populated_sides: set[str] = set()
-        standard_part_refs: set[str] = set()
+        standard_only_refs: set[str] = set()
+        economic_only_refs: set[str] = set()
+        classification_missing_refs: set[str] = set()
 
         for part in parts:
             if part.get("exclude_from_bom") or not str(part.get("lcsc") or ""):
                 continue
 
-            flags = {}
-            with suppress(TypeError, ValueError, json.JSONDecodeError):
-                flags = json.loads(part.get("assembly_flags") or "{}")
+            flags = get_assembly_flags(part)
             if bool(flags.get("is_dnp", False)) or bool(
-                flags.get("exclude_from_pos", False)
+                part.get("exclude_from_pos", False)
             ):
                 continue
 
@@ -187,8 +189,8 @@ class BomEstimatorController:
                 continue
 
             side = "bottom" if self._is_on_bottom_side(footprint) else "top"
-            populated_sides.add(side)
-            populated_refs.add(str(reference))
+            reference = str(reference)
+            (bottom_refs if side == "bottom" else top_refs).add(reference)
 
             is_tht = False
             with suppress(TypeError, ValueError):
@@ -196,17 +198,25 @@ class BomEstimatorController:
             if not is_tht:
                 smt_populated_sides.add(side)
 
-            with suppress(TypeError, ValueError):
-                if int(part.get("component_product_type")) != 0:
-                    standard_part_refs.add(str(reference))
+            product_type = classify_component_product_type(
+                part.get("component_product_type")
+            )
+            if product_type == 2:
+                standard_only_refs.add(reference)
+            elif product_type == 1:
+                economic_only_refs.add(reference)
+            elif product_type is None:
+                classification_missing_refs.add(reference)
 
-        return build_standard_mode_context(
+        return AssemblyModeDecision(
             manual_enabled=bool(self._is_force_standard_enabled()),
             board_count=board_count,
-            populated_refs=populated_refs,
-            populated_sides=populated_sides,
-            smt_populated_sides=smt_populated_sides,
-            standard_part_refs=standard_part_refs,
+            top_refs=top_refs,
+            bottom_refs=bottom_refs,
+            smt_populated_side_count=len(smt_populated_sides),
+            standard_only_refs=standard_only_refs,
+            economic_only_refs=economic_only_refs,
+            classification_missing_refs=classification_missing_refs,
         )
 
     def recompute(self, board_count: int):
@@ -218,43 +228,41 @@ class BomEstimatorController:
         """
         raw_parts = self._read_parts()
         parts = raw_parts if isinstance(raw_parts, list) else []
-        if not parts:
-            self._set_trigger_refs(set())
-            self._refresh_rows()
-            self._set_summary_text(f"BOM Estimate ({board_count} boards): no parts")
-            return
-
-        bom_parts = [
-            part
+        if not any(
+            not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
             for part in parts
-            if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
-        ]
-        if not bom_parts:
+        ):
             self._set_trigger_refs(set())
             self._refresh_rows()
-            self._set_summary_text(
-                f"BOM Estimate ({board_count} boards): no assigned BOM parts"
+            reason = "no parts" if not parts else "no assigned BOM parts"
+            self._set_summary_text(f"BOM Estimate ({board_count} boards): {reason}")
+            return AssemblyModeDecision(
+                board_count, bool(self._is_force_standard_enabled())
             )
-            return
 
-        standard_context = self._get_board_standard_context(parts, board_count)
+        decision = self._get_board_standard_context(parts, board_count)
 
         summary = calculate_bom_estimate(
             parts=parts,
             board_count=board_count,
             get_part_details=self._get_part_details,
-            board_standard=bool(standard_context["board_standard"]),
-            smt_populated_sides=int(standard_context["smt_populated_sides"]),
+            board_standard=decision.board_standard,
+            smt_populated_sides=decision.smt_populated_side_count,
         )
 
-        mode = "Standard" if standard_context["board_standard"] else "Economic"
-        reasons = standard_signal_reasons(standard_context["signals"])
+        mode = "Standard" if decision.board_standard else "Economic"
+        signals = {
+            "manual_enabled": decision.manual_enabled,
+            "quantity_over_50": decision.quantity_over_50,
+            "standard_part_present": bool(decision.standard_only_refs),
+            "multi_side_populated": decision.both_sides_populated,
+        }
+        reasons = standard_signal_reasons(signals)
         reason_text = ", ".join(reasons) if reasons else "none"
-        highlight_refs = (
-            standard_context["trigger_references"]
-            if standard_context["board_standard"]
-            else set()
-        )
+        highlight_refs = set(decision.standard_only_refs)
+        if decision.both_sides_populated:
+            highlight_refs.update(decision.top_refs)
+            highlight_refs.update(decision.bottom_refs)
 
         for reference, price_label in prepare_bom_price_labels(
             parts,
@@ -273,3 +281,4 @@ class BomEstimatorController:
             reason_text,
         )
         self._set_summary_text(f"{overview_line}\n{details_line}")
+        return decision

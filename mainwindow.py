@@ -18,6 +18,7 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
+from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
@@ -931,11 +932,11 @@ class JLCPCBTools(wx.Dialog):
         if lcsc in self.pending_assembly_enrichment:
             return "Pending"
         if (
-            str(part.get("assembly_process") or "")
-            or part.get("component_product_type") is not None
+            classify_component_product_type(part.get("component_product_type"))
+            is not None
         ):
             return "Done"
-        return "Queued"
+        return "Class missing"
 
     def start_assembly_enrichment(self, references=None):
         """Start background enrichment for missing assembly process metadata."""
@@ -997,19 +998,24 @@ class JLCPCBTools(wx.Dialog):
 
         assembly_process = metadata.get("assembly_process", "")
         component_product_type = metadata.get("component_product_type")
-        status = (
-            "Done"
-            if assembly_process or component_product_type is not None
-            else "No data"
-        )
-
         for reference in refs:
-            self.store.set_assembly_metadata(
+            updated = self.store.set_assembly_metadata(
                 reference,
                 assembly_process,
                 component_product_type,
+                expected_lcsc=lcsc,
             )
-            self.partlist_data_model.set_enrichment_status(reference, status)
+            if updated:
+                current_part = self.store.get_part(reference) or {}
+                status = (
+                    "Done"
+                    if classify_component_product_type(
+                        current_part.get("component_product_type")
+                    )
+                    is not None
+                    else "Class missing"
+                )
+                self.partlist_data_model.set_enrichment_status(reference, status)
 
         self.pending_assembly_enrichment.discard(lcsc)
 

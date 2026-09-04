@@ -11,6 +11,8 @@ import contextlib
 from dataclasses import dataclass, field
 import json
 
+from .assembly_mode import classify_component_product_type
+
 
 @dataclass
 class AssemblyPricing:
@@ -256,14 +258,12 @@ def _scan_assembly_state(
         lcsc = str(part.get("lcsc") or "")
         details = run_context.get_cached_part_details(lcsc)
 
-        if _safe_int(part.get("component_product_type")) != 0:
-            scan.standard_present = True
-
-        flags = get_assembly_flags(part)
-        exclude_from_pos = bool(flags.get("exclude_from_pos", False))
+        exclude_from_pos = bool(part.get("exclude_from_pos", False))
         tht = is_tht_part(part)
 
         if not exclude_from_pos:
+            if classify_component_product_type(part.get("component_product_type")) == 2:
+                scan.standard_present = True
             scan.populated_part_present = True
             joints = max(0, _safe_int(part.get("pad_count"))) * board_count
             if tht:

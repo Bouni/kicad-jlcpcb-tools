@@ -194,11 +194,18 @@ class Store:
             cur.commit()
 
     def update_part(self, part: dict):
-        """Update a part in the database, overwrite lcsc if supplied."""
+        """Update a part, clearing assembly metadata only when LCSC changes."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 "UPDATE part_info set "
-                "value = :value, footprint = :footprint, lcsc = :lcsc, "
+                "value = :value, footprint = :footprint, "
+                "assembly_process = CASE "
+                "WHEN COALESCE(lcsc, '') != COALESCE(:lcsc, '') THEN '' "
+                "ELSE assembly_process END, "
+                "component_product_type = CASE "
+                "WHEN COALESCE(lcsc, '') != COALESCE(:lcsc, '') THEN NULL "
+                "ELSE component_product_type END, "
+                "lcsc = :lcsc, "
                 "exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos "
                 "WHERE reference = :reference",
                 part,
@@ -262,21 +269,26 @@ class Store:
         ref: str,
         assembly_process: str,
         component_product_type,
+        expected_lcsc=None,
     ):
-        """Persist assembly metadata for a part."""
+        """Persist metadata if LCSC still matches, preserving known class data."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
+            result = cur.execute(
                 "UPDATE part_info SET "
                 "assembly_process = :assembly_process, "
-                "component_product_type = :component_product_type "
-                "WHERE reference = :reference",
+                "component_product_type = COALESCE("
+                ":component_product_type, component_product_type) "
+                "WHERE reference = :reference "
+                "AND (:expected_lcsc IS NULL OR lcsc = :expected_lcsc)",
                 {
                     "reference": ref,
                     "assembly_process": assembly_process,
                     "component_product_type": component_product_type,
+                    "expected_lcsc": expected_lcsc,
                 },
             )
             cur.commit()
+            return result.rowcount > 0
 
     def get_assembly_enrichment_targets(self, references=None) -> dict:
         """Get references grouped by LCSC that still need assembly process enrichment."""
@@ -285,7 +297,8 @@ class Store:
             "WHERE lcsc IS NOT NULL AND lcsc != '' "
             "AND ("
             "assembly_process IS NULL OR assembly_process = '' "
-            "OR component_product_type IS NULL"
+            "OR component_product_type IS NULL "
+            "OR component_product_type NOT IN (0, 1, 2)"
             ")"
         )
         params = []
