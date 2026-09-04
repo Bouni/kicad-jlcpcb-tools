@@ -5,6 +5,12 @@ from enrichment.providers import (  # pylint: disable=import-error
     fetch_assembly_processes,
 )
 
+_EMPTY_METADATA = {
+    "assembly_process": "",
+    "component_product_type": None,
+    "is_standard_assembly": False,
+}
+
 
 class _FakeApi:
     def get_part_data(self, lcsc):
@@ -32,11 +38,7 @@ def test_fetch_assembly_processes_uses_provider_contract():
             "component_product_type": 2,
             "is_standard_assembly": True,
         },
-        "C2": {
-            "assembly_process": "",
-            "component_product_type": None,
-            "is_standard_assembly": False,
-        },
+        "C2": _EMPTY_METADATA,
     }
 
 
@@ -52,11 +54,7 @@ def test_normalize_returns_empty_metadata_when_api_raises():
     provider = LCSCAssemblyMetadataProvider(api=_RaisingApi())
     metadata = provider._normalize("C123")
 
-    assert metadata == {
-        "assembly_process": "",
-        "component_product_type": None,
-        "is_standard_assembly": False,
-    }
+    assert metadata == _EMPTY_METADATA
 
 
 def test_fetch_iter_yields_empty_metadata_for_each_failed_code():
@@ -66,8 +64,4 @@ def test_fetch_iter_yields_empty_metadata_for_each_failed_code():
 
     assert set(results) == {"C1", "C2"}
     for value in results.values():
-        assert value == {
-            "assembly_process": "",
-            "component_product_type": None,
-            "is_standard_assembly": False,
-        }
+        assert value == _EMPTY_METADATA
