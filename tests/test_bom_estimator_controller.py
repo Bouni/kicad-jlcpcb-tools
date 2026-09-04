@@ -90,12 +90,8 @@ def _make_controller(*, parts, board=None, details=None, force_standard=False):
     captured = {
         "summary": [],
         "prices": [],
-        "trigger_refs": [],
-        "refresh_count": 0,
+        "standard_refs": [],
     }
-
-    def refresh_rows():
-        captured["refresh_count"] += 1
 
     controller = BomEstimatorController(
         read_parts=lambda: parts,
@@ -103,8 +99,7 @@ def _make_controller(*, parts, board=None, details=None, force_standard=False):
         get_board=lambda: board or _Board(),
         is_force_standard_enabled=lambda: force_standard,
         set_price_label=lambda *args: captured["prices"].append(args),
-        set_trigger_refs=lambda refs: captured["trigger_refs"].append(set(refs)),
-        refresh_rows=refresh_rows,
+        set_standard_only_refs=lambda refs: captured["standard_refs"].append(set(refs)),
         set_summary_text=captured["summary"].append,
     )
     return controller, captured
@@ -130,8 +125,7 @@ def test_recompute_empty_states_clear_outputs(parts, board_count, expected):
     assert captured == {
         "summary": [expected],
         "prices": [],
-        "trigger_refs": [set()],
-        "refresh_count": 1,
+        "standard_refs": [set()],
     }
 
 
@@ -170,7 +164,39 @@ def test_recompute_prices_each_reference_in_a_mixed_bom():
         "R2",
         "U1",
     }
-    assert captured["refresh_count"] == 1
+
+
+def test_recompute_checks_only_standard_only_parts_not_side_context():
+    """Only direct Standard Only parts are checked on a two-sided board."""
+    parts = [
+        _part("U1", component_product_type=2),
+        _part("R1", lcsc="C2"),
+    ]
+    controller, captured = _make_controller(
+        parts=parts,
+        board=_board(U1=0, R1=31),
+        details=_details(C1="0.10", C2="0.10"),
+    )
+
+    controller.recompute(5)
+
+    assert captured["standard_refs"] == [{"U1"}]
+
+
+def test_recompute_clears_standard_indicator_on_later_empty_state():
+    """Clear previously checked references when a later scan is empty."""
+    parts = [_part("U1", component_product_type=2)]
+    controller, captured = _make_controller(
+        parts=parts,
+        board=_board(U1=0),
+        details=_details(C1="0.10"),
+    )
+
+    controller.recompute(5)
+    parts.clear()
+    controller.recompute(5)
+
+    assert captured["standard_refs"] == [{"U1"}, set()]
 
 
 @pytest.mark.parametrize(
@@ -276,4 +302,3 @@ def test_recompute_enrichment_pending_uses_available_metadata():
 
     assert len(captured["summary"]) == 1
     assert {reference for reference, _ in captured["prices"]} == {"R1"}
-    assert captured["refresh_count"] == 1
