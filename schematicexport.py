@@ -1,5 +1,7 @@
 """Module for exporting LCSC data to schematic."""
 
+from functools import cached_property
+import glob
 import logging
 import os
 import os.path
@@ -14,7 +16,7 @@ from .core.version import is_version6, is_version7
 class SchematicExport:
     """A class to export Schematic files."""
 
-    # This only works with KiCad v6/v7/v8 files, if the format changes, this will probably break
+    # This only works with KiCad v6+ files; if the format changes, this will probably break.
 
     _IN_BOM_RX = re.compile(r"^(\s*)\(in_bom\s+(yes|no)\)")
     _REFERENCE_RX = re.compile(r'\(property\s+"Reference"\s+"([^"]*)"')
@@ -26,6 +28,44 @@ class SchematicExport:
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
+
+    @cached_property
+    def _project_name(self) -> Optional[str]:  # noqa: UP045
+        """Return the open board's project name, or None if it cannot be authenticated."""
+        fallback = os.path.splitext(self.parent.board_name)[0]
+        pcbnew = getattr(self.parent, "pcbnew", None)
+        get_manager = getattr(pcbnew, "GetSettingsManager", None)
+        if get_manager is None:
+            return fallback
+
+        board = pcbnew.GetBoard()
+        get_project = getattr(board, "GetProject", None)
+        if get_project is None:
+            return fallback
+        board_project = get_project()
+        if board_project is None:
+            self.logger.warning(
+                "Not updating project-specific BOM states for %s; "
+                "open board has no project identity",
+                self.parent.board_name,
+            )
+            return None
+
+        manager = get_manager()
+        matches = [
+            path
+            for path in glob.glob(os.path.join(self.parent.project_path, "*.kicad_pro"))
+            if manager.GetProject(path) == board_project
+        ]
+        if len(matches) == 1:
+            return os.path.splitext(os.path.basename(matches[0]))[0]
+        self.logger.warning(
+            "Not updating project-specific BOM states for %s; "
+            "expected one matching .kicad_pro file, found %d",
+            self.parent.board_name,
+            len(matches),
+        )
+        return None
 
     def _resolved_bom(
         self, refs: set[str], store_parts: list[dict[str, object]]
@@ -55,7 +95,10 @@ class SchematicExport:
 
     def _symbol_instances6(self) -> dict[str, set[str]]:
         """Read KiCad 6's project-level symbol instance references by UUID."""
-        root_name = os.path.splitext(self.parent.board_name)[0] + ".kicad_sch"
+        project_name = self._project_name
+        if project_name is None:
+            return {}
+        root_name = project_name + ".kicad_sch"
         path = os.path.join(self.parent.project_path, root_name)
         try:
             with open(path, encoding="utf-8") as f:
@@ -89,11 +132,9 @@ class SchematicExport:
         self,
         lines: list[str],
         store_parts: list[dict[str, object]],
-        split_symbol: bool = False,
         instance_refs: Optional[dict[str, set[str]]] = None,  # noqa: UP045
     ) -> dict[int, str]:
         """Return in_bom line updates that are safe for every symbol instance."""
-        project_name = os.path.splitext(self.parent.board_name)[0]
         symbols = []
         symbol = None
         symbol_end = ""
@@ -101,12 +142,9 @@ class SchematicExport:
 
         for index, line in enumerate(lines):
             in_line = line.rstrip()
-            symbol_start = (
-                "(symbol" in in_line
-                and index + 1 < len(lines)
-                and "(lib_id" in lines[index + 1]
-                if split_symbol
-                else "(symbol (lib_id" in in_line
+            stripped = in_line.strip()
+            symbol_start = stripped == "(symbol" or stripped.startswith(
+                ("(symbol (lib_id", "(symbol (lib_name")
             )
             if symbol_start:
                 symbol = {
@@ -144,18 +182,33 @@ class SchematicExport:
                 ):
                     symbol["instances"][project].add(match.group(1))
 
+        project_name = None
+        if instance_refs is None and any(
+            symbol["instances"] is not None and set(symbol["instances"]) != {""}
+            for symbol in symbols
+        ):
+            project_name = self._project_name
+
         updates = {}
         for symbol in symbols:
             if instance_refs is not None:
                 refs = instance_refs.get(symbol["uuid"], set())
             elif symbol["instances"] is None:
                 refs = {symbol["reference"]}
+            elif set(symbol["instances"]) == {""}:
+                refs = symbol["instances"][""]
+            elif project_name is None:
+                refs = set()
             else:
-                refs = symbol["instances"].get(project_name)
-                if refs is None and set(symbol["instances"]) == {""}:
-                    refs = symbol["instances"][""]
-                if refs is None:
-                    refs = set()
+                refs = symbol["instances"].get(project_name, set())
+            if not refs:
+                if instance_refs is None and project_name is not None:
+                    self.logger.warning(
+                        "Not updating BOM state for %s; no instances resolve for project %s",
+                        symbol["reference"] or symbol["uuid"],
+                        project_name,
+                    )
+                continue
             bom = self._resolved_bom(refs, store_parts)
             if bom is not None and symbol["bom_line"] is not None:
                 updates[symbol["bom_line"]] = "no" if bom else "yes"
@@ -357,9 +410,7 @@ class SchematicExport:
         with open(path, encoding="utf-8") as f:
             lines = f.readlines()
 
-        for index, desired in self._bom_updates(
-            lines, store_parts, split_symbol=True
-        ).items():
+        for index, desired in self._bom_updates(lines, store_parts).items():
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
 
         partSection = False
