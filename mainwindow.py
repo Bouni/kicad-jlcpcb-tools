@@ -53,6 +53,7 @@ from .events import (
 )
 from .fabrication import Fabrication
 from .footprint_helpers import (
+    get_current_variant,
     get_is_dnp,
     set_lcsc_value,
     toggle_exclude_from_bom,
@@ -136,6 +137,8 @@ class JLCPCBTools(wx.Dialog):
         self.schematic_name = f"{self.board_name.split('.')[0]}.kicad_sch"
         self.hide_bom_parts = False
         self.hide_pos_parts = False
+        self.synced_variant = ""
+        self.title_base = f"JLCPCB Tools [ {getVersion()} ]"
         self.library: Library
         self.store: Store
         self.settings = {}
@@ -649,6 +652,7 @@ class JLCPCBTools(wx.Dialog):
             self.on_assembly_enrichment_completed,
         )
         self.Bind(EVT_BOM_DATA_CHANGED_EVENT, self.on_bom_data_changed)
+        self.Bind(wx.EVT_ACTIVATE, self.on_activate)
 
         self.enable_part_specific_toolbar_buttons(False)
 
@@ -715,8 +719,8 @@ class JLCPCBTools(wx.Dialog):
         meta = self.library.get_parts_db_info()
         if meta is not None:
             last_update = dt.fromisoformat(meta.last_update).strftime("%Y-%m-%d %H:%M")
-            self.SetTitle(
-                f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",
+            self.title_base = (
+                f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}"
             )
             self.logger.debug(
                 "JLCPCB version %s, last database update %s, part count %d, size (bytes) %d",
@@ -726,13 +730,49 @@ class JLCPCBTools(wx.Dialog):
                 meta.size,
             )
         else:
-            self.SetTitle(
-                f"JLCPCB Tools [ {getVersion()} ] | Last database update: No DB found",
+            self.title_base = (
+                f"JLCPCB Tools [ {getVersion()} ] | Last database update: No DB found"
             )
             self.logger.debug("JLCPCB version %s, no parts db info found", getVersion())
+        self.update_title()
+
+    def update_title(self):
+        """Set the window title, appending the active design variant if any."""
+        title = self.title_base
+        if self.synced_variant:
+            title += f" | Variant: {self.synced_variant}"
+        self.SetTitle(title)
+
+    def on_activate(self, e):
+        """Handle window activation, e.g. when switching back from pcbnew."""
+        e.Skip()
+        if e.GetActive():
+            self.refresh_if_variant_changed()
+
+    def refresh_if_variant_changed(self):
+        """Re-sync part data when the active design variant changed in pcbnew."""
+        if getattr(self, "store", None) is None:
+            return
+        library = getattr(self, "library", None)
+        if library is None or library.state != LibraryState.INITIALIZED:
+            return
+        variant = get_current_variant(self.pcbnew.GetBoard())
+        if variant == self.synced_variant:
+            return
+        self.logger.info(
+            "Design variant changed from '%s' to '%s', refreshing part data",
+            self.synced_variant or "<Default>",
+            variant or "<Default>",
+        )
+        self.synced_variant = variant
+        self.update_title()
+        self.store.update_from_board()
+        self.populate_footprint_list()
 
     def init_store(self):
         """Initialize the store of part assignments."""
+        self.synced_variant = get_current_variant(self.pcbnew.GetBoard())
+        self.update_title()
         self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
         if self.library.state == LibraryState.INITIALIZED:
             self.populate_footprint_list()
@@ -1524,6 +1564,7 @@ class JLCPCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
+        self.refresh_if_variant_changed()
         self.generate_button.Enable(False)
         self.reset_gauge()
         wx.BeginBusyCursor()
@@ -1757,6 +1798,7 @@ class JLCPCBTools(wx.Dialog):
         if success:
             if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
                 updated_references = []
+                board = self.pcbnew.GetBoard()
                 for item in self.footprint_list.GetSelections():
                     details = self.library.get_part_details(lcsc)
                     params = params_for_part(details)
@@ -1765,6 +1807,8 @@ class JLCPCBTools(wx.Dialog):
                         reference, lcsc, details["type"], details["stock"], params
                     )
                     self.store.set_lcsc(reference, lcsc)
+                    if fp := board.FindFootprintByReference(reference):
+                        set_lcsc_value(fp, lcsc)
                     updated_references.append(reference)
                 self.start_assembly_enrichment(updated_references)
                 wx.PostEvent(self, BomDataChangedEvent(source="paste_part_lcsc"))
@@ -1801,6 +1845,19 @@ class JLCPCBTools(wx.Dialog):
 
     def export_to_schematic(self, *_):
         """Dialog to select schematics."""
+        variant = get_current_variant(self.pcbnew.GetBoard())
+        if variant:
+            result = wx.MessageBox(
+                f"The design variant '{variant}' is active. Schematic fields are "
+                "variant-independent, so the exported LCSC numbers are the ones "
+                "resolved for this variant and will apply to all variants.\n\n"
+                "Switch to the default variant first if that is not intended. "
+                "Continue anyway?",
+                "Design variant active",
+                wx.OK | wx.CANCEL | wx.CENTER,
+            )
+            if result == wx.CANCEL:
+                return
         with wx.FileDialog(
             self,
             "Select Schematics",
@@ -1828,6 +1885,7 @@ class JLCPCBTools(wx.Dialog):
 
     def search_foot_mapping(self, *_):
         """Search for a footprint mapping."""
+        board = self.pcbnew.GetBoard()
         for item in self.footprint_list.GetSelections():
             reference = self.partlist_data_model.get_reference(item)
             footprint = self.partlist_data_model.get_footprint(item)
@@ -1836,6 +1894,8 @@ class JLCPCBTools(wx.Dialog):
                 if self.library.get_mapping_data(footprint, value):
                     lcsc = self.library.get_mapping_data(footprint, value)[2]
                     self.store.set_lcsc(reference, lcsc)
+                    if fp := board.FindFootprintByReference(reference):
+                        set_lcsc_value(fp, lcsc)
                     self.logger.info("Found %s", lcsc)
                     details = self.library.get_part_details(lcsc)
                     params = params_for_part(self.library.get_part_details(lcsc))

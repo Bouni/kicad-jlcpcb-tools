@@ -33,6 +33,7 @@ sys.modules["kicadplugin"] = _pkg
 
 _footprint_helpers = types.ModuleType("kicadplugin.footprint_helpers")
 _footprint_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
+_footprint_helpers.get_resolved_value = lambda fp: fp.GetValue()  # type: ignore[attr-defined]
 sys.modules["kicadplugin.footprint_helpers"] = _footprint_helpers
 
 _spec = importlib.util.spec_from_file_location(
