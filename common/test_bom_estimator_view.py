@@ -74,18 +74,20 @@ def test_standard_signal_reasons_orders_labels_consistently():
     """Signal reason labels are ordered for stable display."""
     reasons = standard_signal_reasons(
         {
-            "qty_50_plus": True,
+            "quantity_over_50": True,
             "manual_enabled": True,
             "multi_side_populated": True,
             "standard_part_present": True,
         }
     )
-    assert reasons == ["manual", "qty≥50", "standard part", "both sides populated"]
+    assert reasons == ["manual", "qty>50", "standard part", "both sides populated"]
 
 
 def test_standard_signal_reasons_ignores_inactive_flags():
     """No active signals yields no labels."""
-    assert standard_signal_reasons({"manual_enabled": False, "qty_50_plus": 0}) == []
+    assert (
+        standard_signal_reasons({"manual_enabled": False, "quantity_over_50": 0}) == []
+    )
 
 
 def test_calculate_part_bom_cost_uses_raw_component_price_only():

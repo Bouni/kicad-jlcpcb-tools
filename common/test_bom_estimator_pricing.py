@@ -20,6 +20,7 @@ def _part(lcsc="C1", **overrides):
     part = {
         "lcsc": lcsc,
         "exclude_from_bom": 0,
+        "exclude_from_pos": 0,
         "pad_count": 1,
         "has_tht": 0,
         "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
@@ -201,32 +202,30 @@ def test_collect_billable_bom_parts_filters_excluded_unassigned_and_dnp():
 
 
 def test_scan_assembly_state_reports_joints_standard_and_extended_sets():
-    """Scan helper reports joint counts and surcharge sets correctly."""
+    """Scan reports joints/surcharges and trusts current POS over stale JSON."""
     bom_parts = [
-        {
-            "reference": "U1",
-            "lcsc": "C-SMT-STD",
-            "pad_count": 2,
-            "has_tht": 0,
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false}',
-        },
-        {
-            "reference": "J1",
-            "lcsc": "C-THT-EXT",
-            "pad_count": 3,
-            "has_tht": 1,
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false}',
-        },
-        {
-            "reference": "R9",
-            "lcsc": "C-SMT-EXT-NOPOS",
-            "pad_count": 2,
-            "has_tht": 0,
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": true}',
-        },
+        _part(
+            "C-SMT-STD",
+            reference="U1",
+            pad_count=2,
+            component_product_type=2,
+        ),
+        _part(
+            "C-THT-EXT",
+            reference="J1",
+            pad_count=3,
+            has_tht=1,
+            component_product_type=0,
+            assembly_flags='{"exclude_from_pos": true}',
+        ),
+        _part(
+            "C-SMT-EXT-NOPOS",
+            reference="R9",
+            exclude_from_pos=1,
+            pad_count=2,
+            component_product_type=0,
+            assembly_flags='{"exclude_from_pos": false}',
+        ),
     ]
 
     details_map = {
@@ -247,3 +246,23 @@ def test_scan_assembly_state_reports_joints_standard_and_extended_sets():
     assert scan.tht_joints == 15
     assert scan.smt_lcsc == {"C-SMT-STD"}
     assert scan.extended_lcsc == {"C-SMT-EXT-NOPOS"}
+
+
+@pytest.mark.parametrize(
+    ("product_type", "uses_standard"),
+    [("2", True), ("bad", False)],
+)
+def test_pricing_fallback_uses_shared_product_type_classifier(
+    product_type, uses_standard
+):
+    """Representative legacy fallback inputs exercise classifier integration."""
+    part = _part(pad_count=2, component_product_type=product_type)
+
+    summary = _estimate(
+        [part],
+        board_standard=None,
+        smt_populated_sides=1,
+    )
+
+    assert (summary.standard_setup_cost > 0) is uses_standard
+    assert (summary.economic_setup_cost > 0) is (not uses_standard)

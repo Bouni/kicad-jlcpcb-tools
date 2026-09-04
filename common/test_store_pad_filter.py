@@ -113,6 +113,49 @@ def _store_obj():
     return Store.__new__(Store)
 
 
+def _store_with_enriched_part(
+    tmp_path, *, lcsc="C1", assembly_process="SMT", product_type=2
+):
+    """Create a test store containing one enriched LCSC assignment."""
+    store = _store_obj()
+    store.logger = logging.getLogger(__name__)
+    store.dbfile = str(tmp_path / "project.db")
+    store.create_db()
+    with contextlib.closing(sqlite3.connect(store.dbfile)) as con, con as cur:
+        cur.execute(
+            "INSERT INTO part_info ("
+            "reference, value, footprint, lcsc, stock, exclude_from_bom, "
+            "exclude_from_pos, assembly_process, component_product_type"
+            ") VALUES ('R1', '10k', 'R_0603', ?, 1, 0, 0, ?, ?)",
+            (lcsc, assembly_process, product_type),
+        )
+        cur.commit()
+    return store
+
+
+def _update_part(store, lcsc, value="10k"):
+    store.update_part(
+        {
+            "reference": "R1",
+            "value": value,
+            "footprint": "R_0603",
+            "lcsc": lcsc,
+            "exclude_from_bom": 0,
+            "exclude_from_pos": 0,
+        }
+    )
+
+
+def _part_state(store):
+    part = store.get_part("R1")
+    return (
+        part["lcsc"],
+        part["value"],
+        part["assembly_process"],
+        part["component_product_type"],
+    )
+
+
 def test_count_pad_filters_npth_non_plated_and_attribute_markers():
     """count_pad excludes clearly non-joint pads using multiple API signals."""
     assert not count_pad(_Pad(npth=True))
@@ -161,44 +204,27 @@ def test_footprint_has_tht_detects_plated_drilled_or_holed_pad():
     assert footprint_has_tht(fp_drill)
 
 
-def test_set_lcsc_resets_cached_assembly_metadata(tmp_path):
-    """Changing LCSC clears stale enrichment metadata for re-fetch."""
-    s = _store_obj()
-    s.logger = logging.getLogger(__name__)
-    s.dbfile = str(tmp_path / "project.db")
+def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
+    """Metadata survives refreshes, rejects stale results, and clears on reassignment."""
+    store = _store_with_enriched_part(tmp_path)
 
-    s.create_db()
+    _update_part(store, "C1", value="12k")
+    assert _part_state(store) == ("C1", "12k", "SMT", 2)
 
-    with contextlib.closing(sqlite3.connect(s.dbfile)) as con, con as cur:
-        cur.execute(
-            "INSERT INTO part_info ("
-            "reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos"
-            ") VALUES (:reference, :value, :footprint, :lcsc, :stock, :exclude_from_bom, :exclude_from_pos)",
-            {
-                "reference": "R1",
-                "value": "10k",
-                "footprint": "R_0603",
-                "lcsc": "COLD",
-                "stock": 1,
-                "exclude_from_bom": 0,
-                "exclude_from_pos": 0,
-            },
-        )
-        cur.execute(
-            "UPDATE part_info SET assembly_process = 'SMT', component_product_type = 0 WHERE reference = 'R1'"
-        )
-        cur.commit()
+    assert store.set_assembly_metadata("R1", "SMT updated", None, expected_lcsc="C1")
+    assert _part_state(store) == ("C1", "12k", "SMT updated", 2)
 
-    s.set_lcsc("R1", "CNEW")
+    assert not store.set_assembly_metadata(
+        "R1", "Wave soldering", 0, expected_lcsc="COLD"
+    )
+    assert _part_state(store) == ("C1", "12k", "SMT updated", 2)
 
-    with contextlib.closing(sqlite3.connect(s.dbfile)) as con, con as cur:
-        row = cur.execute(
-            "SELECT lcsc, assembly_process, component_product_type FROM part_info WHERE reference = 'R1'"
-        ).fetchone()
+    _update_part(store, "C2")
+    assert _part_state(store) == ("C2", "10k", "", None)
 
-    assert row[0] == "CNEW"
-    assert row[1] == ""
-    assert row[2] is None
+    assert store.set_assembly_metadata("R1", "SMT", 0, expected_lcsc="C2")
+    store.set_lcsc("R1", "CNEW")
+    assert _part_state(store) == ("CNEW", "10k", "", None)
 
 
 def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
@@ -210,21 +236,18 @@ def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
     s.create_db()
 
     with contextlib.closing(sqlite3.connect(s.dbfile)) as con, con as cur:
-        cur.execute(
+        cur.executemany(
             "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
-            "VALUES ('R1', '10k', 'R_0603', 'C1', 1, 0, 0, '', NULL)"
-        )
-        cur.execute(
-            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
-            "VALUES ('R2', '1u', 'C_0603', 'C2', 1, 0, 0, 'SMT', NULL)"
-        )
-        cur.execute(
-            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
-            "VALUES ('R3', '100n', 'C_0603', 'C3', 1, 0, 0, '', 0)"
-        )
-        cur.execute(
-            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
-            "VALUES ('R4', '47k', 'R_0603', 'C4', 1, 0, 0, 'SMT', 0)"
+            "VALUES (?, ?, 'R_0603', ?, 1, 0, 0, ?, ?)",
+            [
+                ("R1", "10k", "C1", "", None),
+                ("R2", "1u", "C2", "SMT", None),
+                ("R3", "100n", "C3", "", 0),
+                ("R4", "47k", "C4", "SMT", 0),
+                ("R5", "22k", "C5", "SMT", 3),
+                ("R6", "4k7", "C6", "SMT", "bad"),
+                ("R7", "1k", "C7", "SMT", 2),
+            ],
         )
         cur.commit()
 
@@ -234,6 +257,8 @@ def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
         "C1": ["R1"],
         "C2": ["R2"],
         "C3": ["R3"],
+        "C5": ["R5"],
+        "C6": ["R6"],
     }
 
 
