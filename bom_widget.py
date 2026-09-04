@@ -16,9 +16,9 @@ from .bom_estimation.assembly_mode import (
 )
 from .bom_estimation.pricing import calculate_bom_estimate, get_assembly_flags
 from .bom_estimation.view import (
+    assembly_mode_details_button_label,
     format_bom_estimate_summary,
     prepare_bom_price_labels,
-    standard_signal_reasons,
 )
 from .helpers import HighResWxSize
 
@@ -37,10 +37,13 @@ class BomEstimatorWidget:
         on_board_count_text,
         on_board_count_text_timer,
         on_force_standard_changed,
+        on_details,
         on_help,
     ):
         self.parent = parent
         self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self._visible = True
+        self._details_button_label = None
 
         controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
         controls_sizer.Add(
@@ -83,6 +86,16 @@ class BomEstimatorWidget:
             10,
         )
 
+        self.details_button = wx.Button(parent, wx.ID_ANY, "Why Standard…")
+        self.details_button.Bind(wx.EVT_BUTTON, on_details)
+        self.details_button.Hide()
+        controls_sizer.Add(
+            self.details_button,
+            0,
+            wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+            10,
+        )
+
         self.help_button = wx.Button(parent, wx.ID_ANY, "Help")
         self.help_button.SetToolTip(
             wx.ToolTip("Show BOM estimator assumptions and limitations")
@@ -107,11 +120,21 @@ class BomEstimatorWidget:
 
     def set_visible(self, show: bool):
         """Show or hide the full estimator panel."""
-        self.sizer.ShowItems(bool(show))
+        self._visible = bool(show)
+        self.sizer.ShowItems(self._visible)
+        self.details_button.Show(self._visible and bool(self._details_button_label))
 
     def set_summary_text(self, text: str):
         """Set the estimator summary text block."""
         self.summary_label.SetLabel(text)
+
+    def set_details_button_label(self, label):
+        """Show the applicable details action, or hide it when unnecessary."""
+        self._details_button_label = label
+        if label:
+            self.details_button.SetLabel(label)
+        self.details_button.Show(self._visible and bool(label))
+        self.parent.Layout()
 
 
 class BomEstimatorController:
@@ -127,6 +150,7 @@ class BomEstimatorController:
         set_price_label: Callable[[str, str], None],
         set_standard_only_refs: Callable[[set[str]], None],
         set_summary_text: Callable[[str], None],
+        set_details_button_label: Callable[[object], None],
     ):
         self._read_parts = read_parts
         self._get_part_details = get_part_details
@@ -135,6 +159,7 @@ class BomEstimatorController:
         self._set_price_label = set_price_label
         self._set_standard_only_refs = set_standard_only_refs
         self._set_summary_text = set_summary_text
+        self._set_details_button_label = set_details_button_label
 
     @staticmethod
     def _is_on_bottom_side(footprint) -> bool:
@@ -231,6 +256,7 @@ class BomEstimatorController:
             for part in parts
         ):
             self._set_standard_only_refs(set())
+            self._set_details_button_label(None)
             reason = "no parts" if not parts else "no assigned BOM parts"
             self._set_summary_text(f"BOM Estimate ({board_count} boards): {reason}")
             return AssemblyModeDecision(
@@ -247,15 +273,6 @@ class BomEstimatorController:
             smt_populated_sides=decision.smt_populated_side_count,
         )
 
-        mode = "Standard" if decision.board_standard else "Economic"
-        signals = {
-            "manual_enabled": decision.manual_enabled,
-            "quantity_over_50": decision.quantity_over_50,
-            "standard_part_present": bool(decision.standard_only_refs),
-            "multi_side_populated": decision.both_sides_populated,
-        }
-        reasons = standard_signal_reasons(signals)
-        reason_text = ", ".join(reasons) if reasons else "none"
         for reference, price_label in prepare_bom_price_labels(
             parts,
             board_count,
@@ -264,12 +281,12 @@ class BomEstimatorController:
             self._set_price_label(reference, price_label)
 
         self._set_standard_only_refs(set(decision.standard_only_refs))
+        self._set_details_button_label(assembly_mode_details_button_label(decision))
 
         overview_line, details_line = format_bom_estimate_summary(
             summary,
             board_count,
-            mode,
-            reason_text,
+            decision,
         )
         self._set_summary_text(f"{overview_line}\n{details_line}")
         return decision

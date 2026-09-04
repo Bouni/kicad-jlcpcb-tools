@@ -75,6 +75,7 @@ from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
+from .why_standard_dialog import WhyStandardDialog
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -170,6 +171,8 @@ class JLCPCBTools(wx.Dialog):
         # "Select Part" while one is open re-targets it instead of opening a
         # second window.
         self._part_selector = None
+        self._why_standard_dialog = None
+        self.bom_estimator_decision = None
         self.pending_assembly_enrichment = set()
         # Monotonic counter incremented each time assembly enrichment is started.
         # Worker threads capture the value at spawn; progress events with a stale
@@ -595,6 +598,7 @@ class JLCPCBTools(wx.Dialog):
             on_board_count_text=self.on_bom_estimator_board_count_text,
             on_board_count_text_timer=self.on_bom_estimator_board_count_text_timer,
             on_force_standard_changed=self.on_bom_estimator_force_standard_changed,
+            on_details=self.show_assembly_mode_details,
             on_help=self.show_bom_estimator_help,
         )
 
@@ -682,6 +686,7 @@ class JLCPCBTools(wx.Dialog):
             set_price_label=self.partlist_data_model.set_bom_price,
             set_standard_only_refs=self._set_standard_only_refs,
             set_summary_text=self.bom_widget.set_summary_text,
+            set_details_button_label=self.bom_widget.set_details_button_label,
         )
 
         self.init_data()
@@ -748,6 +753,8 @@ class JLCPCBTools(wx.Dialog):
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
         self.logger.info("quit_dialog()")
+        if self._why_standard_dialog is not None:
+            self._why_standard_dialog.Close()
         root = logging.getLogger()
         with suppress(AttributeError):
             root.removeHandler(self.logging_handler1)
@@ -947,10 +954,30 @@ class JLCPCBTools(wx.Dialog):
         """Show shared BOM estimator help text via the help_text helper."""
         show_bom_estimator_help(self)
 
+    def show_assembly_mode_details(self, *_):
+        """Open or raise the modeless assembly-mode details dialog."""
+        if self.bom_estimator_decision is None:
+            self.recompute_bom_estimate()
+        if self._why_standard_dialog is None:
+            parts = self.store.read_all() if getattr(self, "store", None) else []
+            self._why_standard_dialog = WhyStandardDialog(
+                self, self.bom_estimator_decision, parts
+            )
+            self._why_standard_dialog.Show()
+        self._why_standard_dialog.Raise()
+
     def recompute_bom_estimate(self):
         """Recompute and display estimated BOM+assembly cost."""
         board_count = self._normalize_board_count(self.bom_estimator_board_count)
-        self.bom_estimator_controller.recompute(board_count)
+        self.bom_estimator_decision = self.bom_estimator_controller.recompute(
+            board_count
+        )
+        if self._why_standard_dialog is not None:
+            parts = self.store.read_all() if getattr(self, "store", None) else []
+            self._why_standard_dialog.update_content(
+                self.bom_estimator_decision,
+                parts,
+            )
 
     def on_bom_data_changed(self, _e):
         """Coalesce a burst of BomDataChangedEvent posts into one recompute.
@@ -1367,6 +1394,11 @@ class JLCPCBTools(wx.Dialog):
             if e.setting == "bom_estimator_show":
                 self.bom_estimator_show = bool(e.value)
                 self.bom_widget.set_visible(self.bom_estimator_show)
+                if (
+                    not self.bom_estimator_show
+                    and self._why_standard_dialog is not None
+                ):
+                    self._why_standard_dialog.Close()
                 self.Layout()
         elif e.section == "highlighting" and e.setting == "matches":
             self.footprint_list.Refresh()
