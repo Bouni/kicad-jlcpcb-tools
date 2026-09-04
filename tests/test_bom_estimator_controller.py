@@ -14,6 +14,8 @@ import sys
 import types
 from unittest.mock import MagicMock
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Bootstrap: stub KiCad / wx modules and load bom_widget under a fake package.
 # ---------------------------------------------------------------------------
@@ -65,6 +67,34 @@ class _FakeBoard:
 
     def FindFootprintByReference(self, ref):
         return self._footprints.get(ref)
+
+
+def _part(reference="R1", **values):
+    """Return a placed, billable part with concise per-test overrides."""
+    part = {
+        "reference": reference,
+        "lcsc": "C1",
+        "exclude_from_bom": 0,
+        "pad_count": 2,
+        "has_tht": 0,
+        "assembly_flags": "{}",
+    }
+    part.update(values)
+    return part
+
+
+def _board(**layers):
+    """Build a board from ``reference=layer`` entries."""
+    return _FakeBoard(
+        {reference: _FakeFootprint(layer) for reference, layer in layers.items()}
+    )
+
+
+def _details(**prices):
+    return {
+        lcsc: {"price": f"1-:{price}", "type": "Basic"}
+        for lcsc, price in prices.items()
+    }
 
 
 def _make_controller(
@@ -126,22 +156,8 @@ def test_recompute_empty_parts_short_circuits_with_no_parts_summary():
 def test_recompute_all_excluded_from_bom_short_circuits_with_no_assigned_summary():
     """All-excluded input emits the 'no assigned BOM parts' summary."""
     parts = [
-        {
-            "reference": "R1",
-            "lcsc": "C1",
-            "exclude_from_bom": 1,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
-        {
-            "reference": "R2",
-            "lcsc": "C2",
-            "exclude_from_bom": 1,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
+        _part("R1", exclude_from_bom=1),
+        _part("R2", lcsc="C2", exclude_from_bom=1),
     ]
     controller, captured = _make_controller(parts=parts)
     controller.recompute(board_count=5)
@@ -160,20 +176,11 @@ def test_recompute_all_dnp_short_circuits_when_all_rows_filtered():
     the controller does not short-circuit; calculate_bom_estimate drops them
     later in its billable filter, yielding zero assembly cost.
     """
-    parts = [
-        {
-            "reference": "R1",
-            "lcsc": "C1",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_flags": '{"is_dnp": true}',
-        },
-    ]
+    parts = [_part(assembly_flags='{"is_dnp": true}')]
     controller, captured = _make_controller(
         parts=parts,
-        board=_FakeBoard({"R1": _FakeFootprint(layer=0)}),
-        details_map={"C1": {"price": "1-:0.10", "type": "Basic"}},
+        board=_board(R1=0),
+        details_map=_details(C1="0.10"),
     )
     controller.recompute(board_count=5)
 
@@ -189,42 +196,12 @@ def test_recompute_all_dnp_short_circuits_when_all_rows_filtered():
 def test_recompute_normal_mixed_emits_summary_and_per_part_price_labels():
     """A normal mixed BOM produces a multi-line summary and one label per ref."""
     parts = [
-        {
-            "reference": "R1",
-            "lcsc": "C1",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
-        {
-            "reference": "R2",
-            "lcsc": "C1",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
-        {
-            "reference": "U1",
-            "lcsc": "C2",
-            "exclude_from_bom": 0,
-            "pad_count": 8,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
+        _part("R1"),
+        _part("R2"),
+        _part("U1", lcsc="C2", pad_count=8),
     ]
-    board = _FakeBoard(
-        {
-            "R1": _FakeFootprint(layer=0),
-            "R2": _FakeFootprint(layer=0),
-            "U1": _FakeFootprint(layer=0),
-        }
-    )
-    details_map = {
-        "C1": {"price": "1-:0.05", "type": "Basic"},
-        "C2": {"price": "1-:0.40", "type": "Basic"},
-    }
+    board = _board(R1=0, R2=0, U1=0)
+    details_map = _details(C1="0.05", C2="0.40")
     controller, captured = _make_controller(
         parts=parts, board=board, details_map=details_map
     )
@@ -239,66 +216,19 @@ def test_recompute_normal_mixed_emits_summary_and_per_part_price_labels():
     assert captured["refresh_rows_count"] == 1
 
 
-def test_get_board_standard_context_multi_side_triggers_when_split_across_sides():
-    """multi_side_populated is True when footprints are on both F_Cu and B_Cu."""
-    parts = [
-        {
-            "reference": "R1",
-            "lcsc": "C1",
-            "exclude_from_bom": 0,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
-        {
-            "reference": "R2",
-            "lcsc": "C2",
-            "exclude_from_bom": 0,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
-    ]
-    # R1 on top (F_Cu == 0), R2 on bottom (any non-zero layer)
-    board = _FakeBoard(
-        {
-            "R1": _FakeFootprint(layer=0),
-            "R2": _FakeFootprint(layer=31),
-        }
-    )
+@pytest.mark.parametrize(
+    ("board", "expected"),
+    [(_board(R1=0, R2=0), False), (_board(R1=0, R2=31), True)],
+    ids=("one-side", "two-sides"),
+)
+def test_get_board_standard_context_detects_populated_sides(board, expected):
+    """Distinguish one-sided from two-sided placement."""
+    parts = [_part("R1"), _part("R2", lcsc="C2")]
     controller, _ = _make_controller(parts=parts, board=board)
     context = controller._get_board_standard_context(parts, board_count=10)
 
-    assert context["signals"]["multi_side_populated"] is True
-    assert context["board_standard"] is True
-
-
-def test_get_board_standard_context_unified_side_does_not_trigger_multi_side():
-    """multi_side_populated is False when all footprints share one side."""
-    parts = [
-        {
-            "reference": "R1",
-            "lcsc": "C1",
-            "exclude_from_bom": 0,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
-        {
-            "reference": "R2",
-            "lcsc": "C2",
-            "exclude_from_bom": 0,
-            "has_tht": 0,
-            "assembly_flags": "{}",
-        },
-    ]
-    board = _FakeBoard(
-        {
-            "R1": _FakeFootprint(layer=0),
-            "R2": _FakeFootprint(layer=0),
-        }
-    )
-    controller, _ = _make_controller(parts=parts, board=board)
-    context = controller._get_board_standard_context(parts, board_count=10)
-
-    assert context["signals"]["multi_side_populated"] is False
+    assert context["signals"]["multi_side_populated"] is expected
+    assert context["board_standard"] is expected
 
 
 def test_recompute_enrichment_pending_uses_available_metadata_and_no_assembly_data():
@@ -308,19 +238,9 @@ def test_recompute_enrichment_pending_uses_available_metadata_and_no_assembly_da
     info but the part rows themselves have no assembly_process / product_type
     (those would be filled in once enrichment finishes).
     """
-    parts = [
-        {
-            "reference": "R1",
-            "lcsc": "C1",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            # No assembly_process / component_product_type at all
-            "assembly_flags": "{}",
-        },
-    ]
-    board = _FakeBoard({"R1": _FakeFootprint(layer=0)})
-    details_map = {"C1": {"price": "1-:0.20", "type": "Basic"}}
+    parts = [_part()]
+    board = _board(R1=0)
+    details_map = _details(C1="0.20")
     controller, captured = _make_controller(
         parts=parts, board=board, details_map=details_map
     )

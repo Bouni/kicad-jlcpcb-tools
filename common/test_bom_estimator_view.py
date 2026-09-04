@@ -6,7 +6,6 @@ from bom_estimation.pricing import (  # pylint: disable=import-error
 )
 from bom_estimation.view import (  # pylint: disable=import-error
     build_bom_estimate_view_model,
-    build_standard_mode_context,
     format_bom_estimate_summary,
     format_part_bom_price_label,
     prepare_bom_price_labels,
@@ -14,24 +13,31 @@ from bom_estimation.view import (  # pylint: disable=import-error
 )
 
 
+def _summary(**overrides):
+    """Return a representative estimate summary."""
+    values = {
+        "total_cost": 25.50,
+        "cost_per_board": 12.75,
+        "missing_prices": 0,
+        "component_cost": 10.00,
+        "fixed_cost": 8.00,
+        "extended_cost": 3.00,
+        "economic_setup_cost": 8.00,
+        "standard_setup_cost": 0.00,
+        "stencil_cost": 1.50,
+        "tht_setup_cost": 0.00,
+        "variable_assembly_cost": 7.50,
+        "standard_part_surcharge_cost": 0.00,
+        "smt_joint_count": 100,
+        "tht_joint_count": 0,
+    }
+    values.update(overrides)
+    return BomEstimateSummary(**values)
+
+
 def test_format_bom_estimate_summary_basic():
     """Economic summary line shows expected fixed/assembly buckets."""
-    summary = BomEstimateSummary(
-        total_cost=25.50,
-        cost_per_board=12.75,
-        missing_prices=0,
-        component_cost=10.00,
-        fixed_cost=8.00,
-        extended_cost=3.00,
-        economic_setup_cost=8.00,
-        standard_setup_cost=0.00,
-        stencil_cost=1.50,
-        tht_setup_cost=0.00,
-        variable_assembly_cost=7.50,
-        standard_part_surcharge_cost=0.00,
-        smt_joint_count=100,
-        tht_joint_count=0,
-    )
+    summary = _summary()
 
     overview, details = format_bom_estimate_summary(summary, 2, "Economic", "none")
     assert "Mode Economic" in overview
@@ -42,17 +48,13 @@ def test_format_bom_estimate_summary_basic():
 
 def test_format_bom_estimate_summary_with_standard_surcharge():
     """Standard summary line shows std-parts and hides extended label."""
-    summary = BomEstimateSummary(
+    summary = _summary(
         total_cost=35.00,
         cost_per_board=17.50,
         missing_prices=2,
-        component_cost=10.00,
-        fixed_cost=8.00,
-        extended_cost=3.00,
         economic_setup_cost=0.00,
         standard_setup_cost=25.00,
         stencil_cost=7.80,
-        tht_setup_cost=0.00,
         variable_assembly_cost=12.20,
         standard_part_surcharge_cost=1.50,
         smt_joint_count=50,
@@ -133,20 +135,6 @@ def test_build_bom_estimate_view_model_returns_summary_and_highlights():
     assert view_model["mode"] == "Standard"
     assert view_model["reason_text"] == "standard part"
     assert view_model["highlight_refs"] == {"R1"}
-
-
-def test_build_standard_mode_context_highlights_standard_parts_and_multiside_refs():
-    """Policy context includes all populated refs on multi-side boards."""
-    context = build_standard_mode_context(
-        manual_enabled=False,
-        board_count=5,
-        populated_refs={"R1", "R2", "R3"},
-        populated_sides={"top", "bottom"},
-        smt_populated_sides={"top", "bottom"},
-        standard_part_refs={"R2"},
-    )
-
-    assert context["trigger_references"] == {"R1", "R2", "R3"}
 
 
 def test_prepare_bom_price_labels_returns_reference_to_label_mapping():
