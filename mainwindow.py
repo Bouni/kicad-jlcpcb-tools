@@ -22,7 +22,7 @@ from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
-from .datamodel import PartListDataModel
+from .datamodel import PartListDataModel, STANDARD_ONLY_TOOLTIP
 from .dataview_highlight import (
     HighlightedTextRenderer,
     decode_highlighted_value,
@@ -162,10 +162,6 @@ class JLCPCBTools(wx.Dialog):
         )
         self.bom_estimator_show = bool(general_settings.get("bom_estimator_show", True))
         general_settings["bom_estimator_show"] = self.bom_estimator_show
-        self.highlight_standard_parts = bool(
-            general_settings.get("highlight_standard_parts", True)
-        )
-        general_settings["highlight_standard_parts"] = self.highlight_standard_parts
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -480,6 +476,14 @@ class JLCPCBTools(wx.Dialog):
         type = self.footprint_list.AppendTextColumn(
             "Type", 4, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
+        self.footprint_list.AppendToggleColumn(
+            "Std",
+            PartListDataModel.columns["STANDARD_ONLY_COL"],
+            width=HighResWxSize(self.window, wx.Size(36, -1)).GetWidth(),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+            flags=0,
+        )
         stock = self.footprint_list.AppendTextColumn(
             "Stock", 5, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
@@ -655,10 +659,17 @@ class JLCPCBTools(wx.Dialog):
 
         self.init_logger()
         self.partlist_data_model = PartListDataModel(self.scale_factor)
-        self.partlist_data_model.set_standard_trigger_highlighting_enabled(
-            self.highlight_standard_parts
-        )
         self.footprint_list.AssociateModel(self.partlist_data_model)
+        self._standard_only_tooltip_active = False
+        self._footprint_list_main_window = (
+            self.footprint_list.GetMainWindow() or self.footprint_list
+        )
+        self._footprint_list_main_window.Bind(
+            wx.EVT_MOTION, self.on_footprint_list_motion
+        )
+        self._footprint_list_main_window.Bind(
+            wx.EVT_LEAVE_WINDOW, self.on_footprint_list_leave
+        )
         self.bom_estimator_controller = BomEstimatorController(
             read_parts=lambda: (
                 self.store.read_all()
@@ -669,8 +680,7 @@ class JLCPCBTools(wx.Dialog):
             get_board=self._get_current_board,
             is_force_standard_enabled=lambda: self.bom_estimator_force_standard,
             set_price_label=self.partlist_data_model.set_bom_price,
-            set_trigger_refs=self.partlist_data_model.set_standard_trigger_refs,
-            refresh_rows=self.footprint_list.Refresh,
+            set_standard_only_refs=self._set_standard_only_refs,
             set_summary_text=self.bom_widget.set_summary_text,
         )
 
@@ -691,6 +701,43 @@ class JLCPCBTools(wx.Dialog):
     def _get_current_board(self):
         """Return current board instance for BOM controller callbacks."""
         return self.pcbnew.GetBoard()
+
+    def _set_standard_only_refs(self, refs):
+        """Update computed Standard-only cells and clear any stale tooltip."""
+        self.partlist_data_model.set_standard_only_refs(refs)
+        self.footprint_list.Refresh()
+        self._set_standard_only_tooltip(False)
+
+    def _set_standard_only_tooltip(self, active):
+        """Show or clear the Standard-only row tooltip without flicker."""
+        active = bool(active)
+        if active == self._standard_only_tooltip_active:
+            return
+        self._standard_only_tooltip_active = active
+        if active:
+            self._footprint_list_main_window.SetToolTip(
+                wx.ToolTip(STANDARD_ONLY_TOOLTIP)
+            )
+        else:
+            self._footprint_list_main_window.UnsetToolTip()
+
+    def on_footprint_list_motion(self, event):
+        """Show the explanation while hovering anywhere on a checked row."""
+        source = event.GetEventObject()
+        control_point = self.footprint_list.ScreenToClient(
+            source.ClientToScreen(event.GetPosition())
+        )
+        item, _column = self.footprint_list.HitTest(control_point)
+        active = bool(
+            item and item.IsOk() and self.partlist_data_model.is_standard_only(item)
+        )
+        self._set_standard_only_tooltip(active)
+        event.Skip()
+
+    def on_footprint_list_leave(self, event):
+        """Clear the Standard-only explanation when the pointer leaves the list."""
+        self._set_standard_only_tooltip(False)
+        event.Skip()
 
     def _bom_get_part_details(self, lcsc: str) -> dict:
         """Safely proxy part-detail lookups for BOM controller callbacks."""
@@ -1321,12 +1368,6 @@ class JLCPCBTools(wx.Dialog):
                 self.bom_estimator_show = bool(e.value)
                 self.bom_widget.set_visible(self.bom_estimator_show)
                 self.Layout()
-            elif e.setting == "highlight_standard_parts":
-                self.highlight_standard_parts = bool(e.value)
-                self.partlist_data_model.set_standard_trigger_highlighting_enabled(
-                    self.highlight_standard_parts
-                )
-                self.footprint_list.Refresh()
         elif e.section == "highlighting" and e.setting == "matches":
             self.footprint_list.Refresh()
 

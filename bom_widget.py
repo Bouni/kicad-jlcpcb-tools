@@ -125,8 +125,7 @@ class BomEstimatorController:
         get_board: Callable[[], object],
         is_force_standard_enabled: Callable[[], bool],
         set_price_label: Callable[[str, str], None],
-        set_trigger_refs: Callable[[set[str]], None],
-        refresh_rows: Callable[[], None],
+        set_standard_only_refs: Callable[[set[str]], None],
         set_summary_text: Callable[[str], None],
     ):
         self._read_parts = read_parts
@@ -134,8 +133,7 @@ class BomEstimatorController:
         self._get_board = get_board
         self._is_force_standard_enabled = is_force_standard_enabled
         self._set_price_label = set_price_label
-        self._set_trigger_refs = set_trigger_refs
-        self._refresh_rows = refresh_rows
+        self._set_standard_only_refs = set_standard_only_refs
         self._set_summary_text = set_summary_text
 
     @staticmethod
@@ -232,8 +230,7 @@ class BomEstimatorController:
             not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
             for part in parts
         ):
-            self._set_trigger_refs(set())
-            self._refresh_rows()
+            self._set_standard_only_refs(set())
             reason = "no parts" if not parts else "no assigned BOM parts"
             self._set_summary_text(f"BOM Estimate ({board_count} boards): {reason}")
             return AssemblyModeDecision(
@@ -259,11 +256,6 @@ class BomEstimatorController:
         }
         reasons = standard_signal_reasons(signals)
         reason_text = ", ".join(reasons) if reasons else "none"
-        highlight_refs = set(decision.standard_only_refs)
-        if decision.both_sides_populated:
-            highlight_refs.update(decision.top_refs)
-            highlight_refs.update(decision.bottom_refs)
-
         for reference, price_label in prepare_bom_price_labels(
             parts,
             board_count,
@@ -271,8 +263,7 @@ class BomEstimatorController:
         ).items():
             self._set_price_label(reference, price_label)
 
-        self._set_trigger_refs(set(highlight_refs))
-        self._refresh_rows()
+        self._set_standard_only_refs(set(decision.standard_only_refs))
 
         overview_line, details_line = format_bom_estimate_summary(
             summary,

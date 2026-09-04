@@ -363,45 +363,6 @@ class SettingsDialog(wx.Dialog):
             self.highlight_matches_setting, 0, wx.ALL | wx.EXPAND, 5
         )
 
-        ##### Highlight Standard-mode trigger parts in main list #####
-
-        self.highlight_standard_parts_setting = wx.CheckBox(
-            self,
-            id=wx.ID_ANY,
-            label="Highlight standard-mode trigger parts",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=0,
-            name="general_highlight_standard_parts",
-        )
-
-        self.highlight_standard_parts_setting.SetToolTip(
-            wx.ToolTip(
-                "Highlight parts in the main list that trigger Standard assembly mode"
-            )
-        )
-
-        self.highlight_standard_parts_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("bom.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.highlight_standard_parts_setting.Bind(
-            wx.EVT_CHECKBOX, self.update_settings
-        )
-
-        highlight_standard_parts_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        highlight_standard_parts_sizer.Add(
-            self.highlight_standard_parts_image, 10, wx.ALL | wx.EXPAND, 5
-        )
-        highlight_standard_parts_sizer.Add(
-            self.highlight_standard_parts_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
-
         ##### Library Selection #####
 
         library_label = wx.StaticText(
@@ -680,7 +641,6 @@ class SettingsDialog(wx.Dialog):
         settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(highlight_standard_parts_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(bom_estimator_show_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
         settings_grid.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -892,18 +852,6 @@ class SettingsDialog(wx.Dialog):
         """Alias shared highlighting setting updates to the checkbox UI helper."""
         self.update_highlight_matches(enabled)
 
-    def update_highlight_standard_parts(self, enabled):
-        """Update settings dialog according to Standard-trigger highlighting setting."""
-        self.highlight_standard_parts_setting.SetValue(bool(enabled))
-        if enabled:
-            self.highlight_standard_parts_setting.SetLabel(
-                "Highlight standard-mode trigger parts"
-            )
-        else:
-            self.highlight_standard_parts_setting.SetLabel(
-                "Do not highlight standard-mode trigger parts"
-            )
-
     def update_bom_estimator_show(self, show):
         """Update settings dialog according to the BOM estimator visibility setting."""
         self.bom_estimator_show_setting.SetValue(bool(show))
@@ -947,11 +895,6 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_highlight_matches(
             self.parent.settings.get("highlighting", {}).get("matches", True)
-        )
-        self.update_highlight_standard_parts(
-            self.parent.settings.get("general", {}).get(
-                "highlight_standard_parts", True
-            )
         )
         self.update_bom_estimator_show(
             self.parent.settings.get("general", {}).get("bom_estimator_show", True)
