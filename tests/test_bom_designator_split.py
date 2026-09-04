@@ -166,15 +166,21 @@ class _FakeStore:
         ]
 
 
-def _make_fake_fab_for_bom(refs, lcsc="C25741", value="WS2812B", footprint="LED_0805"):
+def _make_fake_fab_for_bom(
+    refs,
+    lcsc="C25741",
+    value="WS2812B",
+    footprint="LED_0805",
+    board_refs=None,
+):
     """Build a minimal Fabrication instance whose generate_bom() we can call.
 
-    The fake board has one footprint per ref; the fake store returns a single
-    part group with all those refs joined.
+    The fake board has one footprint per board ref; the fake store returns a
+    single part group with all refs joined.
     """
     fab = object.__new__(Fabrication)
     fab.logger = MagicMock()
-    fab.board = _FakeBoard(refs)
+    fab.board = _FakeBoard(refs if board_refs is None else board_refs)
 
     fake_parent = MagicMock()
     fake_parent.settings.get.return_value = {"lcsc_bom_cpl": True}
@@ -195,6 +201,15 @@ def _read_bom_rows(fab):
         rows = list(csv.reader(fh))
     os.unlink(fab._tmppath)
     return rows[1:]
+
+
+def test_generate_bom_omits_references_deleted_from_board():
+    """Store rows for footprints deleted from the board are omitted from the BOM."""
+    fab = _make_fake_fab_for_bom(["R1", "GONE"], board_refs=["R1"])
+
+    rows = _read_bom_rows(fab)
+
+    assert [(row[1], int(row[4])) for row in rows] == [("R1", 1)]
 
 
 def test_generate_bom_500_leds_all_refs_present():
