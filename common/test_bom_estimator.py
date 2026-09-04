@@ -291,7 +291,7 @@ def test_build_standard_mode_context_combines_policy_signals():
     """Standard mode turns on when any pure policy trigger is active."""
     context = build_standard_mode_context(
         manual_enabled=False,
-        board_count=50,
+        board_count=51,
         populated_refs={"R1", "R2"},
         populated_sides={"top", "bottom"},
         smt_populated_sides={"top"},
@@ -301,7 +301,7 @@ def test_build_standard_mode_context_combines_policy_signals():
     assert context["board_standard"] is True
     assert context["signals"] == {
         "manual_enabled": False,
-        "qty_50_plus": True,
+        "quantity_over_50": True,
         "standard_part_present": True,
         "multi_side_populated": True,
     }
