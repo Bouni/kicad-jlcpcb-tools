@@ -15,6 +15,30 @@ from bom_estimation.pricing import (  # pylint: disable=import-error
 )
 
 
+def _part(lcsc="C1", **overrides):
+    """Return a populated SMT BOM row with optional scenario-specific fields."""
+    part = {
+        "lcsc": lcsc,
+        "exclude_from_bom": 0,
+        "exclude_from_pos": 0,
+        "pad_count": 1,
+        "has_tht": 0,
+        "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+    }
+    part.update(overrides)
+    return part
+
+
+def _estimate(parts, board_count=5, price="1-:0.10", part_type="Basic", **options):
+    """Estimate a scenario with a uniform component detail response."""
+    return calculate_bom_estimate(
+        parts,
+        board_count,
+        lambda _lcsc: {"price": price, "type": part_type},
+        **options,
+    )
+
+
 def test_get_unit_price_quantity_tiers():
     """Tier parser picks expected unit prices."""
     assert get_unit_price(1, "1-9:0.12,10-99:0.08,100-:0.05") == 0.12
@@ -78,27 +102,9 @@ def test_get_unit_price_returns_negative_one_for_fully_malformed_string():
 
 def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
     """Economic mode charges extended surcharge once per distinct LCSC."""
-    parts = [
-        {
-            "lcsc": "C123",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
-        {
-            "lcsc": "C123",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
-    ]
+    parts = [_part("C123"), _part("C123")]
 
-    def get_details(_):
-        return {"price": "1-9:0.30,10-:0.20", "type": "Extended"}
-
-    summary = calculate_bom_estimate(parts, board_count=5, get_part_details=get_details)
+    summary = _estimate(parts, price="1-9:0.30,10-:0.20", part_type="Extended")
 
     p = DEFAULT_PRICING
     expected_assembly = (
@@ -113,21 +119,9 @@ def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
 
 def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
     """THT setup/joint fees apply and SMT extended surcharge is skipped for THT."""
-    parts = [
-        {
-            "lcsc": "C777",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 1,
-            "assembly_process": "Wave soldering",
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
-    ]
+    parts = [_part("C777", pad_count=2, has_tht=1, assembly_process="Wave soldering")]
 
-    def get_details(_):
-        return {"price": "1-:0.50", "type": "Extended"}
-
-    summary = calculate_bom_estimate(parts, board_count=5, get_part_details=get_details)
+    summary = _estimate(parts, price="1-:0.50", part_type="Extended")
 
     p = DEFAULT_PRICING
     expected_assembly = (
@@ -140,24 +134,8 @@ def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
 def test_standard_mode_does_not_charge_extended_surcharge():
     """Standard mode uses std-parts surcharge and does not apply extended fee."""
     parts = [
-        {
-            "lcsc": "CEXT1",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
-        {
-            "lcsc": "CBAS1",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
+        _part("CEXT1", pad_count=2, assembly_process="SMT", component_product_type=2),
+        _part("CBAS1", assembly_process="SMT", component_product_type=0),
     ]
 
     def get_details(lcsc):
@@ -198,25 +176,14 @@ def test_is_tht_part_uses_assembly_process_fallback():
 
 def test_assembly_pricing_custom_instance_overrides_defaults():
     """Custom pricing inputs propagate through total assembly calculation."""
-    part = {
-        "lcsc": "C1",
-        "exclude_from_bom": 0,
-        "pad_count": 2,
-        "has_tht": 0,
-        "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-    }
+    part = _part(pad_count=2)
     cheap = AssemblyPricing(
         economic_setup_fee=1.0,
         economic_stencil_fee=0.5,
         extended_part_fee=0.0,
         smt_per_joint_fee=0.001,
     )
-    summary = calculate_bom_estimate(
-        [part],
-        board_count=5,
-        get_part_details=lambda _: {"price": "1-:0.10", "type": "Basic"},
-        pricing=cheap,
-    )
+    summary = _estimate([part], pricing=cheap)
     expected_assembly = 1.0 + 0.5 + 10 * 0.001
     assert summary.assembly_cost == pytest.approx(expected_assembly, abs=1e-4)
 
@@ -224,25 +191,10 @@ def test_assembly_pricing_custom_instance_overrides_defaults():
 def test_collect_billable_bom_parts_filters_excluded_unassigned_and_dnp():
     """Billable filter excludes unassigned, excluded, and DNP rows."""
     parts = [
-        {
-            "reference": "R1",
-            "lcsc": "C1",
-            "exclude_from_bom": 0,
-            "assembly_flags": "{}",
-        },
-        {"reference": "R2", "lcsc": "", "exclude_from_bom": 0, "assembly_flags": "{}"},
-        {
-            "reference": "R3",
-            "lcsc": "C3",
-            "exclude_from_bom": 1,
-            "assembly_flags": "{}",
-        },
-        {
-            "reference": "R4",
-            "lcsc": "C4",
-            "exclude_from_bom": 0,
-            "assembly_flags": '{"is_dnp": true}',
-        },
+        _part(reference="R1", assembly_flags="{}"),
+        _part("", reference="R2", assembly_flags="{}"),
+        _part("C3", reference="R3", exclude_from_bom=1, assembly_flags="{}"),
+        _part("C4", reference="R4", assembly_flags='{"is_dnp": true}'),
     ]
 
     filtered = _collect_billable_bom_parts(parts)
@@ -250,32 +202,30 @@ def test_collect_billable_bom_parts_filters_excluded_unassigned_and_dnp():
 
 
 def test_scan_assembly_state_reports_joints_standard_and_extended_sets():
-    """Scan helper reports joint counts and surcharge sets correctly."""
+    """Scan reports joints/surcharges and trusts current POS over stale JSON."""
     bom_parts = [
-        {
-            "reference": "U1",
-            "lcsc": "C-SMT-STD",
-            "pad_count": 2,
-            "has_tht": 0,
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false}',
-        },
-        {
-            "reference": "J1",
-            "lcsc": "C-THT-EXT",
-            "pad_count": 3,
-            "has_tht": 1,
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false}',
-        },
-        {
-            "reference": "R9",
-            "lcsc": "C-SMT-EXT-NOPOS",
-            "pad_count": 2,
-            "has_tht": 0,
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": true}',
-        },
+        _part(
+            "C-SMT-STD",
+            reference="U1",
+            pad_count=2,
+            component_product_type=2,
+        ),
+        _part(
+            "C-THT-EXT",
+            reference="J1",
+            pad_count=3,
+            has_tht=1,
+            component_product_type=0,
+            assembly_flags='{"exclude_from_pos": true}',
+        ),
+        _part(
+            "C-SMT-EXT-NOPOS",
+            reference="R9",
+            exclude_from_pos=1,
+            pad_count=2,
+            component_product_type=0,
+            assembly_flags='{"exclude_from_pos": false}',
+        ),
     ]
 
     details_map = {
@@ -296,3 +246,23 @@ def test_scan_assembly_state_reports_joints_standard_and_extended_sets():
     assert scan.tht_joints == 15
     assert scan.smt_lcsc == {"C-SMT-STD"}
     assert scan.extended_lcsc == {"C-SMT-EXT-NOPOS"}
+
+
+@pytest.mark.parametrize(
+    ("product_type", "uses_standard"),
+    [("2", True), ("bad", False)],
+)
+def test_pricing_fallback_uses_shared_product_type_classifier(
+    product_type, uses_standard
+):
+    """Representative legacy fallback inputs exercise classifier integration."""
+    part = _part(pad_count=2, component_product_type=product_type)
+
+    summary = _estimate(
+        [part],
+        board_standard=None,
+        smt_populated_sides=1,
+    )
+
+    assert (summary.standard_setup_cost > 0) is uses_standard
+    assert (summary.economic_setup_cost > 0) is (not uses_standard)

@@ -15,6 +15,10 @@ from .dataview_highlight import (
 from .helpers import loadIconScaled
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
 
+STANDARD_ONLY_TOOLTIP = (
+    "Part cannot be assembled in economy mode, standard must be used"
+)
+
 
 class PartListDataModel(dv.PyDataViewModel):
     """Datamodel for use with the DataViewCtrl of the mainwindow."""
@@ -39,13 +43,13 @@ class PartListDataModel(dv.PyDataViewModel):
         "ENRICH_COL": 12,
         "PRICE_COL": 13,
         "TRAILING_SPACER_COL": 14,
+        "STANDARD_ONLY_COL": 15,
     }
 
     def __init__(self, scale_factor):
         super().__init__()
         self.data = []
-        self.standard_trigger_refs = set()
-        self.standard_trigger_highlighting_enabled = True
+        self.standard_only_refs = set()
 
         self.bom_pos_icons = [
             loadIconScaled(
@@ -59,19 +63,25 @@ class PartListDataModel(dv.PyDataViewModel):
         ]
         self.logger = logging.getLogger(__name__)
 
-    # The following methods implement row-level highlighting for parts that
-    # trigger the Standard mode pricing.  (e.g. parts on more than one side,
-    # or parts that are flagged by JLC as 'standard assembly')
-    def set_standard_trigger_refs(self, refs):
-        """Set references that should be highlighted as Standard-mode triggers."""
-        self.standard_trigger_refs = set(refs or [])
+    def set_standard_only_refs(self, refs):
+        """Set references whose JLC classification is Standard Only."""
+        updated_refs = set(refs or ())
+        changed_refs = self.standard_only_refs.symmetric_difference(updated_refs)
+        self.standard_only_refs = updated_refs
+        column = self.columns["STANDARD_ONLY_COL"]
+        for row in self.data:
+            if str(row[self.columns["REF_COL"]] or "") in changed_refs:
+                self.ValueChanged(self.ObjectToItem(row), column)
 
-    def set_standard_trigger_highlighting_enabled(self, enabled):
-        """Enable or disable Standard-mode trigger row highlighting."""
-        self.standard_trigger_highlighting_enabled = bool(enabled)
+    def is_standard_only(self, item):
+        """Return whether an item's reference is classified Standard Only."""
+        row = self.ItemToObject(item)
+        return bool(
+            row and str(row[self.columns["REF_COL"]] or "") in self.standard_only_refs
+        )
 
     def GetAttr(self, item, col, attr):
-        """Apply side colors and Standard-mode trigger highlighting."""
+        """Apply the existing TOP/BOT colors to the Side cell only."""
         if col == self.columns["SIDE_COL"]:
             row = self.ItemToObject(item)
             if not row:
@@ -87,20 +97,7 @@ class PartListDataModel(dv.PyDataViewModel):
             if hasattr(attr, "SetBold"):
                 attr.SetBold(True)
             return True
-
-        if not self.standard_trigger_highlighting_enabled:
-            return False
-        row = self.ItemToObject(item)
-        if not row:
-            return False
-        ref = str(row[self.columns["REF_COL"]] or "")
-        if ref not in self.standard_trigger_refs:
-            return False
-
-        attr.SetColour(wx.Colour(120, 0, 0))
-        if hasattr(attr, "SetBold"):
-            attr.SetBold(True)
-        return True
+        return False
 
     @staticmethod
     def natural_sort_key(s):
@@ -132,8 +129,15 @@ class PartListDataModel(dv.PyDataViewModel):
             "string",
             "string",
             "string",
+            "bool",
         )
         return columntypes[col]
+
+    def HasValue(self, item, col):
+        """Leave non-Standard cells blank in the computed toggle column."""
+        if col == self.columns["STANDARD_ONLY_COL"]:
+            return self.is_standard_only(item)
+        return super().HasValue(item, col)
 
     def GetChildren(self, parent, children):
         """Get child items of a parent."""
@@ -154,6 +158,8 @@ class PartListDataModel(dv.PyDataViewModel):
     def GetValue(self, item, col):
         """Get value of an item."""
         row = self.ItemToObject(item)
+        if col == self.columns["STANDARD_ONLY_COL"]:
+            return self.HasValue(item, col)
         if col in [
             self.columns["BOM_COL"],
             self.columns["POS_COL"],
@@ -191,6 +197,7 @@ class PartListDataModel(dv.PyDataViewModel):
             self.columns["POS_COL"],
             self.columns["DNP_COL"],
             self.columns["SIDE_COL"],
+            self.columns["STANDARD_ONLY_COL"],
         ]:
             return False
         row[col] = value
@@ -262,6 +269,7 @@ class PartListDataModel(dv.PyDataViewModel):
     def RemoveAll(self):
         """Remove all entries from the data model."""
         self.data.clear()
+        self.standard_only_refs.clear()
         self.Cleared()
 
     def get_all(self):
@@ -309,6 +317,7 @@ class PartListDataModel(dv.PyDataViewModel):
         )
         item[self.columns["ENRICH_COL"]] = ""
         item[self.columns["PRICE_COL"]] = ""
+        self.standard_only_refs.discard(ref)
         self.ItemChanged(self.ObjectToItem(item))
 
     def set_bom_price(self, ref, price_label):
@@ -330,6 +339,7 @@ class PartListDataModel(dv.PyDataViewModel):
     def remove_lcsc_number(self, item):
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)
+        self.standard_only_refs.discard(str(obj[self.columns["REF_COL"]] or ""))
         obj[self.columns["LCSC_COL"]] = ""
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""

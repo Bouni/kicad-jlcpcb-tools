@@ -18,10 +18,11 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
+from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .corrections import CorrectionManagerDialog
-from .datamodel import PartListDataModel
+from .datamodel import PartListDataModel, STANDARD_ONLY_TOOLTIP
 from .dataview_highlight import (
     HighlightedTextRenderer,
     decode_highlighted_value,
@@ -74,6 +75,7 @@ from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
+from .why_standard_dialog import WhyStandardDialog
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -161,10 +163,6 @@ class JLCPCBTools(wx.Dialog):
         )
         self.bom_estimator_show = bool(general_settings.get("bom_estimator_show", True))
         general_settings["bom_estimator_show"] = self.bom_estimator_show
-        self.highlight_standard_parts = bool(
-            general_settings.get("highlight_standard_parts", True)
-        )
-        general_settings["highlight_standard_parts"] = self.highlight_standard_parts
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
@@ -173,6 +171,8 @@ class JLCPCBTools(wx.Dialog):
         # "Select Part" while one is open re-targets it instead of opening a
         # second window.
         self._part_selector = None
+        self._why_standard_dialog = None
+        self.bom_estimator_decision = None
         self.pending_assembly_enrichment = set()
         # Monotonic counter incremented each time assembly enrichment is started.
         # Worker threads capture the value at spawn; progress events with a stale
@@ -479,6 +479,14 @@ class JLCPCBTools(wx.Dialog):
         type = self.footprint_list.AppendTextColumn(
             "Type", 4, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
+        self.footprint_list.AppendToggleColumn(
+            "Std",
+            PartListDataModel.columns["STANDARD_ONLY_COL"],
+            width=HighResWxSize(self.window, wx.Size(36, -1)).GetWidth(),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+            flags=0,
+        )
         stock = self.footprint_list.AppendTextColumn(
             "Stock", 5, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
@@ -590,6 +598,7 @@ class JLCPCBTools(wx.Dialog):
             on_board_count_text=self.on_bom_estimator_board_count_text,
             on_board_count_text_timer=self.on_bom_estimator_board_count_text_timer,
             on_force_standard_changed=self.on_bom_estimator_force_standard_changed,
+            on_details=self.show_assembly_mode_details,
             on_help=self.show_bom_estimator_help,
         )
 
@@ -654,10 +663,17 @@ class JLCPCBTools(wx.Dialog):
 
         self.init_logger()
         self.partlist_data_model = PartListDataModel(self.scale_factor)
-        self.partlist_data_model.set_standard_trigger_highlighting_enabled(
-            self.highlight_standard_parts
-        )
         self.footprint_list.AssociateModel(self.partlist_data_model)
+        self._standard_only_tooltip_active = False
+        self._footprint_list_main_window = (
+            self.footprint_list.GetMainWindow() or self.footprint_list
+        )
+        self._footprint_list_main_window.Bind(
+            wx.EVT_MOTION, self.on_footprint_list_motion
+        )
+        self._footprint_list_main_window.Bind(
+            wx.EVT_LEAVE_WINDOW, self.on_footprint_list_leave
+        )
         self.bom_estimator_controller = BomEstimatorController(
             read_parts=lambda: (
                 self.store.read_all()
@@ -668,9 +684,9 @@ class JLCPCBTools(wx.Dialog):
             get_board=self._get_current_board,
             is_force_standard_enabled=lambda: self.bom_estimator_force_standard,
             set_price_label=self.partlist_data_model.set_bom_price,
-            set_trigger_refs=self.partlist_data_model.set_standard_trigger_refs,
-            refresh_rows=self.footprint_list.Refresh,
+            set_standard_only_refs=self._set_standard_only_refs,
             set_summary_text=self.bom_widget.set_summary_text,
+            set_details_button_label=self.bom_widget.set_details_button_label,
         )
 
         self.init_data()
@@ -691,6 +707,43 @@ class JLCPCBTools(wx.Dialog):
         """Return current board instance for BOM controller callbacks."""
         return self.pcbnew.GetBoard()
 
+    def _set_standard_only_refs(self, refs):
+        """Update computed Standard-only cells and clear any stale tooltip."""
+        self.partlist_data_model.set_standard_only_refs(refs)
+        self.footprint_list.Refresh()
+        self._set_standard_only_tooltip(False)
+
+    def _set_standard_only_tooltip(self, active):
+        """Show or clear the Standard-only row tooltip without flicker."""
+        active = bool(active)
+        if active == self._standard_only_tooltip_active:
+            return
+        self._standard_only_tooltip_active = active
+        if active:
+            self._footprint_list_main_window.SetToolTip(
+                wx.ToolTip(STANDARD_ONLY_TOOLTIP)
+            )
+        else:
+            self._footprint_list_main_window.UnsetToolTip()
+
+    def on_footprint_list_motion(self, event):
+        """Show the explanation while hovering anywhere on a checked row."""
+        source = event.GetEventObject()
+        control_point = self.footprint_list.ScreenToClient(
+            source.ClientToScreen(event.GetPosition())
+        )
+        item, _column = self.footprint_list.HitTest(control_point)
+        active = bool(
+            item and item.IsOk() and self.partlist_data_model.is_standard_only(item)
+        )
+        self._set_standard_only_tooltip(active)
+        event.Skip()
+
+    def on_footprint_list_leave(self, event):
+        """Clear the Standard-only explanation when the pointer leaves the list."""
+        self._set_standard_only_tooltip(False)
+        event.Skip()
+
     def _bom_get_part_details(self, lcsc: str) -> dict:
         """Safely proxy part-detail lookups for BOM controller callbacks."""
         if not hasattr(self, "library") or self.library is None:
@@ -700,6 +753,8 @@ class JLCPCBTools(wx.Dialog):
     def quit_dialog(self, *_):
         """Destroy dialog on close."""
         self.logger.info("quit_dialog()")
+        if self._why_standard_dialog is not None:
+            self._why_standard_dialog.Close()
         root = logging.getLogger()
         with suppress(AttributeError):
             root.removeHandler(self.logging_handler1)
@@ -906,10 +961,30 @@ class JLCPCBTools(wx.Dialog):
         """Show shared BOM estimator help text via the help_text helper."""
         show_bom_estimator_help(self)
 
+    def show_assembly_mode_details(self, *_):
+        """Open or raise the modeless assembly-mode details dialog."""
+        if self.bom_estimator_decision is None:
+            self.recompute_bom_estimate()
+        if self._why_standard_dialog is None:
+            parts = self.store.read_all() if getattr(self, "store", None) else []
+            self._why_standard_dialog = WhyStandardDialog(
+                self, self.bom_estimator_decision, parts
+            )
+            self._why_standard_dialog.Show()
+        self._why_standard_dialog.Raise()
+
     def recompute_bom_estimate(self):
         """Recompute and display estimated BOM+assembly cost."""
         board_count = self._normalize_board_count(self.bom_estimator_board_count)
-        self.bom_estimator_controller.recompute(board_count)
+        self.bom_estimator_decision = self.bom_estimator_controller.recompute(
+            board_count
+        )
+        if self._why_standard_dialog is not None:
+            parts = self.store.read_all() if getattr(self, "store", None) else []
+            self._why_standard_dialog.update_content(
+                self.bom_estimator_decision,
+                parts,
+            )
 
     def on_bom_data_changed(self, _e):
         """Coalesce a burst of BomDataChangedEvent posts into one recompute.
@@ -938,11 +1013,11 @@ class JLCPCBTools(wx.Dialog):
         if lcsc in self.pending_assembly_enrichment:
             return "Pending"
         if (
-            str(part.get("assembly_process") or "")
-            or part.get("component_product_type") is not None
+            classify_component_product_type(part.get("component_product_type"))
+            is not None
         ):
             return "Done"
-        return "Queued"
+        return "Class missing"
 
     def start_assembly_enrichment(self, references=None):
         """Start background enrichment for missing assembly process metadata."""
@@ -1004,19 +1079,24 @@ class JLCPCBTools(wx.Dialog):
 
         assembly_process = metadata.get("assembly_process", "")
         component_product_type = metadata.get("component_product_type")
-        status = (
-            "Done"
-            if assembly_process or component_product_type is not None
-            else "No data"
-        )
-
         for reference in refs:
-            self.store.set_assembly_metadata(
+            updated = self.store.set_assembly_metadata(
                 reference,
                 assembly_process,
                 component_product_type,
+                expected_lcsc=lcsc,
             )
-            self.partlist_data_model.set_enrichment_status(reference, status)
+            if updated:
+                current_part = self.store.get_part(reference) or {}
+                status = (
+                    "Done"
+                    if classify_component_product_type(
+                        current_part.get("component_product_type")
+                    )
+                    is not None
+                    else "Class missing"
+                )
+                self.partlist_data_model.set_enrichment_status(reference, status)
 
         self.pending_assembly_enrichment.discard(lcsc)
 
@@ -1332,13 +1412,12 @@ class JLCPCBTools(wx.Dialog):
             if e.setting == "bom_estimator_show":
                 self.bom_estimator_show = bool(e.value)
                 self.bom_widget.set_visible(self.bom_estimator_show)
+                if (
+                    not self.bom_estimator_show
+                    and self._why_standard_dialog is not None
+                ):
+                    self._why_standard_dialog.Close()
                 self.Layout()
-            elif e.setting == "highlight_standard_parts":
-                self.highlight_standard_parts = bool(e.value)
-                self.partlist_data_model.set_standard_trigger_highlighting_enabled(
-                    self.highlight_standard_parts
-                )
-                self.footprint_list.Refresh()
         elif e.section == "highlighting" and e.setting == "matches":
             self.footprint_list.Refresh()
 

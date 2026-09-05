@@ -6,17 +6,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-import json
 
 import pcbnew  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
-from .bom_estimation.pricing import calculate_bom_estimate
+from .bom_estimation.assembly_mode import (
+    AssemblyModeDecision,
+    classify_component_product_type,
+)
+from .bom_estimation.pricing import calculate_bom_estimate, get_assembly_flags
 from .bom_estimation.view import (
-    build_standard_mode_context,
+    assembly_mode_details_button_label,
     format_bom_estimate_summary,
     prepare_bom_price_labels,
-    standard_signal_reasons,
 )
 from .helpers import HighResWxSize
 
@@ -35,10 +37,13 @@ class BomEstimatorWidget:
         on_board_count_text,
         on_board_count_text_timer,
         on_force_standard_changed,
+        on_details,
         on_help,
     ):
         self.parent = parent
         self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self._visible = True
+        self._details_button_label = None
 
         controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
         controls_sizer.Add(
@@ -81,6 +86,16 @@ class BomEstimatorWidget:
             10,
         )
 
+        self.details_button = wx.Button(parent, wx.ID_ANY, "Why Standard…")
+        self.details_button.Bind(wx.EVT_BUTTON, on_details)
+        self.details_button.Hide()
+        controls_sizer.Add(
+            self.details_button,
+            0,
+            wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+            10,
+        )
+
         self.help_button = wx.Button(parent, wx.ID_ANY, "Help")
         self.help_button.SetToolTip(
             wx.ToolTip("Show BOM estimator assumptions and limitations")
@@ -105,11 +120,21 @@ class BomEstimatorWidget:
 
     def set_visible(self, show: bool):
         """Show or hide the full estimator panel."""
-        self.sizer.ShowItems(bool(show))
+        self._visible = bool(show)
+        self.sizer.ShowItems(self._visible)
+        self.details_button.Show(self._visible and bool(self._details_button_label))
 
     def set_summary_text(self, text: str):
         """Set the estimator summary text block."""
         self.summary_label.SetLabel(text)
+
+    def set_details_button_label(self, label):
+        """Show the applicable details action, or hide it when unnecessary."""
+        self._details_button_label = label
+        if label:
+            self.details_button.SetLabel(label)
+        self.details_button.Show(self._visible and bool(label))
+        self.parent.Layout()
 
 
 class BomEstimatorController:
@@ -123,18 +148,18 @@ class BomEstimatorController:
         get_board: Callable[[], object],
         is_force_standard_enabled: Callable[[], bool],
         set_price_label: Callable[[str, str], None],
-        set_trigger_refs: Callable[[set[str]], None],
-        refresh_rows: Callable[[], None],
+        set_standard_only_refs: Callable[[set[str]], None],
         set_summary_text: Callable[[str], None],
+        set_details_button_label: Callable[[object], None],
     ):
         self._read_parts = read_parts
         self._get_part_details = get_part_details
         self._get_board = get_board
         self._is_force_standard_enabled = is_force_standard_enabled
         self._set_price_label = set_price_label
-        self._set_trigger_refs = set_trigger_refs
-        self._refresh_rows = refresh_rows
+        self._set_standard_only_refs = set_standard_only_refs
         self._set_summary_text = set_summary_text
+        self._set_details_button_label = set_details_button_label
 
     @staticmethod
     def _is_on_bottom_side(footprint) -> bool:
@@ -153,28 +178,28 @@ class BomEstimatorController:
         self,
         parts: list[Mapping[str, object]],
         board_count: int,
-    ) -> dict[str, object]:
+    ) -> AssemblyModeDecision:
         """Compute standard-mode trigger signals and assembly side usage.
 
         Walks the board to extract per-reference facts (sides, SMT vs THT,
-        standard-part membership), then delegates the policy-decision portion
-        to ``build_standard_mode_context`` so the signal contract has one home.
+        and JLC assembly classification), then delegates the policy decision to
+        ``AssemblyModeDecision`` so the signal contract has one home.
         """
         board = self._get_board()
-        populated_sides: set[str] = set()
-        populated_refs: set[str] = set()
+        top_refs: set[str] = set()
+        bottom_refs: set[str] = set()
         smt_populated_sides: set[str] = set()
-        standard_part_refs: set[str] = set()
+        standard_only_refs: set[str] = set()
+        economic_only_refs: set[str] = set()
+        classification_missing_refs: set[str] = set()
 
         for part in parts:
             if part.get("exclude_from_bom") or not str(part.get("lcsc") or ""):
                 continue
 
-            flags = {}
-            with suppress(TypeError, ValueError, json.JSONDecodeError):
-                flags = json.loads(part.get("assembly_flags") or "{}")
+            flags = get_assembly_flags(part)
             if bool(flags.get("is_dnp", False)) or bool(
-                flags.get("exclude_from_pos", False)
+                part.get("exclude_from_pos", False)
             ):
                 continue
 
@@ -187,8 +212,8 @@ class BomEstimatorController:
                 continue
 
             side = "bottom" if self._is_on_bottom_side(footprint) else "top"
-            populated_sides.add(side)
-            populated_refs.add(str(reference))
+            reference = str(reference)
+            (bottom_refs if side == "bottom" else top_refs).add(reference)
 
             is_tht = False
             with suppress(TypeError, ValueError):
@@ -196,17 +221,25 @@ class BomEstimatorController:
             if not is_tht:
                 smt_populated_sides.add(side)
 
-            with suppress(TypeError, ValueError):
-                if int(part.get("component_product_type")) != 0:
-                    standard_part_refs.add(str(reference))
+            product_type = classify_component_product_type(
+                part.get("component_product_type")
+            )
+            if product_type == 2:
+                standard_only_refs.add(reference)
+            elif product_type == 1:
+                economic_only_refs.add(reference)
+            elif product_type is None:
+                classification_missing_refs.add(reference)
 
-        return build_standard_mode_context(
+        return AssemblyModeDecision(
             manual_enabled=bool(self._is_force_standard_enabled()),
             board_count=board_count,
-            populated_refs=populated_refs,
-            populated_sides=populated_sides,
-            smt_populated_sides=smt_populated_sides,
-            standard_part_refs=standard_part_refs,
+            top_refs=top_refs,
+            bottom_refs=bottom_refs,
+            smt_populated_side_count=len(smt_populated_sides),
+            standard_only_refs=standard_only_refs,
+            economic_only_refs=economic_only_refs,
+            classification_missing_refs=classification_missing_refs,
         )
 
     def recompute(self, board_count: int):
@@ -218,42 +251,26 @@ class BomEstimatorController:
         """
         raw_parts = self._read_parts()
         parts = raw_parts if isinstance(raw_parts, list) else []
-        if not parts:
-            self._set_trigger_refs(set())
-            self._refresh_rows()
-            self._set_summary_text(f"BOM Estimate ({board_count} boards): no parts")
-            return
-
-        bom_parts = [
-            part
+        if not any(
+            not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
             for part in parts
-            if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
-        ]
-        if not bom_parts:
-            self._set_trigger_refs(set())
-            self._refresh_rows()
-            self._set_summary_text(
-                f"BOM Estimate ({board_count} boards): no assigned BOM parts"
+        ):
+            self._set_standard_only_refs(set())
+            self._set_details_button_label(None)
+            reason = "no parts" if not parts else "no assigned BOM parts"
+            self._set_summary_text(f"BOM Estimate ({board_count} boards): {reason}")
+            return AssemblyModeDecision(
+                board_count, bool(self._is_force_standard_enabled())
             )
-            return
 
-        standard_context = self._get_board_standard_context(parts, board_count)
+        decision = self._get_board_standard_context(parts, board_count)
 
         summary = calculate_bom_estimate(
             parts=parts,
             board_count=board_count,
             get_part_details=self._get_part_details,
-            board_standard=bool(standard_context["board_standard"]),
-            smt_populated_sides=int(standard_context["smt_populated_sides"]),
-        )
-
-        mode = "Standard" if standard_context["board_standard"] else "Economic"
-        reasons = standard_signal_reasons(standard_context["signals"])
-        reason_text = ", ".join(reasons) if reasons else "none"
-        highlight_refs = (
-            standard_context["trigger_references"]
-            if standard_context["board_standard"]
-            else set()
+            board_standard=decision.board_standard,
+            smt_populated_sides=decision.smt_populated_side_count,
         )
 
         for reference, price_label in prepare_bom_price_labels(
@@ -263,13 +280,13 @@ class BomEstimatorController:
         ).items():
             self._set_price_label(reference, price_label)
 
-        self._set_trigger_refs(set(highlight_refs))
-        self._refresh_rows()
+        self._set_standard_only_refs(set(decision.standard_only_refs))
+        self._set_details_button_label(assembly_mode_details_button_label(decision))
 
         overview_line, details_line = format_bom_estimate_summary(
             summary,
             board_count,
-            mode,
-            reason_text,
+            decision,
         )
         self._set_summary_text(f"{overview_line}\n{details_line}")
+        return decision

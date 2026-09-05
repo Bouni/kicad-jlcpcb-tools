@@ -18,13 +18,14 @@ LCSC-backed implementation for now.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-import contextlib
 import time
 from typing import Protocol
 
 try:
+    from ..bom_estimation.assembly_mode import classify_component_product_type
     from ..lcsc_api import LCSC_API
 except ImportError:  # pragma: no cover - test import fallback
+    from bom_estimation.assembly_mode import classify_component_product_type
     from lcsc_api import LCSC_API
 
 
@@ -57,16 +58,6 @@ class LCSCAssemblyMetadataProvider:
         self._api = api or LCSC_API()
         self.min_interval_seconds = min_interval_seconds
 
-    @staticmethod
-    def _safe_int(value: object, default: int = 0) -> int:
-        """Best-effort integer conversion helper."""
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, (int, float, str)):
-            with contextlib.suppress(ValueError, TypeError):
-                return int(value)
-        return default
-
     def _normalize(self, code: str) -> dict[str, object]:
         """Fetch and normalize a single part code's metadata."""
         assembly_process = ""
@@ -76,14 +67,14 @@ class LCSCAssemblyMetadataProvider:
             if part_data.get("success"):
                 payload = part_data.get("data", {}).get("data", {})
                 assembly_process = payload.get("assemblyProcess", "")
-                component_product_type = payload.get("componentProductType")
+                component_product_type = classify_component_product_type(
+                    payload.get("componentProductType")
+                )
         except Exception:  # pylint: disable=broad-exception-caught
             assembly_process = ""
             component_product_type = None
 
-        is_standard = False
-        with contextlib.suppress(ValueError, TypeError):
-            is_standard = self._safe_int(component_product_type) != 0
+        is_standard = component_product_type == 2
 
         return {
             "assembly_process": assembly_process,

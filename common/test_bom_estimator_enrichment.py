@@ -1,12 +1,23 @@
 """Tests for provider-backed enrichment helpers."""
 
+import pytest
+
 from enrichment.providers import (  # pylint: disable=import-error
     LCSCAssemblyMetadataProvider,
     fetch_assembly_processes,
 )
 
+_EMPTY_METADATA = {
+    "assembly_process": "",
+    "component_product_type": None,
+    "is_standard_assembly": False,
+}
+
 
 class _FakeApi:
+    def __init__(self, product_type=2):
+        self.product_type = product_type
+
     def get_part_data(self, lcsc):
         if lcsc == "C1":
             return {
@@ -14,7 +25,7 @@ class _FakeApi:
                 "data": {
                     "data": {
                         "assemblyProcess": "SMT",
-                        "componentProductType": 2,
+                        "componentProductType": self.product_type,
                     }
                 },
             }
@@ -32,11 +43,7 @@ def test_fetch_assembly_processes_uses_provider_contract():
             "component_product_type": 2,
             "is_standard_assembly": True,
         },
-        "C2": {
-            "assembly_process": "",
-            "component_product_type": None,
-            "is_standard_assembly": False,
-        },
+        "C2": _EMPTY_METADATA,
     }
 
 
@@ -52,11 +59,7 @@ def test_normalize_returns_empty_metadata_when_api_raises():
     provider = LCSCAssemblyMetadataProvider(api=_RaisingApi())
     metadata = provider._normalize("C123")
 
-    assert metadata == {
-        "assembly_process": "",
-        "component_product_type": None,
-        "is_standard_assembly": False,
-    }
+    assert metadata == _EMPTY_METADATA
 
 
 def test_fetch_iter_yields_empty_metadata_for_each_failed_code():
@@ -66,8 +69,23 @@ def test_fetch_iter_yields_empty_metadata_for_each_failed_code():
 
     assert set(results) == {"C1", "C2"}
     for value in results.values():
-        assert value == {
-            "assembly_process": "",
-            "component_product_type": None,
-            "is_standard_assembly": False,
-        }
+        assert value == _EMPTY_METADATA
+
+
+@pytest.mark.parametrize(
+    ("product_type", "expected_type", "expected_standard"),
+    [
+        (1, 1, False),
+        ("bad", None, False),
+    ],
+)
+def test_normalize_uses_shared_product_type_classifier(
+    product_type, expected_type, expected_standard
+):
+    """Representative values verify provider-to-classifier integration."""
+    provider = LCSCAssemblyMetadataProvider(api=_FakeApi(product_type))
+
+    metadata = provider._normalize("C1")
+
+    assert metadata["component_product_type"] == expected_type
+    assert metadata["is_standard_assembly"] is expected_standard

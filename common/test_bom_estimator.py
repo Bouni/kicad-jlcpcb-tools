@@ -13,22 +13,34 @@ from bom_estimation import (
 )
 
 
+def _part(lcsc="C1", **overrides):
+    """Return a populated SMT BOM row with optional scenario-specific fields."""
+    part = {
+        "lcsc": lcsc,
+        "exclude_from_bom": 0,
+        "pad_count": 1,
+        "has_tht": 0,
+        "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+    }
+    part.update(overrides)
+    return part
+
+
+def _estimate(parts, board_count=5, price="1-:1.00", part_type="Basic", **options):
+    """Estimate one scenario with a uniform component detail response."""
+    return calculate_bom_estimate(
+        parts,
+        board_count,
+        lambda _lcsc: {"price": price, "type": part_type},
+        **options,
+    )
+
+
 def test_calculate_bom_estimate_missing_price_counts_unknown_lcsc_price():
     """Missing price bands increment diagnostics and keep component cost zero."""
-    parts = [
-        {
-            "lcsc": "C404",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
-    ]
+    parts = [_part("C404", pad_count=2)]
 
-    def get_details(_):
-        return {"price": "", "type": "Basic"}
-
-    summary = calculate_bom_estimate(parts, board_count=5, get_part_details=get_details)
+    summary = _estimate(parts, price="")
 
     assert summary.component_cost == 0.0
     assert summary.missing_prices == 1
@@ -36,24 +48,9 @@ def test_calculate_bom_estimate_missing_price_counts_unknown_lcsc_price():
 
 def test_calculate_bom_estimate_computes_fixed_cost_without_policy_kwargs():
     """Fixed costs are computed via the current pricing model inputs only."""
-    parts = [
-        {
-            "lcsc": "C100",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
-    ]
+    parts = [_part("C100")]
 
-    def get_details(_):
-        return {"price": "1-:1.00", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
-        parts,
-        board_count=10,
-        get_part_details=get_details,
-    )
+    summary = _estimate(parts, board_count=10)
 
     assert summary.fixed_cost > 0
     assert summary.assembly_cost >= summary.fixed_cost
@@ -63,24 +60,12 @@ def test_calculate_bom_estimate_computes_fixed_cost_without_policy_kwargs():
 def test_standard_fees_apply_for_standard_smt_part():
     """Standard fixed fees apply for standard parts even when assembly process is SMT."""
     parts = [
-        {
-            "lcsc": "CSTD1",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
+        _part("CSTD1", pad_count=2, assembly_process="SMT", component_product_type=2)
     ]
 
-    def get_details(_):
-        return {"price": "1-:1.00", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
+    summary = _estimate(
         parts,
         board_count=2,
-        get_part_details=get_details,
         pricing=AssemblyPricing(
             standard_setup_fee=4.0,
             standard_stencil_fee=1.2,
@@ -99,33 +84,20 @@ def test_standard_fees_apply_for_standard_smt_part():
 def test_standard_fees_are_orthogonal_to_tht_fees():
     """Standard and THT fixed-fee policies can apply together when both conditions are true."""
     parts = [
-        {
-            "lcsc": "CSTD2",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 1,
-            "assembly_process": "THT",
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
-        {
-            "lcsc": "CSMT2",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
+        _part(
+            "CSTD2",
+            pad_count=2,
+            has_tht=1,
+            assembly_process="THT",
+            component_product_type=2,
+        ),
+        _part("CSMT2", assembly_process="SMT", component_product_type=0),
     ]
 
-    def get_details(_lcsc):
-        return {"price": "1-:0.80", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
+    summary = _estimate(
         parts,
         board_count=3,
-        get_part_details=get_details,
+        price="1-:0.80",
         pricing=AssemblyPricing(
             standard_setup_fee=2.0,
             standard_stencil_fee=0.5,
@@ -150,25 +122,12 @@ def test_standard_fees_are_orthogonal_to_tht_fees():
 
 def test_standard_fees_do_not_apply_for_non_standard_parts():
     """Non-standard parts do not incur standard fixed fees."""
-    parts = [
-        {
-            "lcsc": "CNONSTD",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
-    ]
+    parts = [_part("CNONSTD", assembly_process="SMT", component_product_type=0)]
 
-    def get_details(_):
-        return {"price": "1-:0.50", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
+    summary = _estimate(
         parts,
         board_count=4,
-        get_part_details=get_details,
+        price="1-:0.50",
         pricing=AssemblyPricing(
             standard_setup_fee=99.0,
             standard_part_fee=99.0,
@@ -188,33 +147,13 @@ def test_standard_fees_do_not_apply_for_non_standard_parts():
 def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
     """Standard base fees apply per populated SMT side and surcharge all SMT LCSC values."""
     parts = [
-        {
-            "lcsc": "CSTD3",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
-        {
-            "lcsc": "CBASIC3",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
+        _part("CSTD3", pad_count=2, assembly_process="SMT", component_product_type=2),
+        _part("CBASIC3", assembly_process="SMT", component_product_type=0),
     ]
 
-    def get_details(_lcsc):
-        return {"price": "1-:1.00", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
+    summary = _estimate(
         parts,
         board_count=1,
-        get_part_details=get_details,
         board_standard=True,
         smt_populated_sides=2,
     )
@@ -233,24 +172,12 @@ def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
 def test_cost_breakdown_fields_sum_to_total_and_per_board():
     """Breakdown buckets should reconcile with assembly and total costs."""
     parts = [
-        {
-            "lcsc": "C101",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
+        _part("C101", pad_count=2, assembly_process="SMT", component_product_type=0)
     ]
 
-    def get_details(_lcsc):
-        return {"price": "1-:1.00", "type": "Extended"}
-
-    summary = calculate_bom_estimate(
+    summary = _estimate(
         parts,
-        board_count=5,
-        get_part_details=get_details,
+        part_type="Extended",
         board_standard=False,
     )
 
@@ -286,33 +213,18 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
 def test_standard_surcharge_and_joint_counts_are_reported_separately():
     """UI-facing summary fields expose joint counts and standard surcharge cleanly."""
     parts = [
-        {
-            "lcsc": "CSTDUI",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
-        {
-            "lcsc": "CTHTUI",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 1,
-            "assembly_process": "Wave soldering",
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
+        _part("CSTDUI", pad_count=2, assembly_process="SMT", component_product_type=2),
+        _part(
+            "CTHTUI",
+            has_tht=1,
+            assembly_process="Wave soldering",
+            component_product_type=2,
+        ),
     ]
 
-    def get_details(_lcsc):
-        return {"price": "1-:1.00", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
+    summary = _estimate(
         parts,
         board_count=2,
-        get_part_details=get_details,
         board_standard=True,
         smt_populated_sides=1,
     )
@@ -327,35 +239,17 @@ def test_standard_surcharge_and_joint_counts_are_reported_separately():
 def test_dnp_parts_are_excluded_from_bom_estimator_counts():
     """DNP rows should not contribute to component or assembly totals."""
     parts = [
-        {
-            "lcsc": "C401",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        },
-        {
-            "lcsc": "C402",
-            "exclude_from_bom": 0,
-            "pad_count": 2,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 2,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": true}',
-        },
+        _part("C401", pad_count=2, assembly_process="SMT", component_product_type=0),
+        _part(
+            "C402",
+            pad_count=2,
+            assembly_process="SMT",
+            component_product_type=2,
+            assembly_flags='{"exclude_from_pos": false, "is_dnp": true}',
+        ),
     ]
 
-    def get_details(_lcsc):
-        return {"price": "1-:1.00", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
-        parts,
-        board_count=5,
-        get_part_details=get_details,
-        board_standard=False,
-    )
+    summary = _estimate(parts, board_standard=False)
 
     assert summary.component_cost == pytest.approx(5.000, abs=1e-3)
 
@@ -397,7 +291,7 @@ def test_build_standard_mode_context_combines_policy_signals():
     """Standard mode turns on when any pure policy trigger is active."""
     context = build_standard_mode_context(
         manual_enabled=False,
-        board_count=50,
+        board_count=51,
         populated_refs={"R1", "R2"},
         populated_sides={"top", "bottom"},
         smt_populated_sides={"top"},
@@ -407,7 +301,7 @@ def test_build_standard_mode_context_combines_policy_signals():
     assert context["board_standard"] is True
     assert context["signals"] == {
         "manual_enabled": False,
-        "qty_50_plus": True,
+        "quantity_over_50": True,
         "standard_part_present": True,
         "multi_side_populated": True,
     }
