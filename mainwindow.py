@@ -1,5 +1,7 @@
 """Contains the main window of the plugin."""
 
+from __future__ import annotations
+
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 # ruff: noqa: I001
 
@@ -7,12 +9,13 @@ from collections.abc import Sequence
 from contextlib import contextmanager, suppress
 from datetime import datetime as dt
 from threading import Thread
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 import json
 import logging
 import os
 import re
 import sys
+import tempfile
 import time
 
 import pcbnew as kicad_pcbnew
@@ -79,6 +82,13 @@ from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
 from .why_standard_dialog import WhyStandardDialog
+from .window_layout import get_column_widths, restore_column_widths
+
+FOOTPRINT_COLUMN_KEYS = {
+    index: key
+    for key, index in PartListDataModel.columns.items()
+    if key not in {"TRAILING_SPACER_COL", "STANDARD_ONLY_COL"}
+}
 
 if TYPE_CHECKING:
     from .library import CorrectionSnapshot
@@ -124,7 +134,9 @@ class JLCPCBTools(wx.Dialog):
     """JLCPCBTools main dialog."""
 
     def __init__(
-        self, parent: Any, kicad_provider: KicadProvider = KicadProvider()
+        self,
+        parent: Optional[wx.Window],
+        kicad_provider: KicadProvider = KicadProvider(),
     ) -> None:
         while not wx.GetApp():
             time.sleep(1)
@@ -152,8 +164,7 @@ class JLCPCBTools(wx.Dialog):
         self.load_settings()
         # Normalize and write-back BOM-estimator settings into the in-memory
         # dict so subsequent reads see canonical values. The on-disk JSON is
-        # not rewritten here — the next save_settings() call (e.g. when the
-        # user changes a setting via the UI) persists these defaults.
+        # not rewritten here; the next settings change or window close saves it.
         general_settings = self.settings.setdefault("general", {})
         raw_board_count = general_settings.get("bom_estimator_boards", 5)
         try:
@@ -648,6 +659,12 @@ class JLCPCBTools(wx.Dialog):
         self.bom_widget.set_visible(self.bom_estimator_show)
         self.Layout()
         self.Centre(wx.BOTH)
+        restore_column_widths(
+            self.footprint_list,
+            self.settings.get("mainwindow", {}).get("column_widths", {}),
+            FOOTPRINT_COLUMN_KEYS,
+        )
+        self._layout_ready = True
 
         # ---------------------------------------------------------------------
         # ------------------------ Custom Events ------------------------------
@@ -770,19 +787,38 @@ class JLCPCBTools(wx.Dialog):
             return {}
         return self.library.get_part_details(lcsc)
 
-    def quit_dialog(self, *_):
+    def quit_dialog(self, *_: object) -> None:
         """Destroy dialog on close."""
-        self.logger.info("quit_dialog()")
-        if self._why_standard_dialog is not None:
-            self._why_standard_dialog.Close()
-        root = logging.getLogger()
-        with suppress(AttributeError):
-            root.removeHandler(self.logging_handler1)
-        with suppress(AttributeError):
-            root.removeHandler(self.logging_handler2)
-
-        self.Destroy()
-        self.EndModal(0)
+        logger = logging.getLogger(__name__)
+        logger.info("quit_dialog()")
+        layout_ready = getattr(self, "_layout_ready", False)
+        selector = getattr(self, "_part_selector", None)
+        try:
+            if layout_ready:
+                self.settings.setdefault("mainwindow", {})["column_widths"] = (
+                    get_column_widths(self.footprint_list, FOOTPRINT_COLUMN_KEYS)
+                )
+                if not selector:
+                    self.save_settings()
+        except OSError:
+            logger.exception("Unable to save window layout")
+        finally:
+            try:
+                if selector:
+                    # Its close handler saves both windows' updated settings once.
+                    selector.Close()
+            finally:
+                why_standard_dialog = getattr(self, "_why_standard_dialog", None)
+                if why_standard_dialog:
+                    why_standard_dialog.Close()
+                root = logging.getLogger()
+                with suppress(AttributeError):
+                    root.removeHandler(self.logging_handler1)
+                with suppress(AttributeError):
+                    root.removeHandler(self.logging_handler2)
+                if self.IsModal():
+                    self.EndModal(0)
+                self.Destroy()
 
     def init_library(self):
         """Initialize the parts library."""
@@ -1165,7 +1201,7 @@ class JLCPCBTools(wx.Dialog):
             return "0°, 0.0/0.0"
         return f"{match.correction} ({match.source})"
 
-    def update_correction_status(self, snapshot: "CorrectionSnapshot") -> None:
+    def update_correction_status(self, snapshot: CorrectionSnapshot) -> None:
         """Show aggregate readiness; detailed repair diagnostics stay in the manager."""
         unresolved = snapshot.corrections is None
         if unresolved:
@@ -1534,12 +1570,20 @@ class JLCPCBTools(wx.Dialog):
             return text, []
         return text, terms
 
-    def save_settings(self):
-        """Save settings to settings.json."""
-        with open(
-            os.path.join(PLUGIN_PATH, "settings.json"), "w", encoding="utf-8"
-        ) as j:
-            json.dump(self.settings, j)
+    def save_settings(self) -> None:
+        """Replace settings.json only after the complete document is written."""
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=PLUGIN_PATH, delete=False
+            ) as settings_file:
+                temporary_path = settings_file.name
+                json.dump(self.settings, settings_file)
+            os.replace(temporary_path, os.path.join(PLUGIN_PATH, "settings.json"))
+        finally:
+            if temporary_path is not None:
+                with suppress(OSError):
+                    os.unlink(temporary_path)
 
     def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
@@ -1960,7 +2004,7 @@ class JLCPCBTools(wx.Dialog):
                 self.start_assembly_enrichment(updated_references)
                 wx.PostEvent(self, BomDataChangedEvent(source="paste_part_lcsc"))
 
-    def add_correction(self, e: "wx.CommandEvent") -> None:
+    def add_correction(self, e: wx.CommandEvent) -> None:
         """Add part correction for the current part."""
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
