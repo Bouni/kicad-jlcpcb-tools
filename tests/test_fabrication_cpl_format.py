@@ -1,4 +1,4 @@
-"""Keep CPL coordinates in decimal millimetres for GitHub issue #769."""
+"""Keep CPL coordinates in decimal millimetres."""
 
 import csv
 from pathlib import Path

@@ -461,8 +461,12 @@ class Fabrication:
                         part["reference"],
                         part["value"],
                         part["footprint"],
-                        ToMM(position.x),
-                        ToMM(position.y) * -1,
+                        # Fixed-point millimetres follow JLCPCB's exporter:
+                        # https://github.com/JLCPCB/jlcpcb-eagle/blob/master/ulps/jlcpcb_smta_exporter.ulp
+                        # Six decimals preserve KiCad's 1 nm internal resolution:
+                        # https://docs.kicad.org/doxygen/base__units_8h.html
+                        f"{ToMM(position.x):.6f}",
+                        f"{ToMM(position.y) * -1:.6f}",
                         self.fix_rotation(fp),
                         "top" if fp.GetLayer() == 0 else "bottom",
                     ]
