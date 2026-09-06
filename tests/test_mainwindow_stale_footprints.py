@@ -9,6 +9,7 @@ requiring a GUI event loop.
 
 from itertools import count
 import types
+from typing import Any
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -53,14 +54,18 @@ class _Pcbnew:
         return self.board
 
 
-def _window(*, footprints, selections=()):
+def _window(*, footprints: dict[str, object], selections: tuple[int, ...] = ()) -> Any:
     """Build the shared state surface used by main-window action handlers."""
     window = object.__new__(JLCPCBTools)
     window.pcbnew = _Pcbnew(_Board(footprints))
     window.store = MagicMock()
     window.library = MagicMock()
     window.library.get_part_details.return_value = {}
-    window.library.get_all_correction_data.return_value = []
+    window.library.read_correction_data.return_value = types.SimpleNamespace(
+        corrections=(), state=mainwindow.CorrectionState.READY
+    )
+    window.correction_status = MagicMock()
+    window.Layout = MagicMock()
     window.partlist_data_model = MagicMock()
     window.footprint_list = MagicMock()
     window.footprint_list.GetSelections.return_value = list(selections)

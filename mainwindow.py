@@ -3,10 +3,11 @@
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 # ruff: noqa: I001
 
+from collections.abc import Sequence
 from contextlib import contextmanager, suppress
 from datetime import datetime as dt
 from threading import Thread
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ from wx import adv  # pylint: disable=import-error
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
+from .correction_data import Correction, match_correction
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel, STANDARD_ONLY_TOOLTIP
 from .dataview_highlight import (
@@ -69,7 +71,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
-from .library import Library, LibraryState
+from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
 from .partselector import PartSelectorDialog
@@ -77,6 +79,9 @@ from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
 from .why_standard_dialog import WhyStandardDialog
+
+if TYPE_CHECKING:
+    from .library import CorrectionSnapshot
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -118,7 +123,9 @@ class KicadProvider:
 class JLCPCBTools(wx.Dialog):
     """JLCPCBTools main dialog."""
 
-    def __init__(self, parent: Any, kicad_provider: Any = KicadProvider()) -> None:
+    def __init__(
+        self, parent: Any, kicad_provider: KicadProvider = KicadProvider()
+    ) -> None:
         while not wx.GetApp():
             time.sleep(1)
         wx.Dialog.__init__(
@@ -613,6 +620,11 @@ class JLCPCBTools(wx.Dialog):
         self.bom_estimator_help_button = self.bom_widget.help_button
         self.bom_estimator_summary = self.bom_widget.summary_label
 
+        # This status must exist before init_data() first populates the list.
+        # Invalid stored corrections remain repairable through the manager.
+        self.correction_status = wx.StaticText(self, label="")
+        self.correction_status.Hide()
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -621,6 +633,12 @@ class JLCPCBTools(wx.Dialog):
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(self.upper_toolbar, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(estimator_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+        layout.Add(
+            self.correction_status,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            5,
+        )
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
@@ -1133,30 +1151,64 @@ class JLCPCBTools(wx.Dialog):
         }
         wx.MessageBox(e.text, e.title, style=styles.get(e.style, wx.ICON_INFORMATION))
 
-    def get_correction(self, part: dict, corrections: list) -> str:
-        """Try to find correction data for a given part."""
-        # First check if the part name matches
-        for regex, rotation, offset in corrections:
-            if re.search(regex, str(part["reference"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (ref)"
-        # Then try to match by value
-        for regex, rotation, offset in corrections:
-            if re.search(regex, str(part["value"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (val)"
-        # If there was no match for the part name or value, check if the package matches
-        for regex, rotation, offset in corrections:
-            if re.search(regex, str(part["footprint"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (fpt)"
-        return "0°, 0.0/0.0"
+    def get_correction(
+        self, part: dict[str, Any], corrections: Sequence[Correction]
+    ) -> str:
+        """Display the same complete correction rule used for fabrication."""
+        match = match_correction(
+            corrections,
+            str(part["reference"]),
+            str(part["value"]),
+            str(part["footprint"]),
+        )
+        if match is None:
+            return "0°, 0.0/0.0"
+        return f"{match.correction} ({match.source})"
 
-    def populate_footprint_list(self, *_):
+    def update_correction_status(self, snapshot: "CorrectionSnapshot") -> None:
+        """Show aggregate readiness; detailed repair diagnostics stay in the manager."""
+        unresolved = snapshot.corrections is None
+        if unresolved:
+            reason = (
+                "unavailable"
+                if snapshot.state == CorrectionState.UNAVAILABLE
+                else "unresolved"
+            )
+            label = (
+                f"Corrections {reason} in the active {snapshot.scope} database.\n"
+                "Open Corrections Manager to repair or retry loading before generating fabrication files."
+            )
+            details = str(snapshot.db_path)
+        else:
+            label = ""
+            details = ""
+        self.correction_status.SetLabel(label)
+        self.correction_status.SetToolTip(details)
+        self.correction_status.Show(unresolved)
+        self.Layout()
+
+    def read_valid_corrections_for_generation(self) -> tuple[Correction, ...]:
+        """Read a fresh complete snapshot before any generation side effects."""
+        snapshot = self.library.read_correction_data()
+        self.update_correction_status(snapshot)
+        if snapshot.corrections is None:
+            raise ValueError(
+                f"Corrections are unresolved in the active {snapshot.scope} "
+                f"database ({snapshot.db_path}). Open Corrections Manager "
+                "to repair or retry loading before generating fabrication files."
+            )
+        return snapshot.corrections
+
+    def populate_footprint_list(self, *_: object) -> None:
         """Populate list of footprints."""
         if not self.store:
             self.init_store()
         self.partlist_data_model.RemoveAll()
         parts = self.store.read_all()
         details = {}
-        corrections = self.library.get_all_correction_data()
+        snapshot = self.library.read_correction_data()
+        self.update_correction_status(snapshot)
+        corrections = snapshot.corrections
         for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
             if fp is None:
@@ -1182,7 +1234,11 @@ class JLCPCBTools(wx.Dialog):
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
-                    str(self.get_correction(part, corrections)),
+                    (
+                        str(self.get_correction(part, corrections))
+                        if corrections is not None
+                        else "Unresolved"
+                    ),
                     str(fp.GetLayer()),
                     params_for_part(details.get(part["lcsc"], {})),
                     self._get_enrichment_status_label(part),  # enrichment
@@ -1396,9 +1452,10 @@ class JLCPCBTools(wx.Dialog):
         """Update the library from the JLCPCB CSV file."""
         self.library.update()
 
-    def manage_corrections(self, *_):
-        """Manage corrections."""
+    def manage_corrections(self, *_: object) -> None:
+        """Refresh displayed corrections after the manager's recovery attempts."""
         CorrectionManagerDialog(self, "").ShowModal()
+        self.populate_footprint_list()
 
     def manage_mappings(self, *_):
         """Manage footprint mappings."""
@@ -1625,13 +1682,20 @@ class JLCPCBTools(wx.Dialog):
         )
         return False
 
-    def generate_fabrication_data(self, *_):
+    def generate_fabrication_data(self, *_: object) -> None:
         """Generate fabrication data."""
         self.generate_button.Enable(False)
         self.reset_gauge()
         wx.BeginBusyCursor()
         self._current_generation_step = "initialization"
         try:
+            corrections = self.run_generation_step(
+                "Validating corrections",
+                self.read_valid_corrections_for_generation,
+            )
+            placements = self.run_generation_step(
+                "Preparing placement data", self.fabrication.prepare_cpl, corrections
+            )
             warnings = self.run_generation_step(
                 "Checking part consistency",
                 self.fabrication.get_part_consistency_warnings,
@@ -1753,7 +1817,8 @@ class JLCPCBTools(wx.Dialog):
 
             self.run_generation_step(
                 "Generating placement file (CPL)",
-                self.fabrication.generate_cpl,
+                self.fabrication.write_cpl,
+                placements,
             )
 
             self.run_generation_step(
@@ -1895,7 +1960,7 @@ class JLCPCBTools(wx.Dialog):
                 self.start_assembly_enrichment(updated_references)
                 wx.PostEvent(self, BomDataChangedEvent(source="paste_part_lcsc"))
 
-    def add_correction(self, e):
+    def add_correction(self, e: "wx.CommandEvent") -> None:
         """Add part correction for the current part."""
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
@@ -1911,6 +1976,7 @@ class JLCPCBTools(wx.Dialog):
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
+        self.populate_footprint_list()
 
     def save_all_mappings(self, *_):
         """Save all mappings."""

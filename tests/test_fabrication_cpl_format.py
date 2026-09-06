@@ -1,5 +1,6 @@
 """Keep CPL coordinates in decimal millimetres."""
 
+from collections.abc import Callable, Iterator
 import csv
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load, module, package_stubs
+from .wx_harness import load_correction_modules, module
 
 
 class Point:
@@ -23,58 +24,72 @@ class Point:
 
 
 @pytest.fixture
-def generate_cpl(tmp_path):
+def generate_cpl(tmp_path: Path) -> Iterator[Callable[..., list[dict[str, str]]]]:
     """Run the real exporter with KiCad substitutes and temporary output."""
     package = "_cpl_format_test"
-    stubs = package_stubs(package)
-    stubs["pcbnew"] = MagicMock(
+    pcbnew = MagicMock(
         ToMM=lambda value: value / 1_000_000,
         FromMM=lambda value: round(value * 1_000_000),
         wxPoint=Point,
         VECTOR2I=Point,
     )
     helpers = f"{package}.footprint_helpers"
-    stubs[helpers] = module(helpers, get_is_dnp=lambda footprint: False)
-    fabrication_module = load(package, "fabrication", stubs)
+    with load_correction_modules(
+        package=package,
+        pcbnew=pcbnew,
+        names=("fabrication",),
+        replacements={helpers: module(helpers, get_is_dnp=lambda _footprint: False)},
+    ) as modules:
 
-    def generate(position, *, layer=0, origin=(0, 0), offset=(0, 0)):
-        """Return the CSV rows after actual origin and correction calculations."""
-        footprint = SimpleNamespace(
-            GetReference=lambda: "R1",
-            GetValue=lambda: "10k",
-            GetFPID=lambda: SimpleNamespace(GetLibItemName=lambda: "R_0603"),
-            GetLayer=lambda: layer,
-            GetOrientation=lambda: SimpleNamespace(AsDegrees=lambda: 0),
-            Pads=lambda: [],
-            GetPosition=lambda: Point(*position),
-        )
-        board = SimpleNamespace(
-            GetFileName=lambda: str(tmp_path / "board.kicad_pcb"),
-            GetDesignSettings=lambda: SimpleNamespace(
-                GetAuxOrigin=lambda: Point(*origin)
-            ),
-            Footprints=lambda: [footprint],
-        )
-        part = {
-            "reference": "R1",
-            "value": "10k",
-            "footprint": "R_0603",
-            "exclude_from_pos": 0,
-            "lcsc": "C123",
-        }
-        parent = SimpleNamespace(
-            settings={},
-            library=SimpleNamespace(
-                get_all_correction_data=lambda: [("R1", 0, offset)]
-            ),
-            store=SimpleNamespace(get_part=lambda reference: part),
-        )
-        fabrication = fabrication_module.Fabrication(parent, board)
-        fabrication.generate_cpl()
-        with Path(fabrication.get_cpl_csv_path()).open(newline="") as stream:
-            return list(csv.DictReader(stream))
+        def generate(
+            position: tuple[int, int],
+            *,
+            layer: int = 0,
+            origin: tuple[int, int] = (0, 0),
+            offset: tuple[float, float] = (0, 0),
+        ) -> list[dict[str, str]]:
+            """Return the CSV rows after actual origin and correction calculations."""
+            footprint = SimpleNamespace(
+                GetReference=lambda: "R1",
+                GetValue=lambda: "10k",
+                GetFPID=lambda: SimpleNamespace(GetLibItemName=lambda: "R_0603"),
+                GetLayer=lambda: layer,
+                GetOrientation=lambda: SimpleNamespace(AsDegrees=lambda: 0),
+                Pads=lambda: [],
+                GetPosition=lambda: Point(*position),
+            )
+            board = SimpleNamespace(
+                GetFileName=lambda: str(tmp_path / "board.kicad_pcb"),
+                GetDesignSettings=lambda: SimpleNamespace(
+                    GetAuxOrigin=lambda: Point(*origin)
+                ),
+                Footprints=lambda: [footprint],
+            )
+            part = {
+                "reference": "R1",
+                "value": "10k",
+                "footprint": "R_0603",
+                "exclude_from_pos": 0,
+                "lcsc": "C123",
+            }
+            snapshot = modules.library.CorrectionSnapshot(
+                db_path=str(tmp_path / "corrections.db"),
+                scope="global",
+                rows=(),
+                corrections=(modules.data.Correction("R1", 0, offset),),
+                issues=(),
+            )
+            parent = SimpleNamespace(
+                settings={},
+                library=SimpleNamespace(read_correction_data=lambda: snapshot),
+                store=SimpleNamespace(get_part=lambda _reference: part),
+            )
+            fabrication = modules.fabrication.Fabrication(parent, board)
+            fabrication.generate_cpl()
+            with Path(fabrication.get_cpl_csv_path()).open(newline="") as stream:
+                return list(csv.DictReader(stream))
 
-    return generate
+        yield generate
 
 
 @pytest.mark.parametrize(

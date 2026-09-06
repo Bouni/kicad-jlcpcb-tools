@@ -1,20 +1,33 @@
 """Contains the corrections manager."""
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 import csv
 import logging
 import os
+from typing import TYPE_CHECKING, Any
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
+from .correction_data import (
+    Correction,
+    CorrectionDataError,
+    parse_corrections_csv,
+    validate_correction,
+)
 from .events import PopulateFootprintListEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+
+if TYPE_CHECKING:
+    from .library import StoredCorrection
 
 
 class CorrectionManagerDialog(wx.Dialog):
     """Dialog for managing part corrections."""
 
-    def __init__(self, parent, footprint):
+    def __init__(self, parent: Any, footprint: str) -> None:
         wx.Dialog.__init__(
             self,
             parent,
@@ -27,11 +40,10 @@ class CorrectionManagerDialog(wx.Dialog):
 
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.selection_regex = None
-        self.selection_rotation = None
-        self.selection_offset_x = None
-        self.selection_offset_y = None
-        self.import_legacy_corrections()
+        self.selected_record = None
+        self.selection_db_path = None
+        self.correction_snapshot = None
+        self._populating = False
 
         # ---------------------------------------------------------------------
         # ---------------------------- Hotkeys --------------------------------
@@ -161,7 +173,7 @@ class CorrectionManagerDialog(wx.Dialog):
             wx.ID_ANY,
             wx.DefaultPosition,
             wx.DefaultSize,
-            style=wx.dataview.DV_MULTIPLE,
+            style=wx.dataview.DV_SINGLE,
         )
 
         self.corrections_list.AppendTextColumn(
@@ -188,6 +200,14 @@ class CorrectionManagerDialog(wx.Dialog):
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
         )
+
+        self.corrections_list.AppendTextColumn(
+            "Status",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(parent.scale_factor * 280),
+            align=wx.ALIGN_LEFT,
+        )
+        self.correction_status = wx.StaticText(self, wx.ID_ANY, "")
 
         self.corrections_list.SetMinSize(
             HighResWxSize(parent.window, wx.Size(600, 500))
@@ -310,9 +330,7 @@ class CorrectionManagerDialog(wx.Dialog):
         self.global_corrections.Bind(
             wx.EVT_CHECKBOX, self.on_global_corrections_changed
         )
-        self.global_corrections.SetValue(
-            self.parent.library.uses_global_correction_database()
-        )
+        self.global_corrections.SetValue(self._uses_global_corrections())
 
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
@@ -331,20 +349,24 @@ class CorrectionManagerDialog(wx.Dialog):
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(add_edit_sizer, 1, wx.ALL | wx.EXPAND, 5)
+        layout.Add(self.correction_status, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons()
+        if self._uses_global_corrections():
+            self.parent.library.retry_correction_migrations()
+        self.import_legacy_corrections()
         self.populate_corrections_list()
 
-    def quit_dialog(self, *_):
+    def quit_dialog(self, *_: object) -> None:
         """Close this dialog."""
         self.Destroy()
         self.EndModal(0)
 
-    def enable_toolbar_buttons(self):
+    def enable_toolbar_buttons(self) -> None:
         """Control the state of all the buttons in toolbar on the right side."""
         if (
             self.regex.GetValue()
@@ -361,237 +383,342 @@ class CorrectionManagerDialog(wx.Dialog):
         else:
             self.delete_button.Enable(False)
 
-    def to_float(self, value):
-        """Convert the given value to a float, return 0 if convertion fails."""
+    def _clear_selection(self) -> None:
+        """Forget the stored row identity without changing unsaved input fields."""
+        self.selected_record = None
+        self.selection_db_path = None
+
+    def _input_values(self) -> tuple[str, str, str, str]:
+        """Read exact editor text to distinguish actual edits from stale display values."""
+        return tuple(
+            control.GetValue()
+            for control in (self.regex, self.rotation, self.offset_x, self.offset_y)
+        )
+
+    @staticmethod
+    def _record_editor_values(record: StoredCorrection) -> tuple[str, str, str, str]:
+        """Present valid values consistently while preserving invalid original text."""
+        if record.correction is not None:
+            return record.correction.editor_values()
+        return (
+            str(record.pattern),
+            str(record.rotation),
+            str(record.offset[0]),
+            str(record.offset[1]),
+        )
+
+    def _select_record(self, record: StoredCorrection, db_path: str) -> None:
+        """Retain the exact stored record and synchronize the editor with it."""
+        self.selected_record = record
+        self.selection_db_path = db_path
+        for control, value in zip(
+            (self.regex, self.rotation, self.offset_x, self.offset_y),
+            self._record_editor_values(record),
+        ):
+            control.SetValue(value)
+
+    def populate_corrections_list(
+        self, *, selected_rowid: int | None = None, preserve_inputs: bool = False
+    ) -> None:
+        """Refresh rows without granting stale unsaved edits a newer record identity."""
+        snapshot = self.parent.library.read_correction_data()
+        preserve_inputs = preserve_inputs or (
+            selected_rowid is None
+            and self.selected_record is not None
+            and self._input_values() != self._record_editor_values(self.selected_record)
+        )
+        if selected_rowid is None and self.selected_record is not None:
+            selected_rowid = self.selected_record.rowid
+        self._populating = True
         try:
-            return float(value)
-        except ValueError:
-            return 0
-
-    def str_from_float(self, value):
-        """Convert the given floating point value to a string.
-
-        Us as many decimal digits as required but for small numbers
-        at least two decimal digits are used.
-        """
-        s = str(value)
-        return f"{value:.2f}" if len(s) < 4 else s
-
-    def populate_corrections_list(self):
-        """Populate the list with the result of the search."""
-        self.corrections_list.DeleteAllItems()
-        for regex, rotation, offset in self.parent.library.get_all_correction_data():
-            self.corrections_list.AppendItem(
-                [
-                    str(regex),
-                    str(rotation),
-                    self.str_from_float(offset[0]),
-                    self.str_from_float(offset[1])
-                ]
-            )
-        selected_row = None
-        if self.selection_regex is not None:
-            for row in range(self.corrections_list.GetItemCount()):
-                row_regex = self.corrections_list.GetTextValue(row, 0)
-                if row_regex == self.selection_regex:
-                    selected_row = row
-            if selected_row is not None:
-                self.corrections_list.SelectRow(selected_row)
-
-    def save_correction(self, *_):
-        """Add/Update a correction in the database."""
-        regex = self.regex.GetValue()
-        rotation = int(self.to_float(self.rotation.GetValue()))
-        offset_x = self.to_float(self.offset_x.GetValue())
-        offset_y = self.to_float(self.offset_y.GetValue())
-        offset = (offset_x, offset_y)
-        if regex == self.selection_regex:
-            # the regex of the selection was not changed, just update values.
-            self.parent.library.update_correction_data(regex, rotation, offset)
-        else:
-            # regex was modified or nothing was selected.
-            # Check if there is a existing rule for that regex
-            row_of_that_regex = None
-            for row in range(self.corrections_list.GetItemCount()):
-                row_regex = self.corrections_list.GetTextValue(row, 0)
-                if row_regex == regex:
-                    row_of_that_regex = row
-
-            if row_of_that_regex is None:
-                # the regex is a new one, just create it or update the selected entry
-
-                if self.selection_regex is not None:
-                    # remove old line, if one existed
-                    self.parent.library.delete_correction_data(self.selection_regex)
-
-                # Add the modified regex and values
-                self.parent.library.insert_correction_data(regex, rotation, offset)
-                self.selection_regex = regex
-            else:
-                # The regex already exists.
-                existing_rotation = int(
-                    self.to_float(self.corrections_list.GetTextValue(row, 1))
+            self.corrections_list.DeleteAllItems()
+            self.correction_snapshot = snapshot
+            for index, record in enumerate(snapshot.rows):
+                self.corrections_list.AppendItem(
+                    [
+                        *self._record_editor_values(record),
+                        "; ".join(
+                            f"{issue.field}: {issue.message}" for issue in record.issues
+                        ),
+                    ]
                 )
-                existing_offset_x = self.to_float(
-                    self.corrections_list.GetTextValue(row, 2)
-                )
-                existing_offset_y = self.to_float(
-                    self.corrections_list.GetTextValue(row, 3)
-                )
-
-                if (
-                    rotation == existing_rotation
-                    and offset_x == existing_offset_x
-                    and offset_y == existing_offset_y
+                if record.rowid == selected_rowid and (
+                    self.selected_record is None
+                    or self.selection_db_path == snapshot.db_path
                 ):
-                    # User entered a regex that already exists, just select that one
-                    self.selection_regex = regex
-                else:
-                    # The regex exists with different values, ask the user what to do.
-                    existing_correction = "(" + \
-                        str(existing_rotation) + "°, " + \
-                        self.str_from_float(existing_offset_x) + "/" + \
-                        self.str_from_float(existing_offset_y) + \
-                        ")"
-                    new_correction = "(" + \
-                        str(rotation) + "°, " + \
-                        self.str_from_float(offset_x) + "/" + \
-                        self.str_from_float(offset_y) + \
-                        ")"
+                    if not preserve_inputs:
+                        self._select_record(record, snapshot.db_path)
+                        self.corrections_list.SelectRow(index)
+        finally:
+            self._populating = False
 
-                    dialog = wx.MessageDialog(
-                        self,
-                        f"A rule for '{regex}' already exists!",
-                        "Regex exists!",
-                        wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
-                    )
-                    if self.selection_regex is None:
-                        # The user entered a regex that already exists with different values.
-                        dialog.ExtendedMessage = "Do you want to update the corrections " + \
-                           existing_correction + \
-                           " to " + \
-                           new_correction
-                    else:
-                        # The user has selected regex_a, changed it to regex_b
-                        # (but regex_b exists).
-                        dialog.ExtendedMessage = "Do you want to replace the corrections " + \
-                           existing_correction + \
-                           " with " + \
-                           new_correction + \
-                           ",\n" + \
-                           f"removing the rule for '{self.selection_regex}'?"
-                    result = dialog.ShowModal()
+        warning = f"Using {snapshot.scope} corrections: {snapshot.db_path}"
+        if snapshot.issues:
+            if any(row.issues for row in snapshot.rows):
+                warning = (
+                    f"{snapshot.scope.capitalize()} corrections need repair "
+                    f"({len(snapshot.issues)} errors). "
+                    "Select a row to repair or delete it. "
+                )
+            else:
+                warning = f"{snapshot.scope.capitalize()} corrections are unavailable. "
+            warning += (
+                "Export and fabrication are blocked until all errors are resolved."
+            )
+            general_issues = [issue for issue in snapshot.issues if issue.rowid is None]
+            if general_issues:
+                warning += "\n" + "\n".join(map(str, general_issues))
+                warning += (
+                    "\nResolve the file errors above and reopen Corrections Manager "
+                    "to retry."
+                )
+        if snapshot.warnings:
+            warning += "\nCorrection warnings:\n" + "\n".join(
+                map(str, snapshot.warnings)
+            )
+            warning += (
+                "\nResolve the warnings above and reopen Corrections Manager to retry."
+            )
+        self.correction_status.SetLabel(warning)
+        self.correction_status.SetToolTip(
+            "\n".join(map(str, (*snapshot.issues, *snapshot.warnings)))
+        )
+        self.correction_status.Wrap(int(self.parent.scale_factor * 700))
+        self.Layout()
+        self.enable_toolbar_buttons()
 
-                    if result == wx.ID_YES:
-                        if self.selection_regex is not None:
-                            self.parent.library.delete_correction_data(self.selection_regex)
-                        self.parent.library.update_correction_data(regex, rotation, offset)
-                        self.selection_regex = regex
+    def _show_error(self, title: str, error: object) -> None:
+        """Show a handled correction error while preserving the current inputs."""
+        self.logger.warning("%s: %s", title, error)
+        wx.MessageBox(str(error), title, wx.OK | wx.ICON_ERROR, self)
 
-        self.rotation.SetValue(str(rotation))
-        self.offset_x.SetValue(self.str_from_float(offset_x))
-        self.offset_y.SetValue(self.str_from_float(offset_y))
+    def _selection_matches_database(self) -> bool:
+        """Refuse to reuse a selected row identity in a different database."""
+        return self.selected_record is None or os.path.realpath(
+            self.selection_db_path
+        ) == os.path.realpath(self.parent.library.correctionsdb_file)
+
+    def _confirm_replacement(
+        self, correction: Correction, conflicts: Sequence[StoredCorrection]
+    ) -> bool:
+        """Ask before atomically replacing other records with the same pattern."""
+        existing = "\n".join(
+            f"Row {row.rowid}: "
+            + (
+                str(row.correction)
+                if row.correction is not None
+                else f"{row.rotation}°, {row.offset[0]}/{row.offset[1]}"
+            )
+            for row in conflicts
+        )
+        dialog = wx.MessageDialog(
+            self,
+            f"A rule for '{correction.pattern}' already exists!",
+            "Regex exists!",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+        )
+        dialog.ExtendedMessage = (
+            f"{existing}\n\nReplace these {len(conflicts)} existing entries with "
+            f"{correction}?"
+        )
+        if self.selected_record is not None:
+            dialog.ExtendedMessage += (
+                f"\nThe selected row {self.selected_record.rowid} will become "
+                f"'{correction.pattern}'."
+            )
+        try:
+            return dialog.ShowModal() == wx.ID_YES
+        finally:
+            dialog.Destroy()
+
+    def save_correction(self, *_: object) -> bool:
+        """Validate input and save or repair one row in a single transaction."""
+        if not self._selection_matches_database():
+            self._show_error(
+                "Correction Save Error",
+                "The corrections database changed. Select the row again before saving.",
+            )
+            self.populate_corrections_list(preserve_inputs=True)
+            return False
+        library = self.parent.library
+        target = str(library.correctionsdb_file)
+        rowid = self.selected_record.rowid if self.selected_record else None
+        try:
+            correction = validate_correction(
+                self.regex.GetValue(),
+                self.rotation.GetValue(),
+                (self.offset_x.GetValue(), self.offset_y.GetValue()),
+                source=target,
+                rowid=rowid,
+            )
+            snapshot = library.read_correction_data(target)
+            conflicts = [
+                row
+                for row in snapshot.rows
+                if row.pattern == correction.pattern and row.rowid != rowid
+            ]
+            if (
+                self.selected_record is None
+                and len(conflicts) == 1
+                and conflicts[0].correction == correction
+            ):
+                self.populate_corrections_list(selected_rowid=conflicts[0].rowid)
+                return True
+            if conflicts and not self._confirm_replacement(correction, conflicts):
+                return False
+            rowid = library.save_correction_data(
+                correction,
+                rowid=rowid,
+                replace=bool(conflicts),
+                db_path=target,
+                expected_record=self.selected_record,
+                expected_conflicts=conflicts,
+            )
+        except CorrectionDataError as error:
+            self._show_error("Correction Save Error", error)
+            self.populate_corrections_list(preserve_inputs=True)
+            return False
+
+        self.populate_corrections_list(selected_rowid=rowid)
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        return True
+
+    def delete_correction(self, *_: object) -> bool:
+        """Delete only the selected stored row, even for null or duplicate patterns."""
+        if self.selected_record is None:
+            return False
+        if not self._selection_matches_database():
+            self._show_error(
+                "Correction Delete Error",
+                "The corrections database changed. Select the row again before deleting.",
+            )
+            self.populate_corrections_list(preserve_inputs=True)
+            return False
+        try:
+            self.parent.library.delete_correction_row(
+                self.selected_record.rowid,
+                db_path=self.selection_db_path,
+                expected_record=self.selected_record,
+            )
+        except CorrectionDataError as error:
+            self._show_error("Correction Delete Error", error)
+            self.populate_corrections_list(preserve_inputs=True)
+            return False
+        self._clear_selection()
         self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        return True
 
-    def delete_correction(self, *_):
-        """Delete a correction from the database."""
-        item = self.corrections_list.GetSelection()
-        row = self.corrections_list.ItemToRow(item)
-        if row == -1:
+    def on_correction_selected(self, event: wx.dataview.DataViewEvent) -> None:
+        """Copy original field text without coercing invalid values to zero."""
+        if self._populating:
             return
-        regex = self.corrections_list.GetTextValue(row, 0)
-        self.parent.library.delete_correction_data(regex)
-        self.populate_corrections_list()
-        wx.PostEvent(self.parent, PopulateFootprintListEvent())
-
-    def on_correction_selected(self, event):
-        """Enable the toolbar buttons when a selection was made."""
-        if len(self.corrections_list.GetSelections()) > 1:
-            for item in self.corrections_list.GetSelections():
-                if item != event.GetItem():
-                    self.corrections_list.Unselect(item)
-
-        if self.corrections_list.GetSelectedItemsCount() > 0:
-            item = self.corrections_list.GetSelection()
-            row = self.corrections_list.ItemToRow(item)
-            if row == -1:
-                return
-
-            self.selection_regex = self.corrections_list.GetTextValue(row, 0)
-            self.selection_rotation = int(
-                self.to_float(self.corrections_list.GetTextValue(row, 1))
-            )
-            self.selection_offset_x = self.to_float(
-                self.corrections_list.GetTextValue(row, 2)
-            )
-            self.selection_offset_y = self.to_float(
-                self.corrections_list.GetTextValue(row, 3)
-            )
-            self.regex.SetValue(self.selection_regex)
-            self.rotation.SetValue(str(self.selection_rotation))
-            self.offset_x.SetValue(self.str_from_float(self.selection_offset_x))
-            self.offset_y.SetValue(self.str_from_float(self.selection_offset_y))
+        row = self.corrections_list.GetSelectedRow()
+        if row == wx.NOT_FOUND or not 0 <= row < len(self.correction_snapshot.rows):
+            self._clear_selection()
         else:
-            self.selection_row = None
-            self.selection_regex = None
-
-        self.enable_toolbar_buttons()
-
-    def on_textfield_change(self, *_):
-        """Check if the texfield change affects toolbars."""
-        self.enable_toolbar_buttons()
-
-    def on_global_corrections_changed(self, use_global):
-        """Switch between global or local correction database file."""
-        if self.parent.library.uses_global_correction_database():
-            dialog = wx.MessageDialog(
-                self,
-                "Do you want to switch to the local corrections database?",
-                "Switching corrections database",
-                wx.YES_NO | wx.YES_DEFAULT | wx.ICON_QUESTION,
+            self._select_record(
+                self.correction_snapshot.rows[row], self.correction_snapshot.db_path
             )
+        self.enable_toolbar_buttons()
+
+    def on_textfield_change(self, *_: object) -> None:
+        """Check whether changed text enables saving."""
+        self.enable_toolbar_buttons()
+
+    def _uses_global_corrections(self) -> bool:
+        """Read the active scope without inferring it from unrelated stored tables."""
+        library = self.parent.library
+        return os.path.realpath(library.correctionsdb_file) == os.path.realpath(
+            library.globalcorrectionsdb_file
+        )
+
+    def on_global_corrections_changed(self, *_: object) -> bool:
+        """Switch scope only after a successful, validated database transfer."""
+        library = self.parent.library
+        was_global = self._uses_global_corrections()
+        dialog = wx.MessageDialog(
+            self,
+            "Do you want to switch to the "
+            + ("local" if was_global else "global")
+            + " corrections database?",
+            "Switching corrections database",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+        )
+        if was_global:
             dialog.ExtendedMessage = "Switching to a board local database copies the current global database."
         else:
-            dialog = wx.MessageDialog(
+            dialog.ExtendedMessage = (
+                "The project-specific corrections will be discarded. "
+                "The global corrections will be used for this board."
+            )
+        try:
+            confirmed = dialog.ShowModal() == wx.ID_YES
+        finally:
+            dialog.Destroy()
+        if not confirmed:
+            self.global_corrections.SetValue(was_global)
+            return False
+        try:
+            library.switch_to_global_correction_database(not was_global)
+        except CorrectionDataError as error:
+            self.global_corrections.SetValue(was_global)
+            self._show_error(
+                "Correction Database Error",
+                f"{error}\nResolve the file errors and try switching databases again.",
+            )
+            return False
+        self._clear_selection()
+        self.populate_corrections_list()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        self.global_corrections.SetValue(self._uses_global_corrections())
+        return True
+
+    def download_correction_data(self, *_: object) -> bool:
+        """Refresh the display only after the remote batch has committed."""
+        result = self.parent.library.fetch_remote_corrections()
+        if result is None:
+            return False
+        self.populate_corrections_list()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        return True
+
+    def import_legacy_corrections(self) -> bool:
+        """Import an old CSV once, after controls exist, and preserve its archive."""
+        path = os.path.join(PLUGIN_PATH, "corrections", "cpl_rotations_db.csv")
+        if not os.path.isfile(path):
+            return False
+        library = self.parent.library
+        try:
+            with open(path, "rb") as source:
+                contents = source.read()
+            key = library.correction_csv_migration_key(path, contents)
+            completed = library.has_correction_migration(key)
+        except (OSError, CorrectionDataError) as error:
+            self._show_error("Legacy Correction Import Error", f"{path}: {error}")
+            return False
+        if not completed and not self._import_corrections(
+            path, contents=contents, migration_key=key, refresh=False
+        ):
+            return False
+        try:
+            # A hard link refuses an existing archive atomically. Keep the source
+            # if archival fails; the committed marker prevents replay after repair.
+            os.link(path, f"{path}.backup")
+            os.unlink(path)
+        except OSError as error:
+            wx.MessageBox(
+                f"The legacy corrections were already imported successfully. "
+                f"The source remains at {path}, but could not be archived: {error}. "
+                "It will not be imported again unless its contents change.",
+                "Legacy Correction Archive Warning",
+                wx.OK | wx.ICON_WARNING,
                 self,
-                "Do you want to switch to the global corrections database?",
-                "Switching corrections database",
-                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
             )
-        result = dialog.ShowModal()
+        return True
 
-        if result == wx.ID_NO:
-            self.global_corrections.SetValue(
-                self.parent.library.uses_global_correction_database()
-            )
-            return
-
-        self.parent.library.switch_to_global_correction_database(
-            not self.parent.library.uses_global_correction_database()
-        )
-        self.populate_corrections_list()
-        wx.PostEvent(self.parent, PopulateFootprintListEvent())
-        self.global_corrections.SetValue(
-            self.parent.library.uses_global_correction_database()
-        )
-
-    def download_correction_data(self, *_):
-        """Fetch the latest rotation correction table from Matthew Lai's JLCKicadTool repo."""
-        self.parent.library.create_correction_table()
-        self.parent.library.fetch_remote_corrections()
-        self.populate_corrections_list()
-        wx.PostEvent(self.parent, PopulateFootprintListEvent())
-
-    def import_legacy_corrections(self):
-        """Check if corrections in CSV format are found and import them into the database."""
-        csv_file = os.path.join(PLUGIN_PATH, "corrections", "cpl_rotations_db.csv")
-        if os.path.isfile(csv_file):
-            self._import_corrections(csv_file)
-            os.rename(csv_file, f"{csv_file}.backup")
-
-    def import_corrections_dialog(self, *_):
-        """Dialog to import correctios from a CSV file."""
+    def import_corrections_dialog(self, *_: object) -> bool:
+        """Ask for a correction CSV and import it after confirmation."""
         with wx.FileDialog(
             self,
             "Import",
@@ -599,14 +726,13 @@ class CorrectionManagerDialog(wx.Dialog):
             "",
             "CSV files (*.csv)|*.csv",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
-        ) as importFileDialog:
-            if importFileDialog.ShowModal() == wx.ID_CANCEL:
-                return
-            path = importFileDialog.GetPath()
-            self._import_corrections(path)
+        ) as file_dialog:
+            if file_dialog.ShowModal() == wx.ID_CANCEL:
+                return False
+            return self._import_corrections(file_dialog.GetPath())
 
-    def export_corrections_dialog(self, *_):
-        """Dialog to export correctios to a CSV file."""
+    def export_corrections_dialog(self, *_: object) -> bool:
+        """Ask for the destination of a validated correction CSV."""
         with wx.FileDialog(
             self,
             "Export",
@@ -614,63 +740,59 @@ class CorrectionManagerDialog(wx.Dialog):
             "",
             "CSV files (*.csv)|*.csv",
             wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
-        ) as exportFileDialog:
-            if exportFileDialog.ShowModal() == wx.ID_CANCEL:
-                return
-            path = exportFileDialog.GetPath()
-            self._export_corrections(path)
+        ) as file_dialog:
+            if file_dialog.ShowModal() == wx.ID_CANCEL:
+                return False
+            return self._export_corrections(file_dialog.GetPath())
 
-    def _import_corrections(self, path):
-        """Corrections import logic."""
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8") as f:
-                csvreader = csv.DictReader(
-                    f, fieldnames=("regex", "rotation", "offset_x", "offset_y")
-                )
-                next(csvreader)
-                for row in csvreader:
-                    if "regex" in row and row["regex"] is not None:
-                        regex = row["regex"]
-                        rotation = row["rotation"] if row["rotation"] is not None else 0
-                        offset_x = row["offset_x"] if row["offset_x"] is not None else 0
-                        offset_y = row["offset_y"] if row["offset_y"] is not None else 0
-                        existing_data = self.parent.library.get_correction_data(regex)
-                        if existing_data:
-                            self.parent.library.update_correction_data(
-                                regex, rotation, (offset_x, offset_y)
-                            )
-                            self.logger.info(
-                                "Correction '%s' exists already in database with correction value '%s, %s/%s'. Overwrite it with local values from CSV (%s, %s/%s).",
-                                regex,
-                                existing_data[1],
-                                existing_data[2],
-                                existing_data[3],
-                                rotation,
-                                offset_x,
-                                offset_y,
-                            )
-                        else:
-                            self.parent.library.insert_correction_data(
-                                regex, rotation, (offset_x, offset_y)
-                            )
-                            self.logger.info(
-                                "Correction '%s' with correction value '%s, %s/%s' is added to the database from local CSV.",
-                                regex,
-                                rotation,
-                                offset_x,
-                                offset_y,
-                            )
-            self.populate_corrections_list()
+    def _import_corrections(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        contents: bytes | None = None,
+        migration_key: str | None = None,
+        refresh: bool = True,
+    ) -> bool:
+        """Validate the complete CSV before committing any insert or replacement."""
+        library = self.parent.library
+        target = str(library.correctionsdb_file)
+        try:
+            if contents is None:
+                with open(path, "rb") as source:
+                    contents = source.read()
+            corrections = parse_corrections_csv(
+                contents.decode("utf-8"), source=str(path)
+            )
+            result = library.apply_corrections(
+                corrections, db_path=target, migration_key=migration_key
+            )
+        except (OSError, UnicodeError, CorrectionDataError) as error:
+            self._show_error("Correction Import Error", f"{path}: {error}")
+            return False
+        if result.changed:
+            if refresh:
+                self.populate_corrections_list()
             wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        return True
 
-    def _export_corrections(self, path):
-        """Corrections export logic."""
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
-            csvwriter.writerow(["Pattern", "Rotation", "Offset X", "Offset Y"])
-            for (
-                regex,
-                rotation,
-                offset,
-            ) in self.parent.library.get_all_correction_data():
-                csvwriter.writerow([regex, rotation, offset[0], offset[1]])
+    def _export_corrections(self, path: str | os.PathLike[str]) -> bool:
+        """Validate a complete snapshot before opening the export destination."""
+        try:
+            snapshot = self.parent.library.read_correction_data()
+            corrections = snapshot.corrections
+            if corrections is None:
+                self._show_error(
+                    "Correction Export Error",
+                    f"{path}: The active {snapshot.scope} corrections are not ready. "
+                    "Resolve the errors shown in Corrections Manager before exporting.",
+                )
+                return False
+            with open(path, "w", newline="", encoding="utf-8") as destination:
+                writer = csv.writer(destination, quotechar='"', quoting=csv.QUOTE_ALL)
+                writer.writerow(["Pattern", "Rotation", "Offset X", "Offset Y"])
+                for correction in corrections:
+                    writer.writerow(correction.csv_row())
+        except (OSError, UnicodeError, CorrectionDataError) as error:
+            self._show_error("Correction Export Error", f"{path}: {error}")
+            return False
+        return True
