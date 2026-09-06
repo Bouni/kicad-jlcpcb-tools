@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 from typing import Union
 
+from .bom_estimation.assembly_mode import ComponentProductType
 from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
@@ -292,16 +293,24 @@ class Store:
 
     def get_assembly_enrichment_targets(self, references=None) -> dict:
         """Get references grouped by LCSC that still need assembly process enrichment."""
+        # A row counts as enriched only once its classification is one the
+        # ComponentProductType enum knows about; NULL or an unrecognized value
+        # still needs a fetch. Deriving the list here keeps the query in step
+        # with the enum instead of repeating its numeric values.
+        known_product_types = [int(t) for t in ComponentProductType]
+        # The f-string only injects ?-placeholders; the classification values
+        # are bound through `params` below, never interpolated.
+        type_placeholders = ",".join("?" for _ in known_product_types)
         query = (
             "SELECT reference, lcsc FROM part_info "
             "WHERE lcsc IS NOT NULL AND lcsc != '' "
             "AND ("
             "assembly_process IS NULL OR assembly_process = '' "
             "OR component_product_type IS NULL "
-            "OR component_product_type NOT IN (0, 1, 2)"
+            f"OR component_product_type NOT IN ({type_placeholders})"
             ")"
         )
-        params = []
+        params = list(known_product_types)
         if references:
             # The f-string only injects ?-placeholders; the actual reference
             # values are bound through `params` below, never interpolated.

@@ -241,7 +241,11 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
 
 
 def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
-    """Rows missing any required enrichment field should be selected."""
+    """Rows missing any required enrichment field should be selected.
+
+    Every ComponentProductType member (0, 1, 2) counts as enriched; only NULL
+    or an unrecognized classification keeps a row in the target set.
+    """
     s = _store_obj()
     s.logger = logging.getLogger(__name__)
     s.dbfile = str(tmp_path / "project.db")
@@ -260,6 +264,7 @@ def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
                 ("R5", "22k", "C5", "SMT", 3),
                 ("R6", "4k7", "C6", "SMT", "bad"),
                 ("R7", "1k", "C7", "SMT", 2),
+                ("R8", "330p", "C8", "SMT", 1),
             ],
         )
         cur.commit()
