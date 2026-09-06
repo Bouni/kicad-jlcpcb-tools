@@ -28,7 +28,7 @@ echo "Create folder structure for ZIP"
 mkdir -p "$PLUGINS_DIR" "$RESOURCES_DIR"
 
 echo "Copy top-level files"
-for file in VERSION settings.json ./*.py ./*.png; do
+for file in VERSION default_settings.json ./*.py ./*.png; do
 	[ -e "$file" ] || continue
 	cp "$file" "$PLUGINS_DIR"
 done
