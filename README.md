@@ -141,6 +141,9 @@ This tool will automatically export all additional layers with the JLC_ prefix a
 JLCPCB seems to need corrected rotation information. @matthewlai implemented that in his [JLCKicadTools](https://github.com/matthewlai/JLCKicadTools) and I adopted his work in this plugin as well.
 You can download Matthews file from GitHub and manage your own corrections in the Rotation manager.
 
+See [Importing and repairing corrections](CORRECTIONS.md) for supported CSV
+formats, validation rules, and recovery of invalid records from older versions.
+
 ## Icons
 
 This plugin makes use of a lot of icons from the excellent [Material Design Icons](https://materialdesignicons.com/)

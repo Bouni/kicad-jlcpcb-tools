@@ -1,19 +1,29 @@
 """Handle the JLCPCB parts database."""
 
+from collections.abc import Iterable, Iterator, Sequence
 import contextlib
-import csv
+from dataclasses import dataclass, replace
 from enum import Enum
+import hashlib
+import json
 import logging
 import os
-from pathlib import Path
+from pathlib import Path, PurePath
 import sqlite3
 from threading import Lock, Thread
 import time
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Union
 
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
+from .correction_data import (
+    Correction,
+    CorrectionDataError,
+    CorrectionIssue,
+    parse_corrections_csv,
+    validate_correction,
+)
 from .dblib import DEFAULT_LIBRARY, LIBRARY_CONFIGS
 from .events import (
     DownloadCompletedEvent,
@@ -25,6 +35,19 @@ from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
+
+DatabasePath = Union[str, os.PathLike[str]]
+_INITIAL_DEFAULTS_KEY = "remote:initial-defaults:v1"
+_INITIAL_DOWNLOAD_LOCK = Lock()
+_INITIAL_DOWNLOAD_TARGETS: set[str] = set()
+
+
+def _sqlite_file_uri(path: PurePath) -> str:
+    """Keep UNC hosts in SQLite's path while retaining pathlib's escaping."""
+    uri = path.as_uri()
+    if uri.startswith("file://") and not uri.startswith("file:///"):
+        return "file:////" + uri[len("file://") :]
+    return uri
 
 
 class PartsDatabaseInfo(NamedTuple):
@@ -43,10 +66,66 @@ class LibraryState(Enum):
     DOWNLOAD_RUNNING = 2
 
 
+@dataclass(frozen=True)
+class StoredCorrection:
+    """Preserve a stored row and its validation errors for precise repair."""
+
+    rowid: int
+    pattern: object
+    rotation: object
+    offset: tuple[object, object]
+    issues: tuple[CorrectionIssue, ...]
+    correction: Optional[Correction] = None  # noqa: UP045
+
+    @property
+    def identity(self) -> tuple[tuple[type, object], ...]:
+        """Identify the exact raw record, distinguishing SQLite storage types."""
+        return tuple(
+            (type(value), value)
+            for value in (self.rowid, self.pattern, self.rotation, *self.offset)
+        )
+
+
+class CorrectionState(Enum):
+    """Whether a complete correction set is ready, repairable, or unavailable."""
+
+    READY = "ready"
+    NEEDS_REPAIR = "needs_repair"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class CorrectionSnapshot:
+    """An immutable read of one explicitly identified correction database."""
+
+    db_path: str
+    scope: str
+    rows: tuple[StoredCorrection, ...]
+    corrections: Optional[tuple[Correction, ...]]  # noqa: UP045
+    issues: tuple[CorrectionIssue, ...]
+    csv_migrations: tuple[tuple[str, str], ...] = ()
+    state: CorrectionState = CorrectionState.READY
+    warnings: tuple[CorrectionIssue, ...] = ()
+
+
+@dataclass(frozen=True)
+class CorrectionBatchResult:
+    """Describe a committed operation, including input records intentionally skipped."""
+
+    inserted: int = 0
+    updated: int = 0
+    skipped: int = 0
+
+    @property
+    def changed(self) -> int:
+        """Report how many stored records were inserted or updated."""
+        return self.inserted + self.updated
+
+
 class Library:
     """A storage class to get data from a sqlite database and write it back."""
 
-    def __init__(self, parent):
+    def __init__(self, parent: Any) -> None:
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.order_by = "LCSC Part"
@@ -62,6 +141,8 @@ class Library:
         self.state = None
         self.download_lock = Lock()
         self.category_map = {}
+        self._migration_session_diagnostics = {}
+        self._known_legacy_sources = {}
 
         self.refresh_library_config()
 
@@ -122,7 +203,7 @@ class Library:
         else:
             self.logger.info("Data directory '%s' exists, not creating", self.datadir)
 
-    def check_library(self):
+    def check_library(self) -> None:
         """Check if the database files exists, if not trigger update / create database."""
         if (
             not os.path.isfile(self.partsdb_file)
@@ -131,20 +212,32 @@ class Library:
             self.state = LibraryState.UPDATE_NEEDED
         else:
             self.state = LibraryState.INITIALIZED
-        corrections_file_missing = not os.path.isfile(self.correctionsdb_file)
-        if corrections_file_missing or os.path.getsize(self.correctionsdb_file) == 0:
-            self.create_correction_table()
-            self.migrate_corrections()
+        try:
             if (
-                corrections_file_missing
-                and self.correctionsdb_file == self.globalcorrectionsdb_file
+                not os.path.isfile(self.correctionsdb_file)
+                or os.path.getsize(self.correctionsdb_file) == 0
             ):
-                db_path = self.globalcorrectionsdb_file
-                Thread(
-                    target=self.fetch_remote_corrections,
-                    args=(db_path,),
-                    daemon=True,
-                ).start()
+                with self._correction_transaction(
+                    self.correctionsdb_file, create=True
+                ) as con:
+                    if (
+                        self.correctionsdb_file == self.globalcorrectionsdb_file
+                        and _INITIAL_DEFAULTS_KEY
+                        not in self._correction_metadata(con)[0]
+                    ):
+                        con.execute(
+                            "INSERT OR IGNORE INTO correction_migration_state VALUES (?, ?, ?, ?)",
+                            (
+                                _INITIAL_DEFAULTS_KEY,
+                                self.globalcorrectionsdb_file,
+                                "seed-pending",
+                                json.dumps(self._legacy_correction_sources()),
+                            ),
+                        )
+            self.retry_correction_migrations()
+        except (CorrectionDataError, OSError) as error:
+            # Recovery reads report these errors while keeping the manager usable.
+            self.logger.warning("Correction storage is unavailable: %s", error)
         if (
             not os.path.isfile(self.mappingsdb_file)
             or os.path.getsize(self.mappingsdb_file) == 0
@@ -153,58 +246,82 @@ class Library:
             self.migrate_mappings()
 
     def uses_global_correction_database(self):
-        """Check if there is a board specific corrections database or not.
-
-        Returns True if the global database is used.
-        """
-
-        try:
-            with (
-                contextlib.closing(
-                    sqlite3.connect(self.localcorrectionsdb_file)
-                ) as ldb,
-                ldb as lcur,
-            ):
-                result = lcur.execute(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='correction')"
-                ).fetchone()
-                if not result:
-                    return True
-
-                return result[0] != 1
-        except sqlite3.OperationalError:
+        """Check for a project correction table without creating a project database."""
+        if not Path(self.localcorrectionsdb_file).exists():
             return True
+        try:
+            with contextlib.closing(
+                self._read_database(self.localcorrectionsdb_file)
+            ) as con:
+                return not con.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='correction'"
+                ).fetchone()
+        except (sqlite3.Error, OSError):
+            # Expose an unreadable project database for repair rather than
+            # silently changing which correction set a board uses.
+            return False
 
-        return True
+    def _validate_local_destination(self) -> None:
+        """Validate an existing correction table while allowing unrelated project data."""
+        target = self.localcorrectionsdb_file
+        if not Path(target).exists():
+            return
+        try:
+            with contextlib.closing(self._read_database(target)) as con:
+                exists = con.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='correction'"
+                ).fetchone()
+            if exists:
+                snapshot = self.read_correction_data(target)
+                if snapshot.corrections is None:
+                    raise CorrectionDataError(snapshot.issues)
+        except (sqlite3.Error, OSError) as error:
+            raise self._storage_error(target, error) from error
 
-    def switch_to_global_correction_database(self, use_global):
-        """Switches to global or board local database."""
-
+    def switch_to_global_correction_database(self, use_global: bool) -> None:
+        """Switch only after validation and a complete successful storage transaction."""
         currently_using_global = (
             self.correctionsdb_file == self.globalcorrectionsdb_file
         )
         if currently_using_global == use_global:
             return
-
         if use_global:
-            try:
-                with (
-                    contextlib.closing(
-                        sqlite3.connect(self.localcorrectionsdb_file)
-                    ) as con,
-                    con as cur,
-                ):
-                    cur.execute("DROP TABLE IF EXISTS correction")
-                    cur.commit()
-                self.correctionsdb_file = self.globalcorrectionsdb_file
-            except OSError:
-                self.logger.warning("Failed to remove board local corrections file.")
+            if (
+                not Path(self.globalcorrectionsdb_file).exists()
+                or Path(self.globalcorrectionsdb_file).stat().st_size == 0
+            ):
+                self.create_correction_table(self.globalcorrectionsdb_file)
+            migration_issues = self.migrate_corrections()
+            if migration_issues:
+                raise CorrectionDataError(migration_issues)
+            destination = self.read_correction_data(self.globalcorrectionsdb_file)
+            if destination.corrections is None:
+                raise CorrectionDataError(destination.issues)
+            with self._correction_transaction(self.localcorrectionsdb_file) as con:
+                con.execute("DROP TABLE correction")
+                # Keep automatic CSV provenance when leaving local scope, so
+                # an unarchived source cannot replay into the global database.
+            self.correctionsdb_file = self.globalcorrectionsdb_file
+            self._start_initial_remote_corrections(self.globalcorrectionsdb_file)
         else:
-            global_corrections = self.get_all_correction_data()
+            source_snapshot = self.read_correction_data()
+            source = source_snapshot.corrections
+            if source is None:
+                raise CorrectionDataError(source_snapshot.issues)
+            self._validate_local_destination()
+            with self._correction_transaction(
+                self.localcorrectionsdb_file, create=True
+            ) as con:
+                con.execute("DELETE FROM correction")
+                con.executemany(
+                    "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
+                    [correction.db_row() for correction in source],
+                )
+                con.executemany(
+                    "INSERT OR IGNORE INTO correction_migrations VALUES (?, ?)",
+                    source_snapshot.csv_migrations,
+                )
             self.correctionsdb_file = self.localcorrectionsdb_file
-            self.create_correction_table()
-            for regex, rotation, offset in global_corrections:
-                self.insert_correction_data(regex, rotation, offset)
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database."""
@@ -344,75 +461,577 @@ class Library:
             )
             cur.commit()
 
-    def create_correction_table(self):
-        """Create the correction table."""
-        self.logger.debug("Create SQLite table for corrections")
-        with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
-            con as cur,
-        ):
-            cur.execute(
-                "CREATE TABLE IF NOT EXISTS correction ('regex', 'rotation', 'offset_x', 'offset_y')"
-            )
-            cur.commit()
+    @staticmethod
+    def _correction_schema(con: sqlite3.Connection) -> None:
+        """Create additive correction tables inside the caller's transaction."""
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS correction ('regex', 'rotation', 'offset_x', 'offset_y')"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS correction_migrations "
+            "(migration_key TEXT PRIMARY KEY, source TEXT NOT NULL)"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS correction_migration_state "
+            "(migration_key TEXT PRIMARY KEY, source TEXT NOT NULL, "
+            "status TEXT NOT NULL, message TEXT NOT NULL)"
+        )
 
-    def get_correction_data(self, regex, db_path=None):
-        """Get the correction data by its regex."""
+    @staticmethod
+    def _sqlite_affinity(declaration: str) -> str:
+        """Determine column affinity using SQLite's ordered declaration rules."""
+        declared_type = declaration.upper()
+        if "INT" in declared_type:
+            return "INTEGER"
+        if any(name in declared_type for name in ("CHAR", "CLOB", "TEXT")):
+            return "TEXT"
+        if not declared_type or "BLOB" in declared_type:
+            return "BLOB"
+        if any(name in declared_type for name in ("REAL", "FLOA", "DOUB")):
+            return "REAL"
+        return "NUMERIC"
+
+    @classmethod
+    def _validate_correction_schema(cls, con: sqlite3.Connection) -> None:
+        """Require named correction fields and unambiguous physical row identities."""
+        table = con.execute(
+            "SELECT type FROM sqlite_master WHERE name='correction'"
+        ).fetchone()
+        if table is None or table[0] != "table":
+            raise sqlite3.DatabaseError("correction storage must be an ordinary table")
+        columns = con.execute("PRAGMA table_xinfo(correction)").fetchall()
+        expected = {"regex", "rotation", "offset_x", "offset_y"}
+        if (
+            len(columns) != len(expected)
+            or {column[1].casefold() for column in columns} != expected
+            or any(column[6] for column in columns)
+        ):
+            raise sqlite3.DatabaseError(
+                "correction table must contain exactly regex, rotation, offset_x, "
+                "and offset_y; unsupported schemas cannot be repaired automatically"
+            )
+        affinities = {
+            column[1].casefold(): cls._sqlite_affinity(column[2]) for column in columns
+        }
+        if affinities["regex"] not in {"TEXT", "BLOB"}:
+            raise sqlite3.DatabaseError(
+                "unsupported correction schema: regex must have TEXT or BLOB affinity "
+                "to preserve pattern text; use a supported correction database schema"
+            )
+        if affinities["rotation"] == "REAL":
+            raise sqlite3.DatabaseError(
+                "unsupported correction schema: rotation must not have REAL affinity "
+                "because it can round whole degrees; use a supported correction database schema"
+            )
+        if any(affinities[name] == "TEXT" for name in ("offset_x", "offset_y")):
+            raise sqlite3.DatabaseError(
+                "unsupported correction schema: offsets must not have TEXT affinity "
+                "because it can round their numeric values; use a supported correction database schema"
+            )
+        # The exact-column check rules out aliases that shadow SQLite's rowid.
+        # This query also rejects WITHOUT ROWID tables before exposing repair IDs.
+        try:
+            con.execute("SELECT rowid FROM correction LIMIT 0")
+        except sqlite3.Error as error:
+            raise sqlite3.DatabaseError(
+                "correction table requires SQLite row identities for safe repair"
+            ) from error
+
+    @staticmethod
+    def _read_database(target: DatabasePath) -> sqlite3.Connection:
+        """Open an existing database without creating missing files."""
+        return sqlite3.connect(
+            _sqlite_file_uri(Path(target).resolve()) + "?mode=ro", uri=True
+        )
+
+    @staticmethod
+    def _storage_error(
+        target: DatabasePath, error: Exception, field: str = "database"
+    ) -> CorrectionDataError:
+        """Wrap storage failures in actionable correction diagnostics."""
+        return CorrectionDataError(
+            (CorrectionIssue(field, None, str(error), source=str(target)),)
+        )
+
+    @contextlib.contextmanager
+    def _correction_transaction(
+        self, target: DatabasePath, *, create: bool = False
+    ) -> Iterator[sqlite3.Connection]:
+        """Capture one target and roll back the entire operation on any failure."""
+        try:
+            if create:
+                Path(target).parent.mkdir(parents=True, exist_ok=True)
+            elif not Path(target).is_file():
+                raise OSError("correction database does not exist")
+            connection = (
+                sqlite3.connect(target)
+                if create
+                else sqlite3.connect(
+                    _sqlite_file_uri(Path(target).resolve()) + "?mode=rw", uri=True
+                )
+            )
+            with contextlib.closing(connection) as con, con:
+                con.execute("BEGIN IMMEDIATE")
+                if create:
+                    self._correction_schema(con)
+                self._validate_correction_schema(con)
+                yield con
+        except (sqlite3.Error, OSError) as error:
+            raise self._storage_error(target, error) from error
+
+    def create_correction_table(
+        self,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> None:
+        """Initialize correction storage without rewriting existing user records."""
         target = db_path if db_path is not None else self.correctionsdb_file
-        with (
-            contextlib.closing(sqlite3.connect(target)) as con,
-            con as cur,
-        ):
-            return cur.execute(
-                f"SELECT * FROM correction WHERE regex = '{regex}'"
-            ).fetchone()
+        with self._correction_transaction(target, create=True):
+            pass
 
-    def delete_correction_data(self, regex):
-        """Delete a correction from the database."""
-        with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
-            con as cur,
-        ):
-            cur.execute(f"DELETE FROM correction WHERE regex = '{regex}'")
-            cur.commit()
+    @staticmethod
+    def correction_csv_migration_key(
+        path: DatabasePath, contents: Union[bytes, str]
+    ) -> str:
+        """Identify an automatic CSV import by canonical path and exact contents."""
+        if isinstance(contents, str):
+            contents = contents.encode("utf-8")
+        digest = hashlib.sha256(contents).hexdigest()
+        return f"csv:{Path(path).resolve()}:{digest}"
 
-    def update_correction_data(self, regex, rotation, offset):
-        """Update a correction in the database."""
-        with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
-            con as cur,
-        ):
-            cur.execute(
-                f"UPDATE correction SET rotation = '{rotation}', offset_x = '{offset[0]}', offset_y = '{offset[1]}' WHERE regex = '{regex}'"
-            )
-            cur.commit()
+    @staticmethod
+    def _correction_metadata(
+        con: sqlite3.Connection,
+    ) -> tuple[dict[object, str], list[tuple[object, str, str, str]]]:
+        """Read optional metadata once, including databases from earlier releases."""
+        tables = {
+            row[0]
+            for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        completed = (
+            dict(con.execute("SELECT migration_key, source FROM correction_migrations"))
+            if "correction_migrations" in tables
+            else {}
+        )
+        states = (
+            con.execute(
+                "SELECT migration_key, source, status, message FROM correction_migration_state ORDER BY rowid"
+            ).fetchall()
+            if "correction_migration_state" in tables
+            else []
+        )
+        return completed, states
 
-    def insert_correction_data(self, regex, rotation, offset, db_path=None):
-        """Insert a correction into the database."""
+    @staticmethod
+    def _complete_correction_migration(
+        con: sqlite3.Connection, key: str, source: str
+    ) -> None:
+        """Commit completion and remove superseded pending state in the caller's transaction."""
+        con.execute("INSERT INTO correction_migrations VALUES (?, ?)", (key, source))
+        con.execute(
+            "DELETE FROM correction_migration_state WHERE migration_key=?", (key,)
+        )
+
+    def has_correction_migration(
+        self,
+        key: str,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> bool:
+        """Check completion, including the current project's archived CSV provenance."""
         target = db_path if db_path is not None else self.correctionsdb_file
-        with (
-            contextlib.closing(sqlite3.connect(target)) as con,
-            con as cur,
-        ):
-            cur.execute(
-                "INSERT INTO correction VALUES (?, ?, ?, ?)",
-                (regex, rotation, offset[0], offset[1]),
+        candidates = [target]
+        if key.startswith("csv:"):
+            candidates.extend(
+                path
+                for path in (
+                    self.localcorrectionsdb_file,
+                    self.globalcorrectionsdb_file,
+                )
+                if Path(path).resolve() != Path(target).resolve()
+                and Path(path).exists()
             )
-            cur.commit()
+        try:
+            for candidate in candidates:
+                with contextlib.closing(self._read_database(candidate)) as con:
+                    if key in self._correction_metadata(con)[0]:
+                        return True
+            return False
+        except (sqlite3.Error, OSError) as error:
+            raise self._storage_error(candidate, error, "migration") from error
 
-    def get_all_correction_data(self):
-        """Get all corrections from the database."""
-        with (
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
-            con as cur,
-        ):
+    def _validated_corrections(
+        self, records: Iterable[object], target: DatabasePath
+    ) -> list[Correction]:
+        """Parse raw records once; retain already validated immutable corrections."""
+        validated = []
+        issues = []
+        for record in records:
             try:
-                result = cur.execute(
-                    "SELECT * FROM correction ORDER BY regex ASC"
+                if isinstance(record, Correction):
+                    validated.append(record)
+                    continue
+                if not isinstance(record, (tuple, list)) or len(record) != 3:
+                    raise CorrectionDataError(
+                        (
+                            CorrectionIssue(
+                                "record",
+                                record,
+                                "expected pattern, rotation, and offsets",
+                                str(target),
+                            ),
+                        )
+                    )
+                validated.append(validate_correction(*record, source=str(target)))
+            except CorrectionDataError as error:
+                issues.extend(error.issues)
+        if issues:
+            raise CorrectionDataError(issues)
+        return validated
+
+    def apply_corrections(
+        self,
+        records: Iterable[object],
+        *,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+        overwrite: bool = True,
+        migration_key: Optional[str] = None,  # noqa: UP045
+    ) -> CorrectionBatchResult:
+        """Validate a complete batch, then commit its writes and marker atomically."""
+        target = db_path if db_path is not None else self.correctionsdb_file
+        validated = self._validated_corrections(records, target)
+        if migration_key and self.has_correction_migration(migration_key, target):
+            return CorrectionBatchResult(skipped=len(validated))
+        selected = {}
+        for correction in validated:
+            if overwrite or correction.pattern not in selected:
+                selected[correction.pattern] = correction
+        inserted = updated = 0
+        skipped = len(validated) - len(selected)
+        with self._correction_transaction(target) as con:
+            if (
+                migration_key
+                and migration_key != _INITIAL_DEFAULTS_KEY
+                and migration_key in self._correction_metadata(con)[0]
+            ):
+                return CorrectionBatchResult(skipped=len(validated))
+            if (
+                migration_key == _INITIAL_DEFAULTS_KEY
+                and not self._initial_seed_is_eligible(con, str(target))
+            ):
+                # A concurrent retry discovered a higher-priority source while
+                # the HTTP request was in flight. Leave initial seeding pending.
+                return CorrectionBatchResult(skipped=len(validated))
+            for correction in selected.values():
+                exists = con.execute(
+                    "SELECT 1 FROM correction WHERE regex = ?", (correction.pattern,)
+                ).fetchone()
+                if exists and not overwrite:
+                    skipped += 1
+                elif exists:
+                    result = con.execute(
+                        "UPDATE correction SET rotation=?, offset_x=?, offset_y=? WHERE regex=?",
+                        (*correction.db_row()[1:], correction.pattern),
+                    )
+                    updated += result.rowcount
+                else:
+                    con.execute(
+                        "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
+                        correction.db_row(),
+                    )
+                    inserted += 1
+            if migration_key:
+                self._correction_schema(con)
+                self._complete_correction_migration(con, migration_key, migration_key)
+        return CorrectionBatchResult(inserted, updated, skipped)
+
+    def get_correction_data(
+        self,
+        regex: str,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> Optional[tuple[object, object, object, object]]:  # noqa: UP045
+        """Get original stored values for a pattern using a parameterized lookup."""
+        target = db_path if db_path is not None else self.correctionsdb_file
+        try:
+            with contextlib.closing(self._read_database(target)) as con:
+                self._validate_correction_schema(con)
+                return con.execute(
+                    "SELECT regex, rotation, offset_x, offset_y FROM correction WHERE regex = ?",
+                    (regex,),
+                ).fetchone()
+        except (sqlite3.Error, OSError) as error:
+            raise self._storage_error(target, error) from error
+
+    def delete_correction_data(self, regex: str) -> None:
+        """Delete a pattern without interpreting its contents as SQL."""
+        target = self.correctionsdb_file
+        with self._correction_transaction(target) as con:
+            con.execute("DELETE FROM correction WHERE regex = ?", (regex,))
+
+    def _check_expected_corrections(
+        self,
+        actual: Sequence[tuple[object, ...]],
+        expected: Optional[Sequence[StoredCorrection]],  # noqa: UP045
+        target: DatabasePath,
+    ) -> None:
+        """Check existence or exact raw identities under the write lock."""
+        if expected is None:
+            if actual:
+                return
+        elif [tuple((type(value), value) for value in row) for row in actual] == [
+            row.identity for row in sorted(expected, key=lambda row: row.rowid)
+        ]:
+            return
+        raise self._storage_error(
+            target,
+            ValueError("stored correction changed; refresh and select it again"),
+            "row",
+        )
+
+    def delete_correction_row(
+        self,
+        rowid: int,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+        *,
+        expected_record: Optional[StoredCorrection] = None,  # noqa: UP045
+    ) -> None:
+        """Delete the selected original row, rejecting a concurrent edit or reused ID."""
+        target = db_path if db_path is not None else self.correctionsdb_file
+        with self._correction_transaction(target) as con:
+            if expected_record is not None:
+                self._check_expected_corrections(
+                    con.execute(
+                        "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction WHERE rowid=?",
+                        (rowid,),
+                    ).fetchall(),
+                    (expected_record,),
+                    target,
+                )
+            con.execute("DELETE FROM correction WHERE rowid = ?", (rowid,))
+
+    def update_correction_data(
+        self, regex: object, rotation: object, offset: object
+    ) -> None:
+        """Validate and update an existing pattern in one transaction."""
+        target = self.correctionsdb_file
+        correction = validate_correction(regex, rotation, offset, source=str(target))
+        with self._correction_transaction(target) as con:
+            con.execute(
+                "UPDATE correction SET rotation=?, offset_x=?, offset_y=? WHERE regex=?",
+                (*correction.db_row()[1:], correction.pattern),
+            )
+
+    def insert_correction_data(
+        self,
+        regex: object,
+        rotation: object,
+        offset: object,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> int:
+        """Validate and insert a correction, refusing accidental duplicate patterns."""
+        return self.save_correction_data(regex, rotation, offset, db_path=db_path)
+
+    def save_correction_data(
+        self,
+        pattern: object,
+        rotation: object = None,
+        offset: object = None,
+        *,
+        rowid: Optional[int] = None,  # noqa: UP045
+        replace: bool = False,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+        expected_record: Optional[StoredCorrection] = None,  # noqa: UP045
+        expected_conflicts: Optional[Sequence[StoredCorrection]] = None,  # noqa: UP045
+    ) -> int:
+        """Save or repair one row, with optional collision replacement in the same transaction."""
+        target = db_path if db_path is not None else self.correctionsdb_file
+        correction = (
+            pattern
+            if isinstance(pattern, Correction)
+            else validate_correction(
+                pattern, rotation, offset, source=str(target), rowid=rowid
+            )
+        )
+        with self._correction_transaction(target) as con:
+            if rowid is not None or expected_record is not None:
+                self._check_expected_corrections(
+                    con.execute(
+                        "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction WHERE rowid=?",
+                        (rowid,),
+                    ).fetchall(),
+                    (expected_record,) if expected_record is not None else None,
+                    target,
+                )
+            conflicts = con.execute(
+                "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction "
+                "WHERE regex=? AND (? IS NULL OR rowid != ?) ORDER BY rowid",
+                (correction.pattern, rowid, rowid),
+            ).fetchall()
+            if expected_conflicts is not None:
+                self._check_expected_corrections(conflicts, expected_conflicts, target)
+            if conflicts and not replace:
+                raise CorrectionDataError(
+                    (
+                        CorrectionIssue(
+                            "pattern",
+                            correction.pattern,
+                            "another correction already uses this pattern",
+                            str(target),
+                            pattern=correction.pattern,
+                            rowid=rowid,
+                        ),
+                    )
+                )
+            if conflicts:
+                con.executemany(
+                    "DELETE FROM correction WHERE rowid=?",
+                    [(row[0],) for row in conflicts],
+                )
+            if rowid is None:
+                return con.execute(
+                    "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
+                    correction.db_row(),
+                ).lastrowid
+            con.execute(
+                "UPDATE correction SET regex=?, rotation=?, offset_x=?, offset_y=? WHERE rowid=?",
+                (*correction.db_row(), rowid),
+            )
+        return rowid
+
+    def read_correction_data(
+        self,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> CorrectionSnapshot:
+        """Read recoverable original rows and a validated snapshot without creating storage."""
+        target = str(db_path if db_path is not None else self.correctionsdb_file)
+        scope = (
+            "global"
+            if Path(target).resolve() == Path(self.globalcorrectionsdb_file).resolve()
+            else "local"
+        )
+        rows = []
+        issues = []
+        corrections = {}
+        csv_migrations = ()
+        raw_rows = []
+        unavailable = False
+        warnings = []
+        try:
+            with contextlib.closing(self._read_database(target)) as con:
+                con.execute("BEGIN")
+                self._validate_correction_schema(con)
+                raw_rows = con.execute(
+                    "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction ORDER BY regex ASC, rowid ASC"
                 ).fetchall()
-                return [(c[0], int(c[1]), (float(c[2]), float(c[3]))) for c in result]
-            except sqlite3.OperationalError:
-                return []
+                completed, states = self._correction_metadata(con)
+                csv_migrations = tuple(
+                    (key, source)
+                    for key, source in completed.items()
+                    if isinstance(key, str) and key.startswith("csv:")
+                )
+                if scope == "global":
+                    for _, source, status, message in states:
+                        if status in {"pending", "deferred"}:
+                            (issues if status == "pending" else warnings).append(
+                                CorrectionIssue(
+                                    "migration", None, message, source=source
+                                )
+                            )
+                unavailable = bool(issues)
+        except (sqlite3.Error, OSError) as error:
+            issues.extend(self._storage_error(target, error).issues)
+            unavailable = True
+        session_issues, session_warnings = self._migration_session_diagnostics.get(
+            str(Path(target).resolve()), ((), ())
+        )
+        issues.extend(session_issues)
+        warnings.extend(session_warnings)
+        unavailable = unavailable or bool(session_issues)
+        for rowid, pattern, rotation, offset_x, offset_y in raw_rows:
+            correction = None
+            row_issues = ()
+            try:
+                correction = validate_correction(
+                    pattern,
+                    rotation,
+                    (offset_x, offset_y),
+                    source=target,
+                    rowid=rowid,
+                )
+            except CorrectionDataError as error:
+                row_issues = error.issues
+                issues.extend(row_issues)
+            rows.append(
+                StoredCorrection(
+                    rowid,
+                    pattern,
+                    rotation,
+                    (offset_x, offset_y),
+                    row_issues,
+                    correction,
+                )
+            )
+            if correction is not None:
+                corrections.setdefault(pattern, correction)
+        rows, conflicts = self._mark_conflicting_corrections(rows, target)
+        issues.extend(conflicts)
+        state = (
+            CorrectionState.UNAVAILABLE
+            if unavailable
+            else CorrectionState.NEEDS_REPAIR
+            if issues
+            else CorrectionState.READY
+        )
+        return CorrectionSnapshot(
+            target,
+            scope,
+            tuple(rows),
+            None if issues else tuple(corrections.values()),
+            tuple(issues),
+            csv_migrations,
+            state,
+            tuple(warnings),
+        )
+
+    @staticmethod
+    def _mark_conflicting_corrections(
+        rows: Sequence[StoredCorrection], target: str
+    ) -> tuple[list[StoredCorrection], list[CorrectionIssue]]:
+        """Identify every member of a conflicting pattern group for explicit repair."""
+        groups = {}
+        for row in rows:
+            if isinstance(row.pattern, str):
+                groups.setdefault(row.pattern, []).append(row)
+        conflicting = {
+            pattern
+            for pattern, group in groups.items()
+            if len(group) > 1
+            and (
+                any(row.correction is None for row in group)
+                or len({row.correction for row in group}) > 1
+            )
+        }
+        issues = []
+        result = []
+        for row in rows:
+            if row.pattern in conflicting:
+                issue = CorrectionIssue(
+                    "pattern",
+                    row.pattern,
+                    "conflicting stored corrections use this pattern; repair or delete the duplicate rows",
+                    target,
+                    pattern=row.pattern,
+                    rowid=row.rowid,
+                )
+                issues.append(issue)
+                row = replace(row, issues=(*row.issues, issue))
+            result.append(row)
+        return result, issues
+
+    def get_all_correction_data(
+        self,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> Optional[tuple[Correction, ...]]:  # noqa: UP045
+        """Return a complete typed set, or None when storage is not ready."""
+        return self.read_correction_data(db_path).corrections
 
     def create_mapping_table(self):
         """Create the mapping table."""
@@ -767,90 +1386,430 @@ class Library:
         """Get the subcategories associated with the given category."""
         return self.category_map[category]
 
-    def migrate_corrections_from_rotation(self):
-        """Migrate existing rotations from rotation db to correction db."""
-        if not os.path.exists(self.rotationsdb_file):
-            return
-        with (
-            contextlib.closing(sqlite3.connect(self.rotationsdb_file)) as rdb,
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as cdb,
-            rdb as rcur,
-            cdb as ccur,
-        ):
-            try:
-                result = rcur.execute(
-                    "SELECT * FROM rotation ORDER BY regex ASC"
-                ).fetchall()
-                if not result:
-                    return
-                for r in result:
-                    ccur.execute(
-                        "INSERT INTO correction VALUES (?, ?, 0, 0)",
-                        (r[0], r[1]),
-                    )
-                    ccur.commit()
-                self.logger.debug(
-                    "Migrated %d rotations to corrections database.", len(result)
+    def _legacy_correction_sources(self) -> tuple[str, str]:
+        """Associate global legacy archives with stable completion identities."""
+        return self.rotationsdb_file, self.partsdb_file
+
+    @staticmethod
+    def _legacy_migration_key(source: str) -> str:
+        """Keep completed legacy archives from replaying over repaired records."""
+        return f"rotation:{Path(source).resolve()}:rotation"
+
+    def _legacy_rotation_rows(
+        self, source: str
+    ) -> Optional[list[tuple[object, object]]]:  # noqa: UP045
+        """Read a legacy archive without creating or removing source storage."""
+        if not Path(source).exists():
+            return None
+        with contextlib.closing(self._read_database(source)) as con:
+            table = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rotation'"
+            ).fetchone()
+            if not table:
+                return None
+            # Legacy releases named the second column differently; preserve its
+            # original value by position while requiring the original two fields.
+            cursor = con.execute("SELECT * FROM rotation")
+            if len(cursor.description) != 2:
+                raise sqlite3.DatabaseError(
+                    "legacy rotation table must have exactly two columns"
                 )
-                os.remove(self.rotationsdb_file)
-                self.logger.debug("Deleted rotations database.")
-            except sqlite3.OperationalError:
-                return
-            except OSError:
-                return
+            return cursor.fetchall()
 
-    def migrate_corrections_from_parts(self):
-        """Migrate existing rotations from parts db to correction db."""
-        with (
-            contextlib.closing(sqlite3.connect(self.partsdb_file)) as pdb,
-            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as rdb,
-            pdb as pcur,
-            rdb as rcur,
-        ):
-            try:
-                result = pcur.execute(
-                    "SELECT * FROM rotation ORDER BY regex ASC"
-                ).fetchall()
-                if not result:
-                    return
-                for r in result:
-                    rcur.execute(
-                        "INSERT INTO correction VALUES (?, ?, 0, 0)",
-                        (r[0], r[1]),
-                    )
-                    rcur.commit()
-                self.logger.debug(
-                    "Migrated %d rotations to separate database.", len(result)
+    def _migrate_correction_sources(
+        self, sources: Iterable[str]
+    ) -> CorrectionBatchResult:
+        """Inspect once, retain unresolved work, and atomically copy eligible archives."""
+        target = self.globalcorrectionsdb_file
+        if not Path(target).exists() or Path(target).stat().st_size == 0:
+            self.create_correction_table(target)
+        try:
+            with contextlib.closing(self._read_database(target)) as con:
+                con.execute("BEGIN")
+                self._validate_correction_schema(con)
+                completed, metadata = self._correction_metadata(con)
+                states = {key: status for key, _, status, _ in metadata}
+                candidates = {}
+                for source in sources:
+                    key = self._legacy_migration_key(source)
+                    if key not in completed and states.get(key) != "empty":
+                        candidates.setdefault(key, source)
+        except (sqlite3.Error, OSError) as error:
+            raise self._storage_error(target, error, "migration") from error
+        if not candidates:
+            return CorrectionBatchResult()
+
+        identity = str(Path(target).resolve())
+        known_sources = self._known_legacy_sources.setdefault(identity, set())
+        outcomes = []
+        pending = []
+        deferred_by = None
+        for key, source in candidates.items():
+            known = states.get(key) == "pending" or key in known_sources
+            status = "pending" if known else "deferred"
+            if deferred_by is not None:
+                message = f"legacy transfer is waiting for higher-priority archive {deferred_by}; restore that archive and reopen Corrections Manager to retry"
+            else:
+                try:
+                    rows = self._legacy_rotation_rows(source)
+                    if rows is None or not rows:
+                        if known:
+                            message = "previously identified legacy corrections are no longer present; restore the source archive and reopen Corrections Manager to retry"
+                        else:
+                            outcomes.append((key, source, "empty", ""))
+                            continue
+                    else:
+                        known_sources.add(key)
+                        outcomes.append(
+                            (
+                                key,
+                                source,
+                                "pending",
+                                "legacy corrections have not been transferred; reopen Corrections Manager to retry before generating fabrication files",
+                            )
+                        )
+                        pending.append((source, key, rows))
+                        continue
+                except (sqlite3.Error, OSError) as error:
+                    message = f"cannot read legacy corrections: {error}; restore the source archive and reopen Corrections Manager to retry"
+            outcomes.append((key, source, status, message))
+            deferred_by = deferred_by or source
+
+        # Positive knowledge must survive a later transfer rollback or process
+        # interruption. Completion, in contrast, commits together with the rows.
+        try:
+            with self._correction_transaction(target, create=True) as con:
+                completed, metadata = self._correction_metadata(con)
+                current_states = {key: status for key, _, status, _ in metadata}
+                for outcome in outcomes:
+                    if outcome[0] in completed:
+                        continue
+                    current = current_states.get(outcome[0])
+                    if current == "pending" and outcome[2] != "pending":
+                        outcome = (
+                            outcome[0],
+                            outcome[1],
+                            "pending",
+                            outcome[3]
+                            or "previously identified legacy corrections still require transfer; restore the archive and retry",
+                        )
+                    if outcome[2] == "empty":
+                        self._complete_correction_migration(con, *outcome[:2])
+                    else:
+                        con.execute(
+                            "INSERT OR REPLACE INTO correction_migration_state VALUES (?, ?, ?, ?)",
+                            outcome,
+                        )
+        except CorrectionDataError as error:
+            if any(outcome[2] == "pending" for outcome in outcomes):
+                raise
+            # Failure to record absence or an unclassified archive is not
+            # evidence that valid active corrections are incomplete.
+            warnings = tuple(
+                CorrectionIssue("migration", None, message, source=source)
+                for _, source, status, message in outcomes
+                if status == "deferred"
+            )
+            self._migration_session_diagnostics[identity] = (
+                (),
+                (*warnings, *error.issues),
+            )
+            return CorrectionBatchResult()
+        if not pending:
+            return CorrectionBatchResult()
+
+        inserted = skipped = 0
+        with self._correction_transaction(target, create=True) as con:
+            established = {
+                pattern
+                for (pattern,) in con.execute("SELECT regex FROM correction")
+                if isinstance(pattern, str) and pattern.strip()
+            }
+            completed, metadata = self._correction_metadata(con)
+            current_states = {key: status for key, _, status, _ in metadata}
+            earlier = list(candidates)
+            for source, key, rows in pending:
+                if key in completed:
+                    continue
+                if any(
+                    current_states.get(earlier_key) in {"pending", "deferred"}
+                    for earlier_key in earlier[: earlier.index(key)]
+                ):
+                    # Another coordinator may have discovered a higher-priority
+                    # problem after our preflight. Keep lower-priority work pending.
+                    break
+                novel = [
+                    row
+                    for row in rows
+                    if not (isinstance(row[0], str) and row[0] in established)
+                ]
+                for pattern, rotation in novel:
+                    rowid = con.execute(
+                        "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, 0, 0)",
+                        (pattern, rotation),
+                    ).lastrowid
+                    stored = con.execute(
+                        "SELECT regex, rotation, offset_x, offset_y FROM correction WHERE rowid=?",
+                        (rowid,),
+                    ).fetchone()
+                    original = Correction.parse(pattern, rotation, (0, 0))
+                    if original is None:
+                        # Malformed input must remain verbatim for repair. In
+                        # particular, TEXT affinity must not turn numeric legacy
+                        # patterns into silently accepted regular expressions.
+                        preserved = (
+                            stored is not None
+                            and all(
+                                type(before) is type(after) and before == after
+                                for before, after in zip(
+                                    (pattern, rotation), stored[:2]
+                                )
+                            )
+                            and stored[2:] == (0, 0)
+                        )
+                    else:
+                        # Safe representation changes such as '90' to INTEGER 90
+                        # are allowed only when the complete normalized value agrees.
+                        preserved = (
+                            stored is not None
+                            and Correction.parse(stored[0], stored[1], stored[2:])
+                            == original
+                        )
+                    if not preserved:
+                        raise CorrectionDataError(
+                            (
+                                CorrectionIssue(
+                                    "migration",
+                                    (pattern, rotation),
+                                    f"destination schema at {target} cannot preserve this legacy correction; "
+                                    "restore a compatible correction schema before retrying; the source archive is unchanged",
+                                    source=source,
+                                ),
+                            )
+                        )
+                self._complete_correction_migration(
+                    con, key, str(Path(source).resolve())
                 )
-                pcur.execute("DROP TABLE IF EXISTS rotation")
-                pcur.commit()
-                self.logger.debug("Droped rotations table from parts database.")
-            except sqlite3.OperationalError:
-                return
+                current_states.pop(key, None)
+                # Preserve contradictions within this source before allowing it
+                # to take precedence over lower-priority historical archives.
+                established.update(
+                    pattern
+                    for pattern, _ in rows
+                    if isinstance(pattern, str) and pattern.strip()
+                )
+                inserted += len(novel)
+                skipped += len(rows) - len(novel)
+        self.logger.info(
+            "Transferred %d legacy corrections to %s; preserved %d established patterns.",
+            inserted,
+            target,
+            skipped,
+        )
+        return CorrectionBatchResult(inserted=inserted, skipped=skipped)
 
-    def migrate_corrections(self):
-        """Migrate existing rotations from old rotation db and parts db to correction db."""
-        self.migrate_corrections_from_rotation()
-        self.migrate_corrections_from_parts()
+    def migrate_corrections_from_rotation(self) -> CorrectionBatchResult:
+        """Transfer missing rotations.db patterns to global storage, retaining the archive."""
+        return self._migrate_correction_sources((self.rotationsdb_file,))
 
-    def fetch_remote_corrections(self, db_path=None):
-        """Download rotation corrections from Matthew Lai's JLCKicadTools repo."""
+    def migrate_corrections_from_parts(self) -> CorrectionBatchResult:
+        """Transfer missing legacy parts patterns without dropping their source."""
+        return self._migrate_correction_sources((self.partsdb_file,))
+
+    def migrate_corrections(self) -> tuple[CorrectionIssue, ...]:
+        """Retry incomplete global transfers while retaining failures for recovery."""
+        target = self.globalcorrectionsdb_file
+        identity = str(Path(target).resolve())
+        diagnostics = self._migration_session_diagnostics
+        diagnostics.pop(identity, None)
+        try:
+            current_sources = list(self._legacy_correction_sources())
+            sources = current_sources[:1]
+            if Path(self.globalcorrectionsdb_file).exists():
+                with contextlib.closing(
+                    self._read_database(self.globalcorrectionsdb_file)
+                ) as con:
+                    completed, states = self._correction_metadata(con)
+                    if _INITIAL_DEFAULTS_KEY not in completed:
+                        # Initial archives retain priority even if configuration
+                        # changes after storage creation but before examination.
+                        sources.extend(
+                            source
+                            for source in self._initial_seed_sources(states)
+                            if source not in sources
+                        )
+                    # Changing the selected parts library must not strand known
+                    # pending work for the same global correction database.
+                    sources.extend(
+                        source
+                        for key, source, status, _ in states
+                        if isinstance(key, str)
+                        and key.startswith("rotation:")
+                        and status in {"pending", "deferred"}
+                        and source not in sources
+                    )
+            sources.extend(
+                source for source in current_sources[1:] if source not in sources
+            )
+            self._migrate_correction_sources(sources)
+            with contextlib.closing(
+                self._read_database(self.globalcorrectionsdb_file)
+            ) as con:
+                return tuple(
+                    CorrectionIssue("migration", None, message, source=source)
+                    for _, source, status, message in self._correction_metadata(con)[1]
+                    if status == "pending"
+                )
+        except (sqlite3.Error, OSError, CorrectionDataError) as error:
+            self.logger.warning("Correction migration remains unresolved: %s", error)
+            issues = (
+                error.issues
+                if isinstance(error, CorrectionDataError)
+                else self._storage_error(target, error, "migration").issues
+            )
+            diagnostics[identity] = (issues, ())
+            return issues
+
+    def retry_correction_migrations(self) -> tuple[CorrectionIssue, ...]:
+        """Retry active global archives once and resume eligible initial defaults."""
+        if self.correctionsdb_file != self.globalcorrectionsdb_file:
+            return ()
+        issues = self.migrate_corrections()
+        if not issues:
+            self._start_initial_remote_corrections(self.globalcorrectionsdb_file)
+        return issues
+
+    def _start_initial_remote_corrections(self, target: str) -> None:
+        """Schedule optional defaults; failures warn without invalidating stored data."""
+        identity = str(Path(target).resolve())
+        claimed = False
+        try:
+            with contextlib.closing(self._read_database(target)) as con:
+                con.execute("BEGIN")
+                if not self._initial_seed_is_eligible(con, target):
+                    return
+            with _INITIAL_DOWNLOAD_LOCK:
+                if identity in _INITIAL_DOWNLOAD_TARGETS:
+                    return
+                _INITIAL_DOWNLOAD_TARGETS.add(identity)
+                claimed = True
+            Thread(
+                target=self._fetch_initial_remote_corrections,
+                args=(target,),
+                daemon=True,
+            ).start()
+        except (sqlite3.Error, OSError, RuntimeError) as error:
+            if claimed:
+                with _INITIAL_DOWNLOAD_LOCK:
+                    _INITIAL_DOWNLOAD_TARGETS.discard(identity)
+            issues, warnings = self._migration_session_diagnostics.get(
+                identity, ((), ())
+            )
+            self._migration_session_diagnostics[identity] = (
+                issues,
+                (
+                    *warnings,
+                    *self._storage_error(target, error, "initial download").issues,
+                ),
+            )
+
+    def _initial_seed_is_eligible(self, con: sqlite3.Connection, target: str) -> bool:
+        """Require durable classification of captured sources before seeding defaults."""
+        completed, states = self._correction_metadata(con)
+        if _INITIAL_DEFAULTS_KEY in completed:
+            return False
+        session = self._migration_session_diagnostics.get(
+            str(Path(target).resolve()), ((), ())
+        )
+        if any(session):
+            return False
+        if any(status in {"pending", "deferred"} for _, _, status, _ in states):
+            return False
+        sources = self._initial_seed_sources(states)
+        if not sources:
+            return False
+        terminal = {key for key, _, status, _ in states if status == "empty"}
+        return all(
+            self._legacy_migration_key(source) in terminal
+            or self._legacy_migration_key(source) in completed
+            for source in sources
+        )
+
+    @staticmethod
+    def _initial_seed_sources(
+        states: Sequence[tuple[object, str, str, str]],
+    ) -> list[str]:
+        """Decode the original source identities retained across interrupted startup."""
+        seed = next(
+            (
+                message
+                for key, _, status, message in states
+                if key == _INITIAL_DEFAULTS_KEY and status == "seed-pending"
+            ),
+            None,
+        )
+        if seed is None:
+            return []
+        try:
+            sources = json.loads(seed)
+        except (TypeError, ValueError) as error:
+            raise sqlite3.DatabaseError(
+                "initial correction source metadata is unreadable"
+            ) from error
+        if (
+            not isinstance(sources, list)
+            or not sources
+            or not all(isinstance(source, str) for source in sources)
+        ):
+            raise sqlite3.DatabaseError(
+                "initial correction source metadata must name its archives"
+            )
+        return sources
+
+    def _fetch_initial_remote_corrections(self, target: str) -> None:
+        """Release the in-process download claim even after an unsuccessful seed."""
+        try:
+            self.fetch_remote_corrections(target, initial=True)
+        finally:
+            with _INITIAL_DOWNLOAD_LOCK:
+                _INITIAL_DOWNLOAD_TARGETS.discard(str(Path(target).resolve()))
+
+    def fetch_remote_corrections(
+        self,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+        *,
+        initial: bool = False,
+    ) -> Optional[CorrectionBatchResult]:  # noqa: UP045
+        """Validate the entire remote CSV and add missing patterns in one transaction."""
         target = db_path if db_path is not None else self.correctionsdb_file
         url = "https://raw.githubusercontent.com/matthewlai/JLCKicadTools/master/jlc_kicad_tools/cpl_rotations_db.csv"
         try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            corrections = csv.reader(r.text.splitlines(), delimiter=",", quotechar='"')
-            next(corrections)
-            for row in corrections:
-                if len(row) < 2:
-                    continue
-                if not self.get_correction_data(row[0], db_path=target):
-                    offset = (row[2], row[3]) if len(row) >= 4 else (0, 0)
-                    self.insert_correction_data(row[0], row[1], offset, db_path=target)
-            self.logger.info("Downloaded corrections to %s.", target)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self.logger.debug("Failed to download corrections to %s: %s", target, exc)
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            corrections = parse_corrections_csv(response.text, source=url)
+            result = self.apply_corrections(
+                corrections,
+                db_path=target,
+                overwrite=False,
+                migration_key=_INITIAL_DEFAULTS_KEY if initial else None,
+            )
+            self.logger.info(
+                "Downloaded %d corrections to %s.", result.inserted, target
+            )
+            return result
+        except (requests.RequestException, CorrectionDataError, UnicodeError) as error:
+            self.logger.warning(
+                "Failed to download corrections to %s: %s", target, error
+            )
+            wx.PostEvent(
+                self.parent,
+                MessageEvent(
+                    title="Correction Download Error",
+                    text=f"Corrections were not imported into {target}.\n\n{error}",
+                    style="error",
+                ),
+            )
+            return None
 
     def migrate_mappings(self):
         """Migrate existing mappings from parts db to mappings db."""
