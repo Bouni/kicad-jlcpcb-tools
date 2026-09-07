@@ -30,18 +30,14 @@ class Correction:
     rotation: int
     offset: tuple[float, float]
     _regex: re.Pattern[str] = field(init=False, repr=False, compare=False)
-    _suffix_regex: re.Pattern[str] = field(init=False, repr=False, compare=False)
 
     def __init__(self, pattern: object, rotation: object, offset: object) -> None:
         """Enforce the value contract at every construction or replacement."""
-        pattern, rotation, offset, regex, suffix_regex = _validated_values(
-            pattern, rotation, offset
-        )
+        pattern, rotation, offset, regex = _validated_values(pattern, rotation, offset)
         object.__setattr__(self, "pattern", pattern)
         object.__setattr__(self, "rotation", rotation)
         object.__setattr__(self, "offset", offset)
         object.__setattr__(self, "_regex", regex)
-        object.__setattr__(self, "_suffix_regex", suffix_regex)
 
     @classmethod
     def parse(
@@ -86,14 +82,18 @@ class CorrectionMatch:
 def find_correction(
     corrections: Sequence[Correction], value: str
 ) -> Optional[Correction]:  # noqa: UP045
-    """Prefer a suffix match, then the first unanchored match in input order."""
+    """Return the correction consuming the most of the value; ties keep order."""
+    best = None
+    best_length = -1
     for correction in corrections:
-        if correction._suffix_regex.search(value):
-            return correction
-    for correction in corrections:
-        if correction._regex.search(value):
-            return correction
-    return None
+        match = correction._regex.search(value)
+        if match is None:
+            continue
+        length = len(match.group(0))
+        if length > best_length:
+            best = correction
+            best_length = length
+    return best
 
 
 def match_correction(
@@ -180,10 +180,10 @@ def _offset(value: object) -> float:
 
 def _validated_values(
     pattern: object, rotation: object, offset: object
-) -> tuple[str, int, tuple[float, float], re.Pattern[str], re.Pattern[str]]:
+) -> tuple[str, int, tuple[float, float], re.Pattern[str]]:
     """Validate all fields once and return normalized constructor values.
 
-    Pattern text is preserved exactly. Both matching expressions are compiled
+    Pattern text is preserved exactly and its matching expression is compiled
     and retained. Rotations are signed whole degrees within SQLite's
     integer range; offsets must be finite floats. No invalid value is defaulted.
     """
@@ -200,13 +200,11 @@ def _validated_values(
         )
 
     regex = None
-    suffix_regex = None
     if not isinstance(pattern, str) or not pattern.strip():
         issue("pattern", pattern, "expected a nonempty regular expression")
     else:
         try:
             regex = re.compile(pattern)
-            suffix_regex = re.compile(f"(?:{pattern})$")
         except (re.error, OverflowError, RecursionError) as error:
             issue("pattern", pattern, f"invalid correction regular expression: {error}")
 
@@ -236,13 +234,11 @@ def _validated_values(
     assert isinstance(pattern, str)
     assert validated_rotation is not None
     assert regex is not None
-    assert suffix_regex is not None
     return (
         pattern,
         validated_rotation,
         (validated_offsets[0], validated_offsets[1]),
         regex,
-        suffix_regex,
     )
 
 

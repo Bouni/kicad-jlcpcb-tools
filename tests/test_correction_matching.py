@@ -31,10 +31,10 @@ def data(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
         (("SOT-23-3", "SOT-23"), "SOT-23-3", 0),
         (("SOT-23",), "Package:SOT-23", 0),
         (("SOT-23",), "Package:SOT-23-extra", 0),
-        (("23", "SOT-23"), "SOT-23", 0),
+        (("23", "SOT-23"), "SOT-23", 1),
         (("SOT-23", "23"), "SOT-23", 0),
         ((".+", "SOT-23"), "SOT-23", 0),
-        (("SOT", "SOT-23"), "SOT-23-extra", 0),
+        (("SOT", "SOT-23"), "SOT-23-extra", 1),
         (("SOT-23", "SOT"), "SOT-23-extra", 0),
         (("SOT|QFN", "SOT-23"), "SOT-23", 1),
         (("SOT|QFN",), "Package:QFN", 0),
@@ -43,16 +43,18 @@ def data(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
         (("SOT-23",), "sot-23", None),
         (("SOT-23",), "QFN-32", None),
         (("SOT-23", "23\\n"), "SOT-23\n", 0),
+        (("^SOP-(?!18_)", "^SOP-4_"), "SOP-4_3.8x4.1mm_P2.54mm", 1),
+        (("^SOP-(?!18_)", "^SOP-4_"), "SOP-18_7.5x11.6mm_P1.27mm", None),
         ((), "QFN-32", None),
     ],
 )
-def test_find_correction_preserves_cpl_match_precedence(
+def test_find_correction_ranks_by_how_much_of_the_value_is_consumed(
     data: ModuleType,
     patterns: tuple[str, ...],
     value: str,
     expected: Optional[int],  # noqa: UP045
 ) -> None:
-    """Suffix preference and stable ties must not become a new ranking policy."""
+    """More specific wins: the longest match, then input order for ties."""
     corrections = tuple(
         data.Correction(pattern, index * 90, (index, -index))
         for index, pattern in enumerate(patterns)
@@ -70,7 +72,7 @@ def test_find_correction_preserves_cpl_match_precedence(
         (("SOT-23", "SOT-23-3"), "R1", "VALUE", "SOT-23-3", 1, "fpt"),
         (("R", "R12", "VALUE"), "R12", "VALUE", "SOT-23-3", 1, "ref"),
         (("VAL", "VALUE"), "R12", "VALUE", "SOT-23-3", 1, "val"),
-        (("1", "R1", "VALUE"), "R1", "VALUE", "SOT-23-3", 0, "ref"),
+        (("1", "R1", "VALUE"), "R1", "VALUE", "SOT-23-3", 1, "ref"),
         (("R1", "VALUE", "SOT-23"), "R1", "VALUE", "SOT-23-3", 0, "ref"),
         (("SOT-23",), "R1", "VALUE", "Package:SOT-23-extra", 0, "fpt"),
     ],
