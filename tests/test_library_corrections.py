@@ -2481,3 +2481,59 @@ def test_safe_typed_schema_preserves_numeric_patterns_and_large_rotations(
     assert correction_values(fresh_library(library)) == [
         ("123", exact_rotation, (0.125, -0.5))
     ]
+
+
+def test_delete_all_corrections_empties_the_table_without_dropping_it(library):
+    """Emptying the rules must leave the table that marks the storage as present."""
+    library.insert_correction_data("R1", 90, (1, 2))
+    library.insert_correction_data("R2", 180, (0, 0))
+
+    assert library.delete_all_corrections() == 2
+
+    assert raw_rows(library) == []
+    # The table surviving is what keeps a board on its own corrections.
+    assert execute(
+        library.correctionsdb_file,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='correction'",
+    )
+    snapshot = fresh_library(library).read_correction_data()
+    assert snapshot.corrections == ()
+    assert snapshot.issues == ()
+
+
+def test_delete_all_corrections_on_an_empty_table_reports_nothing_deleted(library):
+    """An empty database is already in the requested state, not an error."""
+    assert library.delete_all_corrections() == 0
+    assert raw_rows(library) == []
+
+
+def test_delete_all_corrections_only_empties_the_named_database(modules, tmp_path):
+    """A board-local wipe must leave the shared global rules untouched."""
+    library = make_library(modules.library, tmp_path, local=True)
+    library.insert_correction_data("LOCAL", 90, (1, 2))
+    global_path = library.globalcorrectionsdb_file
+    library.create_correction_table(global_path)
+    execute(
+        global_path,
+        "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES ('GLOBAL', 270, 0, 0)",
+    )
+
+    assert library.delete_all_corrections(db_path=library.localcorrectionsdb_file) == 1
+
+    assert raw_rows(library) == []
+    assert [
+        row[1] for row in execute(global_path, "SELECT rowid, regex FROM correction")
+    ] == ["GLOBAL"]
+
+
+def test_delete_all_corrections_rolls_back_when_the_write_is_aborted(modules, library):
+    """A refused delete must leave every rule in place rather than a partial wipe."""
+    library.insert_correction_data("R1", 90, (1, 2))
+    library.insert_correction_data("explode", 180, (0, 0))
+    before = raw_rows(library)
+    install_abort_trigger(library.correctionsdb_file, operation="DELETE")
+
+    with pytest.raises(modules.data.CorrectionDataError):
+        library.delete_all_corrections()
+
+    assert raw_rows(library) == before
