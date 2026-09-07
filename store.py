@@ -444,10 +444,14 @@ class Store:
 
     def clean_database(self):
         """Delete all parts from the database that are no longer present on the board."""
-        refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(self.board)]
+        refs = [fp.GetReference() for fp in get_valid_footprints(self.board)]
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            # The f-string only injects ?-placeholders; the reference text
+            # itself is bound, so quotes in a designator stay literal.
+            placeholders = ",".join("?" for _ in refs)
             cur.execute(
-                f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
+                f"DELETE FROM part_info WHERE reference NOT IN ({placeholders})",
+                refs,
             )
             cur.commit()
 
