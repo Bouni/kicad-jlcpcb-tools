@@ -28,6 +28,7 @@ PARTSELECTOR_COLUMNS: list[PartSelectorColumn] = [
     PartSelectorColumn("mfr", "Manufacturer", "Manufacturer", 100, "left"),
     PartSelectorColumn("description", "Description", "Description", 300, "left"),
     PartSelectorColumn("price", "Price", "Price", 100, "left"),
+    PartSelectorColumn("trailing_spacer", " ", None, 24, "center", sortable=False),
 ]
 
 EXTRA_DB_FIELDS: list[str] = ["First Category"]
@@ -38,6 +39,10 @@ DB_FIELDS: list[str] = [
 
 COLUMN_INDEX: dict[str, int] = {
     column.key: idx for idx, column in enumerate(PARTSELECTOR_COLUMNS)
+}
+
+PARTSELECTOR_COLUMN_KEYS: dict[int, str] = {
+    index: key for key, index in COLUMN_INDEX.items() if key != "trailing_spacer"
 }
 
 SORTABLE_COLUMN_INDEX_TO_DB: dict[int, str] = {
