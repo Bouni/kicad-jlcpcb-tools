@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+from typing import TYPE_CHECKING
 
 import wx  # pylint: disable=import-error
 
@@ -10,6 +11,9 @@ from .bom_estimation.help_text import show_bom_estimator_help
 from .dblib import LIBRARY_CONFIGS
 from .events import UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
+
+if TYPE_CHECKING:
+    from .mainwindow import JLCPCBTools
 
 # Display strings for the LCSC priority dropdown; the stored setting stays a boolean.
 LCSC_PRIORITY_SCHEMATIC = "Schematic"
@@ -24,7 +28,7 @@ ICON_CELL_SIZE = 48
 class SettingsDialog(wx.Dialog):
     """Dialog for plugin settings."""
 
-    def __init__(self, parent):
+    def __init__(self, parent: "JLCPCBTools") -> None:
         wx.Dialog.__init__(
             self,
             parent,
@@ -386,9 +390,9 @@ class SettingsDialog(wx.Dialog):
         self.library_data_path_setting.SetToolTip(
             wx.ToolTip(
                 "Override where the global library database files are stored."
-                " If you change this, you may want to copy existing mapping and"
+                " If you change this, you may want to copy existing part preferences and"
                 " corrections files from the old location to the new one to avoid"
-                " losing existing mappings and corrections."
+                " losing existing part preferences and corrections."
             )
         )
 

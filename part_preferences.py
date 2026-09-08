@@ -1,24 +1,28 @@
-"""Contains the part mapper."""
+"""Manage reusable LCSC part preferences shared across projects."""
 
 import csv
 import logging
 import os
+from typing import TYPE_CHECKING
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
 from .helpers import HighResWxSize, loadBitmapScaled
 
+if TYPE_CHECKING:
+    from .mainwindow import JLCPCBTools
 
-class PartMapperManagerDialog(wx.Dialog):
-    """Dialog for managing part mappings."""
 
-    def __init__(self, parent):
+class PartPreferencesDialog(wx.Dialog):
+    """Dialog for managing preferred LCSC parts by footprint and value."""
+
+    def __init__(self, parent: "JLCPCBTools") -> None:
         wx.Dialog.__init__(
             self,
             parent,
             id=wx.ID_ANY,
-            title="Footprint Mapper",
+            title="Part preferences",
             pos=wx.DefaultPosition,
             size=HighResWxSize(parent.window, wx.Size(800, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
@@ -43,10 +47,10 @@ class PartMapperManagerDialog(wx.Dialog):
         self.parent.library.create_mapping_table()
 
         # ---------------------------------------------------------------------
-        # ------------------------- Mapping list ----------------------------
+        # ------------------------- Part preferences list ----------------------------
         # ---------------------------------------------------------------------
 
-        self.mapping_list = wx.dataview.DataViewListCtrl(
+        self.part_preferences_list = wx.dataview.DataViewListCtrl(
             self,
             wx.ID_ANY,
             wx.DefaultPosition,
@@ -54,34 +58,36 @@ class PartMapperManagerDialog(wx.Dialog):
             style=wx.dataview.DV_MULTIPLE,
         )
 
-        self.mapping_list.AppendTextColumn(
+        self.part_preferences_list.AppendTextColumn(
             "Footprint",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 150),
             align=wx.ALIGN_LEFT,
         )
-        self.mapping_list.AppendTextColumn(
+        self.part_preferences_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
         )
-        self.mapping_list.AppendTextColumn(
+        self.part_preferences_list.AppendTextColumn(
             "LCSC Part",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
         )
 
-        self.mapping_list.SetMinSize(HighResWxSize(parent.window, wx.Size(600, 500)))
+        self.part_preferences_list.SetMinSize(
+            HighResWxSize(parent.window, wx.Size(600, 500))
+        )
 
-        self.mapping_list.Bind(
-            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.on_mapping_selected
+        self.part_preferences_list.Bind(
+            wx.dataview.EVT_DATAVIEW_SELECTION_CHANGED, self.on_part_preference_selected
         )
 
         table_sizer = wx.BoxSizer(wx.HORIZONTAL)
         table_sizer.SetMinSize(HighResWxSize(parent.window, wx.Size(-1, 400)))
-        table_sizer.Add(self.mapping_list, 20, wx.ALL | wx.EXPAND, 5)
+        table_sizer.Add(self.part_preferences_list, 20, wx.ALL | wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
         # ------------------------ Right side toolbar -------------------------
@@ -112,9 +118,12 @@ class PartMapperManagerDialog(wx.Dialog):
             0,
         )
 
-        self.delete_button.Bind(wx.EVT_BUTTON, self.delete_mapping)
-        self.import_button.Bind(wx.EVT_BUTTON, self.import_mappings_dialog)
-        self.export_button.Bind(wx.EVT_BUTTON, self.export_mappings_dialog)
+        self.delete_button.Bind(wx.EVT_BUTTON, self.delete_selected_part_preferences)
+        self.delete_button.SetToolTip(
+            "Remove selected preferences without changing assignments on your boards."
+        )
+        self.import_button.Bind(wx.EVT_BUTTON, self.import_part_preferences_dialog)
+        self.export_button.Bind(wx.EVT_BUTTON, self.export_part_preferences_dialog)
 
         self.delete_button.SetBitmap(
             loadBitmapScaled(
@@ -151,60 +160,68 @@ class PartMapperManagerDialog(wx.Dialog):
         # ---------------------------------------------------------------------
 
         layout = wx.BoxSizer(wx.VERTICAL)
+        description = wx.StaticText(
+            self,
+            label="Preferred LCSC parts for matching values and footprints, shared across projects.",
+        )
+        description.Wrap(HighResWxSize(parent.window, wx.Size(650, -1)).width)
+        layout.Add(description, 0, wx.ALL | wx.EXPAND, 10)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
         self.enable_toolbar_buttons(False)
-        self.populate_mapping_list()
+        self.populate_part_preferences_list()
 
-    def quit_dialog(self, *_):
+    def quit_dialog(self, *_: object) -> None:
         """Close this dialog."""
         self.Destroy()
         self.EndModal(0)
 
-    def enable_toolbar_buttons(self, state):
+    def enable_toolbar_buttons(self, state: bool) -> None:
         """Control the state of all the buttons in toolbar on the right side."""
         for b in [
             self.delete_button,
         ]:
             b.Enable(bool(state))
 
-    def populate_mapping_list(self):
-        """Populate the list with the result of the search."""
-        self.mapping_list.DeleteAllItems()
+    def populate_part_preferences_list(self) -> None:
+        """Populate the list with all shared part preferences."""
+        self.part_preferences_list.DeleteAllItems()
 
         if self.parent.library.get_all_mapping_data() is None:
             self.logger.info("empty")
             return
 
-        for mapping in self.parent.library.get_all_mapping_data():
-            self.mapping_list.AppendItem([str(m) for m in mapping])
+        for part_preference in self.parent.library.get_all_mapping_data():
+            self.part_preferences_list.AppendItem(
+                [str(field) for field in part_preference]
+            )
 
-    def delete_mapping(self, *_):
-        """Delete a mapping from the database."""
-        for item in self.mapping_list.GetSelections():
-            row = self.mapping_list.ItemToRow(item)
+    def delete_selected_part_preferences(self, *_: object) -> None:
+        """Delete the selected part preferences from the shared database."""
+        for item in self.part_preferences_list.GetSelections():
+            row = self.part_preferences_list.ItemToRow(item)
             if row == -1:
                 return
-            footprint = self.mapping_list.GetTextValue(row, 0)
-            value = self.mapping_list.GetTextValue(row, 1)
+            footprint = self.part_preferences_list.GetTextValue(row, 0)
+            value = self.part_preferences_list.GetTextValue(row, 1)
             self.parent.library.delete_mapping_data(footprint, value)
-        self.populate_mapping_list()
+        self.populate_part_preferences_list()
 
-    def on_mapping_selected(self, *_):
+    def on_part_preference_selected(self, *_: object) -> None:
         """Enable the toolbar buttons when a selection was made."""
-        if self.mapping_list.GetSelectedItemsCount() > 0:
+        if self.part_preferences_list.GetSelectedItemsCount() > 0:
             self.enable_toolbar_buttons(True)
         else:
             self.enable_toolbar_buttons(False)
 
-    def import_mappings_dialog(self, *_):
-        """Dialog to import mappings from a CSV file."""
+    def import_part_preferences_dialog(self, *_: object) -> None:
+        """Choose a CSV file containing part preferences to import."""
         with wx.FileDialog(
             self,
-            "Import Mapping CSV",
+            "Import part preferences CSV",
             "",
             "",
             "CSV files (*.csv)|*.csv",
@@ -213,25 +230,25 @@ class PartMapperManagerDialog(wx.Dialog):
             if importFileDialog.ShowModal() == wx.ID_CANCEL:
                 return
             path = importFileDialog.GetPath()
-            self._import_mappings(path)
+            self._import_part_preferences(path)
 
-    def export_mappings_dialog(self, *_):
-        """Dialog to export mappings to a CSV file."""
+    def export_part_preferences_dialog(self, *_: object) -> None:
+        """Choose a CSV file to export shared part preferences to."""
         with wx.FileDialog(
             self,
-            "Export Mapping CSV",
+            "Export part preferences CSV",
             "",
-            "mapping",
+            "part-preferences",
             "CSV files (*.csv)|*.csv",
             wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
         ) as exportFileDialog:
             if exportFileDialog.ShowModal() == wx.ID_CANCEL:
                 return
             path = exportFileDialog.GetPath()
-            self._export_mappings(path)
+            self._export_part_preferences(path)
 
-    def _import_mappings(self, path):
-        """Import logic for Mappings."""
+    def _import_part_preferences(self, path: str) -> None:
+        """Import part preferences from a CSV file."""
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 csvreader = csv.DictReader(f, fieldnames=("footprint", "value", "lcsc"))
@@ -247,10 +264,10 @@ class PartMapperManagerDialog(wx.Dialog):
                         self.parent.library.insert_mapping_data(
                             row["footprint"], row["value"], row["lcsc"]
                         )
-            self.populate_mapping_list()
+            self.populate_part_preferences_list()
 
-    def _export_mappings(self, path):
-        """Export logic for mappings."""
+    def _export_part_preferences(self, path: str) -> None:
+        """Export shared part preferences to a CSV file."""
         with open(path, "w", newline="", encoding="utf-8") as f:
             csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
             csvwriter.writerow(["Footprint", "Part Value", "LCSC Part"])

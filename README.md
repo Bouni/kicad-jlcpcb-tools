@@ -104,6 +104,10 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
 
+### Part preferences
+
+Part preferences store a preferred LCSC part for each value and footprint combination across projects. Use the right-click actions **Save part preferences** and **Apply part preferences** to remember and reuse assignments. The **Part preferences** button opens the manager to delete, import, or export preferences. Deleting a preference does not remove assignments from your boards.
+
 ### Generate fabrication data
 
 Generate all necessary assembly files for your board with a simple click.

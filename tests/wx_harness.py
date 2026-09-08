@@ -307,7 +307,7 @@ def mainwindow_stubs(
             ),
         },
         "partdetails": {"PartDetailsDialog": object},
-        "partmapper": {"PartMapperManagerDialog": object},
+        "part_preferences": {"PartPreferencesDialog": object},
         "partselector": {"PartSelectorDialog": object},
         "schematicexport": {"SchematicExport": object},
         "settings": {"SettingsDialog": object},

@@ -76,7 +76,7 @@ from .helpers import (
 from .kicad_drc import DRCViolationCounter
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
-from .partmapper import PartMapperManagerDialog
+from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
@@ -99,7 +99,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 ID_GENERATE = 0
 ID_LAYERS = 1
 ID_CORRECTIONS = 2
-ID_MAPPINGS = 3
+ID_PART_PREFERENCES = 3
 ID_DOWNLOAD = 4
 ID_SETTINGS = 5
 ID_SELECT_PART = 6
@@ -111,15 +111,15 @@ ID_TOGGLE_POS = 11
 ID_PART_DETAILS = 12
 ID_HIDE_BOM = 13
 ID_HIDE_POS = 14
-ID_SAVE_MAPPINGS = 15
+ID_SAVE_PART_PREFERENCES = 15
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
-ID_CONTEXT_MENU_FIND_MAPPING = wx.NewIdRef()
-ID_CONTEXT_MENU_ADD_MAPPING = wx.NewIdRef()
+ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
+ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
 
 
 class KicadProvider:
@@ -279,11 +279,11 @@ class JLCPCBTools(wx.Dialog):
             "Manage part corrections",
         )
 
-        self.mapping_button = self.upper_toolbar.AddTool(
-            ID_MAPPINGS,
-            "Mappings",
+        self.part_preferences_button = self.upper_toolbar.AddTool(
+            ID_PART_PREFERENCES,
+            "Part preferences",
             loadBitmapScaled("mdi-selection.png", self.scale_factor),
-            "Manage part mappings",
+            "Manage preferred LCSC parts for matching values and footprints across projects",
         )
 
         self.upper_toolbar.AddSeparator()
@@ -306,7 +306,9 @@ class JLCPCBTools(wx.Dialog):
 
         self.Bind(wx.EVT_TOOL, self.generate_fabrication_data, self.generate_button)
         self.Bind(wx.EVT_TOOL, self.manage_corrections, self.correction_button)
-        self.Bind(wx.EVT_TOOL, self.manage_mappings, self.mapping_button)
+        self.Bind(
+            wx.EVT_TOOL, self.manage_part_preferences, self.part_preferences_button
+        )
         self.Bind(wx.EVT_TOOL, self.update_library, self.download_button)
         self.Bind(wx.EVT_TOOL, self.manage_settings, self.settings_button)
 
@@ -417,13 +419,13 @@ class JLCPCBTools(wx.Dialog):
         )
 
         self.save_all_button = self.right_toolbar.AddTool(
-            ID_SAVE_MAPPINGS,
-            "Save mappings",
+            ID_SAVE_PART_PREFERENCES,
+            "Save part preferences",
             loadBitmapScaled(
                 "mdi-content-save-settings.png",
                 self.scale_factor,
             ),
-            "Save all mappings",
+            "Save all part preferences",
         )
 
         self.export_schematic_button = self.right_toolbar.AddTool(
@@ -433,7 +435,7 @@ class JLCPCBTools(wx.Dialog):
                 "mdi-application-export.png",
                 self.scale_factor,
             ),
-            "Export mappings to schematic",
+            "Export LCSC assignments to schematic",
         )
 
         self.Bind(wx.EVT_TOOL, self.select_part, self.select_part_button)
@@ -445,7 +447,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(wx.EVT_TOOL, self.get_part_details, self.part_details_button)
         self.Bind(wx.EVT_TOOL, self.OnBomHide, self.hide_bom_button)
         self.Bind(wx.EVT_TOOL, self.OnPosHide, self.hide_pos_button)
-        self.Bind(wx.EVT_TOOL, self.save_all_mappings, self.save_all_button)
+        self.Bind(wx.EVT_TOOL, self.save_all_part_preferences, self.save_all_button)
         self.Bind(wx.EVT_TOOL, self.export_to_schematic, self.export_schematic_button)
 
         self.right_toolbar.ToggleTool(ID_SELECT_ALIKE, self.auto_select_alike)
@@ -1493,9 +1495,9 @@ class JLCPCBTools(wx.Dialog):
         CorrectionManagerDialog(self, "").ShowModal()
         self.populate_footprint_list()
 
-    def manage_mappings(self, *_):
-        """Manage footprint mappings."""
-        PartMapperManagerDialog(self).ShowModal()
+    def manage_part_preferences(self, *_: object) -> None:
+        """Manage shared part preferences."""
+        PartPreferencesDialog(self).ShowModal()
 
     def manage_settings(self, *_):
         """Manage settings."""
@@ -2022,8 +2024,8 @@ class JLCPCBTools(wx.Dialog):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
         self.populate_footprint_list()
 
-    def save_all_mappings(self, *_):
-        """Save all mappings."""
+    def save_all_part_preferences(self, *_: object) -> None:
+        """Save all part preferences."""
         for item in self.partlist_data_model.get_all():
             value = item[1]
             footprint = item[2]
@@ -2033,7 +2035,7 @@ class JLCPCBTools(wx.Dialog):
                     self.library.update_mapping_data(footprint, value, lcsc)
                 else:
                     self.library.insert_mapping_data(footprint, value, lcsc)
-        self.logger.info("All mappings saved")
+        self.logger.info("All part preferences saved")
 
     def export_to_schematic(self, *_):
         """Dialog to select schematics."""
@@ -2050,8 +2052,8 @@ class JLCPCBTools(wx.Dialog):
             paths = openFileDialog.GetPaths()
             SchematicExport(self).load_schematic(paths)
 
-    def add_foot_mapping(self, *_):
-        """Add a footprint mapping."""
+    def save_selected_part_preferences(self, *_: object) -> None:
+        """Remember the selected LCSC assignments as part preferences."""
         for item in self.footprint_list.GetSelections():
             footprint = self.partlist_data_model.get_footprint(item)
             value = self.partlist_data_model.get_value(item)
@@ -2062,8 +2064,8 @@ class JLCPCBTools(wx.Dialog):
                 else:
                     self.library.insert_mapping_data(footprint, value, lcsc)
 
-    def search_foot_mapping(self, *_):
-        """Search for a footprint mapping."""
+    def apply_selected_part_preferences(self, *_: object) -> None:
+        """Apply matching part preferences to the selected rows."""
         for item in self.footprint_list.GetSelections():
             reference = self.partlist_data_model.get_reference(item)
             footprint = self.partlist_data_model.get_footprint(item)
@@ -2088,7 +2090,7 @@ class JLCPCBTools(wx.Dialog):
             return m.group(0)
         return ""
 
-    def OnRightDown(self, *_):
+    def OnRightDown(self, *_: object) -> None:
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
 
@@ -2126,17 +2128,25 @@ class JLCPCBTools(wx.Dialog):
         right_click_menu.Append(correction_by_name)
         right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
 
-        find_mapping = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_FIND_MAPPING, "Find LCSC from Mappings"
+        apply_part_preferences = wx.MenuItem(
+            right_click_menu,
+            ID_CONTEXT_MENU_APPLY_PART_PREFERENCES,
+            "Apply part preferences",
         )
-        right_click_menu.Append(find_mapping)
-        right_click_menu.Bind(wx.EVT_MENU, self.search_foot_mapping, find_mapping)
+        right_click_menu.Append(apply_part_preferences)
+        right_click_menu.Bind(
+            wx.EVT_MENU, self.apply_selected_part_preferences, apply_part_preferences
+        )
 
-        add_mapping = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_ADD_MAPPING, "Add Footprint Mapping"
+        save_part_preferences = wx.MenuItem(
+            right_click_menu,
+            ID_CONTEXT_MENU_SAVE_PART_PREFERENCES,
+            "Save part preferences",
         )
-        right_click_menu.Append(add_mapping)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_foot_mapping, add_mapping)
+        right_click_menu.Append(save_part_preferences)
+        right_click_menu.Bind(
+            wx.EVT_MENU, self.save_selected_part_preferences, save_part_preferences
+        )
 
         self.footprint_list.PopupMenu(right_click_menu)
         right_click_menu.Destroy()  # destroy to avoid memory leak
