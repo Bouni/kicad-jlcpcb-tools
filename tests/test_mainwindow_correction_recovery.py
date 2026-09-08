@@ -97,6 +97,12 @@ class StatusLabel:
 def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
     """Supply controls and board records while preserving real window methods."""
     window = object.__new__(runtime.mainwindow.JLCPCBTools)
+    window._project_storage_unavailable = False
+    window._part_preferences_applied_on_open = False
+    window.project_storage_status = MagicMock()
+    window.footprint_list = MagicMock()
+    window.right_toolbar = MagicMock()
+    window.upper_toolbar = MagicMock()
     window.library = library or fresh_library(runtime.library)
     window.scale_factor = 1
     window.window = object()
@@ -324,14 +330,17 @@ def test_valid_empty_database_displays_zero_and_clears_prior_issue(
 
 
 def test_startup_store_population_recovers_invalid_saved_corrections(
-    runtime, monkeypatch
-):
+    runtime: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The startup init_store path reaches recovery without losing the part list."""
     seed_raw(runtime.library, [("C1", "47u", 0, 0)])
     window = _population_window(runtime)
     store = window.store
     monkeypatch.setattr(runtime.mainwindow, "Store", lambda *_args: store)
     window.project_path = runtime.library.parent.project_path
+    window.settings = {
+        "part_preferences": {"fill_empty_lcsc_assignments_on_open": False}
+    }
     window.start_assembly_enrichment = MagicMock()
     window.recompute_bom_estimate = MagicMock()
     window.store = None

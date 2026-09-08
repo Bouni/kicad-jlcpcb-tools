@@ -106,7 +106,12 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ### Part preferences
 
-Part preferences store a preferred LCSC part for each value and footprint combination across projects. Use the right-click actions **Save part preferences** and **Apply part preferences** to remember and reuse assignments. The **Part preferences** button opens the manager to delete, import, or export preferences. Deleting a preference does not remove assignments from your boards.
+Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
+
+- **Remember my part preferences** remembers each successful part selection or pasted LCSC assignment. The latest explicit assignment replaces the preference; opening a board does not change preferences.
+- **Parts preferences fill in empty LCSC assignments** fills blank LCSC assignments once each time the plugin window opens. Existing assignments are preserved. DNP parts and parts excluded from BOM or POS are skipped.
+
+Clearing an LCSC assignment keeps its part preference, so an eligible blank assignment may fill again on the next opening. Exclude the part or disable automatic filling to keep it blank. The right-click actions **Save part preferences** and **Apply part preferences** remain available even when automation is disabled. Use **Part preferences** to delete, import, or export preferences. Deleting a preference does not remove assignments from your boards.
 
 ### Generate fabrication data
 

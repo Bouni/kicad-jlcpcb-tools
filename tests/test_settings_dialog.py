@@ -11,6 +11,7 @@ the LCSC priority setting is a two-way choice rather than an on/off switch.
 """
 
 import types
+from typing import Any, Optional
 
 import pytest
 
@@ -164,7 +165,7 @@ class _Dialog(_FakeWidget):
     """wx.Dialog stand-in whose window methods are all no-ops."""
 
 
-def _load_settings_module():
+def _load_settings_module() -> types.ModuleType:
     """Load settings.py with deterministic stubs for its GUI dependencies."""
     library_config = types.SimpleNamespace(display_name="Full Library - All Parts")
     stubs = package_stubs(_PACKAGE, ("bom_estimation",))
@@ -191,9 +192,6 @@ def _load_settings_module():
             f"{_PACKAGE}.dblib": module(
                 f"{_PACKAGE}.dblib", LIBRARY_CONFIGS={"current-parts": library_config}
             ),
-            f"{_PACKAGE}.events": module(
-                f"{_PACKAGE}.events", UpdateSetting=types.SimpleNamespace
-            ),
             f"{_PACKAGE}.helpers": module(
                 f"{_PACKAGE}.helpers",
                 HighResWxSize=lambda _window, size: size,
@@ -201,6 +199,7 @@ def _load_settings_module():
             ),
         }
     )
+    stubs[f"{_PACKAGE}.events"] = load(_PACKAGE, "events", stubs)
     return load(_PACKAGE, "settings", stubs)
 
 
@@ -220,6 +219,14 @@ _BOOLEAN_SETTINGS = {
     "order_number_setting": ("general", "order_number"),
     "highlight_matches_setting": ("highlighting", "matches"),
     "bom_estimator_show_setting": ("general", "bom_estimator_show"),
+    "part_preferences_remember_lcsc_assignments_setting": (
+        "part_preferences",
+        "remember_lcsc_assignments",
+    ),
+    "part_preferences_fill_empty_lcsc_assignments_on_open_setting": (
+        "part_preferences",
+        "fill_empty_lcsc_assignments_on_open",
+    ),
 }
 
 # Every label describes what happens when the box is checked.
@@ -236,6 +243,10 @@ _EXPECTED_LABELS = {
     "order_number_setting": "Check for an order/serial number placeholder on export",
     "highlight_matches_setting": "Highlight search matches",
     "bom_estimator_show_setting": "Show BOM cost estimator",
+    "part_preferences_remember_lcsc_assignments_setting": "Remember my part preferences",
+    "part_preferences_fill_empty_lcsc_assignments_on_open_setting": (
+        "Parts preferences fill in empty LCSC assignments"
+    ),
 }
 
 
@@ -245,12 +256,13 @@ def _clear_posted_events():
     del _wx.posted_events[:]
 
 
-def _settings(flag):
+def _settings(flag: bool) -> dict[str, dict[str, Any]]:
     """Return a settings dict with every boolean checkbox setting set to ``flag``."""
     settings_dict = {
         "gerber": {},
         "general": {"lcsc_priority": True},
         "highlighting": {},
+        "part_preferences": {},
         "library": {"selected_library": "current-parts", "data_path": ""},
         "hooks": {"pre_script": "", "post_script": "", "timeout_seconds": 30},
     }
@@ -288,20 +300,6 @@ def test_checkbox_label_is_static_and_describes_checked_behaviour(attribute):
     }
 
     assert labels == {True: expected, False: expected}
-
-
-def test_unchecking_a_box_keeps_its_label_and_posts_the_new_value():
-    """Toggling changes the value and the persisted setting, never the text."""
-    dialog = _dialog(_settings(True))
-    checkbox = dialog.tented_vias_setting
-
-    checkbox.SetValue(False)
-    events = _fire(checkbox)
-
-    assert (checkbox.GetLabel(), checkbox.GetValue()) == ("Tent vias", False)
-    assert [(e.section, e.setting, e.value) for e in events] == [
-        ("gerber", "tented_vias", False)
-    ]
 
 
 @pytest.mark.parametrize(
@@ -378,3 +376,72 @@ def test_enabling_force_drc_also_persists_fill_zones():
         ("gerber", "fill_zones", True),
         ("gerber", "force_drc", True),
     ]
+
+
+@pytest.mark.parametrize("attribute", _BOOLEAN_SETTINGS)
+@pytest.mark.parametrize("enabled", [False, True])
+def test_boolean_controls_load_and_dispatch_settings(
+    attribute: str, enabled: bool
+) -> None:
+    """Each checkbox loads its saved state and dispatches its own setting."""
+    settings_dict = _settings(not enabled)
+    if attribute == "fill_zones_setting":
+        settings_dict["gerber"]["force_drc"] = False
+    dialog = _dialog(settings_dict)
+    control = getattr(dialog, attribute)
+    section, key = _BOOLEAN_SETTINGS[attribute]
+    assert control.GetValue() is not enabled
+    assert _wx.posted_events == []
+
+    control.SetValue(enabled)
+    events = _fire(control)
+
+    assert control.GetValue() is enabled
+    assert control.GetLabel() == _EXPECTED_LABELS[attribute]
+    assert all(target is dialog.parent for target, _event in _wx.posted_events)
+    expected = [(section, key, enabled)]
+    if attribute == "force_drc_setting" and enabled:
+        expected.insert(0, ("gerber", "fill_zones", True))
+    assert [(event.section, event.setting, event.value) for event in events] == expected
+
+
+@pytest.mark.parametrize(
+    "existing", [None, {}], ids=["missing-section", "empty-section"]
+)
+def test_part_preferences_default_to_enabled_in_dialog(
+    existing: Optional[dict[str, bool]],
+) -> None:
+    """Opening older settings enables missing options without emitting changes."""
+    settings_dict = _settings(True)
+    settings_dict.pop("part_preferences")
+    if existing is not None:
+        settings_dict["part_preferences"] = existing
+    dialog = _dialog(settings_dict)
+
+    assert dialog.part_preferences_remember_lcsc_assignments_setting.GetValue() is True
+    assert (
+        dialog.part_preferences_fill_empty_lcsc_assignments_on_open_setting.GetValue()
+        is True
+    )
+    assert _wx.posted_events == []
+
+
+def test_preference_settings_remain_editable_when_library_bootstrap_fails() -> None:
+    """The real Settings constructor must work before a Library is available."""
+    parent = types.SimpleNamespace(
+        window=object(),
+        scale_factor=1.0,
+        settings=_settings(True),
+        library=None,
+    )
+    dialog = SettingsDialog(parent)
+    control = dialog.part_preferences_fill_empty_lcsc_assignments_on_open_setting
+    assert control.GetValue() is True
+    control.SetValue(False)
+    events = _fire(control)
+    assert len(events) == 1
+    assert vars(events[0]) == {
+        "section": "part_preferences",
+        "setting": "fill_empty_lcsc_assignments_on_open",
+        "value": False,
+    }

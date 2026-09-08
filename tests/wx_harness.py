@@ -280,8 +280,12 @@ def mainwindow_stubs(
         "enrichment.providers": {"LCSCAssemblyMetadataProvider": object},
         "fabrication": {"Fabrication": object},
         "footprint_helpers": {
+            "get_exclude_from_bom": lambda _footprint: False,
+            "get_exclude_from_pos": lambda _footprint: False,
             "get_is_dnp": lambda _footprint: False,
-            "set_lcsc_value": lambda *_args: None,
+            "get_lcsc_value": lambda _footprint: "",
+            "find_lcsc_assignment_text": lambda _footprint: None,
+            "set_lcsc_value": lambda *_args, **_kwargs: None,
             "toggle_exclude_from_bom": lambda _footprint: None,
             "toggle_exclude_from_pos": lambda _footprint: None,
         },
