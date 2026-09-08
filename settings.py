@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+from typing import TYPE_CHECKING
 
 import wx  # pylint: disable=import-error
 
@@ -10,6 +11,9 @@ from .bom_estimation.help_text import show_bom_estimator_help
 from .dblib import LIBRARY_CONFIGS
 from .events import UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
+
+if TYPE_CHECKING:
+    from .mainwindow import JLCPCBTools
 
 # Display strings for the LCSC priority dropdown; the stored setting stays a boolean.
 LCSC_PRIORITY_SCHEMATIC = "Schematic"
@@ -24,7 +28,7 @@ ICON_CELL_SIZE = 48
 class SettingsDialog(wx.Dialog):
     """Dialog for plugin settings."""
 
-    def __init__(self, parent):
+    def __init__(self, parent: "JLCPCBTools") -> None:
         wx.Dialog.__init__(
             self,
             parent,
@@ -386,9 +390,9 @@ class SettingsDialog(wx.Dialog):
         self.library_data_path_setting.SetToolTip(
             wx.ToolTip(
                 "Override where the global library database files are stored."
-                " If you change this, you may want to copy existing mapping and"
+                " If you change this, you may want to copy existing part preferences and"
                 " corrections files from the old location to the new one to avoid"
-                " losing existing mappings and corrections."
+                " losing existing part preferences and corrections."
             )
         )
 
@@ -401,6 +405,62 @@ class SettingsDialog(wx.Dialog):
             library_data_path_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
         )
         library_data_path_sizer.Add(self.library_data_path_setting, 1, wx.EXPAND)
+
+        ##### Part preferences #####
+
+        self.part_preferences_remember_lcsc_assignments_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Remember my part preferences",
+            name="part_preferences.remember_lcsc_assignments",
+        )
+        self.part_preferences_remember_lcsc_assignments_setting.SetToolTip(
+            wx.ToolTip(
+                "When you select or paste an LCSC part, remember it for components"
+                " with the same value and footprint across projects. A later choice"
+                " replaces the previous preference. Opening a board does not change"
+                " preferences. Save part preferences remains available in the"
+                " right-click menu when this is disabled."
+            )
+        )
+        self.part_preferences_remember_lcsc_assignments_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
+
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Parts preferences fill in empty LCSC assignments",
+            name="part_preferences.fill_empty_lcsc_assignments_on_open",
+        )
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.SetToolTip(
+            wx.ToolTip(
+                "When the plugin window opens, use the preferred LCSC part for"
+                " each matching value and footprint. Existing assignments are"
+                " kept. Skip DNP parts and parts excluded from BOM or placement."
+                " Cleared assignments may fill again on the next opening unless"
+                " the part is excluded or this setting is disabled."
+            )
+        )
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
+
+        part_preferences_box_sizer = wx.StaticBoxSizer(
+            wx.HORIZONTAL, self, "Part preferences"
+        )
+        part_preferences_box_sizer.Add(
+            self.part_preferences_remember_lcsc_assignments_setting,
+            1,
+            wx.ALL | wx.EXPAND,
+            5,
+        )
+        part_preferences_box_sizer.Add(
+            self.part_preferences_fill_empty_lcsc_assignments_on_open_setting,
+            1,
+            wx.ALL | wx.EXPAND,
+            5,
+        )
 
         ##### Generation hooks #####
 
@@ -633,6 +693,7 @@ class SettingsDialog(wx.Dialog):
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(settings_grid, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(part_preferences_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(hooks_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
@@ -775,7 +836,19 @@ class SettingsDialog(wx.Dialog):
         """Show shared BOM estimator help text via the help_text helper."""
         show_bom_estimator_help(self)
 
-    def load_settings(self):
+    def update_part_preferences_remember_lcsc_assignments(self, enabled: bool) -> None:
+        """Update whether explicit LCSC assignments become part preferences."""
+        self.part_preferences_remember_lcsc_assignments_setting.SetValue(bool(enabled))
+
+    def update_part_preferences_fill_empty_lcsc_assignments_on_open(
+        self, enabled: bool
+    ) -> None:
+        """Update whether part preferences fill empty assignments on opening."""
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.SetValue(
+            bool(enabled)
+        )
+
+    def load_settings(self) -> None:
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
             self.parent.settings.get("gerber", {}).get("tented_vias", True)
@@ -818,6 +891,16 @@ class SettingsDialog(wx.Dialog):
         self.update_data_path(
             self.parent.settings.get("library", {}).get("data_path", "")
         )
+        self.update_part_preferences_remember_lcsc_assignments(
+            self.parent.settings.get("part_preferences", {}).get(
+                "remember_lcsc_assignments", True
+            )
+        )
+        self.update_part_preferences_fill_empty_lcsc_assignments_on_open(
+            self.parent.settings.get("part_preferences", {}).get(
+                "fill_empty_lcsc_assignments_on_open", True
+            )
+        )
         self.update_pre_script(
             self.parent.settings.get("hooks", {}).get("pre_script", "")
         )
@@ -834,10 +917,10 @@ class SettingsDialog(wx.Dialog):
             display_name = LIBRARY_CONFIGS[library_key].display_name
             self.library_selected_setting.SetStringSelection(display_name)
 
-    def update_data_path(self, data_path):
+    def update_data_path(self, data_path: object) -> None:
         """Update settings dialog according to the configured data path."""
         value = data_path.strip() if isinstance(data_path, str) else ""
-        effective_path = value if value else self.parent.library.datadir
+        effective_path = value if value else getattr(self.parent.library, "datadir", "")
         self.library_data_path_setting.SetPath(effective_path)
 
     def update_pre_script(self, script_path):
@@ -858,9 +941,16 @@ class SettingsDialog(wx.Dialog):
             return
         self.timeout_seconds_setting.SetValue(30)
 
-    def update_settings(self, event):
+    def update_settings(self, event: "wx.CommandEvent") -> None:
         """Update and persist a setting that was changed."""
-        section, name = event.GetEventObject().GetName().split("_", 1)
+        control_name = event.GetEventObject().GetName()
+        if "." in control_name:
+            # A dot separates section names that themselves contain underscores.
+            section, name = control_name.split(".", 1)
+            update_method = f"update_{section}_{name}"
+        else:
+            section, name = control_name.split("_", 1)
+            update_method = f"update_{name}"
         if hasattr(event.GetEventObject(), "GetPath"):
             value = event.GetEventObject().GetPath()
         else:
@@ -891,7 +981,7 @@ class SettingsDialog(wx.Dialog):
         ):
             value = True
 
-        getattr(self, f"update_{name}")(value)
+        getattr(self, update_method)(value)
 
         # Turning on forced DRC implies enabling fill zones.
         if section == "gerber" and name == "force_drc" and value:

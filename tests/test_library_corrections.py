@@ -78,7 +78,7 @@ def immediate_thread(
 def prepare_constructor_storage(library: Any) -> None:
     """Start the real constructor with project settings and no correction database."""
     library.parent.settings = {"library": {"data_path": library.datadir}}
-    library.create_mapping_table()
+    library.create_part_preferences_table()
     Path(library.globalcorrectionsdb_file).unlink()
 
 
@@ -118,7 +118,7 @@ def test_examined_empty_sources_and_settled_startup_are_read_only(
     elif kind == "empty":
         seed_legacy(library.rotationsdb_file, [])
     seed_raw(library, [("custom", 90, 1, 2)])
-    library.create_mapping_table()
+    library.create_part_preferences_table()
     assert library.migrate_corrections() == ()
     reopened = fresh_library(library)
 
@@ -214,7 +214,7 @@ def test_old_completed_legacy_and_csv_markers_stay_settled(
         "INSERT INTO correction_migrations VALUES ('csv:preserved', 'legacy.csv')",
     )
     execute(library.globalcorrectionsdb_file, "DROP TABLE correction_migration_state")
-    library.create_mapping_table()
+    library.create_part_preferences_table()
     reopened = fresh_library(library)
 
     def forbidden(*args: Any, **kwargs: Any) -> Any:
@@ -284,7 +284,7 @@ def test_pending_metadata_failure_blocks_captured_target_until_retry(
         "WHEN NEW.status='pending' BEGIN SELECT RAISE(ABORT, 'pending metadata denied'); END",
     )
     before = raw_rows(library)
-    library.create_mapping_table()
+    library.create_part_preferences_table()
     library.parent.settings = {"library": {"data_path": library.datadir}}
     library = modules.library.Library(library.parent)
     assert library.retry_correction_migrations()
@@ -987,7 +987,7 @@ def test_optional_download_start_failure_preserves_healthy_corrections(
 ) -> None:
     """Every scheduling entry leaves usable data and retryable initial defaults."""
     seed_raw(library, [("existing", 90, 1, 2)])
-    library.create_mapping_table()
+    library.create_part_preferences_table()
     library.migrate_corrections()
     execute(
         library.globalcorrectionsdb_file,

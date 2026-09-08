@@ -49,6 +49,7 @@ def _make_window(
         settings["gerber"]["fill_zones"] = fill_zones
 
     window = SimpleNamespace(
+        _project_storage_unavailable=False,
         generate_button=MagicMock(),
         reset_gauge=MagicMock(),
         settings=settings,

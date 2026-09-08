@@ -1,12 +1,13 @@
 """Contains the data storge for a project."""
 
+from collections.abc import Iterable
 import contextlib
 import csv
 import logging
 import os
 from pathlib import Path
 import sqlite3
-from typing import Union
+from typing import Optional, Union
 
 from .bom_estimation.assembly_mode import ComponentProductType
 from .footprint_helpers import (
@@ -264,6 +265,21 @@ class Store:
                 },
             )
             cur.commit()
+
+    def set_lcsc_assignments(
+        self, assignments: Iterable[tuple[str, str, Optional[int]]]
+    ) -> None:
+        """Commit assignment, stock, and enrichment invalidation for a whole action."""
+        batch = list(assignments)
+        if not batch:
+            return
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
+            con.executemany(
+                "UPDATE part_info SET "
+                "lcsc = ?, stock = ?, assembly_process = '', "
+                "component_product_type = NULL WHERE reference = ?",
+                ((lcsc, stock, reference) for reference, lcsc, stock in batch),
+            )
 
     def set_assembly_metadata(
         self,

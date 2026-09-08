@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path, PurePath
+import re
 import sqlite3
 from threading import Lock, Thread
 import time
@@ -40,6 +41,15 @@ DatabasePath = Union[str, os.PathLike[str]]
 _INITIAL_DEFAULTS_KEY = "remote:initial-defaults:v1"
 _INITIAL_DOWNLOAD_LOCK = Lock()
 _INITIAL_DOWNLOAD_TARGETS: set[str] = set()
+
+
+def _normalize_part_preference_lcsc(value: object) -> Optional[str]:  # noqa: UP045
+    """Accept a complete C-number without requiring current catalog membership."""
+    if isinstance(value, str) and re.fullmatch(
+        r"C[0-9]+", value.strip(), re.IGNORECASE
+    ):
+        return value.strip().upper()
+    return None
 
 
 def _sqlite_file_uri(path: PurePath) -> str:
@@ -137,7 +147,7 @@ class Library:
         self.localcorrectionsdb_file = ""
         self.globalcorrectionsdb_file = ""
         self.correctionsdb_file = ""
-        self.mappingsdb_file = ""
+        self.part_preferences_db_file = ""
         self.state = None
         self.download_lock = Lock()
         self.category_map = {}
@@ -156,7 +166,7 @@ class Library:
             return os.path.abspath(os.path.expanduser(configured.strip()))
         return os.path.join(PLUGIN_PATH, "jlcpcb")
 
-    def refresh_library_config(self):
+    def refresh_library_config(self) -> None:
         """Refresh library configuration from settings."""
         self.datadir = self._resolve_data_directory()
 
@@ -180,7 +190,8 @@ class Library:
             if self.uses_global_correction_database()
             else self.localcorrectionsdb_file
         )
-        self.mappingsdb_file = os.path.join(self.datadir, "mappings.db")
+        # Retain the legacy filename so existing shared part preferences stay available.
+        self.part_preferences_db_file = os.path.join(self.datadir, "mappings.db")
         self.category_map = {}
 
         self.setup()
@@ -238,12 +249,17 @@ class Library:
         except (CorrectionDataError, OSError) as error:
             # Recovery reads report these errors while keeping the manager usable.
             self.logger.warning("Correction storage is unavailable: %s", error)
-        if (
-            not os.path.isfile(self.mappingsdb_file)
-            or os.path.getsize(self.mappingsdb_file) == 0
-        ):
-            self.create_mapping_table()
-            self.migrate_mappings()
+        try:
+            new_preferences = (
+                not os.path.isfile(self.part_preferences_db_file)
+                or os.path.getsize(self.part_preferences_db_file) == 0
+            )
+            self.create_part_preferences_table()
+            if new_preferences:
+                self.migrate_legacy_part_preferences()
+        except (sqlite3.Error, OSError) as error:
+            # Preferences are optional; keep the catalog and Settings accessible.
+            self.logger.warning("Part preference storage is unavailable: %s", error)
 
     def uses_global_correction_database(self):
         """Check for a project correction table without creating a project database."""
@@ -1033,10 +1049,13 @@ class Library:
         """Return a complete typed set, or None when storage is not ready."""
         return self.read_correction_data(db_path).corrections
 
-    def create_mapping_table(self):
-        """Create the mapping table."""
+    def create_part_preferences_table(self) -> None:
+        """Create part preference storage using the existing table name.
+
+        Keep the legacy ``mapping`` schema compatible with installed databases.
+        """
         with (
-            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(self.part_preferences_db_file)) as con,
             con as cur,
         ):
             cur.execute(
@@ -1044,54 +1063,96 @@ class Library:
             )
             cur.commit()
 
-    def get_mapping_data(self, footprint, value):
-        """Get the mapping data by its regex."""
+    def get_part_preference(self, footprint: str, value: str) -> Optional[str]:  # noqa: UP045
+        """Validate the first stored preference without rewriting installed rows."""
         with (
-            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(self.part_preferences_db_file)) as con,
             con as cur,
         ):
-            return cur.execute(
-                f"SELECT * FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
+            row = cur.execute(
+                "SELECT LCSC FROM mapping WHERE footprint = ? AND value = ? "
+                "ORDER BY rowid LIMIT 1",
+                (footprint, value),
             ).fetchone()
+        if row is None:
+            return None
+        lcsc = _normalize_part_preference_lcsc(row[0])
+        if lcsc is None:
+            self.logger.warning(
+                "Skipping invalid stored part preference for %r / %r: %r",
+                footprint,
+                value,
+                row[0],
+            )
+        return lcsc
 
-    def delete_mapping_data(self, footprint, value):
-        """Delete a mapping from the database."""
+    def delete_part_preference(self, footprint: str, value: str) -> None:
+        """Delete the part preference for a footprint and value."""
         with (
-            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(self.part_preferences_db_file)) as con,
             con as cur,
         ):
             cur.execute(
-                f"DELETE FROM mapping WHERE footprint = '{footprint}' AND value = '{value}'"
+                "DELETE FROM mapping WHERE footprint = ? AND value = ?",
+                (footprint, value),
             )
             cur.commit()
 
-    def update_mapping_data(self, footprint, value, LCSC):
-        """Update a mapping in the database."""
+    def save_part_preferences(
+        self, preferences: Iterable[tuple[str, str, object]]
+    ) -> int:
+        """Commit an action's preferences together and count distinct changed keys.
+
+        The last valid C-number for each exact key wins. Invalid choices leave
+        preferences intact; legacy duplicate rows are updated together. Any
+        database failure rolls back every accepted choice in the action.
+        """
+        latest = {}
+        for footprint, value, identifier in preferences:
+            lcsc = _normalize_part_preference_lcsc(identifier)
+            if lcsc is None:
+                self.logger.warning(
+                    "Skipping invalid part preference for %r / %r: %r",
+                    footprint,
+                    value,
+                    identifier,
+                )
+            else:
+                latest[footprint, value] = lcsc
+        if not latest:
+            return 0
+
         with (
-            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(self.part_preferences_db_file)) as con,
             con as cur,
         ):
-            cur.execute(
-                f"UPDATE mapping SET LCSC = '{LCSC}' WHERE footprint = '{footprint}' AND value = '{value}'"
-            )
-            cur.commit()
+            # Serialize the lookup and write without requiring a new unique index.
+            cur.execute("BEGIN IMMEDIATE")
+            changed = 0
+            for (footprint, value), lcsc in latest.items():
+                existing = cur.execute(
+                    "SELECT LCSC FROM mapping WHERE footprint = ? AND value = ?",
+                    (footprint, value),
+                ).fetchall()
+                if not existing:
+                    cur.execute(
+                        "INSERT INTO mapping VALUES (?, ?, ?)",
+                        (footprint, value, lcsc),
+                    )
+                elif any(row[0] != lcsc for row in existing):
+                    cur.execute(
+                        "UPDATE mapping SET LCSC = ? WHERE footprint = ? AND value = ?",
+                        (lcsc, footprint, value),
+                    )
+                else:
+                    continue
+                changed += 1
+            return changed
 
-    def insert_mapping_data(self, footprint, value, LCSC):
-        """Insert a mapping into the database."""
+    def get_all_part_preferences(self) -> list[list[object]]:
+        """Get all shared part preferences ordered by footprint."""
         with (
-            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
-            con as cur,
-        ):
-            cur.execute(
-                "INSERT INTO mapping VALUES (?, ?, ?)",
-                (footprint, value, LCSC),
-            )
-            cur.commit()
-
-    def get_all_mapping_data(self):
-        """Get all mapping from the database."""
-        with (
-            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as con,
+            contextlib.closing(sqlite3.connect(self.part_preferences_db_file)) as con,
             con as cur,
         ):
             return [
@@ -1350,13 +1411,13 @@ class Library:
         )
         self.state = LibraryState.INITIALIZED
 
-    def create_tables(self, headers):
+    def create_tables(self, headers: Iterable[str]) -> None:
         """Create all tables."""
         self.create_meta_table()
         self.delete_parts_table()
         self.create_parts_table(headers)
         self.create_correction_table()
-        self.create_mapping_table()
+        self.create_part_preferences_table()
 
     @property
     def categories(self):
@@ -1811,13 +1872,15 @@ class Library:
             )
             return None
 
-    def migrate_mappings(self):
-        """Migrate existing mappings from parts db to mappings db."""
+    def migrate_legacy_part_preferences(self) -> None:
+        """Move legacy part preferences out of the parts catalog database."""
         with (
             contextlib.closing(sqlite3.connect(self.partsdb_file)) as pdb,
-            contextlib.closing(sqlite3.connect(self.mappingsdb_file)) as mdb,
+            contextlib.closing(
+                sqlite3.connect(self.part_preferences_db_file)
+            ) as preferences_db,
             pdb as pcur,
-            mdb as mcur,
+            preferences_db as preferences_cursor,
         ):
             try:
                 result = pcur.execute(
@@ -1826,17 +1889,19 @@ class Library:
                 if not result:
                     return
                 for r in result:
-                    mcur.execute(
+                    preferences_cursor.execute(
                         "INSERT INTO mapping VALUES (?, ?)",
                         (r[0], r[1]),
                     )
-                    mcur.commit()
+                    preferences_cursor.commit()
                 self.logger.debug(
-                    "Migrated %d mappings to sepetrate database.", len(result)
+                    "Migrated %d part preferences to a separate database.", len(result)
                 )
                 pcur.execute("DROP TABLE IF EXISTS mapping")
                 pcur.commit()
-                self.logger.debug("Droped mappings table from parts database.")
+                self.logger.debug(
+                    "Removed legacy part preferences from the parts database."
+                )
             except sqlite3.OperationalError:
                 return
 

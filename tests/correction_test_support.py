@@ -30,7 +30,7 @@ def make_library(
     library.datadir = str(global_dir)
     library.partsdb_file = str(global_dir / "parts.db")
     library.rotationsdb_file = str(global_dir / "rotations.db")
-    library.mappingsdb_file = str(global_dir / "mappings.db")
+    library.part_preferences_db_file = str(global_dir / "mappings.db")
     library.globalcorrectionsdb_file = str(global_dir / "corrections.db")
     library.localcorrectionsdb_file = str(project_dir / "jlcpcb" / "project.db")
     library.correctionsdb_file = (
@@ -53,7 +53,7 @@ def fresh_library(library: Any) -> Any:
         "datadir",
         "partsdb_file",
         "rotationsdb_file",
-        "mappingsdb_file",
+        "part_preferences_db_file",
         "globalcorrectionsdb_file",
         "localcorrectionsdb_file",
         "correctionsdb_file",
