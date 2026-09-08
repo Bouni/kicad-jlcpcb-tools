@@ -2,7 +2,7 @@
 
 import csv
 import logging
-import os
+import sqlite3
 from typing import TYPE_CHECKING
 
 import wx  # pylint: disable=import-error
@@ -12,6 +12,8 @@ from .helpers import HighResWxSize, loadBitmapScaled
 
 if TYPE_CHECKING:
     from .mainwindow import JLCPCBTools
+
+_CSV_HEADER = ["Footprint", "Part Value", "LCSC Part"]
 
 
 class PartPreferencesDialog(wx.Dialog):
@@ -44,10 +46,8 @@ class PartPreferencesDialog(wx.Dialog):
         accel = wx.AcceleratorTable(entries)
         self.SetAcceleratorTable(accel)
 
-        self.parent.library.create_mapping_table()
-
         # ---------------------------------------------------------------------
-        # ------------------------- Part preferences list ----------------------------
+        # ---------------------- Part preferences list ------------------------
         # ---------------------------------------------------------------------
 
         self.part_preferences_list = wx.dataview.DataViewListCtrl(
@@ -190,11 +190,7 @@ class PartPreferencesDialog(wx.Dialog):
         """Populate the list with all shared part preferences."""
         self.part_preferences_list.DeleteAllItems()
 
-        if self.parent.library.get_all_mapping_data() is None:
-            self.logger.info("empty")
-            return
-
-        for part_preference in self.parent.library.get_all_mapping_data():
+        for part_preference in self.parent.library.get_all_part_preferences():
             self.part_preferences_list.AppendItem(
                 [str(field) for field in part_preference]
             )
@@ -207,7 +203,7 @@ class PartPreferencesDialog(wx.Dialog):
                 return
             footprint = self.part_preferences_list.GetTextValue(row, 0)
             value = self.part_preferences_list.GetTextValue(row, 1)
-            self.parent.library.delete_mapping_data(footprint, value)
+            self.parent.library.delete_part_preference(footprint, value)
         self.populate_part_preferences_list()
 
     def on_part_preference_selected(self, *_: object) -> None:
@@ -226,10 +222,10 @@ class PartPreferencesDialog(wx.Dialog):
             "",
             "CSV files (*.csv)|*.csv",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
-        ) as importFileDialog:
-            if importFileDialog.ShowModal() == wx.ID_CANCEL:
+        ) as part_preferences_dialog:
+            if part_preferences_dialog.ShowModal() == wx.ID_CANCEL:
                 return
-            path = importFileDialog.GetPath()
+            path = part_preferences_dialog.GetPath()
             self._import_part_preferences(path)
 
     def export_part_preferences_dialog(self, *_: object) -> None:
@@ -241,35 +237,43 @@ class PartPreferencesDialog(wx.Dialog):
             "part-preferences",
             "CSV files (*.csv)|*.csv",
             wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
-        ) as exportFileDialog:
-            if exportFileDialog.ShowModal() == wx.ID_CANCEL:
+        ) as part_preferences_dialog:
+            if part_preferences_dialog.ShowModal() == wx.ID_CANCEL:
                 return
-            path = exportFileDialog.GetPath()
+            path = part_preferences_dialog.GetPath()
             self._export_part_preferences(path)
 
     def _import_part_preferences(self, path: str) -> None:
-        """Import part preferences from a CSV file."""
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8") as f:
-                csvreader = csv.DictReader(f, fieldnames=("footprint", "value", "lcsc"))
-                next(csvreader)
-                for row in csvreader:
-                    if self.parent.library.get_mapping_data(
-                        row["footprint"], row["value"]
-                    ):
-                        self.parent.library.update_mapping_data(
-                            row["footprint"], row["value"], row["lcsc"]
-                        )
-                    else:
-                        self.parent.library.insert_mapping_data(
-                            row["footprint"], row["value"], row["lcsc"]
-                        )
-            self.populate_part_preferences_list()
+        """Parse the complete CSV before saving its valid preferences together."""
+        try:
+            with open(path, newline="", encoding="utf-8") as part_preferences_file:
+                rows = list(csv.reader(part_preferences_file, strict=True))
+            if (
+                not rows
+                or rows[0] != _CSV_HEADER
+                or any(len(row) != 3 for row in rows[1:])
+            ):
+                raise csv.Error(
+                    "Expected Footprint, Part Value, LCSC Part header and three columns per row"
+                )
+            changed = self.parent.library.save_part_preferences(
+                (footprint, value, lcsc) for footprint, value, lcsc in rows[1:]
+            )
+        except (OSError, UnicodeError, csv.Error, sqlite3.Error) as error:
+            self.logger.warning("Unable to import part preferences: %s", error)
+            return
+        if changed:
+            self.logger.info("Imported %d part preference(s).", changed)
+        self.populate_part_preferences_list()
 
     def _export_part_preferences(self, path: str) -> None:
-        """Export shared part preferences to a CSV file."""
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            csvwriter = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
-            csvwriter.writerow(["Footprint", "Part Value", "LCSC Part"])
-            for m in self.parent.library.get_all_mapping_data():
-                csvwriter.writerow([m[0], m[1], m[2]])
+        """Export shared part preferences using the existing CSV format."""
+        with open(path, "w", newline="", encoding="utf-8") as part_preferences_file:
+            part_preferences_writer = csv.writer(
+                part_preferences_file, quotechar='"', quoting=csv.QUOTE_ALL
+            )
+            part_preferences_writer.writerow(_CSV_HEADER)
+            for part_preference in self.parent.library.get_all_part_preferences():
+                part_preferences_writer.writerow(
+                    [part_preference[0], part_preference[1], part_preference[2]]
+                )

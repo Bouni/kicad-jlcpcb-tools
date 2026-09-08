@@ -5,7 +5,7 @@ from __future__ import annotations
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 # ruff: noqa: I001
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, suppress
 from datetime import datetime as dt
 from threading import Thread
@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import sys
 import tempfile
 import time
@@ -730,7 +731,7 @@ class JLCPCBTools(wx.Dialog):
 
         self.init_data()
 
-    def init_data(self):
+    def init_data(self) -> None:
         """Initialize the library and populate the main window."""
         self.init_library()
         self.init_fabrication()
@@ -738,7 +739,6 @@ class JLCPCBTools(wx.Dialog):
             self.library.update()
         else:
             self.init_store()
-        self.library.create_mapping_table()
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
 
@@ -2025,17 +2025,13 @@ class JLCPCBTools(wx.Dialog):
         self.populate_footprint_list()
 
     def save_all_part_preferences(self, *_: object) -> None:
-        """Save all part preferences."""
-        for item in self.partlist_data_model.get_all():
-            value = item[1]
-            footprint = item[2]
-            lcsc = item[3]
-            if footprint != "" and value != "" and lcsc != "":
-                if self.library.get_mapping_data(footprint, value):
-                    self.library.update_mapping_data(footprint, value, lcsc)
-                else:
-                    self.library.insert_mapping_data(footprint, value, lcsc)
-        self.logger.info("All part preferences saved")
+        """Save all part preferences as one validated batch."""
+        preferences = [
+            (item[2], item[1], item[3])
+            for item in self.partlist_data_model.get_all()
+            if item[2] and item[1] and item[3]
+        ]
+        self._save_part_preferences(preferences)
 
     def export_to_schematic(self, *_):
         """Dialog to select schematics."""
@@ -2052,17 +2048,37 @@ class JLCPCBTools(wx.Dialog):
             paths = openFileDialog.GetPaths()
             SchematicExport(self).load_schematic(paths)
 
+    def _save_part_preferences(
+        self, preferences: Iterable[tuple[str, str, str]]
+    ) -> int:
+        """Remember one action's complete preferences without losing its assignments."""
+        complete = [
+            preference
+            for preference in preferences
+            if all(isinstance(text, str) and text.strip() for text in preference[:2])
+        ]
+        if not complete:
+            return 0
+        try:
+            saved = self.library.save_part_preferences(complete)
+        except sqlite3.Error as error:
+            self.logger.warning("Unable to save part preferences: %s", error)
+            return 0
+        if saved:
+            message = "Saved %d part preference(s)."
+            self.logger.info(message, saved)
+        return saved
+
     def save_selected_part_preferences(self, *_: object) -> None:
         """Remember the selected LCSC assignments as part preferences."""
+        preferences = []
         for item in self.footprint_list.GetSelections():
             footprint = self.partlist_data_model.get_footprint(item)
             value = self.partlist_data_model.get_value(item)
             lcsc = self.partlist_data_model.get_lcsc(item)
-            if footprint != "" and value != "" and lcsc != "":
-                if self.library.get_mapping_data(footprint, value):
-                    self.library.update_mapping_data(footprint, value, lcsc)
-                else:
-                    self.library.insert_mapping_data(footprint, value, lcsc)
+            if footprint and value and lcsc:
+                preferences.append((footprint, value, lcsc))
+        self._save_part_preferences(preferences)
 
     def apply_selected_part_preferences(self, *_: object) -> None:
         """Apply matching part preferences to the selected rows."""
@@ -2070,15 +2086,18 @@ class JLCPCBTools(wx.Dialog):
             reference = self.partlist_data_model.get_reference(item)
             footprint = self.partlist_data_model.get_footprint(item)
             value = self.partlist_data_model.get_value(item)
-            if footprint != "" and value != "":
-                if self.library.get_mapping_data(footprint, value):
-                    lcsc = self.library.get_mapping_data(footprint, value)[2]
+            if footprint and value:
+                if lcsc := self.library.get_part_preference(footprint, value):
                     self.store.set_lcsc(reference, lcsc)
                     self.logger.info("Found %s", lcsc)
                     details = self.library.get_part_details(lcsc)
-                    params = params_for_part(self.library.get_part_details(lcsc))
+                    params = params_for_part(details)
                     self.partlist_data_model.set_lcsc(
-                        reference, lcsc, details["type"], details["stock"], params
+                        reference,
+                        lcsc,
+                        details.get("type", ""),
+                        details.get("stock", ""),
+                        params,
                     )
                     self.start_assembly_enrichment([reference])
         self.recompute_bom_estimate()
