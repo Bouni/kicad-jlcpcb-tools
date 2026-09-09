@@ -1,10 +1,15 @@
 """Regression tests for footprint-list scrolling during auto-select-alike.
 
-Selecting the alike rows leaves the last of them focused, and the list scrolls
-the focused row into view once the click that triggered the selection has been
-handled - which drags the row the user clicked out from under the mouse
-pointer. Focusing the clicked row instead points that scroll somewhere already
-on screen.
+The list scrolls its *focused* row into view once the click that triggered a
+selection change has been handled. Selecting the alike rows one by one left the
+last of them focused, which dragged the row the user clicked out from under
+the mouse pointer. The fix replaces the selection in one call and then puts
+the focus back where it was.
+
+The focused row is not always the selected one. Ctrl-clicking a row out of a
+two-row selection leaves the *other* row selected but the focus on the row
+that was clicked, so restoring the focus that was there - rather than focusing
+the selected row - is what keeps the viewport still in that case too.
 
 ``mainwindow.py`` only imports with a full set of GUI stubs in place, so these
 tests load it through the shared harness.
@@ -18,24 +23,31 @@ from .wx_harness import load_mainwindow, wx_stubs
 
 mainwindow = load_mainwindow(
     "mainwindow_select_alike_tests",
-    wx=wx_stubs(Dialog=type("Dialog", (), {}), NewIdRef=object, PostEvent=lambda *_a: None),
+    wx=wx_stubs(
+        Dialog=type("Dialog", (), {}), NewIdRef=object, PostEvent=lambda *_a: None
+    ),
 )
 JLCPCBTools = mainwindow.JLCPCBTools
 
 
 class _Item:
-    """Stand-in for a wx.dataview.DataViewItem."""
+    """Stand-in for a wx.dataview.DataViewItem; ``row=None`` is the invalid item."""
 
     def __init__(self, row):
         self.row = row
 
     def IsOk(self):
-        """Report the item as valid, as a real model item would."""
-        return True
+        """Report whether the item refers to a row."""
+        return self.row is not None
 
 
 class _FakeList:
-    """A list that scrolls its focused row into view after a click.
+    """A multi-select list whose focus follows clicks and drives scrolling.
+
+    Focus and selection are tracked separately, as the real control keeps
+    them: a click focuses the row it lands on whether it selects or deselects
+    it, ``Select``/``SetSelections`` focus the row they selected last, and
+    ``SetCurrentItem`` moves the focus without touching the selection.
 
     The scroll is deferred rather than immediate because that is what the real
     control does: it lands after the click has been handled, which is why
@@ -50,6 +62,14 @@ class _FakeList:
         self.current = None
         self.set_selections_calls = 0
 
+    def click(self, row, ctrl=False):
+        """Model a user click: focus the row, and select or toggle it."""
+        if ctrl:
+            self.selected ^= {row}
+        else:
+            self.selected = {row}
+        self.current = row
+
     def settle(self):
         """Scroll the focused row into view, as the platform does post-click."""
         if self.current is None:
@@ -60,12 +80,22 @@ class _FakeList:
             self.top = self.current - self.page + 1
 
     def GetSelection(self):
-        """Return the single selected row."""
-        return self.items[min(self.selected)]
+        """Return the selected row, or the invalid item unless exactly one is."""
+        if len(self.selected) != 1:
+            return _Item(None)
+        return self.items[next(iter(self.selected))]
+
+    def GetSelections(self):
+        """Return every selected row."""
+        return [self.items[row] for row in sorted(self.selected)]
 
     def GetSelectedItemsCount(self):
         """Return the size of the current selection."""
         return len(self.selected)
+
+    def IsSelected(self, item):
+        """Report whether the row is part of the selection."""
+        return item.row in self.selected
 
     def Select(self, item):
         """Select one more row, and focus it."""
@@ -79,6 +109,10 @@ class _FakeList:
         if items:
             self.current = max(item.row for item in items)
 
+    def GetCurrentItem(self):
+        """Return the focused row, or the invalid item when nothing is focused."""
+        return _Item(self.current)
+
     def SetCurrentItem(self, item):
         """Focus a row without changing the selection."""
         self.current = item.row
@@ -91,11 +125,14 @@ def _item_array(monkeypatch):
 
 
 def _window(footprint_list, alike_rows):
-    """Build the state surface select_alike_parts touches."""
+    """Build the state surface select_alike_parts and its event handler touch."""
     window = object.__new__(JLCPCBTools)
     window.footprint_list = footprint_list
     window.logger = MagicMock()
+    window.auto_select_alike = True
     window.select_alike_in_progress = False
+    window.right_toolbar = MagicMock()
+    window.pcbnew = MagicMock()
     window.partlist_data_model = MagicMock()
     window.partlist_data_model.select_alike.return_value = [
         footprint_list.items[row] for row in alike_rows
@@ -106,7 +143,7 @@ def _window(footprint_list, alike_rows):
 def test_matches_below_the_fold_do_not_scroll_the_clicked_row_away():
     """Alike rows further down the list must leave the viewport alone."""
     footprint_list = _FakeList(rows=300, page=25, top=0)
-    footprint_list.Select(footprint_list.items[7])
+    footprint_list.click(7)
     window = _window(footprint_list, alike_rows=[7, 47, 187, 247])
 
     JLCPCBTools.select_alike_parts(window)
@@ -119,7 +156,7 @@ def test_matches_below_the_fold_do_not_scroll_the_clicked_row_away():
 def test_matches_above_the_fold_do_not_scroll_the_clicked_row_away():
     """Alike rows further up the list must leave the viewport alone."""
     footprint_list = _FakeList(rows=300, page=25, top=150)
-    footprint_list.Select(footprint_list.items[152])
+    footprint_list.click(152)
     window = _window(footprint_list, alike_rows=[3, 92, 152])
 
     JLCPCBTools.select_alike_parts(window)
@@ -132,7 +169,7 @@ def test_matches_above_the_fold_do_not_scroll_the_clicked_row_away():
 def test_the_clicked_row_keeps_the_focus():
     """Focus drives the platform scroll, so it must stay on the clicked row."""
     footprint_list = _FakeList(rows=300, page=25, top=150)
-    footprint_list.Select(footprint_list.items[152])
+    footprint_list.click(152)
     window = _window(footprint_list, alike_rows=[152, 260])
 
     JLCPCBTools.select_alike_parts(window)
@@ -140,10 +177,21 @@ def test_the_clicked_row_keeps_the_focus():
     assert footprint_list.current == 152
 
 
+def test_a_selection_made_without_focus_ends_up_focused():
+    """With nothing focused, the selected row is the only sensible fallback."""
+    footprint_list = _FakeList(rows=300, page=25, top=0)
+    footprint_list.selected = {7}
+    window = _window(footprint_list, alike_rows=[7, 47])
+
+    JLCPCBTools.select_alike_parts(window)
+
+    assert footprint_list.current == 7
+
+
 def test_the_selection_is_replaced_in_a_single_call():
     """One selection change, not one per row, so the list reacts once."""
     footprint_list = _FakeList(rows=300, page=25, top=0)
-    footprint_list.Select(footprint_list.items[7])
+    footprint_list.click(7)
     window = _window(footprint_list, alike_rows=[7, 47, 187])
 
     JLCPCBTools.select_alike_parts(window)
@@ -154,8 +202,8 @@ def test_the_selection_is_replaced_in_a_single_call():
 def test_an_existing_multi_row_selection_is_left_alone():
     """Expanding an already-expanded selection would have nothing to start from."""
     footprint_list = _FakeList(rows=300, page=25, top=0)
-    footprint_list.Select(footprint_list.items[7])
-    footprint_list.Select(footprint_list.items[47])
+    footprint_list.click(7)
+    footprint_list.click(47, ctrl=True)
     window = _window(footprint_list, alike_rows=[7, 47, 187])
 
     JLCPCBTools.select_alike_parts(window)
@@ -163,3 +211,25 @@ def test_an_existing_multi_row_selection_is_left_alone():
     assert footprint_list.selected == {7, 47}
     assert footprint_list.set_selections_calls == 0
     assert window.logger.warning.called
+
+
+def test_deselecting_a_row_does_not_scroll_to_the_one_left_selected():
+    """Ctrl-clicking one of two selected rows away must not chase the survivor.
+
+    The selection event then reports a single selected row - the one that was
+    *not* clicked, possibly far off screen - and the handler expands it. The
+    focus is still on the row that was clicked, and has to stay there.
+    """
+    footprint_list = _FakeList(rows=300, page=25, top=0)
+    footprint_list.click(7)
+    footprint_list.click(200, ctrl=True)
+    footprint_list.top = 190
+    window = _window(footprint_list, alike_rows=[7])
+
+    footprint_list.click(200, ctrl=True)
+    JLCPCBTools.OnFootprintSelected(window)
+    footprint_list.settle()
+
+    assert footprint_list.selected == {7}
+    assert footprint_list.current == 200
+    assert footprint_list.top == 190
