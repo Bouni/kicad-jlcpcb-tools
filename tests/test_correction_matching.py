@@ -146,7 +146,7 @@ def test_large_correction_set_never_recompiles_during_matching(
     expected: Optional[int],  # noqa: UP045
     source: Optional[str],  # noqa: UP045
 ) -> None:
-    """Retained expressions survive cache eviction for suffix, fallback and misses."""
+    """Retained expressions survive cache eviction for footprint, value and missed matches."""
     corrections = tuple(
         data.Correction(f"REVIEW_{index:04d}", index, (0, 0)) for index in range(600)
     )
