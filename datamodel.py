@@ -1,5 +1,6 @@
 """Implementation of the Datamodel for the parts list with natural sort."""
 
+from collections.abc import Iterable
 import logging
 import re
 from typing import Any
@@ -52,6 +53,7 @@ class PartListDataModel(dv.PyDataViewModel):
         super().__init__()
         self.data = []
         self.standard_only_refs = set()
+        self.stock_concern_refs: set[str] = set()
         self.simplify_stock = bool(simplify_stock)
 
         self.bom_pos_icons = [
@@ -83,8 +85,35 @@ class PartListDataModel(dv.PyDataViewModel):
             row and str(row[self.columns["REF_COL"]] or "") in self.standard_only_refs
         )
 
-    def GetAttr(self, item, col, attr):
-        """Apply the existing TOP/BOT colors to the Side cell only."""
+    def set_stock_concern_refs(self, refs: Iterable[str]) -> None:
+        """Notify Stock cells whose concern state changed, including cleared marks."""
+        updated_refs = set(refs)
+        changed_refs = self.stock_concern_refs.symmetric_difference(updated_refs)
+        self.stock_concern_refs = updated_refs
+        for row in self.data:
+            if str(row[self.columns["REF_COL"]] or "") in changed_refs:
+                self.ValueChanged(self.ObjectToItem(row), self.columns["STOCK_COL"])
+
+    def GetAttr(self, item: Any, col: int, attr: Any) -> bool:
+        """Style concerned Stock cells and the existing TOP/BOT Side labels."""
+        if col == self.columns["STOCK_COL"]:
+            row = self.ItemToObject(item)
+            if (
+                row
+                and str(row[self.columns["REF_COL"]] or "") in self.stock_concern_refs
+            ):
+                background = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+                colour = (
+                    wx.Colour(255, 211, 102)
+                    if background.GetLuminance() < 0.5
+                    else wx.Colour(128, 52, 0)
+                )
+                # Cocoa retains custom cell backgrounds after their attributes
+                # clear. Foreground-only concern preserves native row striping.
+                attr.SetColour(colour)
+                attr.SetBold(True)
+                return True
+            return False
         if col == self.columns["SIDE_COL"]:
             row = self.ItemToObject(item)
             if not row:
@@ -284,10 +313,11 @@ class PartListDataModel(dv.PyDataViewModel):
         self.data.append(data)
         self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
 
-    def RemoveAll(self):
+    def RemoveAll(self) -> None:
         """Remove all entries from the data model."""
         self.data.clear()
         self.standard_only_refs.clear()
+        self.stock_concern_refs.clear()
         self.Cleared()
 
     def get_all(self):

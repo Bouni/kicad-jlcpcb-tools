@@ -86,6 +86,7 @@ from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
+from .stock_concern import stock_concern_references
 from .why_standard_dialog import WhyStandardDialog
 from .window_layout import get_column_widths, restore_column_widths
 
@@ -1229,10 +1230,43 @@ class JLCPCBTools(wx.Dialog):
         self._bom_recompute_scheduled = True
         wx.CallAfter(self._run_coalesced_bom_recompute)
 
-    def _run_coalesced_bom_recompute(self):
+    def _run_coalesced_bom_recompute(self) -> None:
         """Drain the coalesced recompute latch and run a single estimate."""
         self._bom_recompute_scheduled = False
+        self.recompute_stock_concerns()
         self.recompute_bom_estimate()
+
+    def recompute_stock_concerns(self) -> None:
+        """Refresh Stock attributes from all live BOM parts, before view filtering."""
+        model = self.partlist_data_model
+        if (
+            not self.settings.get("highlighting", {}).get("stock_concern", True)
+            or self.store is None
+            or self.library is None
+        ):
+            model.set_stock_concern_refs(set())
+            return
+        try:
+            board = self.pcbnew.GetBoard()
+            parts = []
+            if board is not None:
+                for part in self.store.read_all():
+                    fp = board.FindFootprintByReference(part["reference"])
+                    if fp is not None:
+                        parts.append(
+                            {
+                                **part,
+                                "exclude_from_bom": get_exclude_from_bom(fp),
+                                "is_dnp": get_is_dnp(fp),
+                            }
+                        )
+            refs = stock_concern_references(
+                parts, lambda lcsc: self.library.get_part_details(lcsc).get("stock")
+            )
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning("Unable to update stock concerns: %s", error)
+            refs = set()
+        model.set_stock_concern_refs(refs)
 
     def _get_enrichment_status_label(self, part: dict) -> str:
         """Build UI status text for per-part assembly enrichment state."""
@@ -1727,8 +1761,11 @@ class JLCPCBTools(wx.Dialog):
                 ):
                     self._why_standard_dialog.Close()
                 self.Layout()
-        elif e.section == "highlighting" and e.setting == "matches":
-            self.footprint_list.Refresh()
+        elif e.section == "highlighting":
+            if e.setting == "matches":
+                self.footprint_list.Refresh()
+            elif e.setting == "stock_concern":
+                self.recompute_stock_concerns()
 
         self.save_settings()
 
@@ -1760,6 +1797,10 @@ class JLCPCBTools(wx.Dialog):
 
         if "simplify_stock" not in general_settings:
             general_settings["simplify_stock"] = True
+            migrated = True
+
+        if "stock_concern" not in highlighting_settings:
+            highlighting_settings["stock_concern"] = True
             migrated = True
 
         for setting in (

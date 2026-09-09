@@ -347,6 +347,20 @@ class SettingsDialog(wx.Dialog):
         )
         self.simplify_stock_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
+        self.stock_concern_setting = wx.CheckBox(
+            self,
+            label="Highlight stock concern",
+            name="highlighting_stock_concern",
+        )
+        self.stock_concern_setting.SetToolTip(
+            wx.ToolTip(
+                "Highlight Stock when fewer than 10 times one board's required "
+                "quantity are available. Groups populated BOM parts by LCSC number, "
+                "including parts excluded from CPL."
+            )
+        )
+        self.stock_concern_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
         ##### Library Selection #####
 
         library_label = wx.StaticText(
@@ -696,6 +710,7 @@ class SettingsDialog(wx.Dialog):
         )
         self._add_setting_row(settings_grid, None, self.highlight_matches_setting)
         self._add_setting_row(settings_grid, None, self.simplify_stock_setting)
+        self._add_setting_row(settings_grid, None, self.stock_concern_setting)
         self._add_setting_row(
             settings_grid,
             self.bom_estimator_show_image,
@@ -846,6 +861,10 @@ class SettingsDialog(wx.Dialog):
         """Reflect the stock presentation preference in its checkbox."""
         self.simplify_stock_setting.SetValue(bool(enabled))
 
+    def update_stock_concern(self, enabled: bool) -> None:
+        """Reflect the independent stock concern preference in its checkbox."""
+        self.stock_concern_setting.SetValue(bool(enabled))
+
     def update_bom_estimator_show(self, show):
         """Update settings dialog according to the BOM estimator visibility setting."""
         self.bom_estimator_show_setting.SetValue(bool(show))
@@ -900,6 +919,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_simplify_stock(
             self.parent.settings.get("general", {}).get("simplify_stock", True)
+        )
+        self.update_stock_concern(
+            self.parent.settings.get("highlighting", {}).get("stock_concern", True)
         )
         self.update_bom_estimator_show(
             self.parent.settings.get("general", {}).get("bom_estimator_show", True)
