@@ -245,10 +245,12 @@ def test_toggle_handlers_skip_stale_refs_and_continue_live_refs(
 def test_populate_footprint_list_looks_a_part_up_once_per_part(monkeypatch):
     """Two spellings of one number are one part, so one lookup serves both.
 
-    The details cache is keyed on the canonical number rather than on the raw
+    The details cache is keyed on the parsed part rather than on the raw
     column, so a store holding "C12345" on one row and " c12345 " on another
-    -- which it can, since several paths write the column unnormalised -- does
-    not fetch the same part twice, and both rows get the details.
+    -- which it can, since several paths write the column unnormalised --
+    does not fetch the same part twice, and both rows get the details. The
+    LCSC column renders that same parsed part, so the number a row shows
+    agrees with the type and stock shown beside it.
     """
     window = _window(footprints={"R1": _LiveFootprint(), "R2": _LiveFootprint()})
     window.hide_bom_parts = False
@@ -268,4 +270,5 @@ def test_populate_footprint_list_looks_a_part_up_once_per_part(monkeypatch):
 
     rows = window.partlist_data_model.AddEntry.call_args_list
     assert len(rows) == 2
+    assert [row.args[0][3] for row in rows] == ["C12345", "C12345"]
     assert [row.args[0][4] for row in rows] == ["Basic", "Basic"]

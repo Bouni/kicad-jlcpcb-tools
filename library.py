@@ -38,7 +38,7 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
-from .lcsc import is_lcsc_part, normalize_lcsc
+from .lcsc import Lcsc, format_lcsc, normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
@@ -97,10 +97,10 @@ _INITIAL_DOWNLOAD_TARGETS: set[str] = set()
 def _normalize_part_preference_lcsc(value: object) -> Optional[str]:  # noqa: UP045
     """Accept a complete C-number without requiring current catalog membership.
 
-    The shape of a part number is lcsc.py's business, not this module's, so
-    the test and the canonical form both come from there.
+    The shape of a part number is lcsc.py's business, not this module's:
+    the value either parses as a part or it is not a preference.
     """
-    return normalize_lcsc(value) if is_lcsc_part(value) else None
+    return format_lcsc(Lcsc.parse(value)) or None
 
 
 def _sqlite_file_uri(path: PurePath) -> str:
@@ -1367,8 +1367,13 @@ class Library:
             cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
             cur.commit()
 
-    def get_part_details(self, number: str) -> dict:
-        """Get the part details for a LCSC number using optimized FTS5 querying."""
+    def get_part_details(self, number) -> dict:
+        """Get the part details for a LCSC number using optimized FTS5 querying.
+
+        Accepts an :class:`Lcsc` or anything that might name one. A value that
+        does not name a part is not an error -- most callers hold whatever the
+        board gave them -- so it returns no details rather than raising.
+        """
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.row_factory = dict_factory
             cur = con.cursor()
@@ -1376,16 +1381,17 @@ class Library:
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
-            wanted = normalize_lcsc(number)
-            if not wanted:
-                # 'parts MATCH " "' is a syntax error to FTS5, so asking about
-                # a part that isn't there has to mean "not found", not a crash.
+            part = Lcsc.parse(number)
+            if part is None:
+                # Nothing that could name a part, so nothing to look up.
+                # 'parts MATCH " "' is a syntax error to FTS5 besides.
                 return {}
-            cur.execute(query, {"number": wanted})
-            # The FTS5 match is not exact, so the row still has to be confirmed;
-            # compare canonically or a differently spelled number finds nothing.
+            cur.execute(query, {"number": str(part)})
+            # The FTS5 match is not exact, so the row still has to be confirmed.
+            # Comparing parsed values makes the two sides canonical by
+            # construction rather than by remembering to normalise both.
             return next(
-                (n for n in cur.fetchall() if normalize_lcsc(n["lcsc"]) == wanted), {}
+                (n for n in cur.fetchall() if Lcsc.parse(n["lcsc"]) == part), {}
             )
 
     def update(self):

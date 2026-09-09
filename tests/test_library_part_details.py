@@ -48,6 +48,7 @@ sys.modules["kicadplugin.library"] = _library
 _spec.loader.exec_module(_library)
 
 Library = _library.Library
+Lcsc = _library.Lcsc
 
 # Mirrors common/partsdb.py, including the trigram tokenizer -- the tokenizer
 # is case-insensitive, so MATCH was never the half that failed.
@@ -115,6 +116,32 @@ class TestGetPartDetails:
     def test_a_prefix_is_not_a_match(self, library):
         """C1234 does not resolve to C12345."""
         assert library.get_part_details("C1234") == {}
+
+    def test_it_accepts_a_part_object(self, library):
+        """An Lcsc can be passed straight in, and resolves the same way."""
+        assert library.get_part_details(Lcsc("C12345")).get("stock") == "5000"
+        assert library.get_part_details(Lcsc(" c12345 ")).get("stock") == "5000"
+
+    @pytest.mark.parametrize("number", ["R1234", "12345", "C12a45"])
+    def test_a_value_that_cannot_name_a_part_is_not_looked_up(self, library, number):
+        """Anything failing the part-number shape resolves to no details.
+
+        This is narrower than before: the lookup used to send any non-empty
+        string to FTS5, whatever shape it had. Nothing real is lost, since the
+        shape is the one the plugin already requires of a footprint field.
+        """
+        assert library.get_part_details(number) == {}
+
+    @pytest.mark.parametrize("number", ['foo"bar', "*", "C12345-", "AND"])
+    def test_fts5_metacharacters_do_not_reach_the_query(self, library, number):
+        """A value carrying FTS5 syntax returns no details rather than raising.
+
+        These used to reach 'parts MATCH ...' and raise OperationalError:
+        fts5: syntax error. The BOM estimator and the assignment path pass
+        values straight from the store, which is not guaranteed to hold a
+        part number.
+        """
+        assert library.get_part_details(number) == {}
 
     @pytest.mark.parametrize("number", ["", "   "])
     def test_an_empty_number_is_not_a_query(self, library, number):

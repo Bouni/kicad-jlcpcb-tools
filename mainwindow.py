@@ -78,7 +78,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
-from .lcsc import extract_lcsc, normalize_lcsc
+from .lcsc import Lcsc, extract_lcsc, format_lcsc
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
@@ -1468,9 +1468,10 @@ class JLCPCBTools(wx.Dialog):
                 continue
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
-            # Keyed canonically: the store can hold two spellings of one number.
-            lcsc = normalize_lcsc(part["lcsc"])
-            if lcsc and lcsc not in details:
+            # Keyed on the parsed part, so two spellings of one number cannot
+            # become two cache entries and two round trips.
+            lcsc = Lcsc.parse(part["lcsc"])
+            if lcsc is not None and lcsc not in details:
                 details[lcsc] = self.library.get_part_details(lcsc)
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
@@ -1483,7 +1484,10 @@ class JLCPCBTools(wx.Dialog):
                     part["reference"],
                     part["value"],
                     part["footprint"],
-                    part["lcsc"],
+                    # The canonical form, so the column agrees with the details
+                    # beside it rather than showing whatever spelling the store
+                    # happens to hold.
+                    format_lcsc(lcsc),
                     details.get(lcsc, {}).get("type", ""),  # type
                     details.get(lcsc, {}).get("stock", ""),  # stock
                     part["exclude_from_bom"],
