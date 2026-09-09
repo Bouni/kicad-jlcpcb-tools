@@ -9,7 +9,6 @@ import json
 import logging
 import os
 from pathlib import Path, PurePath
-import re
 import sqlite3
 from threading import Lock, Thread
 import time
@@ -39,7 +38,7 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
-from .lcsc import normalize_lcsc
+from .lcsc import is_lcsc_part, normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
@@ -96,12 +95,12 @@ _INITIAL_DOWNLOAD_TARGETS: set[str] = set()
 
 
 def _normalize_part_preference_lcsc(value: object) -> Optional[str]:  # noqa: UP045
-    """Accept a complete C-number without requiring current catalog membership."""
-    if isinstance(value, str) and re.fullmatch(
-        r"C[0-9]+", value.strip(), re.IGNORECASE
-    ):
-        return value.strip().upper()
-    return None
+    """Accept a complete C-number without requiring current catalog membership.
+
+    The shape of a part number is lcsc.py's business, not this module's, so
+    the test and the canonical form both come from there.
+    """
+    return normalize_lcsc(value) if is_lcsc_part(value) else None
 
 
 def _sqlite_file_uri(path: PurePath) -> str:

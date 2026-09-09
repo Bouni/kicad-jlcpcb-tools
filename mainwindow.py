@@ -78,7 +78,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
-from .lcsc import normalize_lcsc
+from .lcsc import extract_lcsc, normalize_lcsc
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
@@ -2245,7 +2245,7 @@ class JLCPCBTools(wx.Dialog):
             success = wx.TheClipboard.GetData(text_data)
             wx.TheClipboard.Close()
         if success:
-            if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
+            if (lcsc := extract_lcsc(text_data.GetText())) != "":
                 references = [
                     self.partlist_data_model.get_reference(item)
                     for item in self.footprint_list.GetSelections()
@@ -2328,13 +2328,6 @@ class JLCPCBTools(wx.Dialog):
             self.logger.info(
                 "Applied part preferences to %d assignment(s).", len(updated_references)
             )
-
-    def sanitize_lcsc(self, lcsc_PN: str) -> str:
-        """Sanitize a given LCSC number using a regex."""
-        m = re.search("C\\d+", lcsc_PN, re.IGNORECASE)
-        if m:
-            return m.group(0).upper()
-        return ""
 
     def OnRightDown(self, *_: object) -> None:
         """Right click context menu for action on parts table."""

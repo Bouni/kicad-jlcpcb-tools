@@ -9,7 +9,7 @@ import math
 import re
 from typing import Literal, Optional, Union
 
-from .lcsc import normalize_lcsc
+from .lcsc import is_lcsc_part, normalize_lcsc
 
 _MIN_ROTATION = -(2**63)
 _MAX_ROTATION = 2**63 - 1
@@ -86,17 +86,14 @@ KIND_FOOTPRINT: Literal["footprint"] = "footprint"
 KIND_LCSC: Literal["lcsc"] = "lcsc"
 CorrectionKind = Literal["footprint", "lcsc"]
 
-_LCSC_PART = re.compile(r"C[0-9]+")
-
 
 def _lcsc_key(value: object) -> str:
     """Return the canonical part number, rejecting anything that is not one."""
     if isinstance(value, bool) or not isinstance(value, str):
         raise TypeError("expected an LCSC part number")
-    key = normalize_lcsc(value)
-    if not _LCSC_PART.fullmatch(key):
+    if not is_lcsc_part(value):
         raise ValueError("expected an LCSC part number")
-    return key
+    return normalize_lcsc(value)
 
 
 @dataclass(frozen=True, init=False)
