@@ -84,6 +84,31 @@ A matched correction of zero degrees and zero offset still takes precedence
 over lower-priority rules. The table labels the match source as `(ref)`, `(val)`,
 or `(fpt)`.
 
+## Corrections for one LCSC part
+
+The package JLC assembles belongs to the part number, not to the name KiCad
+gives the footprint, so two parts that share a footprint name can still need
+different rotations. No pattern over reference, value or footprint text can
+tell them apart. A correction keyed on the exact LCSC part number can.
+
+Tick `LCSC part, matched exactly` in the manager, or use `Add Correction by
+LCSC` on a part in the parts list, and enter a plain part number such as
+`C12345` rather than a pattern. The number is stored in canonical form (trimmed,
+upper case) and looked up the same way, so `c12345` finds the rule saved for
+`C12345`. A value that is not a bare part number is rejected, since an
+exact-match key that never matches is worse than a refused one.
+
+A part-number rule takes precedence over reference, value and footprint rules.
+A part-number rule of zero degrees and zero offset switches those rules off for
+that one part, which suits footprints that already arrive fab-oriented. The
+table labels the match source as `(lcsc)`. The part number used is the one
+assigned in the parts list, which is also what the BOM orders.
+
+Part-number rules are stored beside pattern rules in the same database, follow
+the same global or project scope, and are validated and repaired the same way;
+the manager lists both with their `Kind`. CSV import and export carry pattern
+rules only; an export says how many part-number rules it left out.
+
 ## Legacy data and database scope
 
 Existing patterns in the current correction database take precedence over

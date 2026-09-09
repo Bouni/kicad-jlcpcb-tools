@@ -79,6 +79,11 @@ class Store:
         """Return fresh snapshots as the production database does."""
         return [dict(record) for record in self.parts.values()]
 
+    def get_part(self, reference: str) -> Optional[dict[str, Any]]:
+        """Return a fresh snapshot of one row, or None for an unknown reference."""
+        record = self.parts.get(reference)
+        return None if record is None else dict(record)
+
     def set_lcsc_assignments(
         self, assignments: Iterable[tuple[str, str, Optional[int]]]
     ) -> None:

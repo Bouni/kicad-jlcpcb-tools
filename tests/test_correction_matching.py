@@ -1,27 +1,23 @@
 """Keep display and fabrication selection on the established CPL policy."""
 
+from collections.abc import Iterator
 from dataclasses import FrozenInstanceError
-import importlib.util
-from pathlib import Path
 import re
-import sys
 from types import ModuleType
 from typing import Optional
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
+from tests.wx_harness import load_siblings
 
 
 @pytest.fixture
-def data(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Load the pure production matcher without GUI or database imports."""
-    name = "correction_data_matching_tests"
-    spec = importlib.util.spec_from_file_location(name, _ROOT / "correction_data.py")
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
-    return module
+def data() -> Iterator[ModuleType]:
+    """Load the pure production matcher under a scoped package, without GUI imports."""
+    with load_siblings(
+        "correction_data_matching_tests", ("correction_data",), {}
+    ) as loaded:
+        yield loaded["correction_data"]
 
 
 @pytest.mark.parametrize(
@@ -171,3 +167,50 @@ def test_large_correction_set_never_recompiles_during_matching(
                 assert match.correction is corrections[expected]
                 assert match.source == source
     assert len(compile_requests) == 0
+
+
+@pytest.mark.parametrize("spelling", ["C12345", "c12345", " C12345 "])
+def test_part_number_rule_outranks_every_pattern(
+    data: ModuleType, spelling: str
+) -> None:
+    """The exact part wins over reference, value and footprint rules alike."""
+    part = data.LcscCorrection("C12345", 45, (1, 1))
+    patterns = (
+        data.Correction("U1", 90, (0, 0)),
+        data.Correction("Device", 180, (0, 0)),
+        data.Correction("SOT-23-3", 270, (0, 0)),
+    )
+    match = data.match_correction(
+        (*patterns, part), "U1", "Device", "SOT-23-3", spelling
+    )
+    assert match.correction is part
+    assert match.source == "lcsc"
+
+
+def test_zero_part_rule_still_switches_the_family_rule_off(data: ModuleType) -> None:
+    """A part set to 0 degrees, 0/0 is an explicit rule, not a missing one."""
+    part = data.LcscCorrection("C12345", 0, (0, 0))
+    family = data.Correction("SOT-23-3", 180, (1, 2))
+    match = data.match_correction((family, part), "U1", "Device", "SOT-23-3", "C12345")
+    assert match.correction is part
+    assert match.source == "lcsc"
+
+
+@pytest.mark.parametrize("lcsc", ["", None, "C99999", "C1234", "C123456"])
+def test_other_parts_and_unassigned_parts_fall_through_to_patterns(
+    data: ModuleType, lcsc: object
+) -> None:
+    """Only the exact part number is overridden; siblings keep the family rule."""
+    part = data.LcscCorrection("C12345", 0, (0, 0))
+    family = data.Correction("SOT-23-3", 180, (1, 2))
+    match = data.match_correction((part, family), "U1", "Device", "SOT-23-3", lcsc)
+    assert match.correction is family
+    assert match.source == "fpt"
+    assert data.match_correction((part,), "U1", "Device", "SOT-23-3", lcsc) is None
+
+
+def test_part_rules_never_take_part_in_pattern_matching(data: ModuleType) -> None:
+    """A part number is not a pattern, even when it would read as one."""
+    part = data.LcscCorrection("C1", 90, (0, 0))
+    assert data.find_correction((part,), "C1") is None
+    assert data.match_correction((part,), "C1", "C1", "C1") is None
