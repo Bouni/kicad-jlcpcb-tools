@@ -1,5 +1,6 @@
 """Helpers for reading and mutating KiCad footprint and board state."""
 
+from collections.abc import Iterator
 import re
 from typing import Any, Optional
 
@@ -72,6 +73,19 @@ def get_valid_footprints(board):
         if re.match(r"[\w\d-]+", fp.GetReference()):
             footprints.append(fp)
     return footprints
+
+
+def iter_board_items(container: Any) -> Iterator[Any]:
+    """Yield the concrete board items held by a pcbnew container."""
+    try:
+        items = list(container)
+    except AttributeError:
+        items = []
+        for index in range(len(container)):
+            item = container[index]
+            cast = getattr(item, "Cast", None)
+            items.append(cast() if callable(cast) else item)
+    return iter(items)
 
 
 def get_bit(value, bit):

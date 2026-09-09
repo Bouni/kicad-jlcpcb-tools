@@ -65,6 +65,7 @@ from .footprint_helpers import (
     get_exclude_from_pos,
     get_is_dnp,
     find_lcsc_assignment_text,
+    iter_board_items,
     set_lcsc_value,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
@@ -1831,7 +1832,7 @@ class JLCPCBTools(wx.Dialog):
     def count_order_number_placeholders(self):
         """Count the JLC order/serial number placeholders."""
         count = 0
-        for drawing in self.pcbnew.GetBoard().GetDrawings():
+        for drawing in iter_board_items(self.pcbnew.GetBoard().Drawings()):
             if drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or drawing.IsOnLayer(
                 kicad_pcbnew.B_SilkS
             ):
@@ -2053,7 +2054,12 @@ class JLCPCBTools(wx.Dialog):
             if self.settings.get("general", {}).get("order_number"):
                 placeholder_count = count
             else:
-                placeholder_count = self.count_order_number_placeholders()
+                # Only the generation hooks need the count here, but a failure
+                # must still be attributed to this step rather than the last one.
+                placeholder_count = self.run_generation_step(
+                    "Counting order/serial placeholders",
+                    self.count_order_number_placeholders,
+                )
 
             current_generation_count = self.store.get_generation_count()
             pre_hook_env = self.build_generate_hook_env(

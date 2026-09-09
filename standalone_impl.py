@@ -100,7 +100,7 @@ class BoardStub:
         """Get a list of footprints that match a reference."""
         return Footprint_Stub(reference, "stub", 100)
 
-    def GetDrawings(self):
+    def Drawings(self):
         """Return board drawings.
 
         Standalone mode has no real drawing geometry, so expose an empty list.
