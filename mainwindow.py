@@ -78,6 +78,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
+from .lcsc import normalize_lcsc
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
@@ -1467,8 +1468,10 @@ class JLCPCBTools(wx.Dialog):
                 continue
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
-            if part["lcsc"] and part["lcsc"] not in details:
-                details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
+            # Keyed canonically: the store can hold two spellings of one number.
+            lcsc = normalize_lcsc(part["lcsc"])
+            if lcsc and lcsc not in details:
+                details[lcsc] = self.library.get_part_details(lcsc)
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
@@ -1481,8 +1484,8 @@ class JLCPCBTools(wx.Dialog):
                     part["value"],
                     part["footprint"],
                     part["lcsc"],
-                    details.get(part["lcsc"], {}).get("type", ""),  # type
-                    details.get(part["lcsc"], {}).get("stock", ""),  # stock
+                    details.get(lcsc, {}).get("type", ""),  # type
+                    details.get(lcsc, {}).get("stock", ""),  # stock
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
@@ -1492,7 +1495,7 @@ class JLCPCBTools(wx.Dialog):
                         else "Unresolved"
                     ),
                     str(fp.GetLayer()),
-                    params_for_part(details.get(part["lcsc"], {})),
+                    params_for_part(details.get(lcsc, {})),
                     self._get_enrichment_status_label(part),  # enrichment
                     "",  # bom price label
                 ]

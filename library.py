@@ -1377,8 +1377,17 @@ class Library:
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
-            cur.execute(query, {"number": number})
-            return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
+            wanted = normalize_lcsc(number)
+            if not wanted:
+                # 'parts MATCH " "' is a syntax error to FTS5, so asking about
+                # a part that isn't there has to mean "not found", not a crash.
+                return {}
+            cur.execute(query, {"number": wanted})
+            # The FTS5 match is not exact, so the row still has to be confirmed;
+            # compare canonically or a differently spelled number finds nothing.
+            return next(
+                (n for n in cur.fetchall() if normalize_lcsc(n["lcsc"]) == wanted), {}
+            )
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
