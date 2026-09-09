@@ -76,7 +76,10 @@ def test_assignment_caches_missing_catalog_details_once_per_action(
         window.init_store()
     else:
         act(action, window, mainwindow, monkeypatch, "C200")
-    window.library.get_part_details.assert_called_once_with("C200")
+    # Rendered rather than compared: the assignment path parses the number
+    # once at its boundary, so the lookup is asked for a part, not a string.
+    lookups = window.library.get_part_details.call_args_list
+    assert [str(lookup.args[0]) for lookup in lookups] == ["C200"]
     assert [row["lcsc"] for row in project_rows(window)] == ["C200", "C200"]
     assert [row["lcsc"] for row in window.test_rows.values()] == ["C200", "C200"]
     assert all(
@@ -544,3 +547,30 @@ def test_assignment_preserves_other_supplier_fields_when_assigning_and_clearing(
     }
     window.init_store()
     assert window.store.get_part("R1")["lcsc"] == ""
+
+
+def test_an_assignment_that_names_no_part_is_skipped_and_the_rest_applied(
+    make_window: Callable[..., Any],
+) -> None:
+    """One unusable number does not abandon the action, and it is reported.
+
+    Assignments arrive as strings from a part selector, the clipboard and
+    saved preferences, so the boundary parses them. A value naming no part is
+    skipped the way a reference the board no longer has is skipped, rather
+    than being written into a footprint field and sent to FTS5 as a query.
+    The numbers that do name a part are written canonically.
+    """
+    window = make_window(footprints=[Footprint(), Footprint("R2")])
+
+    assigned = window._apply_lcsc_assignments({"R1": "10k resistor", "R2": " c200 "})
+
+    assert assigned == ["R2"]
+    board = window.pcbnew.GetBoard()
+    assert window.store.get_part("R1")["lcsc"] == "C100"
+    assert board.FindFootprintByReference("R1").field.text == "C100"
+    assert window.store.get_part("R2")["lcsc"] == "C200"
+    assert board.FindFootprintByReference("R2").field.text == "C200"
+    assert [
+        str(call.args[0]) % call.args[1:]
+        for call in window.logger.warning.call_args_list
+    ] == ["Skipped R1: '10k resistor' does not name an LCSC part."]

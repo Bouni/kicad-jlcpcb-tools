@@ -9,7 +9,6 @@ import json
 import logging
 import os
 from pathlib import Path, PurePath
-import re
 import sqlite3
 from threading import Lock, Thread
 import time
@@ -19,11 +18,17 @@ import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
 from .correction_data import (
+    KIND_FOOTPRINT,
+    KIND_LCSC,
+    AnyCorrection,
     Correction,
     CorrectionDataError,
     CorrectionIssue,
+    LcscCorrection,
+    correction_kind,
     parse_corrections_csv,
     validate_correction,
+    validate_lcsc_correction,
 )
 from .dblib import DEFAULT_LIBRARY, LIBRARY_CONFIGS
 from .events import (
@@ -33,23 +38,69 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
+from .lcsc import Lcsc, format_lcsc, normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
 
 DatabasePath = Union[str, os.PathLike[str]]
+
+
+@dataclass(frozen=True)
+class _RuleTable:
+    """The statements that address one kind of correction by physical row."""
+
+    name: str
+    key: str
+    columns: str
+    probe: str
+    select_all: str
+    select_row: str
+    insert: str
+    update: str
+    delete: str
+
+
+# Pattern rules and part-number rules live in sibling tables of one database,
+# so both are validated, repaired and copied between scopes the same way.
+# rowids are only unique within a table, which is why every stored row also
+# carries its kind.
+_RULE_TABLES = {
+    KIND_FOOTPRINT: _RuleTable(
+        "correction",
+        "regex",
+        "PRAGMA table_xinfo(correction)",
+        "SELECT rowid FROM correction LIMIT 0",
+        "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction ORDER BY regex ASC, rowid ASC",
+        "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction WHERE rowid=?",
+        "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
+        "UPDATE correction SET regex=?, rotation=?, offset_x=?, offset_y=? WHERE rowid=?",
+        "DELETE FROM correction WHERE rowid=?",
+    ),
+    KIND_LCSC: _RuleTable(
+        "lcsc_correction",
+        "lcsc",
+        "PRAGMA table_xinfo(lcsc_correction)",
+        "SELECT rowid FROM lcsc_correction LIMIT 0",
+        "SELECT rowid, lcsc, rotation, offset_x, offset_y FROM lcsc_correction ORDER BY lcsc ASC, rowid ASC",
+        "SELECT rowid, lcsc, rotation, offset_x, offset_y FROM lcsc_correction WHERE rowid=?",
+        "INSERT INTO lcsc_correction (lcsc, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
+        "UPDATE lcsc_correction SET lcsc=?, rotation=?, offset_x=?, offset_y=? WHERE rowid=?",
+        "DELETE FROM lcsc_correction WHERE rowid=?",
+    ),
+}
 _INITIAL_DEFAULTS_KEY = "remote:initial-defaults:v1"
 _INITIAL_DOWNLOAD_LOCK = Lock()
 _INITIAL_DOWNLOAD_TARGETS: set[str] = set()
 
 
 def _normalize_part_preference_lcsc(value: object) -> Optional[str]:  # noqa: UP045
-    """Accept a complete C-number without requiring current catalog membership."""
-    if isinstance(value, str) and re.fullmatch(
-        r"C[0-9]+", value.strip(), re.IGNORECASE
-    ):
-        return value.strip().upper()
-    return None
+    """Accept a complete C-number without requiring current catalog membership.
+
+    The shape of a part number is lcsc.py's business, not this module's:
+    the value either parses as a part or it is not a preference.
+    """
+    return format_lcsc(Lcsc.parse(value)) or None
 
 
 def _sqlite_file_uri(path: PurePath) -> str:
@@ -78,14 +129,19 @@ class LibraryState(Enum):
 
 @dataclass(frozen=True)
 class StoredCorrection:
-    """Preserve a stored row and its validation errors for precise repair."""
+    """Preserve a stored row and its validation errors for precise repair.
+
+    ``pattern`` holds the stored key text of either kind: a regular expression
+    for a footprint rule, the part number as stored for an LCSC rule.
+    """
 
     rowid: int
     pattern: object
     rotation: object
     offset: tuple[object, object]
     issues: tuple[CorrectionIssue, ...]
-    correction: Optional[Correction] = None  # noqa: UP045
+    correction: Optional[AnyCorrection] = None  # noqa: UP045
+    kind: str = KIND_FOOTPRINT
 
     @property
     def identity(self) -> tuple[tuple[type, object], ...]:
@@ -315,6 +371,10 @@ class Library:
                 raise CorrectionDataError(destination.issues)
             with self._correction_transaction(self.localcorrectionsdb_file) as con:
                 con.execute("DROP TABLE correction")
+                # uses_global_correction_database() decides by looking for
+                # 'correction', so a surviving part-number table would strand
+                # local overrides in a database that nothing reads.
+                con.execute("DROP TABLE IF EXISTS lcsc_correction")
                 # Keep automatic CSV provenance when leaving local scope, so
                 # an unarchived source cannot replay into the global database.
             self.correctionsdb_file = self.globalcorrectionsdb_file
@@ -329,10 +389,16 @@ class Library:
                 self.localcorrectionsdb_file, create=True
             ) as con:
                 con.execute("DELETE FROM correction")
-                con.executemany(
-                    "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
-                    [correction.db_row() for correction in source],
-                )
+                con.execute("DELETE FROM lcsc_correction")
+                for kind, table in _RULE_TABLES.items():
+                    con.executemany(
+                        table.insert,
+                        [
+                            correction.db_row()
+                            for correction in source
+                            if correction_kind(correction) == kind
+                        ],
+                    )
                 con.executemany(
                     "INSERT OR IGNORE INTO correction_migrations VALUES (?, ?)",
                     source_snapshot.csv_migrations,
@@ -483,6 +549,7 @@ class Library:
         con.execute(
             "CREATE TABLE IF NOT EXISTS correction ('regex', 'rotation', 'offset_x', 'offset_y')"
         )
+        Library._lcsc_correction_schema(con)
         con.execute(
             "CREATE TABLE IF NOT EXISTS correction_migrations "
             "(migration_key TEXT PRIMARY KEY, source TEXT NOT NULL)"
@@ -507,32 +574,66 @@ class Library:
             return "REAL"
         return "NUMERIC"
 
+    @staticmethod
+    def _lcsc_correction_schema(con: sqlite3.Connection) -> None:
+        """Create the part-number table; databases from earlier releases lack it."""
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS lcsc_correction "
+            "('lcsc', 'rotation', 'offset_x', 'offset_y')"
+        )
+
+    @staticmethod
+    def _has_table(con: sqlite3.Connection, name: str) -> bool:
+        """Report whether an ordinary table of that name exists."""
+        return (
+            con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            ).fetchone()
+            is not None
+        )
+
     @classmethod
     def _validate_correction_schema(cls, con: sqlite3.Connection) -> None:
         """Require named correction fields and unambiguous physical row identities."""
-        table = con.execute(
-            "SELECT type FROM sqlite_master WHERE name='correction'"
+        cls._validate_rule_table(con, _RULE_TABLES[KIND_FOOTPRINT], required=True)
+        # The part-number table is additive: a database from an earlier release
+        # is valid without it and gains it on its next write transaction.
+        cls._validate_rule_table(con, _RULE_TABLES[KIND_LCSC], required=False)
+
+    @classmethod
+    def _validate_rule_table(
+        cls, con: sqlite3.Connection, table: _RuleTable, *, required: bool
+    ) -> None:
+        """Check one rule table's columns, affinities and row identities."""
+        found = con.execute(
+            "SELECT type FROM sqlite_master WHERE name=?", (table.name,)
         ).fetchone()
-        if table is None or table[0] != "table":
-            raise sqlite3.DatabaseError("correction storage must be an ordinary table")
-        columns = con.execute("PRAGMA table_xinfo(correction)").fetchall()
-        expected = {"regex", "rotation", "offset_x", "offset_y"}
+        if found is None and not required:
+            return
+        if found is None or found[0] != "table":
+            raise sqlite3.DatabaseError(
+                f"{table.name} storage must be an ordinary table"
+            )
+        columns = con.execute(table.columns).fetchall()
+        expected = {table.key, "rotation", "offset_x", "offset_y"}
         if (
             len(columns) != len(expected)
             or {column[1].casefold() for column in columns} != expected
             or any(column[6] for column in columns)
         ):
             raise sqlite3.DatabaseError(
-                "correction table must contain exactly regex, rotation, offset_x, "
-                "and offset_y; unsupported schemas cannot be repaired automatically"
+                f"{table.name} table must contain exactly {table.key}, rotation, "
+                "offset_x, and offset_y; unsupported schemas cannot be repaired "
+                "automatically"
             )
         affinities = {
             column[1].casefold(): cls._sqlite_affinity(column[2]) for column in columns
         }
-        if affinities["regex"] not in {"TEXT", "BLOB"}:
+        if affinities[table.key] not in {"TEXT", "BLOB"}:
             raise sqlite3.DatabaseError(
-                "unsupported correction schema: regex must have TEXT or BLOB affinity "
-                "to preserve pattern text; use a supported correction database schema"
+                f"unsupported correction schema: {table.key} must have TEXT or BLOB "
+                "affinity to preserve the stored key text; use a supported "
+                "correction database schema"
             )
         if affinities["rotation"] == "REAL":
             raise sqlite3.DatabaseError(
@@ -547,10 +648,10 @@ class Library:
         # The exact-column check rules out aliases that shadow SQLite's rowid.
         # This query also rejects WITHOUT ROWID tables before exposing repair IDs.
         try:
-            con.execute("SELECT rowid FROM correction LIMIT 0")
+            con.execute(table.probe)
         except sqlite3.Error as error:
             raise sqlite3.DatabaseError(
-                "correction table requires SQLite row identities for safe repair"
+                f"{table.name} table requires SQLite row identities for safe repair"
             ) from error
 
     @staticmethod
@@ -591,6 +692,8 @@ class Library:
                 if create:
                     self._correction_schema(con)
                 self._validate_correction_schema(con)
+                # Every write transaction brings an older database up to date.
+                self._lcsc_correction_schema(con)
                 yield con
         except (sqlite3.Error, OSError) as error:
             raise self._storage_error(target, error) from error
@@ -808,20 +911,22 @@ class Library:
         db_path: Optional[DatabasePath] = None,  # noqa: UP045
         *,
         expected_record: Optional[StoredCorrection] = None,  # noqa: UP045
+        kind: str = KIND_FOOTPRINT,
     ) -> None:
-        """Delete the selected original row, rejecting a concurrent edit or reused ID."""
+        """Delete the selected original row, rejecting a concurrent edit or reused ID.
+
+        The record's own kind names the table; ``kind`` applies without one.
+        """
         target = db_path if db_path is not None else self.correctionsdb_file
+        table = _RULE_TABLES[expected_record.kind if expected_record else kind]
         with self._correction_transaction(target) as con:
             if expected_record is not None:
                 self._check_expected_corrections(
-                    con.execute(
-                        "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction WHERE rowid=?",
-                        (rowid,),
-                    ).fetchall(),
+                    con.execute(table.select_row, (rowid,)).fetchall(),
                     (expected_record,),
                     target,
                 )
-            con.execute("DELETE FROM correction WHERE rowid = ?", (rowid,))
+            con.execute(table.delete, (rowid,))
 
     def update_correction_data(
         self, regex: object, rotation: object, offset: object
@@ -845,6 +950,18 @@ class Library:
         """Validate and insert a correction, refusing accidental duplicate patterns."""
         return self.save_correction_data(regex, rotation, offset, db_path=db_path)
 
+    def insert_lcsc_correction_data(
+        self,
+        lcsc: object,
+        rotation: object,
+        offset: object,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> int:
+        """Validate and insert a part-number correction, refusing a duplicate key."""
+        return self.save_correction_data(
+            lcsc, rotation, offset, db_path=db_path, kind=KIND_LCSC
+        )
+
     def save_correction_data(
         self,
         pattern: object,
@@ -856,61 +973,103 @@ class Library:
         db_path: Optional[DatabasePath] = None,  # noqa: UP045
         expected_record: Optional[StoredCorrection] = None,  # noqa: UP045
         expected_conflicts: Optional[Sequence[StoredCorrection]] = None,  # noqa: UP045
+        kind: str = KIND_FOOTPRINT,
     ) -> int:
-        """Save or repair one row, with optional collision replacement in the same transaction."""
+        """Save or repair one row, with optional collision replacement in the same transaction.
+
+        A validated Correction or LcscCorrection names its own table; raw
+        values are validated as the given kind first.
+        """
         target = db_path if db_path is not None else self.correctionsdb_file
-        correction = (
-            pattern
-            if isinstance(pattern, Correction)
-            else validate_correction(
+        if isinstance(pattern, (Correction, LcscCorrection)):
+            correction = pattern
+        elif kind == KIND_LCSC:
+            correction = validate_lcsc_correction(
                 pattern, rotation, offset, source=str(target), rowid=rowid
             )
-        )
+        else:
+            correction = validate_correction(
+                pattern, rotation, offset, source=str(target), rowid=rowid
+            )
+        table = _RULE_TABLES[correction_kind(correction)]
+        if expected_record is not None and expected_record.kind != correction_kind(
+            correction
+        ):
+            raise self._storage_error(
+                target,
+                ValueError("the selected row is a different kind of rule"),
+                "row",
+            )
         with self._correction_transaction(target) as con:
             if rowid is not None or expected_record is not None:
                 self._check_expected_corrections(
-                    con.execute(
-                        "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction WHERE rowid=?",
-                        (rowid,),
-                    ).fetchall(),
+                    con.execute(table.select_row, (rowid,)).fetchall(),
                     (expected_record,) if expected_record is not None else None,
                     target,
                 )
-            conflicts = con.execute(
-                "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction "
-                "WHERE regex=? AND (? IS NULL OR rowid != ?) ORDER BY rowid",
-                (correction.pattern, rowid, rowid),
-            ).fetchall()
+            conflicts = self._conflicting_rows(con, correction, rowid)
             if expected_conflicts is not None:
                 self._check_expected_corrections(conflicts, expected_conflicts, target)
             if conflicts and not replace:
                 raise CorrectionDataError(
-                    (
-                        CorrectionIssue(
-                            "pattern",
-                            correction.pattern,
-                            "another correction already uses this pattern",
-                            str(target),
-                            pattern=correction.pattern,
-                            rowid=rowid,
-                        ),
-                    )
+                    (self._duplicate_key_issue(correction, target, rowid),)
                 )
             if conflicts:
-                con.executemany(
-                    "DELETE FROM correction WHERE rowid=?",
-                    [(row[0],) for row in conflicts],
-                )
+                con.executemany(table.delete, [(row[0],) for row in conflicts])
             if rowid is None:
-                return con.execute(
-                    "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
-                    correction.db_row(),
-                ).lastrowid
-            con.execute(
-                "UPDATE correction SET regex=?, rotation=?, offset_x=?, offset_y=? WHERE rowid=?",
-                (*correction.db_row(), rowid),
-            )
+                return con.execute(table.insert, correction.db_row()).lastrowid
+            con.execute(table.update, (*correction.db_row(), rowid))
         return rowid
+
+    @staticmethod
+    def _conflicting_rows(
+        con: sqlite3.Connection,
+        correction: AnyCorrection,
+        rowid: Optional[int],  # noqa: UP045
+    ) -> list[tuple[object, ...]]:
+        """Find the other rows of the same kind stored under the same key."""
+        if isinstance(correction, LcscCorrection):
+            # Part numbers compare in canonical form, so a row that reached the
+            # table in another spelling still counts as the same rule.
+            return [
+                row
+                for row in con.execute(
+                    "SELECT rowid, lcsc, rotation, offset_x, offset_y "
+                    "FROM lcsc_correction ORDER BY rowid"
+                ).fetchall()
+                if row[0] != rowid
+                and isinstance(row[1], str)
+                and normalize_lcsc(row[1]) == correction.lcsc
+            ]
+        return con.execute(
+            "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction "
+            "WHERE regex=? AND (? IS NULL OR rowid != ?) ORDER BY rowid",
+            (correction.pattern, rowid, rowid),
+        ).fetchall()
+
+    @staticmethod
+    def _duplicate_key_issue(
+        correction: AnyCorrection,
+        target: DatabasePath,
+        rowid: Optional[int],  # noqa: UP045
+    ) -> CorrectionIssue:
+        """Describe a refused save whose key another stored row already uses."""
+        if isinstance(correction, LcscCorrection):
+            return CorrectionIssue(
+                "lcsc",
+                correction.lcsc,
+                "another correction already uses this part number",
+                str(target),
+                rowid=rowid,
+            )
+        return CorrectionIssue(
+            "pattern",
+            correction.pattern,
+            "another correction already uses this pattern",
+            str(target),
+            pattern=correction.pattern,
+            rowid=rowid,
+        )
 
     def read_correction_data(
         self,
@@ -927,16 +1086,16 @@ class Library:
         issues = []
         corrections = {}
         csv_migrations = ()
-        raw_rows = []
+        raw_rows = {kind: [] for kind in _RULE_TABLES}
         unavailable = False
         warnings = []
         try:
             with contextlib.closing(self._read_database(target)) as con:
                 con.execute("BEGIN")
                 self._validate_correction_schema(con)
-                raw_rows = con.execute(
-                    "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction ORDER BY regex ASC, rowid ASC"
-                ).fetchall()
+                for kind, table in _RULE_TABLES.items():
+                    if kind == KIND_FOOTPRINT or self._has_table(con, table.name):
+                        raw_rows[kind] = con.execute(table.select_all).fetchall()
                 completed, states = self._correction_metadata(con)
                 csv_migrations = tuple(
                     (key, source)
@@ -961,32 +1120,13 @@ class Library:
         issues.extend(session_issues)
         warnings.extend(session_warnings)
         unavailable = unavailable or bool(session_issues)
-        for rowid, pattern, rotation, offset_x, offset_y in raw_rows:
-            correction = None
-            row_issues = ()
-            try:
-                correction = validate_correction(
-                    pattern,
-                    rotation,
-                    (offset_x, offset_y),
-                    source=target,
-                    rowid=rowid,
-                )
-            except CorrectionDataError as error:
-                row_issues = error.issues
-                issues.extend(row_issues)
-            rows.append(
-                StoredCorrection(
-                    rowid,
-                    pattern,
-                    rotation,
-                    (offset_x, offset_y),
-                    row_issues,
-                    correction,
-                )
+        for kind, kind_rows in raw_rows.items():
+            stored, kind_issues, kind_corrections = self._stored_rows(
+                kind, kind_rows, target
             )
-            if correction is not None:
-                corrections.setdefault(pattern, correction)
+            rows.extend(stored)
+            issues.extend(kind_issues)
+            corrections.update(kind_corrections)
         rows, conflicts = self._mark_conflicting_corrections(rows, target)
         issues.extend(conflicts)
         state = (
@@ -1008,14 +1148,60 @@ class Library:
         )
 
     @staticmethod
+    def _stored_rows(
+        kind: str, raw_rows: Sequence[tuple[object, ...]], target: str
+    ) -> tuple[
+        list[StoredCorrection],
+        list[CorrectionIssue],
+        dict[tuple[str, str], AnyCorrection],
+    ]:
+        """Validate one table's rows, keeping every original for precise repair."""
+        validate = (
+            validate_lcsc_correction if kind == KIND_LCSC else validate_correction
+        )
+        rows = []
+        issues = []
+        corrections = {}
+        for rowid, key, rotation, offset_x, offset_y in raw_rows:
+            correction = None
+            row_issues = ()
+            try:
+                correction = validate(
+                    key, rotation, (offset_x, offset_y), source=target, rowid=rowid
+                )
+            except CorrectionDataError as error:
+                row_issues = error.issues
+                issues.extend(row_issues)
+            rows.append(
+                StoredCorrection(
+                    rowid,
+                    key,
+                    rotation,
+                    (offset_x, offset_y),
+                    row_issues,
+                    correction,
+                    kind,
+                )
+            )
+            if correction is not None:
+                corrections.setdefault((kind, correction.key), correction)
+        return rows, issues, corrections
+
+    @staticmethod
+    def _conflict_group(row: StoredCorrection) -> tuple[str, str]:
+        """Key a stored row the way its kind compares keys."""
+        key = str(row.pattern)
+        return row.kind, normalize_lcsc(key) if row.kind == KIND_LCSC else key
+
+    @staticmethod
     def _mark_conflicting_corrections(
         rows: Sequence[StoredCorrection], target: str
     ) -> tuple[list[StoredCorrection], list[CorrectionIssue]]:
-        """Identify every member of a conflicting pattern group for explicit repair."""
+        """Identify every member of a conflicting key group for explicit repair."""
         groups = {}
         for row in rows:
             if isinstance(row.pattern, str):
-                groups.setdefault(row.pattern, []).append(row)
+                groups.setdefault(Library._conflict_group(row), []).append(row)
         conflicting = {
             pattern
             for pattern, group in groups.items()
@@ -1028,15 +1214,27 @@ class Library:
         issues = []
         result = []
         for row in rows:
-            if row.pattern in conflicting:
-                issue = CorrectionIssue(
-                    "pattern",
-                    row.pattern,
-                    "conflicting stored corrections use this pattern; repair or delete the duplicate rows",
-                    target,
-                    pattern=row.pattern,
-                    rowid=row.rowid,
-                )
+            if (
+                isinstance(row.pattern, str)
+                and Library._conflict_group(row) in conflicting
+            ):
+                if row.kind == KIND_LCSC:
+                    issue = CorrectionIssue(
+                        "lcsc",
+                        row.pattern,
+                        "conflicting stored corrections use this part number; repair or delete the duplicate rows",
+                        target,
+                        rowid=row.rowid,
+                    )
+                else:
+                    issue = CorrectionIssue(
+                        "pattern",
+                        row.pattern,
+                        "conflicting stored corrections use this pattern; repair or delete the duplicate rows",
+                        target,
+                        pattern=row.pattern,
+                        rowid=row.rowid,
+                    )
                 issues.append(issue)
                 row = replace(row, issues=(*row.issues, issue))
             result.append(row)
@@ -1169,8 +1367,13 @@ class Library:
             cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
             cur.commit()
 
-    def get_part_details(self, number: str) -> dict:
-        """Get the part details for a LCSC number using optimized FTS5 querying."""
+    def get_part_details(self, number) -> dict:
+        """Get the part details for a LCSC number using optimized FTS5 querying.
+
+        Accepts an :class:`Lcsc` or anything that might name one. A value that
+        does not name a part is not an error -- most callers hold whatever the
+        board gave them -- so it returns no details rather than raising.
+        """
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.row_factory = dict_factory
             cur = con.cursor()
@@ -1178,8 +1381,18 @@ class Library:
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
-            cur.execute(query, {"number": number})
-            return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
+            part = Lcsc.parse(number)
+            if part is None:
+                # Nothing that could name a part, so nothing to look up.
+                # 'parts MATCH " "' is a syntax error to FTS5 besides.
+                return {}
+            cur.execute(query, {"number": str(part)})
+            # The FTS5 match is not exact, so the row still has to be confirmed.
+            # Comparing parsed values makes the two sides canonical by
+            # construction rather than by remembering to normalise both.
+            return next(
+                (n for n in cur.fetchall() if Lcsc.parse(n["lcsc"]) == part), {}
+            )
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""

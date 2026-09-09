@@ -95,13 +95,13 @@ def _window(*, footprints: dict[str, object], selections: tuple[int, ...] = ()) 
     return window
 
 
-def _part(reference):
+def _part(reference, lcsc=""):
     """Return the complete store row consumed by populate_footprint_list."""
     return {
         "reference": reference,
         "value": "10k",
         "footprint": "R_0603",
-        "lcsc": "",
+        "lcsc": lcsc,
         "stock": None,
         "exclude_from_bom": 0,
         "exclude_from_pos": 0,
@@ -240,3 +240,35 @@ def test_toggle_handlers_skip_stale_refs_and_continue_live_refs(
         "model_bom_pos": window.partlist_data_model.toggle_bom_pos.call_args_list,
     }
     assert observed == expected
+
+
+def test_populate_footprint_list_looks_a_part_up_once_per_part(monkeypatch):
+    """Two spellings of one number are one part, so one lookup serves both.
+
+    The details cache is keyed on the parsed part rather than on the raw
+    column, so a store holding "C12345" on one row and " c12345 " on another
+    -- which it can, since several paths write the column unnormalised --
+    does not fetch the same part twice, and both rows get the details. The
+    LCSC column renders that same parsed part, so the number a row shows
+    agrees with the type and stock shown beside it.
+    """
+    window = _window(footprints={"R1": _LiveFootprint(), "R2": _LiveFootprint()})
+    window.hide_bom_parts = False
+    window.hide_pos_parts = False
+    window.pending_assembly_enrichment = set()
+    window.store.read_all.return_value = [
+        _part("R1", "C12345"),
+        _part("R2", " c12345 "),
+    ]
+    window.library.get_part_details.return_value = {"type": "Basic", "stock": "27"}
+
+    JLCPCBTools.populate_footprint_list(window)
+
+    lookups = window.library.get_part_details.call_args_list
+    assert len(lookups) == 1, f"expected one lookup per part, got {lookups}"
+    assert str(lookups[0].args[0]) == "C12345"
+
+    rows = window.partlist_data_model.AddEntry.call_args_list
+    assert len(rows) == 2
+    assert [row.args[0][3] for row in rows] == ["C12345", "C12345"]
+    assert [row.args[0][4] for row in rows] == ["Basic", "Basic"]

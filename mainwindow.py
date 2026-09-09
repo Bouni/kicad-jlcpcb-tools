@@ -78,6 +78,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
+from .lcsc import Lcsc, extract_lcsc, format_lcsc
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
@@ -121,6 +122,7 @@ ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
+ID_CONTEXT_MENU_ADD_ROT_BY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
 ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
 
@@ -1011,32 +1013,54 @@ class JLCPCBTools(wx.Dialog):
         remember_part_preferences: bool = False,
         notify: bool = True,
     ) -> list[str]:
-        """Commit project changes before updating board fields or displayed rows."""
+        """Commit project changes before updating board fields or displayed rows.
+
+        Assignments arrive as strings from a part selector, the clipboard and
+        saved preferences, so they are parsed once here, at the boundary. What
+        the store, the board field and the model see below is the canonical
+        number of a part that is known to be one.
+        """
         if self.store is None:
             return []
         board = self.pcbnew.GetBoard()
+        parts = {}
+        for reference, number in assignments.items():
+            # Skipped like a reference the board no longer has: one bad entry
+            # is not a reason to abandon the rest of the action.
+            if (part := Lcsc.parse(number)) is None:
+                self.logger.warning(
+                    "Skipped %s: %r does not name an LCSC part.", reference, number
+                )
+            else:
+                parts[reference] = part
         footprints = {
             reference: footprint
-            for reference in assignments
+            for reference in parts
             if (footprint := board.FindFootprintByReference(reference)) is not None
         }
         if not footprints:
             return []
+        # The caller's details are keyed by whatever string it holds, so they
+        # are parsed too rather than compared against a canonical key.
+        supplied = {
+            part: row
+            for number, row in (details or {}).items()
+            if (part := Lcsc.parse(number)) is not None
+        }
         catalog = {}
         try:
-            for lcsc in dict.fromkeys(assignments[ref] for ref in footprints):
-                part = (details or {}).get(lcsc)
-                if part is None:
-                    part = self.library.get_part_details(lcsc)
-                stock = part.get("stock")
+            for part in dict.fromkeys(parts[ref] for ref in footprints):
+                row = supplied.get(part)
+                if row is None:
+                    row = self.library.get_part_details(part)
+                stock = row.get("stock")
                 try:
                     stored_stock = int(stock) if stock is not None else None
                 except (TypeError, ValueError):
                     stored_stock = None
-                catalog[lcsc] = (part, stored_stock, params_for_part(part))
+                catalog[part] = (row, stored_stock, params_for_part(row))
             self.store.set_lcsc_assignments(
-                (ref, assignments[ref], catalog[assignments[ref]][1])
-                for ref in footprints
+                (ref, str(parts[ref]), catalog[parts[ref]][1]) for ref in footprints
             )
         except sqlite3.Error as error:
             self.logger.warning("Unable to apply LCSC assignments: %s", error)
@@ -1044,14 +1068,15 @@ class JLCPCBTools(wx.Dialog):
 
         preferences = []
         for reference, footprint in footprints.items():
-            lcsc = assignments[reference]
-            part, _stored_stock, params = catalog[lcsc]
+            part = parts[reference]
+            lcsc = str(part)
+            row, _stored_stock, params = catalog[part]
             set_lcsc_value(footprint, lcsc)
-            stock = part.get("stock")
+            stock = row.get("stock")
             self.partlist_data_model.set_lcsc(
                 reference,
                 lcsc,
-                part.get("type", ""),
+                row.get("type", ""),
                 stock if stock is not None else "",
                 params,
             )
@@ -1065,6 +1090,7 @@ class JLCPCBTools(wx.Dialog):
         assigned = list(footprints)
         if notify:
             self.start_assembly_enrichment(assigned)
+            self.refresh_corrections(assigned)
             wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
         return assigned
 
@@ -1373,10 +1399,38 @@ class JLCPCBTools(wx.Dialog):
             str(part["reference"]),
             str(part["value"]),
             str(part["footprint"]),
+            part["lcsc"],
         )
         if match is None:
             return "0°, 0.0/0.0"
         return f"{match.correction} ({match.source})"
+
+    def refresh_corrections(self, references: Iterable[str]) -> None:
+        """Recompute the Correction cells of parts whose LCSC number changed.
+
+        The rule selected for a part depends on its part number as well as
+        its reference, value and footprint, so the cell has to follow the
+        store whenever the number is assigned, pasted, applied from a part
+        preference or removed. Only the affected rows change; the list is
+        not repopulated.
+        """
+        if self.store is None:
+            return
+        references = list(references)
+        if not references:
+            return
+        snapshot = self.library.read_correction_data()
+        self.update_correction_status(snapshot)
+        for reference in references:
+            part = self.store.get_part(reference)
+            if not part:
+                continue
+            self.partlist_data_model.set_correction(
+                reference,
+                str(self.get_correction(part, snapshot.corrections))
+                if snapshot.corrections is not None
+                else "Unresolved",
+            )
 
     def update_correction_status(self, snapshot: CorrectionSnapshot) -> None:
         """Show aggregate readiness; detailed repair diagnostics stay in the manager."""
@@ -1437,8 +1491,11 @@ class JLCPCBTools(wx.Dialog):
                 continue
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
-            if part["lcsc"] and part["lcsc"] not in details:
-                details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
+            # Keyed on the parsed part, so two spellings of one number cannot
+            # become two cache entries and two round trips.
+            lcsc = Lcsc.parse(part["lcsc"])
+            if lcsc is not None and lcsc not in details:
+                details[lcsc] = self.library.get_part_details(lcsc)
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
@@ -1450,9 +1507,12 @@ class JLCPCBTools(wx.Dialog):
                     part["reference"],
                     part["value"],
                     part["footprint"],
-                    part["lcsc"],
-                    details.get(part["lcsc"], {}).get("type", ""),  # type
-                    details.get(part["lcsc"], {}).get("stock", ""),  # stock
+                    # The canonical form, so the column agrees with the details
+                    # beside it rather than showing whatever spelling the store
+                    # happens to hold.
+                    format_lcsc(lcsc),
+                    details.get(lcsc, {}).get("type", ""),  # type
+                    details.get(lcsc, {}).get("stock", ""),  # stock
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
@@ -1462,7 +1522,7 @@ class JLCPCBTools(wx.Dialog):
                         else "Unresolved"
                     ),
                     str(fp.GetLayer()),
-                    params_for_part(details.get(part["lcsc"], {})),
+                    params_for_part(details.get(lcsc, {})),
                     self._get_enrichment_status_label(part),  # enrichment
                     "",  # bom price label
                 ]
@@ -1644,6 +1704,7 @@ class JLCPCBTools(wx.Dialog):
         for item, _ref, fp in selected:
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
+        self.refresh_corrections([ref for _item, ref, _fp in selected])
         wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
 
     def select_alike_parts(self, *_):
@@ -2211,7 +2272,7 @@ class JLCPCBTools(wx.Dialog):
             success = wx.TheClipboard.GetData(text_data)
             wx.TheClipboard.Close()
         if success:
-            if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
+            if (lcsc := extract_lcsc(text_data.GetText())) != "":
                 references = [
                     self.partlist_data_model.get_reference(item)
                     for item in self.footprint_list.GetSelections()
@@ -2222,6 +2283,7 @@ class JLCPCBTools(wx.Dialog):
 
     def add_correction(self, e: wx.CommandEvent) -> None:
         """Add part correction for the current part."""
+        without_lcsc = []
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
                 if reference := self.partlist_data_model.get_reference(item):
@@ -2236,6 +2298,17 @@ class JLCPCBTools(wx.Dialog):
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
+            elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_LCSC:
+                if lcsc := self.partlist_data_model.get_lcsc(item):
+                    CorrectionManagerDialog(self, "", lcsc_part=lcsc).ShowModal()
+                else:
+                    without_lcsc.append(self.partlist_data_model.get_reference(item))
+        if without_lcsc:
+            wx.MessageBox(
+                "No LCSC number is assigned to " + ", ".join(without_lcsc) + ".",
+                "No LCSC number",
+                style=wx.ICON_WARNING,
+            )
         self.populate_footprint_list()
 
     def export_to_schematic(self, *_):
@@ -2283,13 +2356,6 @@ class JLCPCBTools(wx.Dialog):
                 "Applied part preferences to %d assignment(s).", len(updated_references)
             )
 
-    def sanitize_lcsc(self, lcsc_PN: str) -> str:
-        """Sanitize a given LCSC number using a regex."""
-        m = re.search("C\\d+", lcsc_PN, re.IGNORECASE)
-        if m:
-            return m.group(0).upper()
-        return ""
-
     def OnRightDown(self, *_: object) -> None:
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
@@ -2327,6 +2393,12 @@ class JLCPCBTools(wx.Dialog):
         )
         right_click_menu.Append(correction_by_name)
         right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
+
+        correction_by_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_LCSC, "Add Correction by LCSC"
+        )
+        right_click_menu.Append(correction_by_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_lcsc)
 
         apply_part_preferences = wx.MenuItem(
             right_click_menu,
