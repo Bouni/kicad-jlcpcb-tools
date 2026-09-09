@@ -53,7 +53,13 @@ class DataViewModel:
 def stock_modules() -> Iterator[types.SimpleNamespace]:
     """Import real models and columns with only unrelated GUI behavior replaced."""
     package = "stock_workflow_tests"
-    stubs = wx_stubs(Colour=lambda *rgb: rgb)
+    stubs = wx_stubs(
+        Colour=lambda *rgb: rgb,
+        SYS_COLOUR_WINDOW=0,
+        SystemSettings=types.SimpleNamespace(
+            GetColour=lambda _key: types.SimpleNamespace(GetLuminance=lambda: 0.1)
+        ),
+    )
     stubs["wx.dataview"].PyDataViewModel = DataViewModel
     stubs["wx.dataview"].DataViewIconText = lambda *args: args
     stubs["wx.dataview"].NullDataViewItem = None

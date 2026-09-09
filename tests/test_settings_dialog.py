@@ -220,6 +220,7 @@ _BOOLEAN_SETTINGS = {
     "lcsc_bom_cpl_setting": ("gerber", "lcsc_bom_cpl"),
     "order_number_setting": ("general", "order_number"),
     "simplify_stock_setting": ("general", "simplify_stock"),
+    "stock_concern_setting": ("highlighting", "stock_concern"),
     "highlight_matches_setting": ("highlighting", "matches"),
     "bom_estimator_show_setting": ("general", "bom_estimator_show"),
     "part_preferences_remember_lcsc_assignments_setting": (
@@ -246,6 +247,7 @@ _EXPECTED_LABELS = {
     "order_number_setting": "Check for an order/serial number placeholder on export",
     "highlight_matches_setting": "Highlight search matches",
     "simplify_stock_setting": "Simplify stock",
+    "stock_concern_setting": "Highlight stock concern",
     "bom_estimator_show_setting": "Show BOM cost estimator",
     "part_preferences_remember_lcsc_assignments_setting": "Remember my part preferences",
     "part_preferences_fill_empty_lcsc_assignments_on_open_setting": (

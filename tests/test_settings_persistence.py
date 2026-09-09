@@ -26,7 +26,7 @@ def saved_settings(
     window.settings = {
         "gerber": {"subtract_mask_from_silk": True},
         "general": {"simplify_stock": True},
-        "highlighting": {"matches": True},
+        "highlighting": {"matches": True, "stock_concern": True},
         "partselector": {"size": [1200, 700]},
         "part_preferences": {
             "remember_lcsc_assignments": False,
