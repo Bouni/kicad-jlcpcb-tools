@@ -320,6 +320,14 @@ class PartListDataModel(dv.PyDataViewModel):
         self.standard_only_refs.discard(ref)
         self.ItemChanged(self.ObjectToItem(item))
 
+    def set_correction(self, ref, correction):
+        """Show the correction rule now selected for the given reference."""
+        if (index := self.find_index(ref)) is None:
+            return
+        item = self.data[index]
+        item[self.columns["ROT_COL"]] = correction
+        self.ItemChanged(self.ObjectToItem(item))
+
     def set_bom_price(self, ref, price_label):
         """Set BOM price text for a given part reference."""
         if (index := self.find_index(ref)) is None:

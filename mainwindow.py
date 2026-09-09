@@ -121,6 +121,7 @@ ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
+ID_CONTEXT_MENU_ADD_ROT_BY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
 ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
 
@@ -1065,6 +1066,7 @@ class JLCPCBTools(wx.Dialog):
         assigned = list(footprints)
         if notify:
             self.start_assembly_enrichment(assigned)
+            self.refresh_corrections(assigned)
             wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
         return assigned
 
@@ -1373,10 +1375,38 @@ class JLCPCBTools(wx.Dialog):
             str(part["reference"]),
             str(part["value"]),
             str(part["footprint"]),
+            part["lcsc"],
         )
         if match is None:
             return "0°, 0.0/0.0"
         return f"{match.correction} ({match.source})"
+
+    def refresh_corrections(self, references: Iterable[str]) -> None:
+        """Recompute the Correction cells of parts whose LCSC number changed.
+
+        The rule selected for a part depends on its part number as well as
+        its reference, value and footprint, so the cell has to follow the
+        store whenever the number is assigned, pasted, applied from a part
+        preference or removed. Only the affected rows change; the list is
+        not repopulated.
+        """
+        if self.store is None:
+            return
+        references = list(references)
+        if not references:
+            return
+        snapshot = self.library.read_correction_data()
+        self.update_correction_status(snapshot)
+        for reference in references:
+            part = self.store.get_part(reference)
+            if not part:
+                continue
+            self.partlist_data_model.set_correction(
+                reference,
+                str(self.get_correction(part, snapshot.corrections))
+                if snapshot.corrections is not None
+                else "Unresolved",
+            )
 
     def update_correction_status(self, snapshot: CorrectionSnapshot) -> None:
         """Show aggregate readiness; detailed repair diagnostics stay in the manager."""
@@ -1644,6 +1674,7 @@ class JLCPCBTools(wx.Dialog):
         for item, _ref, fp in selected:
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
+        self.refresh_corrections([ref for _item, ref, _fp in selected])
         wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
 
     def select_alike_parts(self, *_):
@@ -2222,6 +2253,7 @@ class JLCPCBTools(wx.Dialog):
 
     def add_correction(self, e: wx.CommandEvent) -> None:
         """Add part correction for the current part."""
+        without_lcsc = []
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
                 if reference := self.partlist_data_model.get_reference(item):
@@ -2236,6 +2268,17 @@ class JLCPCBTools(wx.Dialog):
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
+            elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_LCSC:
+                if lcsc := self.partlist_data_model.get_lcsc(item):
+                    CorrectionManagerDialog(self, "", lcsc_part=lcsc).ShowModal()
+                else:
+                    without_lcsc.append(self.partlist_data_model.get_reference(item))
+        if without_lcsc:
+            wx.MessageBox(
+                "No LCSC number is assigned to " + ", ".join(without_lcsc) + ".",
+                "No LCSC number",
+                style=wx.ICON_WARNING,
+            )
         self.populate_footprint_list()
 
     def export_to_schematic(self, *_):
@@ -2327,6 +2370,12 @@ class JLCPCBTools(wx.Dialog):
         )
         right_click_menu.Append(correction_by_name)
         right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
+
+        correction_by_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_LCSC, "Add Correction by LCSC"
+        )
+        right_click_menu.Append(correction_by_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_lcsc)
 
         apply_part_preferences = wx.MenuItem(
             right_click_menu,
