@@ -1,0 +1,52 @@
+(kicad_sch
+	(version 20250114)
+	(generator "eeschema")
+	(generator_version "9.0")
+	(lib_symbols)
+	(symbol
+		(lib_id "Device:R")
+		(at 10.16 10.16 0)
+		(unit 1)
+		(in_bom no)
+		(on_board yes)
+		(dnp no)
+		(uuid "11111111-1111-4111-8111-111111111111")
+		(property "Reference" "R1"
+			(at 12.7 10.16 0)
+		)
+		(property "LCSC" "OLD"
+			(at 10.16 10.16 0)
+		)
+		(instances
+			(project "previous-board"
+				(path "/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+					(reference "R1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 20.32 20.32 0)
+		(unit 1)
+		(in_bom no)
+		(on_board yes)
+		(dnp no)
+		(uuid "22222222-2222-4222-8222-222222222222")
+		(property "Reference" "R2"
+			(at 22.86 20.32 0)
+		)
+		(property "LCSC" "OLD"
+			(at 20.32 20.32 0)
+		)
+		(instances
+			(project "board"
+				(path "/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+					(reference "R2")
+					(unit 1)
+				)
+			)
+		)
+	)
+)
