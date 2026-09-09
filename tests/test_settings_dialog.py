@@ -15,6 +15,8 @@ from typing import Any, Optional
 
 import pytest
 
+from .stock_test_support import board_row, stock_modules
+from .test_settings_persistence import JLCPCBTools, mainwindow
 from .wx_harness import load, module, package_stubs, wx_stubs
 
 _PACKAGE = "settings_dialog_tests"
@@ -217,6 +219,7 @@ _BOOLEAN_SETTINGS = {
     "subtract_mask_from_silk_setting": ("gerber", "subtract_mask_from_silk"),
     "lcsc_bom_cpl_setting": ("gerber", "lcsc_bom_cpl"),
     "order_number_setting": ("general", "order_number"),
+    "simplify_stock_setting": ("general", "simplify_stock"),
     "highlight_matches_setting": ("highlighting", "matches"),
     "bom_estimator_show_setting": ("general", "bom_estimator_show"),
     "part_preferences_remember_lcsc_assignments_setting": (
@@ -242,6 +245,7 @@ _EXPECTED_LABELS = {
     "lcsc_bom_cpl_setting": "Add parts without LCSC number to BOM/CPL",
     "order_number_setting": "Check for an order/serial number placeholder on export",
     "highlight_matches_setting": "Highlight search matches",
+    "simplify_stock_setting": "Simplify stock",
     "bom_estimator_show_setting": "Show BOM cost estimator",
     "part_preferences_remember_lcsc_assignments_setting": "Remember my part preferences",
     "part_preferences_fill_empty_lcsc_assignments_on_open_setting": (
@@ -445,3 +449,50 @@ def test_preference_settings_remain_editable_when_library_bootstrap_fails() -> N
         "setting": "fill_empty_lcsc_assignments_on_open",
         "value": False,
     }
+
+
+def test_simplify_stock_missing_setting_defaults_on_without_posting_event() -> None:
+    """Old settings render the enabled default before migration or user interaction."""
+    settings_dict = _settings(True)
+    settings_dict["general"].pop("simplify_stock")
+    dialog = _dialog(settings_dict)
+    assert dialog.simplify_stock_setting.GetValue() is True
+    assert _wx.posted_events == []
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_simplify_stock_event_updates_display_persists_and_reopens(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    """A real checkbox event changes the real model and survives dialog reopening."""
+    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    with stock_modules() as modules:
+        parent = object.__new__(JLCPCBTools)
+        parent.window = object()
+        parent.scale_factor = 1.0
+        parent.settings = _settings(not enabled)
+        parent.library = types.SimpleNamespace(datadir="/data")
+        parent.partlist_data_model = modules.datamodel.PartListDataModel(
+            1.0, simplify_stock=not enabled
+        )
+        parent.partlist_data_model.AddEntry(board_row("R1", "22095"))
+        refreshes = []
+        parent.footprint_list = types.SimpleNamespace(
+            Refresh=lambda: refreshes.append(True)
+        )
+        dialog = SettingsDialog(parent)
+        control = dialog.simplify_stock_setting
+        assert control.GetValue() is not enabled
+        control.SetValue(enabled)
+        events = _fire(control)
+        assert len(events) == 1
+        parent.update_settings(events[0])
+
+        model = parent.partlist_data_model
+        assert model.GetValue(model.data[0], model.columns["STOCK_COL"]) == (
+            "22k" if enabled else "22095"
+        )
+        assert model.get_all()[0][model.columns["STOCK_COL"]] == "22095"
+        parent.settings = {}
+        parent.load_settings()
+        assert SettingsDialog(parent).simplify_stock_setting.GetValue() is enabled
