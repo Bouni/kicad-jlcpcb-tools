@@ -334,6 +334,19 @@ class SettingsDialog(wx.Dialog):
 
         self.highlight_matches_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
+        self.simplify_stock_setting = wx.CheckBox(
+            self,
+            label="Simplify stock",
+            name="general_simplify_stock",
+        )
+        self.simplify_stock_setting.SetToolTip(
+            wx.ToolTip(
+                "Show compact stock in the parts lists, for example 22k or 8.8M. "
+                "Turn off to show exact quantities."
+            )
+        )
+        self.simplify_stock_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
         ##### Library Selection #####
 
         library_label = wx.StaticText(
@@ -682,6 +695,7 @@ class SettingsDialog(wx.Dialog):
             settings_grid, self.order_number_image, self.order_number_setting
         )
         self._add_setting_row(settings_grid, None, self.highlight_matches_setting)
+        self._add_setting_row(settings_grid, None, self.simplify_stock_setting)
         self._add_setting_row(
             settings_grid,
             self.bom_estimator_show_image,
@@ -828,6 +842,10 @@ class SettingsDialog(wx.Dialog):
         """Alias shared highlighting setting updates to the checkbox UI helper."""
         self.update_highlight_matches(enabled)
 
+    def update_simplify_stock(self, enabled: bool) -> None:
+        """Reflect the stock presentation preference in its checkbox."""
+        self.simplify_stock_setting.SetValue(bool(enabled))
+
     def update_bom_estimator_show(self, show):
         """Update settings dialog according to the BOM estimator visibility setting."""
         self.bom_estimator_show_setting.SetValue(bool(show))
@@ -879,6 +897,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_highlight_matches(
             self.parent.settings.get("highlighting", {}).get("matches", True)
+        )
+        self.update_simplify_stock(
+            self.parent.settings.get("general", {}).get("simplify_stock", True)
         )
         self.update_bom_estimator_show(
             self.parent.settings.get("general", {}).get("bom_estimator_show", True)

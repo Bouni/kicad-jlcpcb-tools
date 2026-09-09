@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import Any
 
 import wx  # pylint: disable=import-error
 import wx.dataview as dv
@@ -14,6 +15,7 @@ from .dataview_highlight import (
 )
 from .helpers import loadIconScaled
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
+from .stock_display import format_stock, stock_sort_key
 
 STANDARD_ONLY_TOOLTIP = (
     "Part cannot be assembled in economy mode, standard must be used"
@@ -46,10 +48,11 @@ class PartListDataModel(dv.PyDataViewModel):
         "STANDARD_ONLY_COL": 15,
     }
 
-    def __init__(self, scale_factor):
+    def __init__(self, scale_factor: float, simplify_stock: bool = True) -> None:
         super().__init__()
         self.data = []
         self.standard_only_refs = set()
+        self.simplify_stock = bool(simplify_stock)
 
         self.bom_pos_icons = [
             loadIconScaled(
@@ -155,9 +158,19 @@ class PartListDataModel(dv.PyDataViewModel):
         """Get parent item."""
         return dv.NullDataViewItem
 
-    def GetValue(self, item, col):
+    def set_simplify_stock(self, enabled: bool) -> None:
+        """Update stock presentation and notify already associated views."""
+        if self.simplify_stock == bool(enabled):
+            return
+        self.simplify_stock = bool(enabled)
+        for row in self.data:
+            self.ValueChanged(self.ObjectToItem(row), self.columns["STOCK_COL"])
+
+    def GetValue(self, item: Any, col: int) -> Any:
         """Get value of an item."""
         row = self.ItemToObject(item)
+        if col == self.columns["STOCK_COL"]:
+            return format_stock(row[col], self.simplify_stock)
         if col == self.columns["STANDARD_ONLY_COL"]:
             return self.HasValue(item, col)
         if col in [
@@ -203,8 +216,13 @@ class PartListDataModel(dv.PyDataViewModel):
         row[col] = value
         return True
 
-    def Compare(self, item1, item2, column, ascending):
+    def Compare(self, item1: Any, item2: Any, column: int, ascending: bool) -> int:
         """Override to implement natural sorting."""
+        if column == self.columns["STOCK_COL"]:
+            key1 = stock_sort_key(self.ItemToObject(item1)[column])
+            key2 = stock_sort_key(self.ItemToObject(item2)[column])
+            order = (key1 > key2) - (key1 < key2)
+            return order if ascending else -order
         val1 = self.GetValue(item1, column)
         val2 = self.GetValue(item2, column)
 
@@ -375,10 +393,11 @@ class PartListDataModel(dv.PyDataViewModel):
 class PartSelectorDataModel(dv.PyDataViewModel):
     """Datamodel for use with the DataViewCtrl of the partselector modal window."""
 
-    def __init__(self):
+    def __init__(self, simplify_stock: bool = True) -> None:
         super().__init__()
         self.data = []
         self.columns = dict(COLUMN_INDEX)
+        self.simplify_stock = bool(simplify_stock)
 
         self.logger = logging.getLogger(__name__)
 
@@ -414,9 +433,19 @@ class PartSelectorDataModel(dv.PyDataViewModel):
         """Get parent item."""
         return dv.NullDataViewItem
 
-    def GetValue(self, item, col):
+    def set_simplify_stock(self, enabled: bool) -> None:
+        """Update stock presentation without changing assignment values."""
+        if self.simplify_stock == bool(enabled):
+            return
+        self.simplify_stock = bool(enabled)
+        for row in self.data:
+            self.ValueChanged(self.ObjectToItem(row), self.columns["stock"])
+
+    def GetValue(self, item: Any, col: int) -> Any:
         """Get value of an item."""
         row = self.ItemToObject(item)
+        if col == self.columns["stock"]:
+            return format_stock(row[col], self.simplify_stock)
         return row[col]
 
     def SetValue(self, value, item, col):
@@ -425,8 +454,13 @@ class PartSelectorDataModel(dv.PyDataViewModel):
         row[col] = value
         return True
 
-    def Compare(self, item1, item2, column, ascending):
+    def Compare(self, item1: Any, item2: Any, column: int, ascending: bool) -> int:
         """Override to implement natural sorting."""
+        if column == self.columns["stock"]:
+            key1 = stock_sort_key(self.ItemToObject(item1)[column])
+            key2 = stock_sort_key(self.ItemToObject(item2)[column])
+            order = (key1 > key2) - (key1 < key2)
+            return order if ascending else -order
         val1 = self.GetValue(item1, column)
         val2 = self.GetValue(item2, column)
 

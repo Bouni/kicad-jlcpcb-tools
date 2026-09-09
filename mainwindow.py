@@ -706,7 +706,10 @@ class JLCPCBTools(wx.Dialog):
         self.enable_part_specific_toolbar_buttons(False)
 
         self.init_logger()
-        self.partlist_data_model = PartListDataModel(self.scale_factor)
+        self.partlist_data_model = PartListDataModel(
+            self.scale_factor,
+            simplify_stock=self.settings.get("general", {}).get("simplify_stock", True),
+        )
         self.footprint_list.AssociateModel(self.partlist_data_model)
         self._standard_only_tooltip_active = False
         self._footprint_list_main_window = (
@@ -1710,7 +1713,12 @@ class JLCPCBTools(wx.Dialog):
         self.settings[e.section][e.setting] = e.value
 
         if e.section == "general":
-            if e.setting == "bom_estimator_show":
+            if e.setting == "simplify_stock":
+                self.partlist_data_model.set_simplify_stock(bool(e.value))
+                selector = getattr(self, "_part_selector", None)
+                if selector is not None:
+                    selector.part_list_model.set_simplify_stock(bool(e.value))
+            elif e.setting == "bom_estimator_show":
                 self.bom_estimator_show = bool(e.value)
                 self.bom_widget.set_visible(self.bom_estimator_show)
                 if (
@@ -1743,11 +1751,16 @@ class JLCPCBTools(wx.Dialog):
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
 
+        general_settings = self.settings.setdefault("general", {})
         gerber_settings = self.settings.setdefault("gerber", {})
         highlighting_settings = self.settings.setdefault("highlighting", {})
         partselector_settings = self.settings.setdefault("partselector", {})
         part_preferences_settings = self.settings.setdefault("part_preferences", {})
         migrated = False
+
+        if "simplify_stock" not in general_settings:
+            general_settings["simplify_stock"] = True
+            migrated = True
 
         for setting in (
             "remember_lcsc_assignments",

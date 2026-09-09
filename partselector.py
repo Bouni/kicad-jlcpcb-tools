@@ -563,7 +563,11 @@ class PartSelectorDialog(wx.Dialog):
         layout.Add(result_sizer, 1, wx.LEFT, 5)
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
 
-        self.part_list_model = PartSelectorDataModel()
+        self.part_list_model = PartSelectorDataModel(
+            simplify_stock=self.parent.settings.get("general", {}).get(
+                "simplify_stock", True
+            )
+        )
         self.part_list.AssociateModel(self.part_list_model)
 
         self.SetSizer(layout)
