@@ -262,10 +262,10 @@ def _scan_assembly_state(
         tht = is_tht_part(part)
 
         if not exclude_from_pos:
-            if (
-                classify_component_product_type(part.get("component_product_type"))
-                == ComponentProductType.STANDARD_ONLY
-            ):
+            product_type = classify_component_product_type(
+                part.get("component_product_type")
+            )
+            if product_type == ComponentProductType.STANDARD_ONLY:
                 scan.standard_present = True
             scan.populated_part_present = True
             joints = max(0, _safe_int(part.get("pad_count"))) * board_count
