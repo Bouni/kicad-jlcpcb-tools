@@ -23,7 +23,62 @@ STANDARD_ONLY_TOOLTIP = (
 )
 
 
-class PartListDataModel(dv.PyDataViewModel):
+class _StockDataModel(dv.PyDataViewModel):
+    """Share stock presentation and exact sorting between both native views."""
+
+    def __init__(self, stock_column: int, simplify_stock: bool = True) -> None:
+        super().__init__()
+        self.data: list[list[Any]] = []
+        self.stock_column = stock_column
+        self.simplify_stock = bool(simplify_stock)
+
+    def set_simplify_stock(self, enabled: bool) -> None:
+        """Repaint stock cells when presentation changes, retaining raw values."""
+        if self.simplify_stock == bool(enabled):
+            return
+        self.simplify_stock = bool(enabled)
+        for row in self.data:
+            self.ValueChanged(self.ObjectToItem(row), self.stock_column)
+
+    def _stock_value(self, row: list[Any]) -> str:
+        """Format raw supply only for display."""
+        return format_stock(row[self.stock_column], self.simplify_stock)
+
+    def _nonstock_value(self, item: Any, col: int) -> Any:
+        """Return the ordinary value unless a model supplies computed cells."""
+        return self.ItemToObject(item)[col]
+
+    def GetValue(self, item: Any, col: int) -> Any:
+        """Render stock consistently while allowing model-specific other cells."""
+        if col == self.stock_column:
+            return self._stock_value(self.ItemToObject(item))
+        return self._nonstock_value(item, col)
+
+    @staticmethod
+    def natural_sort_key(value: str) -> list[Any]:
+        """Return case-insensitive text and numeric chunks for natural sorting."""
+        return [
+            int(text) if text.isdigit() else text.lower()
+            for text in re.split("([0-9]+)", value)
+        ]
+
+    def _comparison_value(self, item: Any, column: int) -> Any:
+        """Return visible text for ordinary-column sorting."""
+        return self.GetValue(item, column)
+
+    def Compare(self, item1: Any, item2: Any, column: int, ascending: bool) -> int:
+        """Sort exact stock independently of its label and other text naturally."""
+        if column == self.stock_column:
+            key1 = stock_sort_key(self.ItemToObject(item1)[column])
+            key2 = stock_sort_key(self.ItemToObject(item2)[column])
+        else:
+            key1 = self.natural_sort_key(self._comparison_value(item1, column))
+            key2 = self.natural_sort_key(self._comparison_value(item2, column))
+        order = (key1 > key2) - (key1 < key2)
+        return order if ascending else -order
+
+
+class PartListDataModel(_StockDataModel):
     """Datamodel for use with the DataViewCtrl of the mainwindow."""
 
     # The TRAILING_SPACER_COL is used to ensure that the last visible column
@@ -50,11 +105,9 @@ class PartListDataModel(dv.PyDataViewModel):
     }
 
     def __init__(self, scale_factor: float, simplify_stock: bool = True) -> None:
-        super().__init__()
-        self.data = []
+        super().__init__(self.columns["STOCK_COL"], simplify_stock)
         self.standard_only_refs = set()
         self.stock_concern_refs: set[str] = set()
-        self.simplify_stock = bool(simplify_stock)
 
         self.bom_pos_icons = [
             loadIconScaled(
@@ -131,14 +184,6 @@ class PartListDataModel(dv.PyDataViewModel):
             return True
         return False
 
-    @staticmethod
-    def natural_sort_key(s):
-        """Return a tuple that can be used for natural sorting."""
-        return [
-            int(text) if text.isdigit() else text.lower()
-            for text in re.split("([0-9]+)", s)
-        ]
-
     def GetColumnCount(self):
         """Get number of columns."""
         return len(self.columns)
@@ -187,19 +232,16 @@ class PartListDataModel(dv.PyDataViewModel):
         """Get parent item."""
         return dv.NullDataViewItem
 
-    def set_simplify_stock(self, enabled: bool) -> None:
-        """Update stock presentation and notify already associated views."""
-        if self.simplify_stock == bool(enabled):
-            return
-        self.simplify_stock = bool(enabled)
-        for row in self.data:
-            self.ValueChanged(self.ObjectToItem(row), self.columns["STOCK_COL"])
+    def _stock_value(self, row: list[Any]) -> str:
+        """Give assigned unknown availability a visible concern target."""
+        value = super()._stock_value(row)
+        if not value.strip():
+            return "?" if str(row[self.columns["LCSC_COL"]] or "").strip() else ""
+        return value
 
-    def GetValue(self, item: Any, col: int) -> Any:
-        """Get value of an item."""
+    def _nonstock_value(self, item: Any, col: int) -> Any:
+        """Keep main-table computed indicators and native icon values."""
         row = self.ItemToObject(item)
-        if col == self.columns["STOCK_COL"]:
-            return format_stock(row[col], self.simplify_stock)
         if col == self.columns["STANDARD_ONLY_COL"]:
             return self.HasValue(item, col)
         if col in [
@@ -245,27 +287,12 @@ class PartListDataModel(dv.PyDataViewModel):
         row[col] = value
         return True
 
-    def Compare(self, item1: Any, item2: Any, column: int, ascending: bool) -> int:
-        """Override to implement natural sorting."""
-        if column == self.columns["STOCK_COL"]:
-            key1 = stock_sort_key(self.ItemToObject(item1)[column])
-            key2 = stock_sort_key(self.ItemToObject(item2)[column])
-            order = (key1 > key2) - (key1 < key2)
-            return order if ascending else -order
-        val1 = self.GetValue(item1, column)
-        val2 = self.GetValue(item2, column)
-
+    def _comparison_value(self, item: Any, column: int) -> Any:
+        """Ignore hidden Params highlight metadata when comparing visible text."""
+        value = super()._comparison_value(item, column)
         if column == self.columns["PARAMS_COL"]:
-            val1 = self._decode_params_value(val1)
-            val2 = self._decode_params_value(val2)
-
-        key1 = self.natural_sort_key(val1)
-        key2 = self.natural_sort_key(val2)
-
-        if ascending:
-            return (key1 > key2) - (key1 < key2)
-        else:
-            return (key2 > key1) - (key2 < key1)
+            return self._decode_params_value(value)
+        return value
 
     def find_index(self, ref):
         """Get the index of a part within the data list by its reference."""
@@ -368,6 +395,26 @@ class PartListDataModel(dv.PyDataViewModel):
         self.standard_only_refs.discard(ref)
         self.ItemChanged(self.ObjectToItem(item))
 
+    def set_catalog_details(
+        self, lcsc: str, part_type: str, stock: object, params: str
+    ) -> None:
+        """Refresh catalog-owned fields without resetting board or estimator state."""
+        target = lcsc.strip().upper()
+        if not target:
+            return
+        for row in self.data:
+            if str(row[self.columns["LCSC_COL"]] or "").strip().upper() != target:
+                continue
+            row[self.columns["TYPE_COL"]] = part_type
+            row[self.columns["STOCK_COL"]] = stock
+            row[self.columns["PARAMS_COL"]] = self._encode_params_value(
+                reference=str(row[self.columns["REF_COL"]] or ""),
+                value=str(row[self.columns["VALUE_COL"]] or ""),
+                footprint=str(row[self.columns["FP_COL"]] or ""),
+                params=params,
+            )
+            self.ItemChanged(self.ObjectToItem(row))
+
     def set_bom_price(self, ref, price_label):
         """Set BOM price text for a given part reference."""
         if (index := self.find_index(ref)) is None:
@@ -420,24 +467,14 @@ class PartListDataModel(dv.PyDataViewModel):
         self.toggle_pos(item)
 
 
-class PartSelectorDataModel(dv.PyDataViewModel):
+class PartSelectorDataModel(_StockDataModel):
     """Datamodel for use with the DataViewCtrl of the partselector modal window."""
 
     def __init__(self, simplify_stock: bool = True) -> None:
-        super().__init__()
-        self.data = []
         self.columns = dict(COLUMN_INDEX)
-        self.simplify_stock = bool(simplify_stock)
+        super().__init__(self.columns["stock"], simplify_stock)
 
         self.logger = logging.getLogger(__name__)
-
-    @staticmethod
-    def natural_sort_key(s):
-        """Return a tuple that can be used for natural sorting."""
-        return [
-            int(text) if text.isdigit() else text.lower()
-            for text in re.split("([0-9]+)", s)
-        ]
 
     def GetColumnCount(self):
         """Get number of columns."""
@@ -463,44 +500,11 @@ class PartSelectorDataModel(dv.PyDataViewModel):
         """Get parent item."""
         return dv.NullDataViewItem
 
-    def set_simplify_stock(self, enabled: bool) -> None:
-        """Update stock presentation without changing assignment values."""
-        if self.simplify_stock == bool(enabled):
-            return
-        self.simplify_stock = bool(enabled)
-        for row in self.data:
-            self.ValueChanged(self.ObjectToItem(row), self.columns["stock"])
-
-    def GetValue(self, item: Any, col: int) -> Any:
-        """Get value of an item."""
-        row = self.ItemToObject(item)
-        if col == self.columns["stock"]:
-            return format_stock(row[col], self.simplify_stock)
-        return row[col]
-
     def SetValue(self, value, item, col):
         """Set value of an item."""
         row = self.ItemToObject(item)
         row[col] = value
         return True
-
-    def Compare(self, item1: Any, item2: Any, column: int, ascending: bool) -> int:
-        """Override to implement natural sorting."""
-        if column == self.columns["stock"]:
-            key1 = stock_sort_key(self.ItemToObject(item1)[column])
-            key2 = stock_sort_key(self.ItemToObject(item2)[column])
-            order = (key1 > key2) - (key1 < key2)
-            return order if ascending else -order
-        val1 = self.GetValue(item1, column)
-        val2 = self.GetValue(item2, column)
-
-        key1 = self.natural_sort_key(val1)
-        key2 = self.natural_sort_key(val2)
-
-        if ascending:
-            return (key1 > key2) - (key1 < key2)
-        else:
-            return (key2 > key1) - (key2 < key1)
 
     def find_index(self, ref):
         """Get the index of a part within the data list by its reference."""

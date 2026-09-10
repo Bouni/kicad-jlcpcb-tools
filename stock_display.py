@@ -34,8 +34,11 @@ def format_stock(value: object, simplified: bool = True) -> str:
 
 
 def stock_sort_key(value: object) -> tuple[int, int, str]:
-    """Sort exact numeric stock before unknown supplier text deterministically."""
+    """Sort blanks first, then exact numeric stock, then unknown supplier text."""
+    text = format_stock(value, simplified=False)
+    if not text.strip():
+        return (-1, 0, "")
     stock = parse_stock(value)
     if stock is not None:
         return (0, stock, "")
-    return (1, 0, format_stock(value, simplified=False).casefold())
+    return (1, 0, text.casefold())
