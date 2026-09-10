@@ -1,9 +1,26 @@
 """Helpers for reading and mutating KiCad footprint and board state."""
 
 import re
+from typing import Any, Optional
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
+
+
+def find_lcsc_assignment_text(fp: Any) -> Optional[tuple[str, str]]:
+    """Check raw assignment fields independently of identifier validation.
+
+    Any text occupies the field, including whitespace or an identifier the
+    legacy reader does not recognize. Inspect every alias before filling.
+    """
+    try:
+        fields = ((field.GetName(), field.GetText()) for field in fp.GetFields())
+    except AttributeError:
+        fields = iter(fp.GetProperties().items())
+    for name, text in fields:
+        if re.match(r"lcsc|jlc", name, re.IGNORECASE) and text != "":
+            return name, text
+    return None
 
 
 def get_lcsc_value(fp):
@@ -21,19 +38,22 @@ def get_lcsc_value(fp):
     return ""
 
 
-def set_lcsc_value(fp, lcsc: str):
-    """Set an lcsc number on the footprint, using LCSC as property name if needed."""
+def set_lcsc_value(fp: Any, lcsc: str) -> None:
+    """Keep existing assignment aliases consistent, or create a hidden LCSC field."""
     if not fp:
         return
-    lcsc_field = None
-    for field in fp.GetFields():
-        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and re.match(
-            r"^C\d+$", field.GetText()
-        ):
-            lcsc_field = field
-
-    if lcsc_field:
-        fp.SetField(lcsc_field.GetName(), lcsc)
+    names = [
+        field.GetName()
+        for field in fp.GetFields()
+        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE)
+        and (
+            field.GetName().lower() == "lcsc"
+            or re.fullmatch(r"C[0-9]+", field.GetText().strip(), re.IGNORECASE)
+        )
+    ]
+    if names:
+        for name in names:
+            fp.SetField(name, lcsc)
     else:
         fp.SetField("LCSC", lcsc)
         if hasattr(fp, "GetFieldByName"):

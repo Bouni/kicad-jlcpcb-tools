@@ -6,7 +6,8 @@ import logging
 import math
 import os
 from pathlib import Path
-import re
+from types import SimpleNamespace
+from typing import Any, Optional
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from pcbnew import (  # pylint: disable=import-error
@@ -15,7 +16,6 @@ from pcbnew import (  # pylint: disable=import-error
     PCB_VIA,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
-    VECTOR2I,
     ZONE_FILLER,
     B_Cu,
     B_Mask,
@@ -33,6 +33,7 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
+from .correction_data import Correction, CorrectionMatch, match_correction
 from .footprint_helpers import get_is_dnp
 
 # Compatibility hack for V6 / V7 / V7.99
@@ -47,6 +48,13 @@ except ImportError:
 # 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
 # Quantity) so the Designator chunk alone is capped at 1920 characters.
 _BOM_DESIGNATOR_MAX_LEN = 1920  # 2048 - 128 padding for remaining CSV fields
+
+
+def _checked_position(x: float, y: float) -> Any:
+    """Reject overflow before wxPoint converts doubles to signed 32-bit integers."""
+    if any(not -(2**31) <= int(value) <= 2**31 - 1 for value in (x, y)):
+        raise ValueError("position exceeds KiCad's signed 32-bit coordinate range")
+    return wxPoint(x, y)
 
 
 def split_bom_designators(
@@ -91,11 +99,11 @@ def split_bom_designators(
 class Fabrication:
     """Contains all functionality to generate the JLCPCB production files."""
 
-    def __init__(self, parent, board):
+    def __init__(self, parent: Any, board: Any) -> None:
         self.parent = parent
         self.logger = logging.getLogger(__name__)
         self.board = board
-        self.corrections = []
+        self.corrections: tuple[Correction, ...] = ()
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
 
@@ -150,23 +158,27 @@ class Fabrication:
                 empty_pours.append(f"{zone.GetNetname() or 'no net'} on {name}")
         return empty_pours
 
-    def _find_correction(self, value):
-        """Return (rotation, offset) for the first correction matching value.
+    def _correction_for_footprint(self, footprint: Any) -> Optional[CorrectionMatch]:  # noqa: UP045
+        """Select the same reference, value, or package rule as the parts table."""
+        return match_correction(
+            self.corrections,
+            str(footprint.GetReference()),
+            str(footprint.GetValue()),
+            str(footprint.GetFPID().GetLibItemName()),
+        )
 
-        Tries anchored match (pattern + '$') before falling back to unanchored,
-        so 'SOT-23-3' beats 'SOT-23' when both patterns exist.
-        """
-        anchored = [(f"(?:{r})$", rot, off) for r, rot, off in self.corrections]
-        for regex, rotation, offset in anchored:
-            if re.search(regex, value):
-                return rotation, offset
-        for regex, rotation, offset in self.corrections:
-            if re.search(regex, value):
-                return rotation, offset
-        return None
-
-    def fix_rotation(self, footprint):
+    def fix_rotation(self, footprint: Any) -> float:
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
+        return self._rotation_for_match(
+            footprint, self._correction_for_footprint(footprint)
+        )
+
+    def _rotation_for_match(
+        self,
+        footprint: Any,
+        match: Optional[CorrectionMatch],  # noqa: UP045
+    ) -> float:
+        """Apply the already selected rule, including an explicit no-match result."""
         original = footprint.GetOrientation()
         # `.AsDegrees()` added in KiCAD 6.99
         try:
@@ -178,19 +190,14 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
-        for getter in (
-            lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
-            lambda: str(footprint.GetFPID().GetLibItemName()),
-        ):
-            match = self._find_correction(getter())
-            if match:
-                return self.rotate(footprint, rotation, match[0])
+        if match is not None:
+            return self.rotate(footprint, rotation, match.correction.rotation)
         return rotation
 
-    def rotate(self, footprint, rotation, correction):
+    def rotate(self, footprint: Any, rotation: float, correction: int) -> float:
         """Calculate the actual correction."""
-        rotation = (rotation + int(correction)) % 360
+        # Keep exact whole degrees before adding KiCad's floating point angle.
+        rotation = (rotation + correction % 360) % 360
         self.logger.info(
             "Fixed rotation of %s (%s / %s) on %s Layer by %d degrees",
             footprint.GetReference(),
@@ -201,26 +208,16 @@ class Fabrication:
         )
         return rotation
 
-    def reposition(self, footprint, position, offset):
+    def reposition(
+        self, footprint: Any, position: Any, offset: tuple[float, float]
+    ) -> Any:
         """Adjust the position of the footprint, returning the new position as a wxPoint."""
         if offset[0] != 0 or offset[1] != 0:
-            original = footprint.GetOrientation()
-            # `.AsRadians()` added in KiCAD 6.99
-            try:
-                rotation = original.AsDegrees()
-            except AttributeError:
-                # we need to divide by 10 to get 180 out of 1800 for example.
-                # This might be a bug in 5.99 / 6.0 RC
-                rotation = original / 10
-            if footprint.GetLayer() != 0:
-                # bottom angles need to be mirrored on Y-axis
-                rotation = (180 - rotation) % 360
-            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(
-                offset[1]
-            ) * math.sin(math.radians(rotation))
-            offset_y = -FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(
-                offset[1]
-            ) * math.cos(math.radians(rotation))
+            rotation = math.radians(self._rotation_for_match(footprint, None))
+            x, y = map(FromMM, offset)
+            cosine, sine = math.cos(rotation), math.sin(rotation)
+            offset_x = x * cosine + y * sine
+            offset_y = -x * sine + y * cosine
             if footprint.GetLayer() != 0:
                 # mirrored coordinate system needs to be taken into account on the bottom
                 offset_x = -offset_x
@@ -233,19 +230,24 @@ class Fabrication:
                 offset[0],
                 offset[1],
             )
-            return wxPoint(position.x + offset_x, position.y + offset_y)
+            return _checked_position(position.x + offset_x, position.y + offset_y)
         return position
 
-    def fix_position(self, footprint, position):
-        """Fix the position of footprints in order to be correct for JLCPCB."""
-        for getter in (
-            lambda: str(footprint.GetReference()),
-            lambda: str(footprint.GetValue()),
-            lambda: str(footprint.GetFPID().GetLibItemName()),
-        ):
-            match = self._find_correction(getter())
-            if match:
-                return self.reposition(footprint, position, match[1])
+    def fix_position(self, footprint: Any, position: Any) -> Any:
+        """Apply the offset from the same selected rule used for rotation."""
+        return self._position_for_match(
+            footprint, position, self._correction_for_footprint(footprint)
+        )
+
+    def _position_for_match(
+        self,
+        footprint: Any,
+        position: Any,
+        match: Optional[CorrectionMatch],  # noqa: UP045
+    ) -> Any:
+        """Apply the selected offset without resolving the footprint again."""
+        if match is not None:
+            return self.reposition(footprint, position, match.correction.offset)
         return position
 
     def get_position(self, footprint):
@@ -421,52 +423,99 @@ class Fabrication:
                     zipfile.write(filePath, os.path.basename(filePath))
         self.logger.info("Finished generating ZIP file %s", zip_path)
 
-    def generate_cpl(self):
-        """Generate placement file (CPL)."""
-        cpl_path = self.get_cpl_csv_path()
-        self.corrections = self.parent.library.get_all_correction_data()
-        aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
+    def generate_cpl(
+        self,
+        corrections: Optional[tuple[Correction, ...]] = None,  # noqa: UP045
+    ) -> None:
+        """Prepare every placement before opening the output file."""
+        self.write_cpl(self.prepare_cpl(corrections))
+
+    def prepare_cpl(
+        self,
+        corrections: Optional[tuple[Correction, ...]] = None,  # noqa: UP045
+    ) -> tuple[tuple[Any, ...], ...]:
+        """Capture placement rows from one complete immutable correction set.
+
+        Direct calls read current storage; a supplied preflight tuple stays fixed
+        for the operation. Unavailable or unresolved storage is rejected before
+        touching the board or opening an existing output file.
+        """
+        if corrections is None:
+            snapshot = self.parent.library.read_correction_data()
+            corrections = snapshot.corrections
+            if corrections is None:
+                raise ValueError(
+                    f"Corrections are unresolved in the active {snapshot.scope} "
+                    f"database ({snapshot.db_path}). Open Corrections Manager "
+                    "to repair or retry loading before generating fabrication files."
+                )
+        if not isinstance(corrections, tuple) or any(
+            not isinstance(correction, Correction) for correction in corrections
+        ):
+            raise TypeError("Expected an immutable tuple of Correction values")
+        self.corrections = corrections
+        aux_origin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
+        rows = []
+        footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
+        for fp in footprints:
+            if get_is_dnp(fp):
+                self.logger.info(
+                    "Component %s has 'Do not place' enabled: removing from CPL",
+                    fp.GetReference(),
+                )
+                continue
+            part = self.parent.store.get_part(fp.GetReference())
+            if not part or part["exclude_from_pos"] == 1:
+                continue
+            if not add_without_lcsc and not part["lcsc"]:
+                continue
+            match = self._correction_for_footprint(fp)
+            try:
+                center = self.get_position(fp)
+                # Subtract in Python, before native coordinate arithmetic can wrap.
+                position = SimpleNamespace(
+                    x=center.x - aux_origin.x, y=center.y - aux_origin.y
+                )
+                position = self._position_for_match(fp, position, match)
+                position = _checked_position(position.x, position.y)
+                rows.append(
+                    (
+                        part["reference"],
+                        part["value"],
+                        part["footprint"],
+                        # Fixed-point millimetres follow JLCPCB's exporter:
+                        # https://github.com/JLCPCB/jlcpcb-eagle/blob/master/ulps/jlcpcb_smta_exporter.ulp
+                        # Six decimals preserve KiCad's 1 nm internal resolution:
+                        # https://docs.kicad.org/doxygen/base__units_8h.html
+                        f"{ToMM(position.x):.6f}",
+                        f"{ToMM(position.y) * -1:.6f}",
+                        self._rotation_for_match(fp, match),
+                        "top" if fp.GetLayer() == 0 else "bottom",
+                    )
+                )
+            except (OverflowError, ValueError) as error:
+                source = (
+                    f"correction {match.correction.pattern!r}"
+                    if match
+                    else "no correction"
+                )
+                raise ValueError(
+                    f"Cannot generate CPL for {fp.GetReference()} ({source}): {error}"
+                ) from error
+        return tuple(rows)
+
+    def write_cpl(self, rows: tuple[tuple[Any, ...], ...]) -> None:
+        """Write prepared placements without rereading the board or corrections."""
+        cpl_path = self.get_cpl_csv_path()
         with open(cpl_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
                 ["Designator", "Val", "Package", "Mid X", "Mid Y", "Rotation", "Layer"]
             )
-            footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
-            for fp in footprints:
-                if get_is_dnp(fp):
-                    self.logger.info(
-                        "Component %s has 'Do not place' enabled: removing from CPL",
-                        fp.GetReference(),
-                    )
-                    continue
-                part = self.parent.store.get_part(fp.GetReference())
-                if not part:  # No matching part in the database, continue
-                    continue
-                if part["exclude_from_pos"] == 1:
-                    continue
-                if not add_without_lcsc and not part["lcsc"]:
-                    continue
-                try:  # Kicad <= 8.0
-                    position = self.get_position(fp) - aux_orgin
-                except TypeError:  # Kicad 8.99
-                    x1, y1 = self.get_position(fp)
-                    x2, y2 = aux_orgin
-                    position = VECTOR2I(x1 - x2, y1 - y2)
-                position = self.fix_position(fp, position)
-                writer.writerow(
-                    [
-                        part["reference"],
-                        part["value"],
-                        part["footprint"],
-                        ToMM(position.x),
-                        ToMM(position.y) * -1,
-                        self.fix_rotation(fp),
-                        "top" if fp.GetLayer() == 0 else "bottom",
-                    ]
-                )
+            writer.writerows(rows)
         self.logger.info("Finished generating CPL file %s", cpl_path)
 
     def generate_bom(self):

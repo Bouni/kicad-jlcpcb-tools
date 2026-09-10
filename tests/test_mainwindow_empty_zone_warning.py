@@ -1,6 +1,7 @@
 """Tests for empty-zone warnings during fabrication-data generation."""
 
 from types import SimpleNamespace
+from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,7 +29,10 @@ def mainwindow_module():
     return module, module.wx
 
 
-def _make_window(empty_pours, fill_zones=None):
+def _make_window(
+    empty_pours: list[str],
+    fill_zones: Optional[bool] = None,  # noqa: UP045
+) -> tuple[SimpleNamespace, list[str]]:
     """Build the smallest object needed by generate_fabrication_data()."""
     fabrication = SimpleNamespace(
         get_part_consistency_warnings=MagicMock(return_value=""),
@@ -36,7 +40,8 @@ def _make_window(empty_pours, fill_zones=None):
         generate_geber=MagicMock(),
         generate_excellon=MagicMock(),
         zip_gerber_excellon=MagicMock(),
-        generate_cpl=MagicMock(),
+        prepare_cpl=MagicMock(return_value=()),
+        write_cpl=MagicMock(),
         generate_bom=MagicMock(),
     )
     settings = {"general": {}, "gerber": {}}
@@ -44,6 +49,7 @@ def _make_window(empty_pours, fill_zones=None):
         settings["gerber"]["fill_zones"] = fill_zones
 
     window = SimpleNamespace(
+        _project_storage_unavailable=False,
         generate_button=MagicMock(),
         reset_gauge=MagicMock(),
         settings=settings,
@@ -56,6 +62,12 @@ def _make_window(empty_pours, fill_zones=None):
         build_generate_hook_env=MagicMock(return_value={}),
         run_generate_hook=MagicMock(return_value=True),
         report_generation_step=MagicMock(),
+        library=SimpleNamespace(
+            read_correction_data=MagicMock(return_value=SimpleNamespace(corrections=()))
+        ),
+    )
+    window.read_valid_corrections_for_generation = (
+        lambda: window.library.read_correction_data().corrections
     )
     window.layer_selection.GetSelection.return_value = 0
     window.layer_selection.GetString.return_value = "Auto"

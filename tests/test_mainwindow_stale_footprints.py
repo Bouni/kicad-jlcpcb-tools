@@ -7,8 +7,10 @@ capturing fakes, so the tests exercise production control flow without
 requiring a GUI event loop.
 """
 
+from collections.abc import Iterable
 from itertools import count
 import types
+from typing import Any, Optional
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -36,6 +38,12 @@ class _LiveFootprint:
     def GetLayer(self):
         return self.layer
 
+    def GetFPID(self) -> types.SimpleNamespace:
+        return types.SimpleNamespace(GetLibItemName=lambda: "R_0603")
+
+    def GetValue(self) -> str:
+        return "10k"
+
 
 class _Board:
     def __init__(self, footprints):
@@ -53,14 +61,32 @@ class _Pcbnew:
         return self.board
 
 
-def _window(*, footprints, selections=()):
+def _window(*, footprints: dict[str, object], selections: tuple[int, ...] = ()) -> Any:
     """Build the shared state surface used by main-window action handlers."""
     window = object.__new__(JLCPCBTools)
     window.pcbnew = _Pcbnew(_Board(footprints))
     window.store = MagicMock()
+    window.test_assignment_batches = []
+    window.test_assignments = {}
+
+    def set_lcsc_assignments(
+        assignments: Iterable[tuple[str, str, Optional[int]]],  # noqa: UP045
+    ) -> None:
+        batch = list(assignments)
+        window.test_assignment_batches.append(batch)
+        window.test_assignments.update(
+            {reference: (lcsc, stock) for reference, lcsc, stock in batch}
+        )
+
+    window.store.set_lcsc_assignments.side_effect = set_lcsc_assignments
+    window.settings = {}
     window.library = MagicMock()
     window.library.get_part_details.return_value = {}
-    window.library.get_all_correction_data.return_value = []
+    window.library.read_correction_data.return_value = types.SimpleNamespace(
+        corrections=(), state=mainwindow.CorrectionState.READY
+    )
+    window.correction_status = MagicMock()
+    window.Layout = MagicMock()
     window.partlist_data_model = MagicMock()
     window.footprint_list = MagicMock()
     window.footprint_list.GetSelections.return_value = list(selections)
@@ -104,7 +130,7 @@ def test_populate_footprint_list_skips_stale_row_and_retains_live_row(monkeypatc
     assert added_references == ["R2"]
 
 
-def test_assign_parts_skips_stale_refs_and_continues_live_refs():
+def test_assign_parts_skips_stale_refs_and_continues_live_refs() -> None:
     """Assignment must mutate and enrich only references still on the board."""
     live_footprint = _LiveFootprint()
     window = _window(footprints={"R2": live_footprint})
@@ -118,21 +144,25 @@ def test_assign_parts_skips_stale_refs_and_continues_live_refs():
     JLCPCBTools.assign_parts(window, event)
 
     observed = {
+        "store_assignments": window.test_assignment_batches,
         "store_lcsc": window.store.set_lcsc.call_args_list,
         "store_stock": window.store.set_stock.call_args_list,
         "model_lcsc": window.partlist_data_model.set_lcsc.call_args_list,
         "enrichment": window.start_assembly_enrichment.call_args_list,
     }
     expected = {
-        "store_lcsc": [call("R2", "C12345")],
-        "store_stock": [call("R2", 27)],
+        "store_assignments": [[("R2", "C12345", 27)]],
+        "store_lcsc": [],
+        "store_stock": [],
         "model_lcsc": [call("R2", "C12345", "Basic", "27", "params")],
         "enrichment": [call(["R2"])],
     }
     assert observed == expected
+    window.store.set_lcsc_assignments.assert_called_once()
+    assert window.test_assignments == {"R2": ("C12345", 27)}
 
 
-def test_assign_parts_with_only_stale_refs_does_not_start_enrichment():
+def test_assign_parts_with_only_stale_refs_does_not_start_enrichment() -> None:
     """An all-stale selector result must be a no-op, including enrichment."""
     window = _window(footprints={})
     event = types.SimpleNamespace(
@@ -145,17 +175,21 @@ def test_assign_parts_with_only_stale_refs_does_not_start_enrichment():
     JLCPCBTools.assign_parts(window, event)
 
     observed = {
+        "store_assignments": window.test_assignment_batches,
         "store_lcsc": window.store.set_lcsc.call_args_list,
         "store_stock": window.store.set_stock.call_args_list,
         "model_lcsc": window.partlist_data_model.set_lcsc.call_args_list,
         "enrichment": window.start_assembly_enrichment.call_args_list,
     }
     assert observed == {
+        "store_assignments": [],
         "store_lcsc": [],
         "store_stock": [],
         "model_lcsc": [],
         "enrichment": [],
     }
+    window.store.set_lcsc_assignments.assert_not_called()
+    assert window.test_assignments == {}
 
 
 @pytest.mark.parametrize("handler_name", ["toggle_bom", "toggle_pos", "toggle_bom_pos"])

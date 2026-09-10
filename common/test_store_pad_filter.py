@@ -260,6 +260,7 @@ def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
                 ("R5", "22k", "C5", "SMT", 3),
                 ("R6", "4k7", "C6", "SMT", "bad"),
                 ("R7", "1k", "C7", "SMT", 2),
+                ("R8", "2k2", "C8", "SMT", 1),
             ],
         )
         cur.commit()

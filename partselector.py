@@ -1,7 +1,10 @@
 """Contains the part selector modal window."""
 
+from __future__ import annotations
+
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
@@ -12,7 +15,16 @@ from .derive_params import params_for_part  # pylint: disable=import-error
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 from .partdetails import PartDetailsDialog
-from .partselector_columns import DB_FIELDS, PARAMS_COLUMN_KEY, PARTSELECTOR_COLUMNS
+from .partselector_columns import (
+    DB_FIELDS,
+    PARAMS_COLUMN_KEY,
+    PARTSELECTOR_COLUMN_KEYS,
+    PARTSELECTOR_COLUMNS,
+)
+from .window_layout import get_column_widths, restore_column_widths, to_dip
+
+if TYPE_CHECKING:
+    from .mainwindow import JLCPCBTools
 
 HIGHLIGHTED_COLUMN_KEYS = {
     "lcsc",
@@ -32,7 +44,7 @@ def _format_duration(seconds: float) -> str:
 class PartSelectorDialog(wx.Dialog):
     """The part selector window."""
 
-    def __init__(self, parent, parts):
+    def __init__(self, parent: JLCPCBTools, parts: dict[str, str]) -> None:
         wx.Dialog.__init__(
             self,
             parent,
@@ -555,12 +567,86 @@ class PartSelectorDialog(wx.Dialog):
         self.part_list.AssociateModel(self.part_list_model)
 
         self.SetSizer(layout)
+        settings = self.parent.settings.get("partselector", {})
+        self._normal_size = self._restore_size(settings.get("size"))
         self.Layout()
         self.Centre(wx.BOTH)
+        restore_column_widths(
+            self.part_list, settings.get("column_widths", {}), PARTSELECTOR_COLUMN_KEYS
+        )
         self.enable_toolbar_buttons(False)
+        self._changing_window_state = False
+        self._layout_ready = True
+        self.Bind(wx.EVT_SIZE, self._on_size)
+        self.Bind(wx.EVT_MAXIMIZE, self._on_maximize)
 
         # initiate the initial search now that the window has been constructed
         self.search(None)
+
+    def _restore_size(self, size: object) -> list[int]:
+        """Restore bounded normal geometry without passing untrusted sizes to wx."""
+        default = [1400, 800]
+        available = HighResWxSize(self, wx.Size(*default))
+        display = wx.Display.GetFromWindow(self.parent)
+        if display == wx.NOT_FOUND and wx.Display.GetCount():
+            display = 0
+        if display != wx.NOT_FOUND:
+            work_area = wx.Display(display).GetClientArea().GetSize()
+            if all(value > 0 for value in work_area):
+                available = work_area
+            else:
+                size = default
+        else:
+            size = default
+        if not (
+            isinstance(size, list)
+            and len(size) == 2
+            and all(type(value) is int and value > 0 for value in size)
+        ):
+            size = default
+        maximum = [max(1, value) for value in to_dip(self, available)]
+        minimum = [min(value, limit) for value, limit in zip((1100, 600), maximum)]
+        size = [
+            min(max(value, floor), limit)
+            for value, floor, limit in zip(size, minimum, maximum)
+        ]
+        pixel_sizes = []
+        for logical_size in (minimum, size):
+            pixels = HighResWxSize(self, wx.Size(*logical_size))
+            # Fractional DPI conversion can round past the available work area.
+            pixel_sizes.append(
+                wx.Size(min(pixels[0], available[0]), min(pixels[1], available[1]))
+            )
+        self.SetSizeHints(pixel_sizes[0], wx.DefaultSize)
+        self.SetSize(pixel_sizes[1])
+        return size
+
+    def _remember_normal_size(self) -> None:
+        """Cache geometry only while the window is in its normal state."""
+        if not self.IsMaximized() and not self.IsIconized() and not self.IsFullScreen():
+            self._normal_size = list(to_dip(self, self.GetSize()))
+
+    def _on_size(self, event: wx.SizeEvent) -> None:
+        """Remember normal resizes without recording zoom animation frames."""
+        if event.GetEventObject() is self and not self._changing_window_state:
+            self._remember_normal_size()
+        event.Skip()
+
+    def _on_maximize(self, event: wx.MaximizeEvent) -> None:
+        """Preserve normal size throughout native maximize and restore animations."""
+        if event.GetEventObject() is self:
+            self._remember_normal_size()
+            # Cocoa sends this before zooming, while IsMaximized is still false.
+            self._changing_window_state = True
+            wx.CallAfter(self._finish_window_state_change)
+        event.Skip()
+
+    def _finish_window_state_change(self) -> None:
+        """Resume size tracking after native zooming returns to the event loop."""
+        if not self:
+            return
+        self._changing_window_state = False
+        self._remember_normal_size()
 
     def update_settings(self, event):
         """Update the settings on change."""
@@ -588,13 +674,23 @@ class PartSelectorDialog(wx.Dialog):
         """Close this window (via EVT_CLOSE → _on_close → Destroy)."""
         self.Close()
 
-    def _on_close(self, _event):
+    def _on_close(self, _event: wx.CloseEvent) -> None:
         """Destroy on close and clear the parent's singleton ref."""
-        # Tell the main window we're going away so it doesn't try to update
-        # a destroyed dialog the next time "Select Part" is clicked.
-        if getattr(self.parent, "_part_selector", None) is self:
-            self.parent._part_selector = None
-        self.Destroy()
+        try:
+            if getattr(self, "_layout_ready", False):
+                settings = self.parent.settings.setdefault("partselector", {})
+                settings["column_widths"] = get_column_widths(
+                    self.part_list, PARTSELECTOR_COLUMN_KEYS
+                )
+                settings["size"] = self._normal_size
+                self.parent.save_settings()
+        except OSError:
+            self.logger.exception("Unable to save window layout")
+        finally:
+            # Do not leave the parent pointing at a destroyed selector.
+            if getattr(self.parent, "_part_selector", None) is self:
+                self.parent._part_selector = None
+            self.Destroy()
 
     def update_for(self, parts):
         """Re-target this open selector at a new set of footprints.

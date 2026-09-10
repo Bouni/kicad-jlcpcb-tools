@@ -1,13 +1,15 @@
 """Contains the data storge for a project."""
 
+from collections.abc import Iterable
 import contextlib
 import csv
 import logging
 import os
 from pathlib import Path
 import sqlite3
-from typing import Union
+from typing import Optional, Union
 
+from .bom_estimation.assembly_mode import ComponentProductType
 from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
@@ -264,6 +266,21 @@ class Store:
             )
             cur.commit()
 
+    def set_lcsc_assignments(
+        self, assignments: Iterable[tuple[str, str, Optional[int]]]
+    ) -> None:
+        """Commit assignment, stock, and enrichment invalidation for a whole action."""
+        batch = list(assignments)
+        if not batch:
+            return
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
+            con.executemany(
+                "UPDATE part_info SET "
+                "lcsc = ?, stock = ?, assembly_process = '', "
+                "component_product_type = NULL WHERE reference = ?",
+                ((lcsc, stock, reference) for reference, lcsc, stock in batch),
+            )
+
     def set_assembly_metadata(
         self,
         ref: str,
@@ -292,13 +309,14 @@ class Store:
 
     def get_assembly_enrichment_targets(self, references=None) -> dict:
         """Get references grouped by LCSC that still need assembly process enrichment."""
+        product_types = ",".join(str(member.value) for member in ComponentProductType)
         query = (
             "SELECT reference, lcsc FROM part_info "
             "WHERE lcsc IS NOT NULL AND lcsc != '' "
             "AND ("
             "assembly_process IS NULL OR assembly_process = '' "
             "OR component_product_type IS NULL "
-            "OR component_product_type NOT IN (0, 1, 2)"
+            f"OR component_product_type NOT IN ({product_types})"
             ")"
         )
         params = []
@@ -442,10 +460,14 @@ class Store:
 
     def clean_database(self):
         """Delete all parts from the database that are no longer present on the board."""
-        refs = [f"'{fp.GetReference()}'" for fp in get_valid_footprints(self.board)]
+        refs = [fp.GetReference() for fp in get_valid_footprints(self.board)]
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            # The f-string only injects ?-placeholders; the reference text
+            # itself is bound, so quotes in a designator stay literal.
+            placeholders = ",".join("?" for _ in refs)
             cur.execute(
-                f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
+                f"DELETE FROM part_info WHERE reference NOT IN ({placeholders})",
+                refs,
             )
             cur.commit()
 

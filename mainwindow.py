@@ -1,16 +1,22 @@
 """Contains the main window of the plugin."""
 
+from __future__ import annotations
+
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 # ruff: noqa: I001
 
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, suppress
 from datetime import datetime as dt
 from threading import Thread
+from typing import TYPE_CHECKING, Any, Optional
 import json
 import logging
 import os
 import re
+import sqlite3
 import sys
+import tempfile
 import time
 
 import pcbnew as kicad_pcbnew
@@ -21,6 +27,7 @@ from wx import adv  # pylint: disable=import-error
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
+from .correction_data import Correction, match_correction
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel, STANDARD_ONLY_TOOLTIP
 from .dataview_highlight import (
@@ -54,7 +61,10 @@ from .events import (
 )
 from .fabrication import Fabrication
 from .footprint_helpers import (
+    get_exclude_from_bom,
+    get_exclude_from_pos,
     get_is_dnp,
+    find_lcsc_assignment_text,
     set_lcsc_value,
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
@@ -68,14 +78,24 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
-from .library import Library, LibraryState
+from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
-from .partmapper import PartMapperManagerDialog
+from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
 from .why_standard_dialog import WhyStandardDialog
+from .window_layout import get_column_widths, restore_column_widths
+
+FOOTPRINT_COLUMN_KEYS = {
+    index: key
+    for key, index in PartListDataModel.columns.items()
+    if key not in {"TRAILING_SPACER_COL", "STANDARD_ONLY_COL"}
+}
+
+if TYPE_CHECKING:
+    from .library import CorrectionSnapshot
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -83,7 +103,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 ID_GENERATE = 0
 ID_LAYERS = 1
 ID_CORRECTIONS = 2
-ID_MAPPINGS = 3
+ID_PART_PREFERENCES = 3
 ID_DOWNLOAD = 4
 ID_SETTINGS = 5
 ID_SELECT_PART = 6
@@ -95,15 +115,14 @@ ID_TOGGLE_POS = 11
 ID_PART_DETAILS = 12
 ID_HIDE_BOM = 13
 ID_HIDE_POS = 14
-ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
-ID_CONTEXT_MENU_FIND_MAPPING = wx.NewIdRef()
-ID_CONTEXT_MENU_ADD_MAPPING = wx.NewIdRef()
+ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
+ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
 
 
 class KicadProvider:
@@ -117,7 +136,13 @@ class KicadProvider:
 class JLCPCBTools(wx.Dialog):
     """JLCPCBTools main dialog."""
 
-    def __init__(self, parent, kicad_provider=KicadProvider()):
+    def __init__(
+        self,
+        parent: Optional[wx.Window],
+        kicad_provider: KicadProvider = KicadProvider(),
+    ) -> None:
+        self.library: Optional[Library] = None
+        self.store: Optional[Store] = None
         while not wx.GetApp():
             time.sleep(1)
         wx.Dialog.__init__(
@@ -144,8 +169,7 @@ class JLCPCBTools(wx.Dialog):
         self.load_settings()
         # Normalize and write-back BOM-estimator settings into the in-memory
         # dict so subsequent reads see canonical values. The on-disk JSON is
-        # not rewritten here — the next save_settings() call (e.g. when the
-        # user changes a setting via the UI) persists these defaults.
+        # not rewritten here; the next settings change or window close saves it.
         general_settings = self.settings.setdefault("general", {})
         raw_board_count = general_settings.get("bom_estimator_boards", 5)
         try:
@@ -167,6 +191,8 @@ class JLCPCBTools(wx.Dialog):
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
         self.select_alike_in_progress = False
+        self._part_preferences_applied_on_open = False
+        self._project_storage_unavailable = False
         # Singleton reference for the modeless PartSelectorDialog. Re-invoking
         # "Select Part" while one is open re-targets it instead of opening a
         # second window.
@@ -260,11 +286,11 @@ class JLCPCBTools(wx.Dialog):
             "Manage part corrections",
         )
 
-        self.mapping_button = self.upper_toolbar.AddTool(
-            ID_MAPPINGS,
-            "Mappings",
+        self.part_preferences_button = self.upper_toolbar.AddTool(
+            ID_PART_PREFERENCES,
+            "Part preferences",
             loadBitmapScaled("mdi-selection.png", self.scale_factor),
-            "Manage part mappings",
+            "Manage preferred LCSC parts for matching values and footprints across projects",
         )
 
         self.upper_toolbar.AddSeparator()
@@ -287,7 +313,9 @@ class JLCPCBTools(wx.Dialog):
 
         self.Bind(wx.EVT_TOOL, self.generate_fabrication_data, self.generate_button)
         self.Bind(wx.EVT_TOOL, self.manage_corrections, self.correction_button)
-        self.Bind(wx.EVT_TOOL, self.manage_mappings, self.mapping_button)
+        self.Bind(
+            wx.EVT_TOOL, self.manage_part_preferences, self.part_preferences_button
+        )
         self.Bind(wx.EVT_TOOL, self.update_library, self.download_button)
         self.Bind(wx.EVT_TOOL, self.manage_settings, self.settings_button)
 
@@ -295,11 +323,12 @@ class JLCPCBTools(wx.Dialog):
         # ------------------ Right side toolbar List --------------------------
         # ---------------------------------------------------------------------
 
+        # An explicit width overrides GTK's content-based minimum size.
         self.right_toolbar = wx.ToolBar(
             self,
             wx.ID_ANY,
             wx.DefaultPosition,
-            wx.Size(int(self.scale_factor * 128), -1),
+            wx.DefaultSize,
             wx.TB_VERTICAL | wx.TB_TEXT | wx.TB_NODIVIDER,
         )
 
@@ -396,16 +425,6 @@ class JLCPCBTools(wx.Dialog):
             "Hide excluded POS parts",
         )
 
-        self.save_all_button = self.right_toolbar.AddTool(
-            ID_SAVE_MAPPINGS,
-            "Save mappings",
-            loadBitmapScaled(
-                "mdi-content-save-settings.png",
-                self.scale_factor,
-            ),
-            "Save all mappings",
-        )
-
         self.export_schematic_button = self.right_toolbar.AddTool(
             ID_EXPORT_TO_SCHEMATIC,
             "Export to schematic",
@@ -413,7 +432,7 @@ class JLCPCBTools(wx.Dialog):
                 "mdi-application-export.png",
                 self.scale_factor,
             ),
-            "Export mappings to schematic",
+            "Export LCSC assignments to schematic",
         )
 
         self.Bind(wx.EVT_TOOL, self.select_part, self.select_part_button)
@@ -425,7 +444,6 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(wx.EVT_TOOL, self.get_part_details, self.part_details_button)
         self.Bind(wx.EVT_TOOL, self.OnBomHide, self.hide_bom_button)
         self.Bind(wx.EVT_TOOL, self.OnPosHide, self.hide_pos_button)
-        self.Bind(wx.EVT_TOOL, self.save_all_mappings, self.save_all_button)
         self.Bind(wx.EVT_TOOL, self.export_to_schematic, self.export_schematic_button)
 
         self.right_toolbar.ToggleTool(ID_SELECT_ALIKE, self.auto_select_alike)
@@ -611,6 +629,13 @@ class JLCPCBTools(wx.Dialog):
         self.bom_estimator_help_button = self.bom_widget.help_button
         self.bom_estimator_summary = self.bom_widget.summary_label
 
+        # This status must exist before init_data() first populates the list.
+        # Invalid stored corrections remain repairable through the manager.
+        self.correction_status = wx.StaticText(self, label="")
+        self.project_storage_status = wx.StaticText(self, label="")
+        self.project_storage_status.Hide()
+        self.correction_status.Hide()
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -619,6 +644,18 @@ class JLCPCBTools(wx.Dialog):
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(self.upper_toolbar, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(estimator_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 5)
+        layout.Add(
+            self.project_storage_status,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            5,
+        )
+        layout.Add(
+            self.correction_status,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND,
+            5,
+        )
         layout.Add(table_sizer, 20, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
@@ -628,6 +665,12 @@ class JLCPCBTools(wx.Dialog):
         self.bom_widget.set_visible(self.bom_estimator_show)
         self.Layout()
         self.Centre(wx.BOTH)
+        restore_column_widths(
+            self.footprint_list,
+            self.settings.get("mainwindow", {}).get("column_widths", {}),
+            FOOTPRINT_COLUMN_KEYS,
+        )
+        self._layout_ready = True
 
         # ---------------------------------------------------------------------
         # ------------------------ Custom Events ------------------------------
@@ -691,15 +734,17 @@ class JLCPCBTools(wx.Dialog):
 
         self.init_data()
 
-    def init_data(self):
+    def init_data(self) -> None:
         """Initialize the library and populate the main window."""
-        self.init_library()
-        self.init_fabrication()
-        if self.library.state == LibraryState.UPDATE_NEEDED:
-            self.library.update()
-        else:
-            self.init_store()
-        self.library.create_mapping_table()
+        try:
+            self.init_library()
+            self.init_fabrication()
+            if self.library.state == LibraryState.UPDATE_NEEDED:
+                self.library.update()
+            else:
+                self.init_store()
+        except (sqlite3.Error, OSError) as error:
+            self._set_project_storage_error(error)
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
 
@@ -750,19 +795,38 @@ class JLCPCBTools(wx.Dialog):
             return {}
         return self.library.get_part_details(lcsc)
 
-    def quit_dialog(self, *_):
+    def quit_dialog(self, *_: object) -> None:
         """Destroy dialog on close."""
-        self.logger.info("quit_dialog()")
-        if self._why_standard_dialog is not None:
-            self._why_standard_dialog.Close()
-        root = logging.getLogger()
-        with suppress(AttributeError):
-            root.removeHandler(self.logging_handler1)
-        with suppress(AttributeError):
-            root.removeHandler(self.logging_handler2)
-
-        self.Destroy()
-        self.EndModal(0)
+        logger = logging.getLogger(__name__)
+        logger.info("quit_dialog()")
+        layout_ready = getattr(self, "_layout_ready", False)
+        selector = getattr(self, "_part_selector", None)
+        try:
+            if layout_ready:
+                self.settings.setdefault("mainwindow", {})["column_widths"] = (
+                    get_column_widths(self.footprint_list, FOOTPRINT_COLUMN_KEYS)
+                )
+                if not selector:
+                    self.save_settings()
+        except OSError:
+            logger.exception("Unable to save window layout")
+        finally:
+            try:
+                if selector:
+                    # Its close handler saves both windows' updated settings once.
+                    selector.Close()
+            finally:
+                why_standard_dialog = getattr(self, "_why_standard_dialog", None)
+                if why_standard_dialog:
+                    why_standard_dialog.Close()
+                root = logging.getLogger()
+                with suppress(AttributeError):
+                    root.removeHandler(self.logging_handler1)
+                with suppress(AttributeError):
+                    root.removeHandler(self.logging_handler2)
+                if self.IsModal():
+                    self.EndModal(0)
+                self.Destroy()
 
     def init_library(self):
         """Initialize the parts library."""
@@ -786,13 +850,49 @@ class JLCPCBTools(wx.Dialog):
             )
             self.logger.debug("JLCPCB version %s, no parts db info found", getVersion())
 
-    def init_store(self):
+    def init_store(self) -> None:
         """Initialize the store of part assignments."""
-        self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
-        if self.library.state == LibraryState.INITIALIZED:
-            self.populate_footprint_list()
-            self.start_assembly_enrichment()
-            self.recompute_bom_estimate()
+        try:
+            self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
+            self._set_project_storage_error(None)
+            if self.library.state == LibraryState.INITIALIZED:
+                if not self._part_preferences_applied_on_open:
+                    self._part_preferences_applied_on_open = True
+                    if self.settings.get("part_preferences", {}).get(
+                        "fill_empty_lcsc_assignments_on_open", True
+                    ):
+                        self._fill_empty_lcsc_assignments_from_part_preferences()
+                self.populate_footprint_list()
+                if self.store is not None:
+                    self.start_assembly_enrichment()
+                    self.recompute_bom_estimate()
+        except (sqlite3.Error, OSError) as error:
+            self._set_project_storage_error(error)
+
+    def _set_project_storage_error(self, error: Optional[BaseException]) -> None:
+        """Keep Settings usable while unavailable project data disables assignments."""
+        unavailable = error is not None
+        self._project_storage_unavailable = unavailable
+        if unavailable:
+            self.logger.warning("Part assignments are unavailable: %s", error)
+            self.store = None
+            self.partlist_data_model.RemoveAll()
+            self.assembly_enrichment_generation += 1
+            self.pending_assembly_enrichment.clear()
+        self.project_storage_status.SetLabel(
+            "Part assignments are unavailable; assignment actions and generation are disabled.\n"
+            "Check the log, close other windows using this project, then reopen. Settings remains available."
+            if unavailable
+            else ""
+        )
+        self.project_storage_status.SetToolTip(str(error) if unavailable else "")
+        self.project_storage_status.Show(unavailable)
+        self.footprint_list.Enable(not unavailable)
+        self.right_toolbar.Enable(not unavailable)
+        self.upper_toolbar.EnableTool(ID_GENERATE, not unavailable)
+        for tool in (ID_DOWNLOAD, ID_CORRECTIONS, ID_PART_PREFERENCES):
+            self.upper_toolbar.EnableTool(tool, self.library is not None)
+        self.Layout()
 
     def init_fabrication(self):
         """Initialize the fabrication."""
@@ -890,28 +990,153 @@ class JLCPCBTools(wx.Dialog):
         self.reset_gauge()
         self.init_data()
 
-    def assign_parts(self, e):
-        """Assign a selected LCSC number to parts."""
-        details = self.library.get_part_details(e.lcsc)
-        params = params_for_part(details)
-        board = self.pcbnew.GetBoard()
-        # A row outlives its footprint until the next board sync, so only
-        # references that still resolve are assigned.
-        footprints = {
-            reference: board.FindFootprintByReference(reference)
-            for reference in e.references
-        }
-        footprints = {ref: fp for ref, fp in footprints.items() if fp is not None}
-        for reference, fp in footprints.items():
-            self.store.set_lcsc(reference, e.lcsc)
-            self.store.set_stock(reference, int(e.stock))
-            set_lcsc_value(fp, e.lcsc)
-            self.partlist_data_model.set_lcsc(
-                reference, e.lcsc, e.type, e.stock, params
+    def assign_parts(self, e: Any) -> None:
+        """Assign the selected catalog part and remember its preferences."""
+        try:
+            details = dict(self.library.get_part_details(e.lcsc))
+            details.update(type=e.type, stock=e.stock)
+            self._apply_lcsc_assignments(
+                dict.fromkeys(e.references, e.lcsc),
+                details={e.lcsc: details},
+                remember_part_preferences=True,
             )
-        if footprints:
-            self.start_assembly_enrichment(list(footprints))
-        wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
+        except sqlite3.Error as error:
+            self.logger.warning("Unable to read the selected part: %s", error)
+
+    def _apply_lcsc_assignments(
+        self,
+        assignments: dict[str, str],
+        *,
+        details: Optional[dict[str, dict[str, Any]]] = None,
+        remember_part_preferences: bool = False,
+        notify: bool = True,
+    ) -> list[str]:
+        """Commit project changes before updating board fields or displayed rows."""
+        if self.store is None:
+            return []
+        board = self.pcbnew.GetBoard()
+        footprints = {
+            reference: footprint
+            for reference in assignments
+            if (footprint := board.FindFootprintByReference(reference)) is not None
+        }
+        if not footprints:
+            return []
+        catalog = {}
+        try:
+            for lcsc in dict.fromkeys(assignments[ref] for ref in footprints):
+                part = (details or {}).get(lcsc)
+                if part is None:
+                    part = self.library.get_part_details(lcsc)
+                stock = part.get("stock")
+                try:
+                    stored_stock = int(stock) if stock is not None else None
+                except (TypeError, ValueError):
+                    stored_stock = None
+                catalog[lcsc] = (part, stored_stock, params_for_part(part))
+            self.store.set_lcsc_assignments(
+                (ref, assignments[ref], catalog[assignments[ref]][1])
+                for ref in footprints
+            )
+        except sqlite3.Error as error:
+            self.logger.warning("Unable to apply LCSC assignments: %s", error)
+            return []
+
+        preferences = []
+        for reference, footprint in footprints.items():
+            lcsc = assignments[reference]
+            part, _stored_stock, params = catalog[lcsc]
+            set_lcsc_value(footprint, lcsc)
+            stock = part.get("stock")
+            self.partlist_data_model.set_lcsc(
+                reference,
+                lcsc,
+                part.get("type", ""),
+                stock if stock is not None else "",
+                params,
+            )
+            preferences.append(
+                (str(footprint.GetFPID().GetLibItemName()), footprint.GetValue(), lcsc)
+            )
+        if remember_part_preferences and self.settings.get("part_preferences", {}).get(
+            "remember_lcsc_assignments", True
+        ):
+            self._save_part_preferences(preferences, automatic=True)
+        assigned = list(footprints)
+        if notify:
+            self.start_assembly_enrichment(assigned)
+            wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
+        return assigned
+
+    def _save_part_preferences(
+        self, preferences: Iterable[tuple[str, str, str]], *, automatic: bool = False
+    ) -> int:
+        """Remember one action's complete preferences without losing its assignments."""
+        complete = [
+            preference
+            for preference in preferences
+            if all(isinstance(text, str) and text.strip() for text in preference[:2])
+        ]
+        if not complete:
+            return 0
+        try:
+            saved = self.library.save_part_preferences(complete)
+        except sqlite3.Error as error:
+            self.logger.warning("Unable to save part preferences: %s", error)
+            return 0
+        if saved:
+            message = "Saved %d part preference(s)."
+            if automatic:
+                message += (
+                    " To disable automatic remembering, clear 'Remember my part preferences'"
+                    " in Settings > Part preferences."
+                )
+            self.logger.info(message, saved)
+        return saved
+
+    def _fill_empty_lcsc_assignments_from_part_preferences(self) -> None:
+        """Fill truly empty eligible fields once, in one project transaction."""
+        board = self.pcbnew.GetBoard()
+        part_preferences = {}
+        assignments = {}
+        try:
+            for part in self.store.read_all():
+                if part["lcsc"] or not part["footprint"] or not part["value"]:
+                    continue
+                footprint = board.FindFootprintByReference(part["reference"])
+                if (
+                    footprint is None
+                    or get_exclude_from_bom(footprint)
+                    or get_exclude_from_pos(footprint)
+                    or get_is_dnp(footprint)
+                ):
+                    continue
+                key = (part["footprint"], part["value"])
+                if key not in part_preferences:
+                    part_preferences[key] = self.library.get_part_preference(*key)
+                if lcsc := part_preferences[key]:
+                    occupied = find_lcsc_assignment_text(footprint)
+                    if occupied:
+                        self.logger.info(
+                            "Skipped part preference for %s: field %r already contains %r.",
+                            part["reference"],
+                            *occupied,
+                        )
+                    else:
+                        assignments[part["reference"]] = lcsc
+            assigned = self._apply_lcsc_assignments(assignments, notify=False)
+        except sqlite3.Error as error:
+            self.logger.warning(
+                "Unable to fill assignments from part preferences: %s", error
+            )
+            return
+        if assigned:
+            self.logger.info(
+                "Filled %d empty LCSC assignment(s) from part preferences. "
+                "To disable, clear 'Parts preferences fill in empty LCSC assignments' "
+                "in Settings > Part preferences.",
+                len(assigned),
+            )
 
     def _set_bom_estimator_board_count(self, value: int) -> None:
         """Persist board count and update estimate when value changed."""
@@ -1019,9 +1244,17 @@ class JLCPCBTools(wx.Dialog):
             return "Done"
         return "Class missing"
 
-    def start_assembly_enrichment(self, references=None):
+    def start_assembly_enrichment(
+        self, references: Optional[Iterable[str]] = None
+    ) -> None:
         """Start background enrichment for missing assembly process metadata."""
-        targets = self.store.get_assembly_enrichment_targets(references)
+        if self.store is None:
+            return
+        try:
+            targets = self.store.get_assembly_enrichment_targets(references)
+        except sqlite3.Error as error:
+            self.logger.warning("Unable to start assembly enrichment: %s", error)
+            return
         targets = {
             lcsc: refs
             for lcsc, refs in targets.items()
@@ -1131,30 +1364,73 @@ class JLCPCBTools(wx.Dialog):
         }
         wx.MessageBox(e.text, e.title, style=styles.get(e.style, wx.ICON_INFORMATION))
 
-    def get_correction(self, part: dict, corrections: list) -> str:
-        """Try to find correction data for a given part."""
-        # First check if the part name matches
-        for regex, rotation, offset in corrections:
-            if re.search(regex, str(part["reference"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (ref)"
-        # Then try to match by value
-        for regex, rotation, offset in corrections:
-            if re.search(regex, str(part["value"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (val)"
-        # If there was no match for the part name or value, check if the package matches
-        for regex, rotation, offset in corrections:
-            if re.search(regex, str(part["footprint"])):
-                return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (fpt)"
-        return "0°, 0.0/0.0"
+    def get_correction(
+        self, part: dict[str, Any], corrections: Sequence[Correction]
+    ) -> str:
+        """Display the same complete correction rule used for fabrication."""
+        match = match_correction(
+            corrections,
+            str(part["reference"]),
+            str(part["value"]),
+            str(part["footprint"]),
+        )
+        if match is None:
+            return "0°, 0.0/0.0"
+        return f"{match.correction} ({match.source})"
 
-    def populate_footprint_list(self, *_):
+    def update_correction_status(self, snapshot: CorrectionSnapshot) -> None:
+        """Show aggregate readiness; detailed repair diagnostics stay in the manager."""
+        unresolved = snapshot.corrections is None
+        if unresolved:
+            reason = (
+                "unavailable"
+                if snapshot.state == CorrectionState.UNAVAILABLE
+                else "unresolved"
+            )
+            label = (
+                f"Corrections {reason} in the active {snapshot.scope} database.\n"
+                "Open Corrections Manager to repair or retry loading before generating fabrication files."
+            )
+            details = str(snapshot.db_path)
+        else:
+            label = ""
+            details = ""
+        self.correction_status.SetLabel(label)
+        self.correction_status.SetToolTip(details)
+        self.correction_status.Show(unresolved)
+        self.Layout()
+
+    def read_valid_corrections_for_generation(self) -> tuple[Correction, ...]:
+        """Read a fresh complete snapshot before any generation side effects."""
+        snapshot = self.library.read_correction_data()
+        self.update_correction_status(snapshot)
+        if snapshot.corrections is None:
+            raise ValueError(
+                f"Corrections are unresolved in the active {snapshot.scope} "
+                f"database ({snapshot.db_path}). Open Corrections Manager "
+                "to repair or retry loading before generating fabrication files."
+            )
+        return snapshot.corrections
+
+    def populate_footprint_list(self, *_: object) -> None:
         """Populate list of footprints."""
         if not self.store:
-            self.init_store()
+            if not self._project_storage_unavailable:
+                self.init_store()
+            return
+        try:
+            self._populate_footprint_rows()
+        except (sqlite3.Error, OSError) as error:
+            self._set_project_storage_error(error)
+
+    def _populate_footprint_rows(self) -> None:
+        """Read a complete project view, allowing the caller to recover storage errors."""
         self.partlist_data_model.RemoveAll()
         parts = self.store.read_all()
         details = {}
-        corrections = self.library.get_all_correction_data()
+        snapshot = self.library.read_correction_data()
+        self.update_correction_status(snapshot)
+        corrections = snapshot.corrections
         for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
             if fp is None:
@@ -1180,7 +1456,11 @@ class JLCPCBTools(wx.Dialog):
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
-                    str(self.get_correction(part, corrections)),
+                    (
+                        str(self.get_correction(part, corrections))
+                        if corrections is not None
+                        else "Unresolved"
+                    ),
                     str(fp.GetLayer()),
                     params_for_part(details.get(part["lcsc"], {})),
                     self._get_enrichment_status_label(part),  # enrichment
@@ -1337,16 +1617,31 @@ class JLCPCBTools(wx.Dialog):
             self.partlist_data_model.toggle_pos(item)
         wx.PostEvent(self, BomDataChangedEvent(source="toggle_pos"))
 
-    def remove_lcsc_number(self, *_):
-        """Remove an assigned a LCSC Part number to a footprint."""
-        for item in self.footprint_list.GetSelections():
+    def remove_lcsc_number(self, *_: object) -> None:
+        """Clear selected assignments after committing one project transaction."""
+        if self.store is None:
+            return
+        selected = []
+        # wx selection items borrow storage from this native array. Keep it
+        # alive until the post-commit model updates have finished using them.
+        selections = self.footprint_list.GetSelections()
+        for item in selections:
             ref = self.partlist_data_model.get_reference(item)
             board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             if fp is None:
                 continue
-            self.store.set_lcsc(ref, "")
-            self.store.set_stock(ref, None)
+            selected.append((item, ref, fp))
+        if not selected:
+            return
+        try:
+            self.store.set_lcsc_assignments(
+                (ref, "", None) for _item, ref, _fp in selected
+            )
+        except sqlite3.Error as error:
+            self.logger.warning("Unable to clear LCSC assignments: %s", error)
+            return
+        for item, _ref, fp in selected:
             set_lcsc_value(fp, "")
             self.partlist_data_model.remove_lcsc_number(item)
         wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
@@ -1390,11 +1685,15 @@ class JLCPCBTools(wx.Dialog):
         if self.auto_select_alike and self.footprint_list.GetSelectedItemsCount() == 1:
             self.select_alike_parts()
 
-    def get_part_details(self, *_):
-        """Show Part Details for each selected footprint (modeless windows)."""
+    def get_part_details(self, *_: object) -> None:
+        """Show one modeless Part Details window per selected LCSC number."""
+        seen: set[str] = set()
         for item in self.footprint_list.GetSelections():
-            if lcsc := self.partlist_data_model.get_lcsc(item):
-                self.show_part_details_dialog(lcsc)
+            lcsc = self.partlist_data_model.get_lcsc(item)
+            if not lcsc or lcsc in seen:
+                continue
+            seen.add(lcsc)
+            self.show_part_details_dialog(lcsc)
 
     def show_part_details_dialog(self, part):
         """Show the part details dialog (modeless so it doesn't block the app)."""
@@ -1405,19 +1704,20 @@ class JLCPCBTools(wx.Dialog):
         """Update the library from the JLCPCB CSV file."""
         self.library.update()
 
-    def manage_corrections(self, *_):
-        """Manage corrections."""
+    def manage_corrections(self, *_: object) -> None:
+        """Refresh displayed corrections after the manager's recovery attempts."""
         CorrectionManagerDialog(self, "").ShowModal()
+        self.populate_footprint_list()
 
-    def manage_mappings(self, *_):
-        """Manage footprint mappings."""
-        PartMapperManagerDialog(self).ShowModal()
+    def manage_part_preferences(self, *_: object) -> None:
+        """Manage shared part preferences."""
+        PartPreferencesDialog(self).ShowModal()
 
     def manage_settings(self, *_):
         """Manage settings."""
         SettingsDialog(self).ShowModal()
 
-    def update_settings(self, e):
+    def update_settings(self, e: Any) -> None:
         """Update the settings on change."""
         if e.section not in self.settings:
             self.settings[e.section] = {}
@@ -1440,13 +1740,19 @@ class JLCPCBTools(wx.Dialog):
 
         # Refresh library configuration if relevant library settings changed
         if e.section == "library" and e.setting in ["selected_library", "data_path"]:
-            self.library.refresh_library_config()
+            try:
+                if self.library is None:
+                    self.init_data()
+                else:
+                    self.library.refresh_library_config()
+            except (sqlite3.Error, OSError) as error:
+                self._set_project_storage_error(error)
 
     def logbox_append(self, e):
         """Write text to the logbox."""
         self.logbox.WriteText(e.msg)
 
-    def load_settings(self):
+    def load_settings(self) -> None:
         """Load settings from settings.json."""
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
@@ -1454,7 +1760,16 @@ class JLCPCBTools(wx.Dialog):
         gerber_settings = self.settings.setdefault("gerber", {})
         highlighting_settings = self.settings.setdefault("highlighting", {})
         partselector_settings = self.settings.setdefault("partselector", {})
+        part_preferences_settings = self.settings.setdefault("part_preferences", {})
         migrated = False
+
+        for setting in (
+            "remember_lcsc_assignments",
+            "fill_empty_lcsc_assignments_on_open",
+        ):
+            if setting not in part_preferences_settings:
+                part_preferences_settings[setting] = True
+                migrated = True
 
         if "matches" not in highlighting_settings:
             if "highlight_matches" in partselector_settings:
@@ -1486,12 +1801,20 @@ class JLCPCBTools(wx.Dialog):
             return text, []
         return text, terms
 
-    def save_settings(self):
-        """Save settings to settings.json."""
-        with open(
-            os.path.join(PLUGIN_PATH, "settings.json"), "w", encoding="utf-8"
-        ) as j:
-            json.dump(self.settings, j)
+    def save_settings(self) -> None:
+        """Replace settings.json only after the complete document is written."""
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=PLUGIN_PATH, delete=False
+            ) as settings_file:
+                temporary_path = settings_file.name
+                json.dump(self.settings, settings_file)
+            os.replace(temporary_path, os.path.join(PLUGIN_PATH, "settings.json"))
+        finally:
+            if temporary_path is not None:
+                with suppress(OSError):
+                    os.unlink(temporary_path)
 
     def select_part(self, *_):
         """Select a part from the library and assign it to the selected footprint(s)."""
@@ -1634,13 +1957,25 @@ class JLCPCBTools(wx.Dialog):
         )
         return False
 
-    def generate_fabrication_data(self, *_):
+    def generate_fabrication_data(self, *_: object) -> None:
         """Generate fabrication data."""
+        if self._project_storage_unavailable:
+            self.logger.warning(
+                "Cannot generate fabrication files while part assignments are unavailable."
+            )
+            return
         self.generate_button.Enable(False)
         self.reset_gauge()
         wx.BeginBusyCursor()
         self._current_generation_step = "initialization"
         try:
+            corrections = self.run_generation_step(
+                "Validating corrections",
+                self.read_valid_corrections_for_generation,
+            )
+            placements = self.run_generation_step(
+                "Preparing placement data", self.fabrication.prepare_cpl, corrections
+            )
             warnings = self.run_generation_step(
                 "Checking part consistency",
                 self.fabrication.get_part_consistency_warnings,
@@ -1762,7 +2097,8 @@ class JLCPCBTools(wx.Dialog):
 
             self.run_generation_step(
                 "Generating placement file (CPL)",
-                self.fabrication.generate_cpl,
+                self.fabrication.write_cpl,
+                placements,
             )
 
             self.run_generation_step(
@@ -1882,7 +2218,7 @@ class JLCPCBTools(wx.Dialog):
                     wx.TheClipboard.SetData(wx.TextDataObject(lcsc))
                     wx.TheClipboard.Close()
 
-    def paste_part_lcsc(self, *_):
+    def paste_part_lcsc(self, *_: object) -> None:
         """Paste a lcsc number from the clipboard to the current part."""
         text_data = wx.TextDataObject()
         success = False
@@ -1891,20 +2227,15 @@ class JLCPCBTools(wx.Dialog):
             wx.TheClipboard.Close()
         if success:
             if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
-                updated_references = []
-                for item in self.footprint_list.GetSelections():
-                    details = self.library.get_part_details(lcsc)
-                    params = params_for_part(details)
-                    reference = self.partlist_data_model.get_reference(item)
-                    self.partlist_data_model.set_lcsc(
-                        reference, lcsc, details["type"], details["stock"], params
-                    )
-                    self.store.set_lcsc(reference, lcsc)
-                    updated_references.append(reference)
-                self.start_assembly_enrichment(updated_references)
-                wx.PostEvent(self, BomDataChangedEvent(source="paste_part_lcsc"))
+                references = [
+                    self.partlist_data_model.get_reference(item)
+                    for item in self.footprint_list.GetSelections()
+                ]
+                self._apply_lcsc_assignments(
+                    dict.fromkeys(references, lcsc), remember_part_preferences=True
+                )
 
-    def add_correction(self, e):
+    def add_correction(self, e: wx.CommandEvent) -> None:
         """Add part correction for the current part."""
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
@@ -1920,19 +2251,7 @@ class JLCPCBTools(wx.Dialog):
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
-
-    def save_all_mappings(self, *_):
-        """Save all mappings."""
-        for item in self.partlist_data_model.get_all():
-            value = item[1]
-            footprint = item[2]
-            lcsc = item[3]
-            if footprint != "" and value != "" and lcsc != "":
-                if self.library.get_mapping_data(footprint, value):
-                    self.library.update_mapping_data(footprint, value, lcsc)
-                else:
-                    self.library.insert_mapping_data(footprint, value, lcsc)
-        self.logger.info("All mappings saved")
+        self.populate_footprint_list()
 
     def export_to_schematic(self, *_):
         """Dialog to select schematics."""
@@ -1949,45 +2268,44 @@ class JLCPCBTools(wx.Dialog):
             paths = openFileDialog.GetPaths()
             SchematicExport(self).load_schematic(paths)
 
-    def add_foot_mapping(self, *_):
-        """Add a footprint mapping."""
+    def save_selected_part_preferences(self, *_: object) -> None:
+        """Remember the selected LCSC assignments as part preferences."""
+        preferences = []
         for item in self.footprint_list.GetSelections():
             footprint = self.partlist_data_model.get_footprint(item)
             value = self.partlist_data_model.get_value(item)
             lcsc = self.partlist_data_model.get_lcsc(item)
-            if footprint != "" and value != "" and lcsc != "":
-                if self.library.get_mapping_data(footprint, value):
-                    self.library.update_mapping_data(footprint, value, lcsc)
-                else:
-                    self.library.insert_mapping_data(footprint, value, lcsc)
+            preferences.append((footprint, value, lcsc))
+        self._save_part_preferences(preferences)
 
-    def search_foot_mapping(self, *_):
-        """Search for a footprint mapping."""
-        for item in self.footprint_list.GetSelections():
-            reference = self.partlist_data_model.get_reference(item)
-            footprint = self.partlist_data_model.get_footprint(item)
-            value = self.partlist_data_model.get_value(item)
-            if footprint != "" and value != "":
-                if self.library.get_mapping_data(footprint, value):
-                    lcsc = self.library.get_mapping_data(footprint, value)[2]
-                    self.store.set_lcsc(reference, lcsc)
-                    self.logger.info("Found %s", lcsc)
-                    details = self.library.get_part_details(lcsc)
-                    params = params_for_part(self.library.get_part_details(lcsc))
-                    self.partlist_data_model.set_lcsc(
-                        reference, lcsc, details["type"], details["stock"], params
-                    )
-                    self.start_assembly_enrichment([reference])
-        self.recompute_bom_estimate()
+    def apply_selected_part_preferences(self, *_: object) -> None:
+        """Apply matching part preferences to the selected rows."""
+        assignments = {}
+        try:
+            for item in self.footprint_list.GetSelections():
+                reference = self.partlist_data_model.get_reference(item)
+                footprint = self.partlist_data_model.get_footprint(item)
+                value = self.partlist_data_model.get_value(item)
+                if footprint and value:
+                    if preference := self.library.get_part_preference(footprint, value):
+                        assignments[reference] = preference
+            updated_references = self._apply_lcsc_assignments(assignments)
+        except sqlite3.Error as error:
+            self.logger.warning("Unable to apply part preferences: %s", error)
+            return
+        if updated_references:
+            self.logger.info(
+                "Applied part preferences to %d assignment(s).", len(updated_references)
+            )
 
-    def sanitize_lcsc(self, lcsc_PN):
+    def sanitize_lcsc(self, lcsc_PN: str) -> str:
         """Sanitize a given LCSC number using a regex."""
         m = re.search("C\\d+", lcsc_PN, re.IGNORECASE)
         if m:
-            return m.group(0)
+            return m.group(0).upper()
         return ""
 
-    def OnRightDown(self, *_):
+    def OnRightDown(self, *_: object) -> None:
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
 
@@ -2025,17 +2343,25 @@ class JLCPCBTools(wx.Dialog):
         right_click_menu.Append(correction_by_name)
         right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
 
-        find_mapping = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_FIND_MAPPING, "Find LCSC from Mappings"
+        apply_part_preferences = wx.MenuItem(
+            right_click_menu,
+            ID_CONTEXT_MENU_APPLY_PART_PREFERENCES,
+            "Apply part preferences",
         )
-        right_click_menu.Append(find_mapping)
-        right_click_menu.Bind(wx.EVT_MENU, self.search_foot_mapping, find_mapping)
+        right_click_menu.Append(apply_part_preferences)
+        right_click_menu.Bind(
+            wx.EVT_MENU, self.apply_selected_part_preferences, apply_part_preferences
+        )
 
-        add_mapping = wx.MenuItem(
-            right_click_menu, ID_CONTEXT_MENU_ADD_MAPPING, "Add Footprint Mapping"
+        save_part_preferences = wx.MenuItem(
+            right_click_menu,
+            ID_CONTEXT_MENU_SAVE_PART_PREFERENCES,
+            "Save part preferences",
         )
-        right_click_menu.Append(add_mapping)
-        right_click_menu.Bind(wx.EVT_MENU, self.add_foot_mapping, add_mapping)
+        right_click_menu.Append(save_part_preferences)
+        right_click_menu.Bind(
+            wx.EVT_MENU, self.save_selected_part_preferences, save_part_preferences
+        )
 
         self.footprint_list.PopupMenu(right_click_menu)
         right_click_menu.Destroy()  # destroy to avoid memory leak

@@ -21,6 +21,11 @@
     "resources": {
         "homepage": "https://github.com/bouni/kicad-jlcpcb-tools"
     },
+    "keep_on_update": [
+        "plugins/[^/]+/settings\\.json$",
+        "plugins/[^/]+/jlcpcb/corrections\\.db$",
+        "plugins/[^/]+/jlcpcb/mappings\\.db$"
+    ],
     "versions": [{
         "version": "VERSION_HERE",
         "status": "testing",

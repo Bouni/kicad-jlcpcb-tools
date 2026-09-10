@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+from typing import TYPE_CHECKING
 
 import wx  # pylint: disable=import-error
 
@@ -11,11 +12,23 @@ from .dblib import LIBRARY_CONFIGS
 from .events import UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 
+if TYPE_CHECKING:
+    from .mainwindow import JLCPCBTools
+
+# Display strings for the LCSC priority dropdown; the stored setting stays a boolean.
+LCSC_PRIORITY_SCHEMATIC = "Schematic"
+LCSC_PRIORITY_DATABASE = "Database"
+LCSC_PRIORITY_CHOICES = [LCSC_PRIORITY_SCHEMATIC, LCSC_PRIORITY_DATABASE]
+
+
+# Side of the square icon cell in every settings row (largest icon is 48 px).
+ICON_CELL_SIZE = 48
+
 
 class SettingsDialog(wx.Dialog):
     """Dialog for plugin settings."""
 
-    def __init__(self, parent):
+    def __init__(self, parent: "JLCPCBTools") -> None:
         wx.Dialog.__init__(
             self,
             parent,
@@ -51,16 +64,14 @@ class SettingsDialog(wx.Dialog):
         self.tented_vias_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Do not tent vias",
+            label="Tent vias",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
             name="gerber_tented_vias",
         )
 
-        self.tented_vias_setting.SetToolTip(
-            wx.ToolTip("Whether vias should be coverd by soldermask or not")
-        )
+        self.tented_vias_setting.SetToolTip(wx.ToolTip("Cover vias with soldermask"))
 
         self.tented_vias_image = wx.StaticBitmap(
             self,
@@ -72,10 +83,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.tented_vias_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        tented_vias_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        tented_vias_sizer.Add(self.tented_vias_image, 10, wx.ALL | wx.EXPAND, 5)
-        tented_vias_sizer.Add(self.tented_vias_setting, 100, wx.ALL | wx.EXPAND, 5)
 
         ##### Fill zones #####
 
@@ -104,16 +111,12 @@ class SettingsDialog(wx.Dialog):
 
         self.fill_zones_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        fill_zones_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        fill_zones_sizer.Add(self.fill_zones_image, 10, wx.ALL | wx.EXPAND, 5)
-        fill_zones_sizer.Add(self.fill_zones_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Force DRC before Gerber export #####
 
         self.force_drc_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Force DRC check before Gerber export - Saves board and fills zones!",
+            label="Force DRC check before Gerber export (saves board and fills zones)",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
@@ -139,16 +142,12 @@ class SettingsDialog(wx.Dialog):
 
         self.force_drc_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        force_drc_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        force_drc_sizer.Add(self.force_drc_image, 10, wx.ALL | wx.EXPAND, 5)
-        force_drc_sizer.Add(self.force_drc_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Plot values #####
 
         self.plot_values_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Plot values",
+            label="Plot values on silkscreen",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
@@ -170,16 +169,12 @@ class SettingsDialog(wx.Dialog):
 
         self.plot_values_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        plot_values_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        plot_values_sizer.Add(self.plot_values_image, 10, wx.ALL | wx.EXPAND, 5)
-        plot_values_sizer.Add(self.plot_values_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Plot references #####
 
         self.plot_references_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Plot references",
+            label="Plot references on silkscreen",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
@@ -187,7 +182,7 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.plot_references_setting.SetToolTip(
-            wx.ToolTip("Whether value should be plotted on gerber generation")
+            wx.ToolTip("Whether references should be plotted on gerber generation")
         )
 
         self.plot_references_image = wx.StaticBitmap(
@@ -200,12 +195,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.plot_references_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        plot_references_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        plot_references_sizer.Add(self.plot_references_image, 10, wx.ALL | wx.EXPAND, 5)
-        plot_references_sizer.Add(
-            self.plot_references_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
 
         ##### Subtract mask from silkscreen #####
 
@@ -227,26 +216,30 @@ class SettingsDialog(wx.Dialog):
 
         self.subtract_mask_from_silk_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        subtract_mask_from_silk_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        subtract_mask_from_silk_sizer.Add(
-            self.subtract_mask_from_silk_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
-
         ##### LCSC priority #####
 
-        self.lcsc_priority_setting = wx.CheckBox(
+        lcsc_priority_label = wx.StaticText(
             self,
             id=wx.ID_ANY,
-            label="LCSC number priority",
+            label="Prefer LCSC numbers from:",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
-            style=0,
+        )
+
+        self.lcsc_priority_setting = wx.ComboBox(
+            self,
+            id=wx.ID_ANY,
+            value="",
+            choices=LCSC_PRIORITY_CHOICES,
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=wx.CB_READONLY,
             name="general_lcsc_priority",
         )
 
         self.lcsc_priority_setting.SetToolTip(
             wx.ToolTip(
-                "Whether LCSC number from schematic should overrule those in the database"
+                "When a part has an LCSC number in both the schematic and the plugin database, which one is used"
             )
         )
 
@@ -259,18 +252,20 @@ class SettingsDialog(wx.Dialog):
             0,
         )
 
-        self.lcsc_priority_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+        self.lcsc_priority_setting.Bind(wx.EVT_COMBOBOX, self.update_settings)
 
         lcsc_priority_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        lcsc_priority_sizer.Add(self.lcsc_priority_image, 10, wx.ALL | wx.EXPAND, 5)
-        lcsc_priority_sizer.Add(self.lcsc_priority_setting, 100, wx.ALL | wx.EXPAND, 5)
+        lcsc_priority_sizer.Add(
+            lcsc_priority_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        lcsc_priority_sizer.Add(self.lcsc_priority_setting, 0, wx.ALIGN_CENTER_VERTICAL)
 
         ##### Only parts with LCSC number in BOM/CPL #####
 
         self.lcsc_bom_cpl_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Add parts without LCSC numbers to BOM/CPL",
+            label="Add parts without LCSC number to BOM/CPL",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
@@ -278,7 +273,7 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.lcsc_bom_cpl_setting.SetToolTip(
-            wx.ToolTip("Whether parts wihout LCSC number should be added to BOM/CPL")
+            wx.ToolTip("Whether parts without LCSC number should be added to BOM/CPL")
         )
 
         self.lcsc_bom_cpl_image = wx.StaticBitmap(
@@ -292,16 +287,12 @@ class SettingsDialog(wx.Dialog):
 
         self.lcsc_bom_cpl_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        lcsc_bom_cpl_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
-        lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Check if order/serial number placeholder is present #####
 
         self.order_number_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Check if an order/serial number placeholder is placed",
+            label="Check for an order/serial number placeholder on export",
             pos=wx.DefaultPosition,
             size=wx.DefaultSize,
             style=0,
@@ -323,19 +314,7 @@ class SettingsDialog(wx.Dialog):
 
         self.order_number_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        order_number_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
-        order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Highlight text matches ######
-
-        highlight_matches_label = wx.StaticText(
-            self,
-            id=wx.ID_ANY,
-            label="Match highlighting",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-        )
 
         self.highlight_matches_setting = wx.CheckBox(
             self,
@@ -354,14 +333,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.highlight_matches_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        highlight_matches_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        highlight_matches_sizer.Add(
-            highlight_matches_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        highlight_matches_sizer.Add(
-            self.highlight_matches_setting, 0, wx.ALL | wx.EXPAND, 5
-        )
 
         ##### Library Selection #####
 
@@ -392,8 +363,8 @@ class SettingsDialog(wx.Dialog):
         self.library_selected_setting.Bind(wx.EVT_COMBOBOX, self.update_settings)
 
         library_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        library_sizer.Add(library_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        library_sizer.Add(self.library_selected_setting, 1, wx.ALL | wx.EXPAND, 5)
+        library_sizer.Add(library_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5)
+        library_sizer.Add(self.library_selected_setting, 1, wx.EXPAND)
 
         ##### Library Data Directory #####
 
@@ -419,9 +390,9 @@ class SettingsDialog(wx.Dialog):
         self.library_data_path_setting.SetToolTip(
             wx.ToolTip(
                 "Override where the global library database files are stored."
-                " If you change this, you may want to copy existing mapping and"
+                " If you change this, you may want to copy existing part preferences and"
                 " corrections files from the old location to the new one to avoid"
-                " losing existing mappings and corrections."
+                " losing existing part preferences and corrections."
             )
         )
 
@@ -431,10 +402,64 @@ class SettingsDialog(wx.Dialog):
 
         library_data_path_sizer = wx.BoxSizer(wx.HORIZONTAL)
         library_data_path_sizer.Add(
-            library_data_path_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+            library_data_path_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
         )
-        library_data_path_sizer.Add(
-            self.library_data_path_setting, 1, wx.ALL | wx.EXPAND, 5
+        library_data_path_sizer.Add(self.library_data_path_setting, 1, wx.EXPAND)
+
+        ##### Part preferences #####
+
+        self.part_preferences_remember_lcsc_assignments_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Remember my part preferences",
+            name="part_preferences.remember_lcsc_assignments",
+        )
+        self.part_preferences_remember_lcsc_assignments_setting.SetToolTip(
+            wx.ToolTip(
+                "When you select or paste an LCSC part, remember it for components"
+                " with the same value and footprint across projects. A later choice"
+                " replaces the previous preference. Opening a board does not change"
+                " preferences. Save part preferences remains available in the"
+                " right-click menu when this is disabled."
+            )
+        )
+        self.part_preferences_remember_lcsc_assignments_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
+
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Parts preferences fill in empty LCSC assignments",
+            name="part_preferences.fill_empty_lcsc_assignments_on_open",
+        )
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.SetToolTip(
+            wx.ToolTip(
+                "When the plugin window opens, use the preferred LCSC part for"
+                " each matching value and footprint. Existing assignments are"
+                " kept. Skip DNP parts and parts excluded from BOM or placement."
+                " Cleared assignments may fill again on the next opening unless"
+                " the part is excluded or this setting is disabled."
+            )
+        )
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
+
+        part_preferences_box_sizer = wx.StaticBoxSizer(
+            wx.HORIZONTAL, self, "Part preferences"
+        )
+        part_preferences_box_sizer.Add(
+            self.part_preferences_remember_lcsc_assignments_setting,
+            1,
+            wx.ALL | wx.EXPAND,
+            5,
+        )
+        part_preferences_box_sizer.Add(
+            self.part_preferences_fill_empty_lcsc_assignments_on_open_setting,
+            1,
+            wx.ALL | wx.EXPAND,
+            5,
         )
 
         ##### Generation hooks #####
@@ -614,39 +639,61 @@ class SettingsDialog(wx.Dialog):
 
         bom_estimator_show_sizer = wx.BoxSizer(wx.HORIZONTAL)
         bom_estimator_show_sizer.Add(
-            self.bom_estimator_show_image, 10, wx.ALL | wx.EXPAND, 5
+            self.bom_estimator_show_setting, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
         )
+        bom_estimator_show_sizer.AddStretchSpacer()
         bom_estimator_show_sizer.Add(
-            self.bom_estimator_show_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
-        bom_estimator_show_sizer.Add(
-            self.bom_estimator_help_button,
-            0,
-            wx.ALL | wx.ALIGN_CENTER_VERTICAL,
-            5,
+            self.bom_estimator_help_button, 0, wx.ALIGN_CENTER_VERTICAL
         )
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        settings_grid = wx.GridSizer(0, 2, 0, 0)
-        settings_grid.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(subtract_mask_from_silk_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(bom_estimator_show_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        # Two settings columns, each a fixed-size icon cell plus a control cell,
+        # so the controls line up and every row has the same height whatever
+        # the icon size (or absence of an icon).
+        settings_grid = wx.FlexGridSizer(0, 4, 0, 0)
+        settings_grid.AddGrowableCol(1, 1)
+        settings_grid.AddGrowableCol(3, 1)
+        self._add_setting_row(
+            settings_grid, self.tented_vias_image, self.tented_vias_setting
+        )
+        self._add_setting_row(
+            settings_grid, self.fill_zones_image, self.fill_zones_setting
+        )
+        self._add_setting_row(
+            settings_grid, self.force_drc_image, self.force_drc_setting
+        )
+        self._add_setting_row(
+            settings_grid, self.plot_values_image, self.plot_values_setting
+        )
+        self._add_setting_row(
+            settings_grid, self.plot_references_image, self.plot_references_setting
+        )
+        self._add_setting_row(settings_grid, None, self.subtract_mask_from_silk_setting)
+        self._add_setting_row(
+            settings_grid, self.lcsc_priority_image, lcsc_priority_sizer
+        )
+        self._add_setting_row(
+            settings_grid, self.lcsc_bom_cpl_image, self.lcsc_bom_cpl_setting
+        )
+        self._add_setting_row(
+            settings_grid, self.order_number_image, self.order_number_setting
+        )
+        self._add_setting_row(settings_grid, None, self.highlight_matches_setting)
+        self._add_setting_row(
+            settings_grid,
+            self.bom_estimator_show_image,
+            bom_estimator_show_sizer,
+            wx.EXPAND,
+        )
+        self._add_setting_row(settings_grid, None, library_sizer, wx.EXPAND)
+        self._add_setting_row(settings_grid, None, library_data_path_sizer, wx.EXPAND)
 
         layout = wx.BoxSizer(wx.VERTICAL)
-        layout.Add(settings_grid, 1, wx.ALL | wx.EXPAND, 5)
+        layout.Add(settings_grid, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(part_preferences_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(hooks_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
@@ -655,39 +702,38 @@ class SettingsDialog(wx.Dialog):
 
         self.load_settings()
 
+    def _add_setting_row(self, grid, image, control, flags=wx.ALIGN_CENTER_VERTICAL):
+        """Add an icon | control pair to the settings grid.
+
+        The icon sits centred in a square cell of fixed size (empty when the
+        setting has no icon), so controls share one left edge and rows share
+        one pitch regardless of icon size.
+        """
+        side = int(round(ICON_CELL_SIZE * self.parent.scale_factor))
+        icon_cell = wx.BoxSizer(wx.HORIZONTAL)
+        icon_cell.SetMinSize(side, side)
+        if image is not None:
+            icon_cell.AddStretchSpacer()
+            icon_cell.Add(image, 0, wx.ALIGN_CENTER_VERTICAL)
+            icon_cell.AddStretchSpacer()
+        grid.Add(icon_cell, 0, wx.ALL, 5)
+        grid.Add(control, 0, wx.ALL | flags, 5)
+
     def update_tented_vias(self, tented):
         """Update settings dialog according to the settings."""
-        if tented:
-            self.tented_vias_setting.SetValue(tented)
-            self.tented_vias_setting.SetLabel("Tented vias")
-            self.tented_vias_image.SetBitmap(
-                loadBitmapScaled("tented.png", self.parent.scale_factor, static=True)
-            )
-        else:
-            self.tented_vias_setting.SetValue(tented)
-            self.tented_vias_setting.SetLabel("Untented vias")
-            self.tented_vias_image.SetBitmap(
-                loadBitmapScaled("untented.png", self.parent.scale_factor, static=True)
-            )
+        self.tented_vias_setting.SetValue(tented)
+        icon = "tented.png" if tented else "untented.png"
+        self.tented_vias_image.SetBitmap(
+            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
+        )
 
     def update_fill_zones(self, fill):
         """Update settings dialog according to the settings."""
-        if fill:
-            self.fill_zones_setting.SetValue(fill)
-            self.fill_zones_setting.SetLabel("Fill zones")
-            self.fill_zones_image.SetBitmap(
-                loadBitmapScaled(
-                    "fill-zones.png", self.parent.scale_factor, static=True
-                )
-            )
-        else:
-            self.fill_zones_setting.SetValue(fill)
-            self.fill_zones_setting.SetLabel("Don't fill zones")
-            self.fill_zones_image.SetBitmap(
-                loadBitmapScaled(
-                    "unfill-zones.png", self.parent.scale_factor, static=True
-                )
-            )
+        self.fill_zones_setting.SetValue(fill)
+        icon = "fill-zones.png" if fill else "unfill-zones.png"
+        self.fill_zones_image.SetBitmap(
+            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
+        )
 
     def build_force_drc_bitmap(self, enabled):
         """Build the Force DRC icon, overlaying a red X when disabled."""
@@ -718,135 +764,65 @@ class SettingsDialog(wx.Dialog):
 
     def update_plot_values(self, plot_values):
         """Update settings dialog according to the settings."""
-        if plot_values:
-            self.plot_values_setting.SetValue(plot_values)
-            self.plot_values_setting.SetLabel("Plot values on silkscreen")
-            self.plot_values_image.SetBitmap(
-                loadBitmapScaled(
-                    "plot_values.png", self.parent.scale_factor, static=True
-                )
-            )
-        else:
-            self.plot_values_setting.SetValue(plot_values)
-            self.plot_values_setting.SetLabel("Don't plot values on silkscreen")
-            self.plot_values_image.SetBitmap(
-                loadBitmapScaled("no_values.png", self.parent.scale_factor, static=True)
-            )
+        self.plot_values_setting.SetValue(plot_values)
+        icon = "plot_values.png" if plot_values else "no_values.png"
+        self.plot_values_image.SetBitmap(
+            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
+        )
 
     def update_force_drc(self, force_drc):
         """Update settings dialog according to the settings."""
         self.force_drc_setting.SetValue(bool(force_drc))
         self.force_drc_image.SetBitmap(self.build_force_drc_bitmap(bool(force_drc)))
         if force_drc:
-            self.force_drc_setting.SetLabel(
-                "Force DRC check before Gerber export - Saves board and fills zones!"
-            )
             self.update_fill_zones(True)
             self.fill_zones_setting.Disable()
         else:
-            self.force_drc_setting.SetLabel(
-                "Do not force DRC check before Gerber export"
-            )
             self.fill_zones_setting.Enable()
 
     def update_plot_references(self, plot_references):
         """Update settings dialog according to the settings."""
-        if plot_references:
-            self.plot_references_setting.SetValue(plot_references)
-            self.plot_references_setting.SetLabel("Plot references on silkscreen")
-            self.plot_references_image.SetBitmap(
-                loadBitmapScaled("plot_refs.png", self.parent.scale_factor, static=True)
-            )
-        else:
-            self.plot_references_setting.SetValue(plot_references)
-            self.plot_references_setting.SetLabel("Don't plot references on silkscreen")
-            self.plot_references_image.SetBitmap(
-                loadBitmapScaled("no_refs.png", self.parent.scale_factor, static=True)
-            )
+        self.plot_references_setting.SetValue(plot_references)
+        icon = "plot_refs.png" if plot_references else "no_refs.png"
+        self.plot_references_image.SetBitmap(
+            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
+        )
 
     def update_subtract_mask_from_silk(self, enabled):
-        """Update subtract-mask-from-silk setting label/value."""
+        """Update subtract-mask-from-silk setting value."""
         self.subtract_mask_from_silk_setting.SetValue(bool(enabled))
-        if enabled:
-            self.subtract_mask_from_silk_setting.SetLabel(
-                "Subtract soldermask from silkscreen"
-            )
-        else:
-            self.subtract_mask_from_silk_setting.SetLabel(
-                "Do not subtract soldermask from silkscreen"
-            )
 
     def update_lcsc_priority(self, priority):
         """Update settings dialog according to the settings."""
         if priority:
-            self.lcsc_priority_setting.SetValue(priority)
-            self.lcsc_priority_setting.SetLabel(
-                "LCSC numbers from schematic have priority"
-            )
-            self.lcsc_priority_image.SetBitmap(
-                loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True)
-            )
+            self.lcsc_priority_setting.SetStringSelection(LCSC_PRIORITY_SCHEMATIC)
+            icon = "schematic.png"
         else:
-            self.lcsc_priority_setting.SetValue(priority)
-            self.lcsc_priority_setting.SetLabel(
-                "LCSC numbers from database have priority"
-            )
-            self.lcsc_priority_image.SetBitmap(
-                loadBitmapScaled(
-                    "database-outline.png", self.parent.scale_factor, static=True
-                )
-            )
+            self.lcsc_priority_setting.SetStringSelection(LCSC_PRIORITY_DATABASE)
+            icon = "database-outline.png"
+        self.lcsc_priority_image.SetBitmap(
+            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
+        )
 
     def update_lcsc_bom_cpl(self, add):
         """Update settings dialog according to the settings."""
-        if add:
-            self.lcsc_bom_cpl_setting.SetValue(add)
-            self.lcsc_bom_cpl_setting.SetLabel(
-                "Add parts without LCSC number to BOM/POS"
-            )
-            self.lcsc_bom_cpl_image.SetBitmap(
-                loadBitmapScaled("bom.png", self.parent.scale_factor, static=True)
-            )
-        else:
-            self.lcsc_bom_cpl_setting.SetValue(add)
-            self.lcsc_bom_cpl_setting.SetLabel(
-                "Don't add parts without LCSC number to BOM/POS"
-            )
-            self.lcsc_bom_cpl_image.SetBitmap(
-                loadBitmapScaled("no_bom.png", self.parent.scale_factor, static=True)
-            )
+        self.lcsc_bom_cpl_setting.SetValue(add)
+        icon = "bom.png" if add else "no_bom.png"
+        self.lcsc_bom_cpl_image.SetBitmap(
+            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
+        )
 
     def update_order_number(self, check):
         """Update settings dialog according to the settings."""
-        self.logger.debug(check)
-        if check:
-            self.order_number_setting.SetValue(check)
-            self.order_number_setting.SetLabel(
-                "Check if an order/serial number placeholder is placed"
-            )
-            self.order_number_image.SetBitmap(
-                loadBitmapScaled(
-                    "order_number.png", self.parent.scale_factor, static=True
-                )
-            )
-        else:
-            self.order_number_setting.SetValue(check)
-            self.order_number_setting.SetLabel(
-                "Don't check if an order/serial number placeholder is placed"
-            )
-            self.order_number_image.SetBitmap(
-                loadBitmapScaled(
-                    "no_order_number.png", self.parent.scale_factor, static=True
-                )
-            )
+        self.order_number_setting.SetValue(check)
+        icon = "order_number.png" if check else "no_order_number.png"
+        self.order_number_image.SetBitmap(
+            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
+        )
 
     def update_highlight_matches(self, enabled):
         """Update settings dialog according to the settings."""
         self.highlight_matches_setting.SetValue(bool(enabled))
-        if enabled:
-            self.highlight_matches_setting.SetLabel("Highlight search matches")
-        else:
-            self.highlight_matches_setting.SetLabel("Do not highlight search matches")
 
     def update_matches(self, enabled):
         """Alias shared highlighting setting updates to the checkbox UI helper."""
@@ -855,16 +831,24 @@ class SettingsDialog(wx.Dialog):
     def update_bom_estimator_show(self, show):
         """Update settings dialog according to the BOM estimator visibility setting."""
         self.bom_estimator_show_setting.SetValue(bool(show))
-        if show:
-            self.bom_estimator_show_setting.SetLabel("Show BOM cost estimator")
-        else:
-            self.bom_estimator_show_setting.SetLabel("Hide BOM cost estimator")
 
     def show_bom_estimator_help(self, *_):
         """Show shared BOM estimator help text via the help_text helper."""
         show_bom_estimator_help(self)
 
-    def load_settings(self):
+    def update_part_preferences_remember_lcsc_assignments(self, enabled: bool) -> None:
+        """Update whether explicit LCSC assignments become part preferences."""
+        self.part_preferences_remember_lcsc_assignments_setting.SetValue(bool(enabled))
+
+    def update_part_preferences_fill_empty_lcsc_assignments_on_open(
+        self, enabled: bool
+    ) -> None:
+        """Update whether part preferences fill empty assignments on opening."""
+        self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.SetValue(
+            bool(enabled)
+        )
+
+    def load_settings(self) -> None:
         """Load settings and set checkboxes accordingly."""
         self.update_tented_vias(
             self.parent.settings.get("gerber", {}).get("tented_vias", True)
@@ -907,6 +891,16 @@ class SettingsDialog(wx.Dialog):
         self.update_data_path(
             self.parent.settings.get("library", {}).get("data_path", "")
         )
+        self.update_part_preferences_remember_lcsc_assignments(
+            self.parent.settings.get("part_preferences", {}).get(
+                "remember_lcsc_assignments", True
+            )
+        )
+        self.update_part_preferences_fill_empty_lcsc_assignments_on_open(
+            self.parent.settings.get("part_preferences", {}).get(
+                "fill_empty_lcsc_assignments_on_open", True
+            )
+        )
         self.update_pre_script(
             self.parent.settings.get("hooks", {}).get("pre_script", "")
         )
@@ -923,10 +917,10 @@ class SettingsDialog(wx.Dialog):
             display_name = LIBRARY_CONFIGS[library_key].display_name
             self.library_selected_setting.SetStringSelection(display_name)
 
-    def update_data_path(self, data_path):
+    def update_data_path(self, data_path: object) -> None:
         """Update settings dialog according to the configured data path."""
         value = data_path.strip() if isinstance(data_path, str) else ""
-        effective_path = value if value else self.parent.library.datadir
+        effective_path = value if value else getattr(self.parent.library, "datadir", "")
         self.library_data_path_setting.SetPath(effective_path)
 
     def update_pre_script(self, script_path):
@@ -947,9 +941,16 @@ class SettingsDialog(wx.Dialog):
             return
         self.timeout_seconds_setting.SetValue(30)
 
-    def update_settings(self, event):
+    def update_settings(self, event: "wx.CommandEvent") -> None:
         """Update and persist a setting that was changed."""
-        section, name = event.GetEventObject().GetName().split("_", 1)
+        control_name = event.GetEventObject().GetName()
+        if "." in control_name:
+            # A dot separates section names that themselves contain underscores.
+            section, name = control_name.split(".", 1)
+            update_method = f"update_{section}_{name}"
+        else:
+            section, name = control_name.split("_", 1)
+            update_method = f"update_{name}"
         if hasattr(event.GetEventObject(), "GetPath"):
             value = event.GetEventObject().GetPath()
         else:
@@ -967,6 +968,11 @@ class SettingsDialog(wx.Dialog):
                     value = key
                     break
 
+        # Special handling for LCSC priority: the dropdown text maps onto the
+        # boolean that has always been stored (True = schematic wins).
+        if section == "general" and name == "lcsc_priority":
+            value = value == LCSC_PRIORITY_SCHEMATIC
+
         # If forced DRC is enabled, fill zones must stay enabled.
         if (
             section == "gerber"
@@ -975,7 +981,7 @@ class SettingsDialog(wx.Dialog):
         ):
             value = True
 
-        getattr(self, f"update_{name}")(value)
+        getattr(self, update_method)(value)
 
         # Turning on forced DRC implies enabling fill zones.
         if section == "gerber" and name == "force_drc" and value:
