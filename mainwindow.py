@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, suppress
+from copy import deepcopy
 from datetime import datetime as dt
 from threading import Thread
 from typing import TYPE_CHECKING, Any, Optional
@@ -43,6 +44,7 @@ from .events import (
     EVT_ASSIGN_PARTS_EVENT,
     EVT_BOM_DATA_CHANGED_EVENT,
     EVT_DOWNLOAD_COMPLETED_EVENT,
+    EVT_DOWNLOAD_FINISHED_EVENT,
     EVT_DOWNLOAD_PROGRESS_EVENT,
     EVT_DOWNLOAD_STARTED_EVENT,
     EVT_LOGBOX_APPEND_EVENT,
@@ -87,6 +89,7 @@ from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
 from .stock_concern import stock_concern_references
+from .stock_display import parse_stock
 from .why_standard_dialog import WhyStandardDialog
 from .window_layout import get_column_widths, restore_column_widths
 
@@ -144,6 +147,9 @@ class JLCPCBTools(wx.Dialog):
         kicad_provider: KicadProvider = KicadProvider(),
     ) -> None:
         self.library: Optional[Library] = None
+        self._catalog_details: dict[str, dict[str, Any]] = {}
+        self._catalog_ready = False
+        self._catalog_switch_pending = False
         self.store: Optional[Store] = None
         while not wx.GetApp():
             time.sleep(1)
@@ -686,6 +692,7 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(EVT_DOWNLOAD_STARTED_EVENT, self.download_started)
         self.Bind(EVT_DOWNLOAD_PROGRESS_EVENT, self.download_progress)
         self.Bind(EVT_DOWNLOAD_COMPLETED_EVENT, self.download_completed)
+        self.Bind(EVT_DOWNLOAD_FINISHED_EVENT, self.download_finished)
 
         self.Bind(EVT_UNZIP_COMBINING_STARTED_EVENT, self.unzip_combining_started)
         self.Bind(EVT_UNZIP_COMBINING_PROGRESS_EVENT, self.unzip_combining_progress)
@@ -739,16 +746,20 @@ class JLCPCBTools(wx.Dialog):
 
         self.init_data()
 
-    def init_data(self) -> None:
+    def init_data(self, *, download_if_missing: bool = True) -> None:
         """Initialize the library and populate the main window."""
         try:
             self.init_library()
             self.init_fabrication()
             if self.library.state == LibraryState.UPDATE_NEEDED:
-                self.library.update()
+                if download_if_missing:
+                    self.library.update()
+                else:
+                    self.init_store()
+                    self._clear_catalog_views()
             else:
                 self.init_store()
-        except (sqlite3.Error, OSError) as error:
+        except (sqlite3.Error, OSError, ValueError) as error:
             self._set_project_storage_error(error)
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
@@ -794,11 +805,86 @@ class JLCPCBTools(wx.Dialog):
         self._set_standard_only_tooltip(False)
         event.Skip()
 
-    def _bom_get_part_details(self, lcsc: str) -> dict:
-        """Safely proxy part-detail lookups for BOM controller callbacks."""
-        if not hasattr(self, "library") or self.library is None:
+    def is_catalog_available(self) -> bool:
+        """Report whether the selected catalog has completed initialization."""
+        return self.library is not None and getattr(self, "_catalog_ready", True)
+
+    def _invalidate_catalog_details(self) -> None:
+        """Start a fresh raw-details snapshot for the current catalog."""
+        self._catalog_details = {}
+
+    def _catalog_get_part_details(
+        self, lcsc: str, *, strict: bool = False
+    ) -> dict[str, Any]:
+        """Reuse raw catalog records, distinguishing confirmed misses from failures."""
+        key = str(lcsc or "").strip().upper()
+        if not key or not self.is_catalog_available():
             return {}
-        return self.library.get_part_details(lcsc)
+        if not hasattr(self, "_catalog_details"):
+            self._invalidate_catalog_details()
+        if key not in self._catalog_details:
+            try:
+                self._catalog_details[key] = deepcopy(
+                    self.library.get_part_details(key)
+                )
+            except (sqlite3.Error, OSError) as error:
+                if strict:
+                    raise
+                self.logger.warning("Unable to read catalog part %s: %s", key, error)
+                return {}
+            details = self._catalog_details[key]
+            self.partlist_data_model.set_catalog_details(
+                key,
+                details.get("type", ""),
+                details.get("stock", ""),
+                params_for_part(details),
+            )
+        return deepcopy(self._catalog_details[key])
+
+    def _bom_get_part_details(self, lcsc: str) -> dict[str, Any]:
+        """Share the current raw catalog snapshot with estimator callbacks."""
+        return self._catalog_get_part_details(lcsc)
+
+    def _refresh_catalog_views(self) -> None:
+        """Replace catalog-dependent display, concerns, prices and selector results."""
+        self.populate_footprint_list()
+        self._refresh_catalog_outputs()
+
+    def _refresh_catalog_outputs(self) -> None:
+        """Refresh computed catalog values and the open selector after row changes."""
+        self.recompute_stock_concerns()
+        self.recompute_bom_estimate()
+        selector = getattr(self, "_part_selector", None)
+        if selector is not None:
+            selector.refresh_catalog()
+
+    def _clear_catalog_views(self) -> None:
+        """Discard supply and prices when catalog replacement cannot be trusted."""
+        self._catalog_ready = False
+        self._invalidate_catalog_details()
+        self._refresh_catalog_views()
+
+    def _publish_catalog(self) -> None:
+        """Validate catalog consumers before publishing a fresh initialized snapshot."""
+        self._catalog_ready = False
+        self._invalidate_catalog_details()
+        try:
+            if not self.library.has_usable_parts_catalog(check_integrity=False):
+                raise sqlite3.DatabaseError(
+                    "The parts catalog is unreadable or incomplete. Download it again."
+                )
+            self._update_library_title()
+            self.library.category_map = {}
+            self._catalog_ready = True
+            if self.store is None:
+                self.init_store()
+            else:
+                self._initialize_catalog_parts()
+            self._refresh_catalog_outputs()
+        except (sqlite3.Error, OSError, ValueError) as error:
+            self.library.state = LibraryState.UPDATE_NEEDED
+            self._set_project_storage_error(error)
+            self._clear_catalog_views()
 
     def quit_dialog(self, *_: object) -> None:
         """Destroy dialog on close."""
@@ -833,11 +919,33 @@ class JLCPCBTools(wx.Dialog):
                     self.EndModal(0)
                 self.Destroy()
 
-    def init_library(self):
-        """Initialize the parts library."""
+    def init_library(self) -> None:
+        """Initialize the parts library and start a new catalog snapshot."""
+        self._catalog_ready = False
+        self._invalidate_catalog_details()
         self.library = Library(self)
+        try:
+            if (
+                self.library.state == LibraryState.INITIALIZED
+                and not self.library.has_usable_parts_catalog(check_integrity=False)
+            ):
+                raise sqlite3.DatabaseError(
+                    "The parts catalog is unreadable or incomplete. Download it again."
+                )
+            self._update_library_title()
+        except (sqlite3.Error, OSError, ValueError):
+            self.library.state = LibraryState.UPDATE_NEEDED
+            raise
+        self._catalog_ready = self.library.state == LibraryState.INITIALIZED
+
+    def _update_library_title(self) -> None:
+        """Show metadata from the currently active catalog after initialization."""
         meta = self.library.get_parts_db_info()
         if meta is not None:
+            if not isinstance(meta.last_update, str):
+                raise ValueError(
+                    "The parts catalog update date must be an ISO date string."
+                )
             last_update = dt.fromisoformat(meta.last_update).strftime("%Y-%m-%d %H:%M")
             self.SetTitle(
                 f"JLCPCB Tools [ {getVersion()} ] | Last database update: {last_update}",
@@ -856,23 +964,34 @@ class JLCPCBTools(wx.Dialog):
             self.logger.debug("JLCPCB version %s, no parts db info found", getVersion())
 
     def init_store(self) -> None:
-        """Initialize the store of part assignments."""
+        """Initialize fabrication and assignments before enabling project actions."""
         try:
+            if getattr(self, "fabrication", None) is None:
+                self.init_fabrication()
             self.store = Store(self, self.project_path, self.pcbnew.GetBoard())
             self._set_project_storage_error(None)
-            if self.library.state == LibraryState.INITIALIZED:
-                if not self._part_preferences_applied_on_open:
-                    self._part_preferences_applied_on_open = True
-                    if self.settings.get("part_preferences", {}).get(
-                        "fill_empty_lcsc_assignments_on_open", True
-                    ):
-                        self._fill_empty_lcsc_assignments_from_part_preferences()
-                self.populate_footprint_list()
-                if self.store is not None:
-                    self.start_assembly_enrichment()
-                    self.recompute_bom_estimate()
+            self._initialize_catalog_parts()
         except (sqlite3.Error, OSError) as error:
             self._set_project_storage_error(error)
+
+    def _initialize_catalog_parts(self) -> None:
+        """Apply opening preferences once whenever project and catalog first meet."""
+        if (
+            self.store is None
+            or self.library.state != LibraryState.INITIALIZED
+            or not self.is_catalog_available()
+        ):
+            return
+        if not getattr(self, "_part_preferences_applied_on_open", False):
+            self._part_preferences_applied_on_open = True
+            if self.settings.get("part_preferences", {}).get(
+                "fill_empty_lcsc_assignments_on_open", True
+            ):
+                self._fill_empty_lcsc_assignments_from_part_preferences()
+        self.populate_footprint_list()
+        if self.store is not None:
+            self.start_assembly_enrichment()
+            self.recompute_bom_estimate()
 
     def _set_project_storage_error(self, error: Optional[BaseException]) -> None:
         """Keep Settings usable while unavailable project data disables assignments."""
@@ -899,7 +1018,7 @@ class JLCPCBTools(wx.Dialog):
             self.upper_toolbar.EnableTool(tool, self.library is not None)
         self.Layout()
 
-    def init_fabrication(self):
+    def init_fabrication(self) -> None:
         """Initialize the fabrication."""
         self.fabrication = Fabrication(self, self.pcbnew.GetBoard())
 
@@ -970,9 +1089,39 @@ class JLCPCBTools(wx.Dialog):
         """Update the gauge."""
         self.gauge.SetValue(int(e.value))
 
-    def download_completed(self, *_):
-        """Populate the footprint list."""
-        self.populate_footprint_list()
+    def _is_current_catalog_event(self, event: Any) -> bool:
+        """Reject queued completions from an earlier library or source."""
+        if self.library is None:
+            return False
+        source = (self.library.selected_library, self.library.partsdb_file)
+        return (
+            getattr(event, "library", self.library) is self.library
+            and getattr(event, "source", source) == source
+            and getattr(event, "attempt", self.library.download_attempt)
+            == self.library.download_attempt
+        )
+
+    def download_completed(self, event: Any = None) -> None:
+        """Publish a successful replacement only if its source is still selected."""
+        if (
+            not self._is_current_catalog_event(event)
+            or self.library.is_download_running()
+            or getattr(self, "_catalog_switch_pending", False)
+        ):
+            return
+        self._publish_catalog()
+
+    def download_finished(self, event: Any) -> None:
+        """Apply deferred catalog settings after either download success or failure."""
+        if not self._is_current_catalog_event(event):
+            return
+        if getattr(self, "_catalog_switch_pending", False):
+            self._apply_library_settings()
+        elif not event.succeeded:
+            if self.library.state == LibraryState.INITIALIZED:
+                self._publish_catalog()
+            else:
+                self._clear_catalog_views()
 
     def unzip_combining_started(self, *_):
         """Initialize the gauge."""
@@ -990,22 +1139,48 @@ class JLCPCBTools(wx.Dialog):
         """Update the gauge."""
         self.gauge.SetValue(int(e.value))
 
-    def unzip_extracting_completed(self, *_):
-        """Update the gauge."""
+    def unzip_extracting_completed(self, *_: object) -> None:
+        """Update progress; source-tagged completion publishes the extracted catalog."""
         self.reset_gauge()
-        self.init_data()
+
+    def _can_apply_user_assignments(self) -> bool:
+        """Explain unavailable assignment dependencies for a user-initiated action."""
+        if self.store is None:
+            self.logger.warning(
+                "Cannot apply LCSC assignments while project storage is unavailable. "
+                "Check the storage error, then retry after recovery or reopen the dialog."
+            )
+            return False
+        if not self.is_catalog_available():
+            self.logger.warning(
+                "Cannot apply LCSC assignments: the selected parts catalog is unavailable. "
+                "Download it or select an available catalog in Settings."
+            )
+            return False
+        return True
 
     def assign_parts(self, e: Any) -> None:
         """Assign the selected catalog part and remember its preferences."""
+        if not self._can_apply_user_assignments():
+            return
         try:
-            details = dict(self.library.get_part_details(e.lcsc))
+            details = self._catalog_get_part_details(e.lcsc, strict=True)
             details.update(type=e.type, stock=e.stock)
-            self._apply_lcsc_assignments(
+            assigned = self._apply_lcsc_assignments(
                 dict.fromkeys(e.references, e.lcsc),
                 details={e.lcsc: details},
                 remember_part_preferences=True,
             )
-        except sqlite3.Error as error:
+            if assigned:
+                key = str(e.lcsc).strip().upper()
+                self._catalog_details[key] = deepcopy(details)
+                self.partlist_data_model.set_catalog_details(
+                    key,
+                    details.get("type", ""),
+                    details.get("stock", ""),
+                    params_for_part(details),
+                )
+        except (sqlite3.Error, OSError) as error:
             self.logger.warning("Unable to read the selected part: %s", error)
 
     def _apply_lcsc_assignments(
@@ -1017,7 +1192,7 @@ class JLCPCBTools(wx.Dialog):
         notify: bool = True,
     ) -> list[str]:
         """Commit project changes before updating board fields or displayed rows."""
-        if self.store is None:
+        if self.store is None or not self.is_catalog_available():
             return []
         board = self.pcbnew.GetBoard()
         footprints = {
@@ -1032,18 +1207,14 @@ class JLCPCBTools(wx.Dialog):
             for lcsc in dict.fromkeys(assignments[ref] for ref in footprints):
                 part = (details or {}).get(lcsc)
                 if part is None:
-                    part = self.library.get_part_details(lcsc)
-                stock = part.get("stock")
-                try:
-                    stored_stock = int(stock) if stock is not None else None
-                except (TypeError, ValueError):
-                    stored_stock = None
+                    part = self._catalog_get_part_details(lcsc, strict=True)
+                stored_stock = parse_stock(part.get("stock"))
                 catalog[lcsc] = (part, stored_stock, params_for_part(part))
             self.store.set_lcsc_assignments(
                 (ref, assignments[ref], catalog[assignments[ref]][1])
                 for ref in footprints
             )
-        except sqlite3.Error as error:
+        except (sqlite3.Error, OSError) as error:
             self.logger.warning("Unable to apply LCSC assignments: %s", error)
             return []
 
@@ -1150,30 +1321,31 @@ class JLCPCBTools(wx.Dialog):
         self.bom_estimator_board_count = value
         self.settings.setdefault("general", {})["bom_estimator_boards"] = value
         self.save_settings()
+        self.recompute_stock_concerns()
         self.recompute_bom_estimate()
 
-    def on_bom_estimator_board_count_spinctrl(self, e):
+    def on_bom_estimator_board_count_spinctrl(self, e: Any) -> None:
         """Handle SpinCtrl arrows immediately, using step=5 increments."""
         value = self._normalize_board_count(e.GetEventObject().GetValue())
         if e.GetEventObject().GetValue() != value:
             e.GetEventObject().SetValue(value)
         self._set_bom_estimator_board_count(value)
 
-    def on_bom_estimator_board_count_text(self, *_):
+    def on_bom_estimator_board_count_text(self, *_: object) -> None:
         """Debounce manual text entry to avoid recompute flicker while typing."""
         if hasattr(self.bom_estimator_text_timer, "StartOnce"):
             self.bom_estimator_text_timer.StartOnce(300)
         else:
             self.bom_estimator_text_timer.Start(300, oneShot=True)
 
-    def on_bom_estimator_board_count_text_timer(self, *_):
+    def on_bom_estimator_board_count_text_timer(self, *_: object) -> None:
         """Apply board count from text field after debounce delay."""
         value = self._normalize_board_count(self.bom_estimator_boards_input.GetValue())
         if self.bom_estimator_boards_input.GetValue() != value:
             self.bom_estimator_boards_input.SetValue(value)
         self._set_bom_estimator_board_count(value)
 
-    def _normalize_board_count(self, value) -> int:
+    def _normalize_board_count(self, value: Any) -> int:
         """Normalize board count to a minimum of 5 boards."""
         return max(5, int(value))
 
@@ -1242,7 +1414,7 @@ class JLCPCBTools(wx.Dialog):
         if (
             not self.settings.get("highlighting", {}).get("stock_concern", True)
             or self.store is None
-            or self.library is None
+            or not self.is_catalog_available()
         ):
             model.set_stock_concern_refs(set())
             return
@@ -1261,7 +1433,11 @@ class JLCPCBTools(wx.Dialog):
                             }
                         )
             refs = stock_concern_references(
-                parts, lambda lcsc: self.library.get_part_details(lcsc).get("stock")
+                parts,
+                lambda lcsc: self._catalog_get_part_details(lcsc).get("stock"),
+                board_count=self._normalize_board_count(
+                    getattr(self, "bom_estimator_board_count", 5)
+                ),
             )
         except (sqlite3.Error, OSError) as error:
             self.logger.warning("Unable to update stock concerns: %s", error)
@@ -1453,8 +1629,10 @@ class JLCPCBTools(wx.Dialog):
     def populate_footprint_list(self, *_: object) -> None:
         """Populate list of footprints."""
         if not self.store:
-            if not self._project_storage_unavailable:
+            if not self._project_storage_unavailable and self.is_catalog_available():
                 self.init_store()
+            else:
+                self.partlist_data_model.RemoveAll()
             return
         try:
             self._populate_footprint_rows()
@@ -1465,7 +1643,6 @@ class JLCPCBTools(wx.Dialog):
         """Read a complete project view, allowing the caller to recover storage errors."""
         self.partlist_data_model.RemoveAll()
         parts = self.store.read_all()
-        details = {}
         snapshot = self.library.read_correction_data()
         self.update_correction_status(snapshot)
         corrections = snapshot.corrections
@@ -1474,9 +1651,8 @@ class JLCPCBTools(wx.Dialog):
             if fp is None:
                 continue
             is_dnp = get_is_dnp(fp)
-            # Get part stock and type from library, skip if part number was already looked up before
-            if part["lcsc"] and part["lcsc"] not in details:
-                details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
+            # Warm all live assignments before view filters, for every stock consumer.
+            details = self._catalog_get_part_details(part["lcsc"])
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
@@ -1489,8 +1665,8 @@ class JLCPCBTools(wx.Dialog):
                     part["value"],
                     part["footprint"],
                     part["lcsc"],
-                    details.get(part["lcsc"], {}).get("type", ""),  # type
-                    details.get(part["lcsc"], {}).get("stock", ""),  # stock
+                    details.get("type", ""),  # type
+                    details.get("stock", ""),  # stock
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
@@ -1500,7 +1676,7 @@ class JLCPCBTools(wx.Dialog):
                         else "Unresolved"
                     ),
                     str(fp.GetLayer()),
-                    params_for_part(details.get(part["lcsc"], {})),
+                    params_for_part(details),
                     self._get_enrichment_status_label(part),  # enrichment
                     "",  # bom price label
                 ]
@@ -1723,9 +1899,10 @@ class JLCPCBTools(wx.Dialog):
         dialog = PartDetailsDialog(self, part)
         dialog.Show()
 
-    def update_library(self, *_):
+    def update_library(self, *_: object) -> None:
         """Update the library from the JLCPCB CSV file."""
-        self.library.update()
+        if self.library is not None:
+            self.library.update()
 
     def manage_corrections(self, *_: object) -> None:
         """Refresh displayed corrections after the manager's recovery attempts."""
@@ -1769,15 +1946,35 @@ class JLCPCBTools(wx.Dialog):
 
         self.save_settings()
 
-        # Refresh library configuration if relevant library settings changed
         if e.section == "library" and e.setting in ["selected_library", "data_path"]:
-            try:
-                if self.library is None:
-                    self.init_data()
+            self._apply_library_settings()
+
+    def _apply_library_settings(self) -> None:
+        """Switch catalogs after any active download has released its source paths."""
+        self._catalog_ready = False
+        self._invalidate_catalog_details()
+        if self.library is not None and self.library.is_download_running():
+            self._catalog_switch_pending = True
+            self._refresh_catalog_views()
+            return
+        self._catalog_switch_pending = False
+        try:
+            if self.library is None:
+                self.init_data(download_if_missing=False)
+            else:
+                if self.library.refresh_library_config() is False:
+                    self._catalog_switch_pending = True
+                    self._refresh_catalog_views()
+                    return
+                if self.library.state == LibraryState.INITIALIZED:
+                    self._publish_catalog()
                 else:
-                    self.library.refresh_library_config()
-            except (sqlite3.Error, OSError) as error:
-                self._set_project_storage_error(error)
+                    if self._project_storage_unavailable:
+                        self.init_store()
+                    self._clear_catalog_views()
+        except (sqlite3.Error, OSError, ValueError) as error:
+            self._set_project_storage_error(error)
+            self._clear_catalog_views()
 
     def logbox_append(self, e):
         """Write text to the logbox."""
@@ -2276,6 +2473,8 @@ class JLCPCBTools(wx.Dialog):
                     self.partlist_data_model.get_reference(item)
                     for item in self.footprint_list.GetSelections()
                 ]
+                if not references or not self._can_apply_user_assignments():
+                    return
                 self._apply_lcsc_assignments(
                     dict.fromkeys(references, lcsc), remember_part_preferences=True
                 )
@@ -2325,6 +2524,8 @@ class JLCPCBTools(wx.Dialog):
 
     def apply_selected_part_preferences(self, *_: object) -> None:
         """Apply matching part preferences to the selected rows."""
+        if not self._can_apply_user_assignments():
+            return
         assignments = {}
         try:
             for item in self.footprint_list.GetSelections():

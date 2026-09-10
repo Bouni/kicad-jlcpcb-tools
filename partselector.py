@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
@@ -166,7 +166,7 @@ class PartSelectorDialog(wx.Dialog):
             "",
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
-            choices=parent.library.categories,
+            choices=parent.library.categories if parent.is_catalog_available() else [],
             style=wx.CB_READONLY,
         )
         self.category.SetHint("e.g. Resistors")
@@ -744,8 +744,41 @@ class PartSelectorDialog(wx.Dialog):
         """
         self.search_timer.StartOnce(750)
 
-    def search(self, *_):
+    def refresh_catalog(self) -> None:
+        """Discard stale results and repopulate filters from the selected catalog."""
+        self.search_timer.Stop()
+        category = self.category.GetValue()
+        self.part_list_model.RemoveAll()
+        # Clear emits EVT_TEXT on Cocoa, even for an empty read-only combo.
+        # Suppress callbacks until both filters contain the final catalog state.
+        with wx.EventBlocker(self.category), wx.EventBlocker(self.subcategory):
+            self.category.Clear()
+            self.category.SetValue("")
+            self.subcategory.Clear()
+            self.subcategory.SetValue("")
+            if not self.parent.is_catalog_available():
+                self.result_count.SetLabel(
+                    "Parts catalog unavailable; download it to search."
+                )
+                return
+            categories = self.parent.library.categories
+            self.category.AppendItems(categories)
+            category = category if category in categories else "All"
+            self.category.SetValue(category)
+            if category != "All":
+                self.subcategory.AppendItems(
+                    self.parent.library.get_subcategories(category)
+                )
+        self.search()
+
+    def search(self, *_: object) -> None:
         """Search the library for parts that meet the search criteria."""
+        if not self.parent.is_catalog_available():
+            self.part_list_model.RemoveAll()
+            self.result_count.SetLabel(
+                "Parts catalog unavailable; download it to search."
+            )
+            return
         parameters = {
             "keyword": self.keyword.GetValue(),
             "manufacturer": self.manufacturer.GetValue(),
@@ -773,13 +806,15 @@ class PartSelectorDialog(wx.Dialog):
             return ""
         return self.keyword.GetValue()
 
-    def update_subcategories(self, *_):
+    def update_subcategories(self, *_: object) -> None:
         """Update the possible subcategory selection."""
+        if not self.parent.is_catalog_available():
+            self.refresh_catalog()
+            return
         self.subcategory.Clear()
-        if self.category.GetSelection() != wx.NOT_FOUND:
-            subcategories = self.parent.library.get_subcategories(
-                self.category.GetValue()
-            )
+        category = self.category.GetValue()
+        if self.category.GetSelection() != wx.NOT_FOUND and category != "All":
+            subcategories = self.parent.library.get_subcategories(category)
             self.subcategory.AppendItems(subcategories)
 
         # search now that categories might have changed
@@ -805,7 +840,7 @@ class PartSelectorDialog(wx.Dialog):
                 return float(price)
         return -1.0
 
-    def populate_part_list(self, parts, search_duration):
+    def populate_part_list(self, parts: Any, search_duration: float) -> None:
         """Populate the list with the result of the search."""
         search_duration_text = _format_duration(search_duration)
         start = time.time()

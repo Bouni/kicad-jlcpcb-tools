@@ -354,9 +354,11 @@ class SettingsDialog(wx.Dialog):
         )
         self.stock_concern_setting.SetToolTip(
             wx.ToolTip(
-                "Highlight Stock when fewer than 10 times one board's required "
-                "quantity are available. Groups populated BOM parts by LCSC number, "
-                "including parts excluded from CPL."
+                "Highlight Stock when availability is unknown or fewer than 10 "
+                "times the required quantity are available. Uses the BOM "
+                "estimator's board quantity, even when its panel is hidden. "
+                "Groups populated BOM parts by LCSC number, including parts "
+                "excluded from CPL."
             )
         )
         self.stock_concern_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)

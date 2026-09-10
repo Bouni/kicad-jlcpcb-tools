@@ -5,6 +5,7 @@
 try:
     from wx.lib.newevent import NewEvent  # pylint: disable=import-error
 except ImportError:  # pragma: no cover - test environments may not have wx
+
     def NewEvent():
         """Fallback event factory for non-wx test environments."""
 
@@ -15,9 +16,11 @@ except ImportError:  # pragma: no cover - test environments may not have wx
 
         return _DummyEvent, object()
 
+
 DownloadStartedEvent, EVT_DOWNLOAD_STARTED_EVENT = NewEvent()
 DownloadProgressEvent, EVT_DOWNLOAD_PROGRESS_EVENT = NewEvent()
 DownloadCompletedEvent, EVT_DOWNLOAD_COMPLETED_EVENT = NewEvent()
+DownloadFinishedEvent, EVT_DOWNLOAD_FINISHED_EVENT = NewEvent()
 
 UnzipCombiningStartedEvent, EVT_UNZIP_COMBINING_STARTED_EVENT = NewEvent()
 UnzipCombiningProgressEvent, EVT_UNZIP_COMBINING_PROGRESS_EVENT = NewEvent()
