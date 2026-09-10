@@ -129,6 +129,7 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             window = object.__new__(mainwindow.JLCPCBTools)
             window.settings = {"part_preferences": {"remember_lcsc_assignments": False}}
             window.store = Store(records)
+            window.bom_estimator_board_count = 5
             window.footprints = (
                 live
                 if live is not None
@@ -148,6 +149,10 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
             window.library = MagicMock()
+            window.library.state = mainwindow.LibraryState.INITIALIZED
+            window.library.get_parts_db_info.return_value = None
+            window.SetTitle = MagicMock()
+            window._part_preferences_applied_on_open = True
             window.library.get_part_details.side_effect = lambda lcsc: {
                 "stock": stock.get(lcsc),
                 "type": "Basic",
@@ -204,7 +209,7 @@ def test_populate_and_filtered_reopen_use_all_live_bom_demand(
         "R3": Footprint(bom=True),
         "R4": Footprint(dnp=True),
     }
-    window = workflow.make_window(records, {"C1": 19}, live)
+    window = workflow.make_window(records, {"C1": 95}, live)
     window.hide_pos_parts = True
     window.populate_footprint_list()
     workflow.drain()
@@ -227,13 +232,13 @@ def test_assignment_and_removal_update_old_and_new_siblings(
 ) -> None:
     """Moving one part clears its old group and flags the new group's sibling."""
     records = [part("R1"), part("R2"), part("R3", "C2")]
-    window = workflow.make_window(records, {"C1": 15, "C2": 15})
+    window = workflow.make_window(records, {"C1": 75, "C2": 75})
     window.populate_footprint_list()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
 
     window.assign_parts(
-        types.SimpleNamespace(lcsc="C2", stock="15", type="Basic", references=["R2"])
+        types.SimpleNamespace(lcsc="C2", stock="75", type="Basic", references=["R2"])
     )
     workflow.drain()
     assert window.store.parts["R2"]["lcsc"] == "C2"
@@ -255,14 +260,14 @@ def test_failed_assignment_transaction_preserves_existing_concerns(
     action: str,
 ) -> None:
     """A failed write cannot mutate rows, live assignments or concern state."""
-    window = workflow.make_window([part("R1"), part("R2")], {"C1": 15, "C2": 100})
+    window = workflow.make_window([part("R1"), part("R2")], {"C1": 75, "C2": 500})
     window.populate_footprint_list()
     workflow.drain()
     window.store.fail_write = True
     if action == "assignment":
         window.assign_parts(
             types.SimpleNamespace(
-                lcsc="C2", stock="100", type="Basic", references=["R2"]
+                lcsc="C2", stock="500", type="Basic", references=["R2"]
             )
         )
     else:
@@ -281,7 +286,7 @@ def test_bom_and_pos_toggle_events_recalculate_current_board_demand(
     workflow: types.SimpleNamespace,
 ) -> None:
     """BOM changes count; POS-only changes leave the required stock unchanged."""
-    window = workflow.make_window([part("R1"), part("R2")], {"C1": 15})
+    window = workflow.make_window([part("R1"), part("R2")], {"C1": 75})
     window.populate_footprint_list()
     workflow.drain()
     window.footprint_list.GetSelections.return_value = [
@@ -298,20 +303,12 @@ def test_bom_and_pos_toggle_events_recalculate_current_board_demand(
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
 
 
-def test_stock_refresh_and_empty_board_clear_stale_concerns(
+def test_empty_board_clears_stale_concerns(
     workflow: types.SimpleNamespace,
 ) -> None:
-    """Refresh supply and rebuilds remove marks once their evidence disappears."""
-    stock = {"C1": 9}
+    """Rebuilding an emptied board removes concerns for deleted footprints."""
+    stock = {"C1": 49}
     window = workflow.make_window([part("R1")], stock)
-    window.populate_footprint_list()
-    workflow.drain()
-    assert window.partlist_data_model.stock_concern_refs == {"R1"}
-    stock["C1"] = 10
-    window.populate_footprint_list()
-    workflow.drain()
-    assert window.partlist_data_model.stock_concern_refs == set()
-    stock["C1"] = 0
     window.populate_footprint_list()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == {"R1"}
@@ -324,8 +321,8 @@ def test_stock_refresh_and_empty_board_clear_stale_concerns(
 def test_event_burst_coalesces_and_catalog_lookup_is_once_per_group(
     workflow: types.SimpleNamespace,
 ) -> None:
-    """A single deferred recompute reads one catalog quantity per matching LCSC."""
-    window = workflow.make_window([part("R1"), part("R2")], {"C1": 15})
+    """A single deferred recompute reuses warmed quantities for matching LCSC."""
+    window = workflow.make_window([part("R1"), part("R2")], {"C1": 75})
     window.populate_footprint_list()
     workflow.drain()
     window.library.get_part_details.reset_mock()
@@ -334,17 +331,17 @@ def test_event_burst_coalesces_and_catalog_lookup_is_once_per_group(
     window.on_bom_data_changed(None)
     assert len(workflow.idle) == 1
     workflow.drain()
-    window.library.get_part_details.assert_called_once_with("C1")
+    window.library.get_part_details.assert_not_called()
     window.recompute_bom_estimate.assert_called_once()
 
 
 @pytest.mark.parametrize("source", ["store", "catalog"])
-def test_failed_recompute_clears_unknown_concerns_and_retry_restores_them(
+def test_failed_recompute_keeps_unknown_stock_risky_and_retry_available(
     workflow: types.SimpleNamespace,
     source: str,
 ) -> None:
-    """Unavailable evidence clears stale marks and does not wedge the event latch."""
-    window = workflow.make_window([part("R1")], {"C1": 9})
+    """Unknown availability warns; a failed project read clears stale reference marks."""
+    window = workflow.make_window([part("R1")], {"C1": 49})
     window.populate_footprint_list()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == {"R1"}
@@ -354,13 +351,16 @@ def test_failed_recompute_clears_unknown_concerns_and_retry_restores_them(
             side_effect=sqlite3.OperationalError("read failed")
         )
     else:
+        window._invalidate_catalog_details()
         original = window.library.get_part_details.side_effect
         window.library.get_part_details.side_effect = sqlite3.OperationalError(
             "read failed"
         )
     window.on_bom_data_changed(None)
     workflow.drain()
-    assert window.partlist_data_model.stock_concern_refs == set()
+    assert window.partlist_data_model.stock_concern_refs == (
+        {"R1"} if source == "catalog" else set()
+    )
     assert window._bom_recompute_scheduled is False
     if source == "store":
         window.store.read_all = original
@@ -375,7 +375,7 @@ def test_setting_toggle_immediately_clears_and_restores_stock_style(
     workflow: types.SimpleNamespace,
 ) -> None:
     """Disabling the option repaints the stock cell; reenabling recalculates it."""
-    window = workflow.make_window([part("R1")], {"C1": 9})
+    window = workflow.make_window([part("R1")], {"C1": 49})
     window.populate_footprint_list()
     workflow.drain()
     column = window.partlist_data_model.columns["STOCK_COL"]
@@ -413,7 +413,7 @@ def test_stock_concern_default_and_saved_setting_survive_reopening(
     path.write_text(json.dumps(settings), encoding="utf-8")
     expected = saved if saved is not None else True
     for _ in range(2):
-        window = workflow.make_window([part("R1")], {"C1": 9})
+        window = workflow.make_window([part("R1")], {"C1": 49})
         del window.save_settings
         window.load_settings()
         window.populate_footprint_list()
@@ -479,3 +479,39 @@ def test_real_settings_constructor_defaults_missing_concern_to_enabled() -> None
     dialog = _dialog(settings)
     assert dialog.stock_concern_setting.GetValue() is True
     assert len(_wx.posted_events) == before
+
+
+@pytest.mark.parametrize("entry", ["spin", "text"])
+def test_board_quantity_handlers_update_concern_without_waiting_for_bom_event(
+    workflow: types.SimpleNamespace, entry: str
+) -> None:
+    """Estimator quantity changes concern immediately, including its hidden panel."""
+    window = workflow.make_window([part("R1"), part("R2")], {"C1": 199})
+    window.bom_estimator_board_count = 5
+    window.bom_estimator_show = False
+    window.populate_footprint_list()
+    workflow.drain()
+    assert window.partlist_data_model.stock_concern_refs == set()
+    value = [10]
+    control = types.SimpleNamespace(
+        GetValue=lambda: value[0], SetValue=lambda new: value.__setitem__(0, new)
+    )
+    if entry == "spin":
+        window.on_bom_estimator_board_count_spinctrl(
+            types.SimpleNamespace(GetEventObject=lambda: control)
+        )
+    else:
+        window.bom_estimator_boards_input = control
+        window.bom_estimator_text_timer = MagicMock()
+        window.on_bom_estimator_board_count_text()
+        window.bom_estimator_text_timer.StartOnce.assert_called_once_with(300)
+        window.on_bom_estimator_board_count_text_timer()
+    assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
+    assert window.settings["general"]["bom_estimator_boards"] == 10
+    assert workflow.posted == []
+    value[0] = 1
+    window.on_bom_estimator_board_count_spinctrl(
+        types.SimpleNamespace(GetEventObject=lambda: control)
+    )
+    assert value[0] == 5
+    assert window.partlist_data_model.stock_concern_refs == set()

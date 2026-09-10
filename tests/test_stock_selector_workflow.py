@@ -1,6 +1,6 @@
 """Stock presentation survives complete selector and assignment workflows."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
 import json
 from pathlib import Path
 from typing import Any
@@ -178,3 +178,283 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
         assert reopened.get_part("R1")["stock"] == 22095
         assert reopened.get_part("R1")["lcsc"] == "C200"
         layout_ui._drain_callbacks()
+
+
+class _CatalogComboBox:
+    """Retain read-only choices and dispatch Cocoa's synchronous Clear text event."""
+
+    def __init__(
+        self, *_args: Any, choices: Sequence[str] = (), **_kwargs: Any
+    ) -> None:
+        self.items = list(choices)
+        self.value = ""
+        self.selection = -1
+        self.handlers: dict[Any, Callable[..., None]] = {}
+        self.blocked = 0
+
+    def Bind(self, event: Any, handler: Callable[..., None]) -> None:
+        self.handlers[event] = handler
+
+    def SetHint(self, _hint: str) -> None:
+        pass
+
+    def GetValue(self) -> str:
+        return self.value
+
+    def SetValue(self, value: str) -> None:
+        # A read-only native combo only accepts an existing choice and is silent.
+        if value in self.items:
+            self.value = value
+            self.selection = self.items.index(value)
+
+    def GetSelection(self) -> int:
+        return self.selection
+
+    def Clear(self) -> None:
+        self.items.clear()
+        self.value = ""
+        self.selection = -1
+        self.emit(layout_ui.partselector.wx.EVT_TEXT)
+
+    def AppendItems(self, items: list[str]) -> None:
+        self.items.extend(items)
+
+    def emit(self, event: Any) -> None:
+        if not self.blocked and event in self.handlers:
+            self.handlers[event](MagicMock())
+
+    def select(self, value: str) -> None:
+        assert value in self.items
+        self.value = value
+        self.selection = self.items.index(value)
+        self.emit(layout_ui.partselector.wx.EVT_COMBOBOX)
+
+
+class _CatalogEventBlocker:
+    """Suppress dispatch in scope and restore it even when a refresh raises."""
+
+    def __init__(self, control: _CatalogComboBox) -> None:
+        self.control = control
+        self.control.blocked += 1
+
+    def __enter__(self) -> "_CatalogEventBlocker":
+        return self
+
+    def __exit__(self, *_exception: Any) -> None:
+        self.control.blocked -= 1
+
+
+class _SelectorCatalog:
+    """Record real search parameters and inject metadata failures on demand."""
+
+    def __init__(self) -> None:
+        self.category_names = ["All", "", "Resistors", "Capacitors", "Old category"]
+        self.subcategories = {
+            "": [],
+            "Resistors": ["Chip resistors"],
+            "Capacitors": ["Ceramic capacitors"],
+            "Old category": ["Old subcategory"],
+        }
+        self.fail_at = ""
+        self.queries: list[dict[str, Any]] = []
+        self.subcategory_queries: list[str] = []
+
+    @property
+    def categories(self) -> list[str]:
+        if self.fail_at == "categories":
+            raise RuntimeError("catalog categories failed")
+        return self.category_names
+
+    def get_subcategories(self, category: str) -> list[str]:
+        if self.fail_at == "subcategories":
+            raise RuntimeError("catalog subcategories failed")
+        self.subcategory_queries.append(category)
+        return self.subcategories[category]
+
+    def search(self, parameters: dict[str, Any]) -> list[tuple[Any, ...]]:
+        self.queries.append(parameters)
+        return []
+
+
+@pytest.fixture
+def catalog_selector(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    """Open the production constructor with controls that retain its bindings."""
+    with stock_modules() as modules:
+        monkeypatch.setattr(
+            layout_ui.partselector,
+            "PartSelectorDataModel",
+            modules.datamodel.PartSelectorDataModel,
+        )
+        monkeypatch.setattr(layout_ui.partselector.wx, "ComboBox", _CatalogComboBox)
+        monkeypatch.setattr(
+            layout_ui.partselector.wx,
+            "EventBlocker",
+            _CatalogEventBlocker,
+            raising=False,
+        )
+        window = layout_ui._open_main(monkeypatch, settings_ui._settings(True))
+        window.library = _SelectorCatalog()
+        selector = layout_ui._open_selector(
+            monkeypatch, {}, parent=window, real_search=True
+        )
+        window.library.queries.clear()
+        try:
+            yield selector
+        finally:
+            selector.Close()
+            window.Close()
+            layout_ui._drain_callbacks()
+
+
+def test_catalog_reset_repeatedly_unavailable_and_category_event_are_bounded(
+    catalog_selector: Any,
+) -> None:
+    """Clearing populated or empty native-style controls cannot reenter refresh."""
+    selector = catalog_selector
+    selector.category.SetValue("Old category")
+    selector.subcategory.AppendItems(["Old subcategory"])
+    selector.subcategory.SetValue("Old subcategory")
+    _populate_selector(selector)
+    selector.parent._catalog_ready = False
+    selector.parent.library.fail_at = "categories"
+
+    for _attempt in range(2):
+        selector.search_timer.StartOnce(750)
+        selector.search_timer.Stop.reset_mock()
+        selector.refresh_catalog()
+        selector.search_timer.Stop.assert_called_once_with()
+        assert selector.category.items == selector.subcategory.items == []
+        assert selector.category.GetValue() == selector.subcategory.GetValue() == ""
+        assert selector.part_list_model.data == []
+        assert selector.category.blocked == selector.subcategory.blocked == 0
+        selector.result_count.SetLabel.assert_called_with(
+            "Parts catalog unavailable; download it to search."
+        )
+
+    selector.category.emit(layout_ui.partselector.wx.EVT_TEXT)
+    selector.category.emit(layout_ui.partselector.wx.EVT_COMBOBOX)
+    selector.search()
+    assert selector.parent.library.queries == []
+    assert selector.parent.library.subcategory_queries == []
+
+
+@pytest.mark.parametrize(
+    ("saved_category", "expected_category", "expected_subcategories"),
+    [
+        ("Resistors", "Resistors", ["Chip resistors"]),
+        ("Old category", "All", []),
+        ("All", "All", []),
+    ],
+)
+def test_ready_catalog_reset_searches_only_after_filters_are_complete(
+    catalog_selector: Any,
+    saved_category: str,
+    expected_category: str,
+    expected_subcategories: list[str],
+) -> None:
+    """Preserved and removed categories each lead to one final filtered search."""
+    selector = catalog_selector
+    selector.category.SetValue(saved_category)
+    selector.subcategory.AppendItems(["Old subcategory"])
+    selector.subcategory.SetValue("Old subcategory")
+    selector.parent.library.category_names.remove("Old category")
+
+    for _attempt in range(2):
+        selector.parent.library.queries.clear()
+        selector.refresh_catalog()
+        assert selector.category.GetValue() == expected_category
+        assert selector.subcategory.GetValue() == ""
+        assert selector.subcategory.items == expected_subcategories
+        assert len(selector.parent.library.queries) == 1
+        parameters = selector.parent.library.queries[0]
+        assert parameters["category"] == expected_category
+        assert parameters["subcategory"] == ""
+
+
+def test_catalog_recovers_and_retains_real_category_selection_handler(
+    catalog_selector: Any,
+) -> None:
+    """A pending download can recover without leaving category events blocked."""
+    selector = catalog_selector
+    selector.parent._catalog_ready = False
+    selector.refresh_catalog()
+    selector.parent._catalog_ready = True
+    selector.refresh_catalog()
+    assert len(selector.parent.library.queries) == 1
+    assert selector.parent.library.queries[0]["category"] == ""
+    assert selector.parent.library.queries[0]["subcategory"] == ""
+    selector.parent.library.queries.clear()
+
+    selector.category.select("Resistors")
+    assert selector.subcategory.items == ["Chip resistors"]
+    assert len(selector.parent.library.queries) == 1
+    assert selector.parent.library.queries[0]["category"] == "Resistors"
+    assert selector.parent.library.queries[0]["subcategory"] == ""
+
+
+def test_selecting_all_after_a_category_uses_no_display_only_subcategory_key(
+    catalog_selector: Any,
+) -> None:
+    """The All label is absent from Library.category_map and must not be queried."""
+    selector = catalog_selector
+    selector.category.select("Resistors")
+    assert selector.subcategory.items == ["Chip resistors"]
+    selector.parent.library.queries.clear()
+    selector.parent.library.subcategory_queries.clear()
+
+    selector.category.select("All")
+    assert selector.subcategory.items == []
+    assert selector.subcategory.GetValue() == ""
+    assert selector.parent.library.subcategory_queries == []
+    assert len(selector.parent.library.queries) == 1
+    assert selector.parent.library.queries[0]["category"] == "All"
+    assert selector.parent.library.queries[0]["subcategory"] == ""
+
+
+@pytest.mark.parametrize("failure", ["categories", "subcategories"])
+def test_catalog_reset_exception_restores_handlers_for_retry_and_selection(
+    catalog_selector: Any, failure: str
+) -> None:
+    """Metadata errors cannot query half-reset filters or leave handlers blocked."""
+    selector = catalog_selector
+    selector.category.SetValue("Resistors")
+    selector.parent.library.fail_at = failure
+    with pytest.raises(RuntimeError, match=f"catalog {failure} failed"):
+        selector.refresh_catalog()
+    assert selector.parent.library.queries == []
+    assert selector.category.blocked == selector.subcategory.blocked == 0
+    selector.parent.library.fail_at = ""
+
+    selector.refresh_catalog()
+    assert len(selector.parent.library.queries) == 1
+    selector.parent.library.queries.clear()
+    selector.category.select("Capacitors")
+    assert selector.subcategory.items == ["Ceramic capacitors"]
+    assert len(selector.parent.library.queries) == 1
+    assert selector.parent.library.queries[0]["category"] == "Capacitors"
+
+
+def test_selector_constructor_never_queries_an_unavailable_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opening a selector while a catalog download is pending must remain usable."""
+
+    class PendingCatalog:
+        """Fail immediately if constructor accidentally loads absent category tables."""
+
+        @property
+        def categories(self) -> list[str]:
+            raise AssertionError("unavailable category table queried")
+
+    window = layout_ui._open_main(monkeypatch, settings_ui._settings(True))
+    window._catalog_ready = False
+    window.library = PendingCatalog()
+    selector = layout_ui._open_selector(
+        monkeypatch, {}, parent=window, real_search=True
+    )
+    selector.result_count.SetLabel.assert_called_with(
+        "Parts catalog unavailable; download it to search."
+    )
+    selector.Close()
+    window.Close()
+    layout_ui._drain_callbacks()

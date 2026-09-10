@@ -1,4 +1,4 @@
-"""Stock concern follows exact supply and one board's grouped BOM demand."""
+"""Stock concern follows availability and grouped demand for the board quantity."""
 
 from collections.abc import Callable, Iterator
 import types
@@ -45,6 +45,49 @@ def test_strict_ten_times_grouped_board_usage(
     )
 
 
+@pytest.mark.parametrize("stock, expected", [(0, True), (4999, True), (5000, False)])
+def test_board_quantity_multiplies_grouped_usage(
+    concern: Callable[..., set[str]], stock: int, expected: bool
+) -> None:
+    """Five populated copies on each of 100 boards need 5000 stock for headroom."""
+    parts = [part(f"R{index}") for index in range(1, 6)]
+    assert concern(parts, lambda _lcsc: stock, board_count=100) == (
+        {f"R{index}" for index in range(1, 6)} if expected else set()
+    )
+
+
+def test_board_quantity_changes_do_not_change_grouping_or_duplicate_references(
+    concern: Callable[..., set[str]],
+) -> None:
+    """Count unique populated references and keep different LCSC groups separate."""
+    parts = [
+        part("R1"),
+        part("R1"),
+        part("R2", exclude_from_pos=True),
+        part("R3", exclude_from_bom=True),
+        part("R4", is_dnp=True),
+        part("R5", "C2"),
+    ]
+    get_stock = MagicMock(side_effect={"C1": 99, "C2": 50}.__getitem__)
+    assert concern(parts, get_stock, board_count=5) == {"R1", "R2"}
+    assert sorted(invocation.args for invocation in get_stock.call_args_list) == [
+        ("C1",),
+        ("C2",),
+    ]
+    assert concern(parts, get_stock, board_count=1) == set()
+
+
+@pytest.mark.parametrize("board_count", [0, -1, True, False, 1.5, "5", None])
+def test_board_quantity_must_be_a_positive_integer(
+    concern: Callable[..., set[str]], board_count: object
+) -> None:
+    """Reject invalid demand instead of silently reporting stock as sufficient."""
+    get_stock = MagicMock()
+    with pytest.raises(ValueError, match="positive integer"):
+        concern([part("R1")], get_stock, board_count=board_count)
+    get_stock.assert_not_called()
+
+
 def test_matching_lcsc_groups_across_values_and_footprints(
     concern: Callable[..., set[str]],
 ) -> None:
@@ -78,13 +121,29 @@ def test_only_populated_assigned_bom_references_count_or_highlight(
 
 
 @pytest.mark.parametrize(
-    "stock", [None, "", "unknown", "2k", "-1", -1, 1.5, "1.5", True]
+    "stock", [None, "", " ", "unknown", "2k", "5000+", "-1", -1, 1.5, "1.5", True]
 )
-def test_unknown_and_invalid_supply_never_raise_a_false_concern(
+def test_unknown_and_invalid_supply_are_concerns(
     concern: Callable[..., set[str]], stock: object
 ) -> None:
-    """Only an exact known nonnegative integer quantity can trigger concern."""
-    assert concern([part("R1")], lambda _lcsc: stock) == set()
+    """Assigned populated demand is at risk when exact availability is unknown."""
+    assert concern([part("R1")], lambda _lcsc: stock) == {"R1"}
+
+
+def test_unknown_supply_only_highlights_populated_assigned_bom_references(
+    concern: Callable[..., set[str]],
+) -> None:
+    """Unknown supply does not turn unassigned or excluded rows into concerns."""
+    parts = [
+        part("R1"),
+        part("R2", exclude_from_pos=True),
+        part("R3", exclude_from_bom=True),
+        part("R4", is_dnp=True),
+        part("R5", lcsc=""),
+    ]
+    get_stock = MagicMock(return_value=None)
+    assert concern(parts, get_stock) == {"R1", "R2"}
+    get_stock.assert_called_once_with("C1")
 
 
 def test_raw_integer_string_is_used_without_rounding(

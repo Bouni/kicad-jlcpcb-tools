@@ -343,6 +343,9 @@ def test_startup_store_population_recovers_invalid_saved_corrections(
     }
     window.start_assembly_enrichment = MagicMock()
     window.recompute_bom_estimate = MagicMock()
+    board = window.pcbnew.GetBoard()
+    board.GetFileName = lambda: str(Path(window.project_path) / "board.kicad_pcb")
+    window.init_fabrication()
     window.store = None
 
     window.init_store()
