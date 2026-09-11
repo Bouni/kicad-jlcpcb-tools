@@ -72,9 +72,13 @@ uncorrected placement. Unreadable storage or unresolved records are shown as
 
 The parts table and placement output use the same correction selection rules.
 Reference matches take priority over value matches, which take priority over
-footprint matches. For each of those fields, patterns matching the end of the
-text are tried before ordinary substring matches. Ties retain database order.
-For example, `SOT-23-3` wins over `SOT-23` for a footprint named `SOT-23-3`.
+footprint matches. Within a field, every pattern is searched against the text,
+and the pattern whose match consumes the most characters wins. Ties retain
+database order. For example, `SOT-23-3` wins over `SOT-23` for a footprint
+named `SOT-23-3`, and `^SOP-4_` wins over `^SOP-(?!18_)` for
+`SOP-4_3.8x4.1mm_P2.54mm` because a lookahead consumes nothing. Matching the
+end of the text carries no special priority: `SOT-23` wins over `23$` for
+`SOT-23-extra-23`.
 
 A matched correction of zero degrees and zero offset still takes precedence
 over lower-priority rules. The table labels the match source as `(ref)`, `(val)`,

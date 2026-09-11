@@ -208,16 +208,26 @@ def test_patterns_preserve_supported_regex_text(data, pattern):
         "",
         " \t\n",
         "[",
-        "(?i)SOT",
         "a{999999999999999999999}",
         "(" * 1000,
     ],
 )
-def test_invalid_patterns_include_anchored_matcher_failures(data, pattern):
-    """Reject invalid regexes, including raw-valid global flag expressions."""
+def test_invalid_patterns_are_rejected(data, pattern):
+    """Reject patterns that are not usable regular expressions."""
     with pytest.raises(data.CorrectionDataError) as raised:
         data.validate_correction(pattern, 0, (0, 0))
     assert raised.value.issues[0].field == "pattern"
+
+
+def test_a_global_flag_pattern_is_usable(data):
+    """A leading (?i) is a valid regex, and now survives to match with.
+
+    It only ever failed validation because the discarded anchored pass wrapped
+    the pattern in "(?:...)$", which moves the flag off the front of the
+    expression -- where Python requires it to be.
+    """
+    correction = data.Correction("(?i)SOT-23", 90, (0, 0))
+    assert data.find_correction((correction,), "Package:sot-23") is correction
 
 
 def test_validation_aggregates_all_fields(data):
@@ -475,7 +485,6 @@ def test_parser_requires_decoded_text(data, value):
         ("C1", float("inf"), (0, 0), "rotation"),
         ("C1", True, (0, 0), "rotation"),
         ("[", 0, (0, 0), "pattern"),
-        ("(?i)C1", 0, (0, 0), "pattern"),
         (" ", 0, (0, 0), "pattern"),
         (123, 0, (0, 0), "pattern"),
         ("C1", 0, (float("nan"), 0), "offset_x"),
@@ -549,7 +558,7 @@ def test_dataclass_replace_normalizes_valid_inputs(data: ModuleType) -> None:
     assert correction == data.Correction("C1", -90, (-1.25, 2.5))
 
 
-def test_dataclass_replace_pattern_updates_both_matching_passes(
+def test_dataclass_replace_pattern_updates_the_matching_expression(
     data: ModuleType,
 ) -> None:
     """A replacement uses its new pattern while the original remains usable."""
@@ -557,7 +566,7 @@ def test_dataclass_replace_pattern_updates_both_matching_passes(
     replacement = replace(original, pattern="NEW")
     fallback = data.Correction("prefix", -90, (0, 0))
 
-    assert data.find_correction((fallback, replacement), "prefix-NEW") is replacement
+    assert data.find_correction((fallback, replacement), "only-NEW") is replacement
     assert data.find_correction((replacement,), "prefix-NEW-suffix") is replacement
     assert data.find_correction((replacement,), "prefix-OLD") is None
     assert data.find_correction((replacement,), "prefix-OLD-suffix") is None
