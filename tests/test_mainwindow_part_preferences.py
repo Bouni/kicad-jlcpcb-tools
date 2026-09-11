@@ -219,8 +219,6 @@ def test_assignment_with_incomplete_part_preference_key_still_updates_project(
     [
         {"LCSC": "Z123"},
         {"LCSC": "A456"},
-        {"LCSC": "c123"},
-        {"LCSC": "C123 "},
         {"LCSC": "not assigned yet"},
         {"LCSC": " \t "},
         {"LCSC": "", "JLCPCB": "Z123"},
@@ -250,6 +248,31 @@ def test_opening_preserves_every_occupied_assignment_field(
     reopened.init_store()
 
     assert {name: field.text for name, field in footprint.fields.items()} == fields
+
+
+@pytest.mark.parametrize("text", ["c123", "C123 "])
+def test_opening_reads_an_untidily_typed_assignment_as_the_part_it_names(
+    make_window: Callable[..., Any], text: str
+) -> None:
+    """A field needing only normalisation names a part, so it is not empty.
+
+    These two spellings used to be rejected identifiers, and the fill only
+    left them alone because the occupied-field check caught them. Now the
+    reader normalises before testing (issue #773), so the part is assigned to
+    C123 outright, the fill skips it as it skips any assigned part, and
+    nothing is logged or written back over what the user typed.
+    """
+    footprint = Footprint(fields={"LCSC": text})
+    window = make_window(
+        footprints=[footprint], part_preferences={("R_0603", "10k"): "C999"}
+    )
+
+    window.init_store()
+
+    assert window.store.get_part("R1")["lcsc"] == "C123"
+    assert info_messages(window) == []
+    window.library.get_part_preference.assert_not_called()
+    assert footprint.fields["LCSC"].text == text
 
 
 @pytest.mark.parametrize("action", ["open", "apply"])
