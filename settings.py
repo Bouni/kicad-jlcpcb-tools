@@ -341,7 +341,7 @@ class SettingsDialog(wx.Dialog):
         )
         self.simplify_stock_setting.SetToolTip(
             wx.ToolTip(
-                "Show compact stock in the parts lists, for example 22k or 8.8M. "
+                "Show compact stock in the parts lists, for example 22 k or 8.8 M. "
                 "Turn off to show exact quantities."
             )
         )

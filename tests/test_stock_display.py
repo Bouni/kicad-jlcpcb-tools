@@ -15,25 +15,25 @@ from .wx_harness import load_siblings
         (0, "0"),
         (1, "1"),
         (999, "999"),
-        (1000, "1k"),
-        (1099, "1k"),
-        (1100, "1.1k"),
-        (7260, "7.2k"),
-        (9999, "9.9k"),
-        (10000, "10k"),
-        (22095, "22k"),
-        (888000, "888k"),
-        (999999, "999k"),
-        (1000000, "1M"),
-        (1099999, "1M"),
-        (1100000, "1.1M"),
-        (8880000, "8.8M"),
-        (9999999, "9.9M"),
-        (10000000, "10M"),
-        (999999999, "999M"),
-        (1000000000, "1B"),
-        (7260000000, "7.2B"),
-        (22095000000, "22B"),
+        (1000, "1 k"),
+        (1099, "1 k"),
+        (1100, "1.1 k"),
+        (7260, "7.2 k"),
+        (9999, "9.9 k"),
+        (10000, "10 k"),
+        (22095, "22 k"),
+        (888000, "888 k"),
+        (999999, "999 k"),
+        (1000000, "1 M"),
+        (1099999, "1 M"),
+        (1100000, "1.1 M"),
+        (8880000, "8.8 M"),
+        (9999999, "9.9 M"),
+        (10000000, "10 M"),
+        (999999999, "999 M"),
+        (1000000000, "1 B"),
+        (7260000000, "7.2 B"),
+        (22095000000, "22 B"),
     ],
 )
 @pytest.mark.parametrize("as_string", [False, True])
@@ -74,7 +74,7 @@ def test_models_default_to_compact_display_and_preserve_raw_stock(kind: str) -> 
         model.AddEntry(row)
         item = model.ObjectToItem(model.data[0])
 
-        assert model.GetValue(item, column) == "22k"
+        assert model.GetValue(item, column) == "22 k"
         assert model.get_all()[0][column] == "22095"
         if kind == "selector":
             assert model.get_stock(item) == "22095"
@@ -85,7 +85,7 @@ def test_models_default_to_compact_display_and_preserve_raw_stock(kind: str) -> 
         assert ("value", (item, column)) in model.notifications
 
         model.set_simplify_stock(True)
-        assert model.GetValue(item, column) == "22k"
+        assert model.GetValue(item, column) == "22 k"
         assert model.get_all()[0][column] == "22095"
 
 
@@ -119,7 +119,7 @@ def test_stock_sort_uses_exact_numeric_values_in_both_modes(
             assert (
                 model.GetValue(first, column)
                 == model.GetValue(second, column)
-                == "7.2k"
+                == "7.2 k"
             )
 
 
@@ -132,7 +132,7 @@ def test_assignment_and_removal_keep_exact_stock_until_rendering() -> None:
         column = model.columns["STOCK_COL"]
 
         model.set_lcsc("R1", "C2", "Basic", "8880000", "new params")
-        assert model.GetValue(item, column) == "8.8M"
+        assert model.GetValue(item, column) == "8.8 M"
         assert model.get_all()[0][column] == "8880000"
         model.set_simplify_stock(False)
         assert model.GetValue(item, column) == "8880000"

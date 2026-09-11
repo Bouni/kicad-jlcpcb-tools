@@ -18,7 +18,15 @@ def parse_stock(value: object) -> Optional[int]:
 
 
 def format_stock(value: object, simplified: bool = True) -> str:
-    """Truncate stock to compact units without overstating available supply."""
+    """Truncate stock to spaced compact labels without overstating supply.
+
+    BIPM, The International System of Units (SI Brochure), 9th ed., §5.4.3:
+    SI formatting requires a space between a numerical value and its unit
+    symbol (e.g. 10 V, not 10V).
+    https://www.bipm.org/documents/20126/41483022/SI-Brochure-9-EN.pdf
+
+    Stock uses magnitude abbreviations; adopt the same spacing convention.
+    """
     text = "" if value is None else str(value)
     stock = parse_stock(value)
     if not simplified or stock is None or stock < 1000:
@@ -28,8 +36,8 @@ def format_stock(value: object, simplified: bool = True) -> str:
             whole = stock // unit
             tenth = (stock % unit) * 10 // unit
             if whole < 10 and tenth:
-                return f"{whole}.{tenth}{suffix}"
-            return f"{whole}{suffix}"
+                return f"{whole}.{tenth} {suffix}"
+            return f"{whole} {suffix}"
     return text
 
 

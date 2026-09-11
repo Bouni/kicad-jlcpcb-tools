@@ -70,8 +70,10 @@ def test_open_selector_updates_with_main_setting_and_reopens_exact_stock(
         selector = layout_ui._open_selector(monkeypatch, {}, parent=window)
         selected = _populate_selector(selector)
         main_item = window.partlist_data_model.data[0]
-        assert _stock_label(window.partlist_data_model, main_item, "STOCK_COL") == "22k"
-        assert _stock_label(selector.part_list_model, selected, "stock") == "22k"
+        assert (
+            _stock_label(window.partlist_data_model, main_item, "STOCK_COL") == "22 k"
+        )
+        assert _stock_label(selector.part_list_model, selected, "stock") == "22 k"
 
         dialog = settings_ui.SettingsDialog(window)
         for enabled in (False, True, False):
@@ -79,7 +81,7 @@ def test_open_selector_updates_with_main_setting_and_reopens_exact_stock(
             events = settings_ui._fire(dialog.simplify_stock_setting)
             assert len(events) == 1
             window.update_settings(events[0])
-            expected = "22k" if enabled else "22095"
+            expected = "22 k" if enabled else "22095"
             assert (
                 _stock_label(window.partlist_data_model, main_item, "STOCK_COL")
                 == expected
@@ -152,7 +154,7 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
         )
 
         assert _stock_label(selector.part_list_model, item, "stock") == (
-            "22k" if simplified else "22095"
+            "22 k" if simplified else "22095"
         )
         selector.select_part()
         assert len(queued) == 1
@@ -170,7 +172,7 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
         model = window.partlist_data_model
         assert model.get_all()[0][model.columns["STOCK_COL"]] == "22095"
         assert _stock_label(model, model.data[0], "STOCK_COL") == (
-            "22k" if simplified else "22095"
+            "22 k" if simplified else "22095"
         )
         reopened = mainwindow.Store(
             window, window.project_path, window.pcbnew.GetBoard()

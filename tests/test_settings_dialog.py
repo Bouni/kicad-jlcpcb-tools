@@ -492,7 +492,7 @@ def test_simplify_stock_event_updates_display_persists_and_reopens(
 
         model = parent.partlist_data_model
         assert model.GetValue(model.data[0], model.columns["STOCK_COL"]) == (
-            "22k" if enabled else "22095"
+            "22 k" if enabled else "22095"
         )
         assert model.get_all()[0][model.columns["STOCK_COL"]] == "22095"
         parent.settings = {}

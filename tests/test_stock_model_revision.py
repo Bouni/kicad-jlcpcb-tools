@@ -243,7 +243,7 @@ def test_catalog_recovery_refreshes_matching_rows_without_resetting_board_state(
             assert model._decode_params_value(row[model.columns["PARAMS_COL"]]) == (
                 "updated params"
             )
-            assert model.GetValue(row, model.columns["STOCK_COL"]) == "22k"
+            assert model.GetValue(row, model.columns["STOCK_COL"]) == "22 k"
             for column in range(len(row)):
                 if column not in changed_columns:
                     assert row[column] == original[column]

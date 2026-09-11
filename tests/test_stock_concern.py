@@ -265,7 +265,7 @@ def test_stock_presentation_flags_are_independent(
     model.set_simplify_stock(simplify)
     model.set_stock_concern_refs({"R1"} if highlight else set())
     column = model.columns["STOCK_COL"]
-    assert model.GetValue(model.data[0], column) == ("7.2k" if simplify else "7260")
+    assert model.GetValue(model.data[0], column) == ("7.2 k" if simplify else "7260")
     attr = CellAttr()
     assert model.GetAttr(model.data[0], column, attr) is highlight
     assert attr.background is None
