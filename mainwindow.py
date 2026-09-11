@@ -1661,8 +1661,16 @@ class JLCPCBTools(wx.Dialog):
         focused_item = self.footprint_list.GetCurrentItem()
         if not focused_item.IsOk():
             focused_item = selected_item
+        alike_items = self.partlist_data_model.select_alike(selected_item)
+        if all(self.footprint_list.IsSelected(item) for item in alike_items):
+            # Nothing to add. Replacing the selection with itself is not free:
+            # on GTK it moves the selection anchor onto the survivor, so a
+            # following shift-click ranges from the wrong row, and putting the
+            # focus back scrolls the focused row into view even when the
+            # focus did not move. Leave the control's native state alone.
+            return
         alike = dv.DataViewItemArray()
-        for alike_item in self.partlist_data_model.select_alike(selected_item):
+        for alike_item in alike_items:
             alike.append(alike_item)
         self.select_alike_in_progress = True
         try:

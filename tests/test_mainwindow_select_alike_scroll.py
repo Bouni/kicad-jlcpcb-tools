@@ -11,6 +11,12 @@ two-row selection leaves the *other* row selected but the focus on the row
 that was clicked, so restoring the focus that was there - rather than focusing
 the selected row - is what keeps the viewport still in that case too.
 
+When the alike rows are all selected already there is nothing to expand, and
+the control is not touched at all. Replacing a selection with itself is not
+free: on GTK it moves the selection anchor, so a following shift-click ranges
+from the wrong row, and re-focusing a row scrolls it into view even when the
+focus did not move - which is how enabling the option used to jump the list.
+
 ``mainwindow.py`` only imports with a full set of GUI stubs in place, so these
 tests load it through the shared harness.
 """
@@ -49,9 +55,15 @@ class _FakeList:
     it, ``Select``/``SetSelections`` focus the row they selected last, and
     ``SetCurrentItem`` moves the focus without touching the selection.
 
-    The scroll is deferred rather than immediate because that is what the real
-    control does: it lands after the click has been handled, which is why
-    ``settle`` is separate from the calls that change the selection.
+    The post-click scroll is deferred rather than immediate because that is
+    what the real control does: it lands after the click has been handled,
+    which is why ``settle`` is separate from the calls that change the
+    selection. ``SetCurrentItem`` scrolls straight away, as GTK's cursor
+    setter does, whether or not the focus actually moved.
+
+    The shift-click anchor follows GTK too: a click puts it on the clicked
+    row, ``SetSelections`` moves it onto the last row it selected, and
+    ``SetCurrentItem`` leaves it where it is.
     """
 
     def __init__(self, rows, page, top=0):
@@ -60,7 +72,9 @@ class _FakeList:
         self.top = top
         self.selected = set()
         self.current = None
+        self.anchor = None
         self.set_selections_calls = 0
+        self.set_current_item_calls = 0
 
     def click(self, row, ctrl=False):
         """Model a user click: focus the row, and select or toggle it."""
@@ -68,6 +82,13 @@ class _FakeList:
             self.selected ^= {row}
         else:
             self.selected = {row}
+        self.current = row
+        self.anchor = row
+
+    def shift_click(self, row):
+        """Model a shift-click: select the range from the anchor to the row."""
+        low, high = sorted((self.anchor, row))
+        self.selected = set(range(low, high + 1))
         self.current = row
 
     def settle(self):
@@ -108,14 +129,17 @@ class _FakeList:
         self.selected = {item.row for item in items}
         if items:
             self.current = max(item.row for item in items)
+            self.anchor = self.current
 
     def GetCurrentItem(self):
         """Return the focused row, or the invalid item when nothing is focused."""
         return _Item(self.current)
 
     def SetCurrentItem(self, item):
-        """Focus a row without changing the selection."""
+        """Focus a row without changing the selection, scrolling it into view."""
+        self.set_current_item_calls += 1
         self.current = item.row
+        self.settle()
 
 
 @pytest.fixture(autouse=True)
@@ -224,12 +248,60 @@ def test_deselecting_a_row_does_not_scroll_to_the_one_left_selected():
     footprint_list.click(7)
     footprint_list.click(200, ctrl=True)
     footprint_list.top = 190
-    window = _window(footprint_list, alike_rows=[7])
+    window = _window(footprint_list, alike_rows=[7, 100])
 
     footprint_list.click(200, ctrl=True)
     JLCPCBTools.OnFootprintSelected(window)
     footprint_list.settle()
 
-    assert footprint_list.selected == {7}
+    assert footprint_list.selected == {7, 100}
     assert footprint_list.current == 200
     assert footprint_list.top == 190
+
+
+def test_deselecting_a_row_keeps_the_shift_click_anchor_when_nothing_is_added():
+    """A survivor with no alike rows must not have its selection re-applied.
+
+    Re-selecting the survivor moves the shift-click anchor onto it, so the
+    user's next shift-click would range from the survivor instead of from the
+    row they just ctrl-clicked. With nothing to add, the control is left alone.
+    """
+    footprint_list = _FakeList(rows=300, page=25, top=0)
+    footprint_list.click(7)
+    footprint_list.click(200, ctrl=True)
+    footprint_list.top = 190
+    window = _window(footprint_list, alike_rows=[7])
+
+    footprint_list.click(200, ctrl=True)
+    JLCPCBTools.OnFootprintSelected(window)
+    footprint_list.settle()
+    footprint_list.shift_click(202)
+
+    assert footprint_list.selected == {200, 201, 202}
+    assert footprint_list.set_selections_calls == 0
+    assert footprint_list.set_current_item_calls == 0
+
+
+def test_enabling_the_option_with_an_offscreen_selection_does_not_scroll():
+    """Turning auto-select on must not jump to a lone selected row offscreen.
+
+    There is nothing to expand, and putting the focus back where it already
+    is would still scroll that row into view. The control is left alone.
+    """
+    footprint_list = _FakeList(rows=300, page=25, top=0)
+    footprint_list.click(7)
+    footprint_list.top = 150
+    window = _window(footprint_list, alike_rows=[7])
+    window.auto_select_alike = False
+    window.settings = {}
+    window.save_settings = MagicMock()
+    event = MagicMock()
+    event.IsChecked.return_value = True
+
+    JLCPCBTools.toggle_select_alike(window, event)
+
+    assert window.auto_select_alike is True
+    assert footprint_list.selected == {7}
+    assert footprint_list.top == 150
+    assert footprint_list.set_selections_calls == 0
+    assert footprint_list.set_current_item_calls == 0
