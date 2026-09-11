@@ -23,7 +23,7 @@ def mainwindow(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
     stubs = mainwindow_stubs(
         package,
         wx=wx_stubs(
-            Dialog=type("Dialog", (), {}),
+            Frame=type("Frame", (), {}),
             NewIdRef=lambda: next(ids),
             PostEvent=MagicMock(),
         ),

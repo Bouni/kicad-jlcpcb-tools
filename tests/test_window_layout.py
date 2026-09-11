@@ -59,11 +59,24 @@ class _Display:
         )
 
 
-class _Dialog:
+class _TopLevelWindow:
     """Dispatch bound events and retain the state read by the real handlers."""
 
-    def __init__(self, *_args: Any, size: tuple = (1400, 800), **_kwargs: Any) -> None:
+    def __init__(
+        self,
+        *_args: Any,
+        size: tuple = (1400, 800),
+        style: int = 0,
+        title: str = "",
+        **_kwargs: Any,
+    ) -> None:
         self._size = size
+        self._style = style
+        self._title = title
+        self._parent = _args[0] if _args else None
+        self._children: list[Any] = []
+        if isinstance(self._parent, _TopLevelWindow):
+            self._parent._children.append(self)
         self.display_index = 0
         self.scale_factor = getattr(_args[0], "scale_factor", 2) if _args else 2
         self._destroyed = False
@@ -73,16 +86,13 @@ class _Dialog:
         self.IsMaximized = MagicMock(return_value=False)
         self.IsIconized = MagicMock(return_value=False)
         self.IsFullScreen = MagicMock(return_value=False)
-        self.IsModal = MagicMock(return_value=False)
-        self.EndModal = MagicMock(side_effect=self._end_modal)
         self.FromDIP = lambda value: _scale(value, self.scale_factor)
         self.ToDIP = lambda value: _scale(value, 1 / self.scale_factor)
         for name in (
-            "SetAcceleratorTable SetSizer SetSizeHints Layout Centre Destroy"
+            "SetAcceleratorTable SetSizer SetSizeHints Centre Destroy"
         ).split():
             setattr(self, name, MagicMock())
         self.Destroy.side_effect = lambda: setattr(self, "_destroyed", True)
-        self.Layout.side_effect = self._layout
 
     def __bool__(self) -> bool:
         return not self._destroyed
@@ -90,9 +100,17 @@ class _Dialog:
     def Bind(self, event: Any, handler: Callable, *_args: Any, **_kwargs: Any) -> None:
         self._bindings[event] = handler
 
-    def _end_modal(self, _result: int) -> None:
-        assert self.IsModal(), "EndModal is invalid for a modeless dialog"
-        self.IsModal.return_value = False
+    def GetWindowStyleFlag(self) -> int:
+        return self._style
+
+    def GetParent(self) -> Any:
+        return self._parent
+
+    def GetTitle(self) -> str:
+        return self._title
+
+    def SetTitle(self, title: str) -> None:
+        self._title = title
 
     def _set_size(self, size: tuple) -> None:
         self._size = tuple(size)
@@ -102,8 +120,13 @@ class _Dialog:
 
     def _layout(self) -> None:
         self._laid_out = True
+        for child in self._children:
+            if isinstance(child, _Panel):
+                child._size = self._size
+            elif getattr(child, "_is_table", False):
+                child.client_width = self._size[0] - 80
         for name in ("part_list", "footprint_list"):
-            if hasattr(self, name):
+            if hasattr(self, name) and not isinstance(self, _Frame):
                 # Table borders and surrounding layout consume client space.
                 getattr(self, name).client_width = self._size[0] - 80
 
@@ -117,6 +140,36 @@ class _Dialog:
 
     def Close(self) -> None:
         self.emit(_wx["wx"].EVT_CLOSE)
+
+
+class _Frame(_TopLevelWindow):
+    """A normal frame deliberately has no dialog-only modal operations."""
+
+    def Layout(self) -> bool:
+        self._layout()
+        return True
+
+
+class _Panel(_TopLevelWindow):
+    """Retain the content area separately from the frame's outer layout."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.Layout = MagicMock(side_effect=self._layout)
+
+
+class _Dialog(_TopLevelWindow):
+    """Child dialogs retain their distinct modal API."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.Layout = MagicMock(side_effect=self._layout)
+        self.IsModal = MagicMock(return_value=False)
+        self.EndModal = MagicMock(side_effect=self._end_modal)
+
+    def _end_modal(self, _result: int) -> None:
+        assert self.IsModal(), "EndModal is invalid for a modeless dialog"
+        self.IsModal.return_value = False
 
 
 def _column(model_column: int, width: int, title: str = "Column") -> MagicMock:
@@ -215,6 +268,8 @@ def _clear_callbacks() -> Iterator[None]:
 
 _wx = wx_stubs(
     Dialog=_Dialog,
+    Frame=_Frame,
+    Panel=_Panel,
     Display=_Display,
     Size=_Size,
     DefaultPosition=None,
@@ -234,6 +289,14 @@ _wx = wx_stubs(
             "StaticBoxSizer ScrolledWindow AcceleratorEntry AcceleratorTable"
         ).split()
     },
+)
+_wx["wx"].DEFAULT_FRAME_STYLE = (
+    _wx["wx"].CAPTION
+    | _wx["wx"].MINIMIZE_BOX
+    | _wx["wx"].MAXIMIZE_BOX
+    | _wx["wx"].RESIZE_BORDER
+    | _wx["wx"].CLOSE_BOX
+    | _wx["wx"].SYSTEM_MENU
 )
 _wx["wx.adv"].BitmapComboBox = MagicMock()
 _wx["wx.dataview"].PyDataViewModel = object
@@ -325,6 +388,7 @@ def _open_selector(
 
         monkeypatch.setattr(_Dialog, "__init__", init_without_dip)
     monkeypatch.setattr(partselector.dv.DataViewCtrl, "return_value", control)
+    monkeypatch.setattr(partselector.dv.DataViewCtrl, "side_effect", None)
     if not real_search:
         monkeypatch.setattr(partselector.PartSelectorDialog, "search", MagicMock())
 
@@ -362,6 +426,14 @@ def _open_main(
 ) -> Any:
     control = _control(scale=2, client_width=0, stretch=True)
     monkeypatch.setattr(mainwindow.dv.DataViewCtrl, "return_value", control)
+
+    def create_table(parent: Any, *_args: Any, **_kwargs: Any) -> MagicMock:
+        control._is_table = True
+        control.GetParent.return_value = parent
+        parent._children.append(control)
+        return control
+
+    monkeypatch.setattr(mainwindow.dv.DataViewCtrl, "side_effect", create_table)
 
     def load_settings(window: Any) -> None:
         window.settings = json.loads(json.dumps(settings))
@@ -608,6 +680,54 @@ def test_selector_spacer_preserves_query_fields_row_alignment_and_sorting(
     assert selector.part_list.GetColumns()[-2].sortable
 
 
+def test_main_constructor_creates_a_normal_frame_with_window_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create a regular application window with standard window controls."""
+    window = _open_main(monkeypatch, {})
+
+    assert isinstance(window, _Frame)
+    assert not isinstance(window, _Dialog)
+    assert not hasattr(window, "IsModal")
+    assert not hasattr(window, "EndModal")
+    assert window.GetTitle() == "JLCPCB Tools [ test ]"
+    assert window.GetWindowStyleFlag() == _wx["wx"].DEFAULT_FRAME_STYLE
+    for flag in ("MINIMIZE_BOX", "MAXIMIZE_BOX", "RESIZE_BORDER", "CLOSE_BOX"):
+        assert window.GetWindowStyleFlag() & getattr(_wx["wx"], flag)
+
+
+def test_main_form_controls_share_a_panel_and_follow_frame_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Frame forms require a panel, whose layout must follow outer size changes."""
+    factories = [
+        mainwindow.wx.ToolBar,
+        mainwindow.wx.TextCtrl,
+        mainwindow.wx.Gauge,
+        mainwindow.wx.StaticText,
+        mainwindow.BomEstimatorWidget,
+    ]
+    first_calls = [factory.call_count for factory in factories]
+    window = _open_main(monkeypatch, {})
+
+    panel = window.content_panel
+    assert isinstance(panel, _Panel)
+    assert panel.GetParent() is window
+    assert window.footprint_list.GetParent() is panel
+    for factory, first_call in zip(factories, first_calls):
+        calls = factory.call_args_list[first_call:]
+        assert calls
+        assert all(call.args[0] is panel for call in calls)
+    assert window.footprint_list.GetClientSize()[0] == window.GetSize()[0] - 80
+    panel.Layout.reset_mock()
+    window._size = (3000, 2000)
+
+    window.Layout()
+
+    panel.Layout.assert_called_once()
+    assert window.footprint_list.GetClientSize()[0] == 2920
+
+
 def test_main_constructor_restores_semantic_widths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -632,11 +752,9 @@ def test_main_constructor_restores_semantic_widths(
 
 
 @pytest.mark.parametrize("selector_open", [False, True])
-@pytest.mark.parametrize("modal", [False, True])
 def test_parent_close_saves_both_layouts_once_before_destroy(
     monkeypatch: pytest.MonkeyPatch,
     selector_open: bool,
-    modal: bool,
 ) -> None:
     """Persist both windows before either destruction with one synchronous write."""
     window = _open_main(
@@ -646,7 +764,6 @@ def test_parent_close_saves_both_layouts_once_before_destroy(
             "mainwindow": {"column_widths": {"FP_COL": 90}},
         },
     )
-    window.IsModal.return_value = modal
     footprint = _column_by_title(window.footprint_list, "Footprint")
     footprint.SetWidth(240)
     issue_widths = {"BOM_COL": 110, "POS_COL": 90}
@@ -678,7 +795,6 @@ def test_parent_close_saves_both_layouts_once_before_destroy(
     else:
         assert snapshots[1:] == ["parent destroyed"]
     assert window._part_selector is None
-    assert window.EndModal.call_count == int(modal)
     reopened = _open_main(monkeypatch, snapshots[0])
     for key, width in issue_widths.items():
         assert snapshots[0]["mainwindow"]["column_widths"][key] == width
@@ -708,7 +824,6 @@ def test_incomplete_main_constructor_closes_without_overwriting_saved_layout(
     assert window.settings["mainwindow"] == saved_layout
     window.save_settings.assert_not_called()
     window.Destroy.assert_called_once()
-    window.EndModal.assert_not_called()
 
 
 def test_older_wx_preserves_widths_and_size_without_dip_methods(
@@ -775,7 +890,6 @@ def test_save_failure_still_destroys_windows_and_clears_selector(
         assert owner._part_selector is None
     if window is not None:
         window.Destroy.assert_called_once()
-        window.EndModal.assert_not_called()
 
 
 @pytest.mark.parametrize("fail_at", ["before_controls", "during_restore"])
@@ -1059,8 +1173,6 @@ def test_unexpected_persistence_failure_cannot_strand_windows(
         None if close_path == "main" else _open_selector(monkeypatch, {}, parent=window)
     )
     owner = window if window is not None else selector.parent
-    if window is not None:
-        window.IsModal.return_value = failure == "serialization"
     if failure == "capture":
         control = window.footprint_list if window is not None else selector.part_list
         control.GetColumns.side_effect = RuntimeError("layout capture failed")
@@ -1077,23 +1189,20 @@ def test_unexpected_persistence_failure_cannot_strand_windows(
         assert owner._part_selector is None
     if window is not None:
         window.Destroy.assert_called_once()
-        assert window.EndModal.call_count == int(failure == "serialization")
     if failure == "serialization":
         assert (tmp_path / "settings.json").read_bytes() == previous
         assert [path.name for path in tmp_path.iterdir()] == ["settings.json"]
 
 
-def test_selector_capture_failure_also_destroys_its_modal_parent(
+def test_selector_capture_failure_also_destroys_its_parent_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A child close failure cannot skip the parent's modal-loop teardown."""
+    """A child close failure cannot skip the main frame's teardown."""
     window = _open_main(monkeypatch, {})
-    window.IsModal.return_value = True
     selector = _open_selector(monkeypatch, {}, parent=window)
     selector.part_list.GetColumns.side_effect = RuntimeError("layout capture failed")
     with pytest.raises(RuntimeError, match="layout capture failed"):
         window.Close()
     assert window._part_selector is None
     selector.Destroy.assert_called_once()
-    window.EndModal.assert_called_once_with(0)
     window.Destroy.assert_called_once()

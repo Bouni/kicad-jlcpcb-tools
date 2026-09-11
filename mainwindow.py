@@ -138,8 +138,8 @@ class KicadProvider:
         return kicad_pcbnew
 
 
-class JLCPCBTools(wx.Dialog):
-    """JLCPCBTools main dialog."""
+class JLCPCBTools(wx.Frame):
+    """JLCPCBTools main application window."""
 
     def __init__(
         self,
@@ -153,15 +153,17 @@ class JLCPCBTools(wx.Dialog):
         self.store: Optional[Store] = None
         while not wx.GetApp():
             time.sleep(1)
-        wx.Dialog.__init__(
+        wx.Frame.__init__(
             self,
             parent,
             id=wx.ID_ANY,
             title=f"JLCPCB Tools [ {getVersion()} ]",
             pos=wx.DefaultPosition,
             size=wx.Size(1300, 800),
-            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
+            style=wx.DEFAULT_FRAME_STYLE,
         )
+        # Host the form on a wx.Panel to retain tab navigation and native colours.
+        self.content_panel = wx.Panel(self)
         self.pcbnew = kicad_provider.get_pcbnew()
         self.window = wx.GetTopLevelParent(self)
         self.SetSize(HighResWxSize(self.window, wx.Size(1300, 800)))
@@ -238,7 +240,7 @@ class JLCPCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
 
         self.upper_toolbar = wx.ToolBar(
-            self,
+            self.content_panel,
             wx.ID_ANY,
             wx.DefaultPosition,
             wx.Size(1300, -1),
@@ -333,7 +335,7 @@ class JLCPCBTools(wx.Dialog):
 
         # An explicit width overrides GTK's content-based minimum size.
         self.right_toolbar = wx.ToolBar(
-            self,
+            self.content_panel,
             wx.ID_ANY,
             wx.DefaultPosition,
             wx.DefaultSize,
@@ -466,7 +468,7 @@ class JLCPCBTools(wx.Dialog):
         table_sizer.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 600)))
 
         self.footprint_list = dv.DataViewCtrl(
-            self,
+            self.content_panel,
             style=wx.BORDER_THEME | dv.DV_ROW_LINES | dv.DV_VERT_RULES | dv.DV_MULTIPLE,
         )
 
@@ -592,7 +594,7 @@ class JLCPCBTools(wx.Dialog):
         # --------------------- Bottom Logbox and Gauge -----------------------
         # ---------------------------------------------------------------------
         self.logbox = wx.TextCtrl(
-            self,
+            self.content_panel,
             wx.ID_ANY,
             wx.EmptyString,
             wx.DefaultPosition,
@@ -601,7 +603,7 @@ class JLCPCBTools(wx.Dialog):
         )
         self.logbox.SetMinSize(HighResWxSize(self.window, wx.Size(-1, 150)))
         self.gauge = wx.Gauge(
-            self,
+            self.content_panel,
             wx.ID_ANY,
             100,
             wx.DefaultPosition,
@@ -616,7 +618,7 @@ class JLCPCBTools(wx.Dialog):
         # ---------------------------------------------------------------------
 
         self.bom_widget = BomEstimatorWidget(
-            self,
+            self.content_panel,
             window=self.window,
             board_count=self.bom_estimator_board_count,
             force_standard=self.bom_estimator_force_standard,
@@ -639,8 +641,8 @@ class JLCPCBTools(wx.Dialog):
 
         # This status must exist before init_data() first populates the list.
         # Invalid stored corrections remain repairable through the manager.
-        self.correction_status = wx.StaticText(self, label="")
-        self.project_storage_status = wx.StaticText(self, label="")
+        self.correction_status = wx.StaticText(self.content_panel, label="")
+        self.project_storage_status = wx.StaticText(self.content_panel, label="")
         self.project_storage_status.Hide()
         self.correction_status.Hide()
 
@@ -668,7 +670,10 @@ class JLCPCBTools(wx.Dialog):
         layout.Add(self.logbox, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(self.gauge, 0, wx.ALL | wx.EXPAND, 5)
 
-        self.SetSizer(layout)
+        self.content_panel.SetSizer(layout)
+        frame_layout = wx.BoxSizer(wx.VERTICAL)
+        frame_layout.Add(self.content_panel, 1, wx.EXPAND)
+        self.SetSizer(frame_layout)
         self.Layout()
         self.bom_widget.set_visible(self.bom_estimator_show)
         self.Layout()
@@ -745,6 +750,14 @@ class JLCPCBTools(wx.Dialog):
         )
 
         self.init_data()
+
+    def Layout(self) -> bool:
+        """Lay out the form after resizing or changing the visible controls."""
+        result = wx.Frame.Layout(self)
+        panel = getattr(self, "content_panel", None)
+        if panel:
+            panel.Layout()
+        return result
 
     def init_data(self, *, download_if_missing: bool = True) -> None:
         """Initialize the library and populate the main window."""
@@ -887,7 +900,7 @@ class JLCPCBTools(wx.Dialog):
             self._clear_catalog_views()
 
     def quit_dialog(self, *_: object) -> None:
-        """Destroy dialog on close."""
+        """Save layout and destroy the frame and its child windows on close."""
         logger = logging.getLogger(__name__)
         logger.info("quit_dialog()")
         layout_ready = getattr(self, "_layout_ready", False)
@@ -915,8 +928,6 @@ class JLCPCBTools(wx.Dialog):
                     root.removeHandler(self.logging_handler1)
                 with suppress(AttributeError):
                     root.removeHandler(self.logging_handler2)
-                if self.IsModal():
-                    self.EndModal(0)
                 self.Destroy()
 
     def init_library(self) -> None:

@@ -30,6 +30,7 @@ def runtime(tmp_path: Path) -> Iterator[SimpleNamespace]:
     package = "mainwindow_correction_recovery_tests"
     wx = wx_stubs(
         Dialog=type("Dialog", (), {}),
+        Frame=type("Frame", (), {}),
         NewIdRef=MagicMock(side_effect=object),
         BeginBusyCursor=MagicMock(),
         EndBusyCursor=MagicMock(),

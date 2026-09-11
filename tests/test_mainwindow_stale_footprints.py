@@ -21,7 +21,7 @@ _ids = count(1)
 mainwindow = load_mainwindow(
     "mainwindow_stale_footprint_tests",
     wx=wx_stubs(
-        Dialog=type("Dialog", (), {}),
+        Frame=type("Frame", (), {}),
         NewIdRef=lambda: next(_ids),
         PostEvent=lambda *_args, **_kwargs: None,
     ),
