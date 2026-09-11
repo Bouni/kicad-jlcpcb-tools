@@ -285,6 +285,7 @@ def mainwindow_stubs(
             "get_is_dnp": lambda _footprint: False,
             "get_lcsc_value": lambda _footprint: "",
             "find_lcsc_assignment_text": lambda _footprint: None,
+            "iter_board_items": iter,
             "set_lcsc_value": lambda *_args, **_kwargs: None,
             "toggle_exclude_from_bom": lambda _footprint: None,
             "toggle_exclude_from_pos": lambda _footprint: None,
