@@ -90,6 +90,7 @@ from .settings import SettingsDialog
 from .store import Store
 from .stock_concern import stock_concern_references
 from .stock_display import parse_stock
+from .type_cell_tooltip import TypeCellTooltip
 from .why_standard_dialog import WhyStandardDialog
 from .window_layout import get_column_widths, restore_column_widths
 
@@ -723,11 +724,11 @@ class JLCPCBTools(wx.Dialog):
         self._footprint_list_main_window = (
             self.footprint_list.GetMainWindow() or self.footprint_list
         )
-        self._footprint_list_main_window.Bind(
-            wx.EVT_MOTION, self.on_footprint_list_motion
-        )
-        self._footprint_list_main_window.Bind(
-            wx.EVT_LEAVE_WINDOW, self.on_footprint_list_leave
+        self._type_cell_tooltip = TypeCellTooltip(
+            self.footprint_list,
+            PartListDataModel.columns["TYPE_COL"],
+            self.partlist_data_model.is_standard_only,
+            self._set_standard_only_tooltip,
         )
         self.bom_estimator_controller = BomEstimatorController(
             read_parts=lambda: (
@@ -768,13 +769,13 @@ class JLCPCBTools(wx.Dialog):
         """Return current board instance for BOM controller callbacks."""
         return self.pcbnew.GetBoard()
 
-    def _set_standard_only_refs(self, refs):
-        """Update computed Standard-only cells and clear any stale tooltip."""
+    def _set_standard_only_refs(self, refs: Iterable[str]) -> None:
+        """Update computed Standard-only cells and refresh the current row help."""
         self.partlist_data_model.set_standard_only_refs(refs)
         self.footprint_list.Refresh()
-        self._set_standard_only_tooltip(False)
+        self._type_cell_tooltip.refresh()
 
-    def _set_standard_only_tooltip(self, active):
+    def _set_standard_only_tooltip(self, active: bool) -> None:
         """Show or clear the Standard-only row tooltip without flicker."""
         active = bool(active)
         if active == self._standard_only_tooltip_active:
@@ -786,24 +787,6 @@ class JLCPCBTools(wx.Dialog):
             )
         else:
             self._footprint_list_main_window.UnsetToolTip()
-
-    def on_footprint_list_motion(self, event):
-        """Show the explanation while hovering anywhere on a checked row."""
-        source = event.GetEventObject()
-        control_point = self.footprint_list.ScreenToClient(
-            source.ClientToScreen(event.GetPosition())
-        )
-        item, _column = self.footprint_list.HitTest(control_point)
-        active = bool(
-            item and item.IsOk() and self.partlist_data_model.is_standard_only(item)
-        )
-        self._set_standard_only_tooltip(active)
-        event.Skip()
-
-    def on_footprint_list_leave(self, event):
-        """Clear the Standard-only explanation when the pointer leaves the list."""
-        self._set_standard_only_tooltip(False)
-        event.Skip()
 
     def is_catalog_available(self) -> bool:
         """Report whether the selected catalog has completed initialization."""
@@ -888,6 +871,9 @@ class JLCPCBTools(wx.Dialog):
 
     def quit_dialog(self, *_: object) -> None:
         """Destroy dialog on close."""
+        tooltip = getattr(self, "_type_cell_tooltip", None)
+        if tooltip is not None:
+            tooltip.stop()
         logger = logging.getLogger(__name__)
         logger.info("quit_dialog()")
         layout_ready = getattr(self, "_layout_ready", False)
@@ -1000,6 +986,9 @@ class JLCPCBTools(wx.Dialog):
         if unavailable:
             self.logger.warning("Part assignments are unavailable: %s", error)
             self.store = None
+            tooltip = getattr(self, "_type_cell_tooltip", None)
+            if tooltip is not None:
+                tooltip.dismiss()
             self.partlist_data_model.RemoveAll()
             self.assembly_enrichment_generation += 1
             self.pending_assembly_enrichment.clear()
@@ -1641,6 +1630,9 @@ class JLCPCBTools(wx.Dialog):
 
     def _populate_footprint_rows(self) -> None:
         """Read a complete project view, allowing the caller to recover storage errors."""
+        tooltip = getattr(self, "_type_cell_tooltip", None)
+        if tooltip is not None:
+            tooltip.dismiss()
         self.partlist_data_model.RemoveAll()
         parts = self.store.read_all()
         snapshot = self.library.read_correction_data()
