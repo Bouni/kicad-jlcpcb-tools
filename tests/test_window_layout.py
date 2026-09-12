@@ -475,6 +475,61 @@ def test_main_type_hover_rechecks_metadata_and_stops_before_reopening(
     instances[1].stop.assert_not_called()
 
 
+@pytest.mark.parametrize("help_state", ["pending", "visible"])
+@pytest.mark.parametrize(
+    "storage_unavailable,catalog_ready",
+    [(True, True), (False, False)],
+    ids=["storage-unavailable", "catalog-unavailable"],
+)
+def test_main_empty_refresh_clears_type_help_before_resetting_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    help_state: str,
+    storage_unavailable: bool,
+    catalog_ready: bool,
+) -> None:
+    """Unavailable data clears pending or visible hover help before model reset."""
+
+    class HoverState:
+        def __init__(
+            self,
+            _control: Any,
+            _type_column: int,
+            _is_standard_only: Callable[[Any], bool],
+            set_standard_help: Callable[[bool], None],
+        ) -> None:
+            self.pending = False
+            self.visible = False
+            self.set_standard_help = set_standard_help
+
+        def dismiss(self) -> None:
+            self.pending = False
+            self.visible = False
+            self.set_standard_help(False)
+
+    monkeypatch.setattr(mainwindow, "TypeCellTooltip", HoverState)
+    window = _open_main(monkeypatch, {})
+    tooltip = window._type_cell_tooltip
+    tooltip.pending = help_state == "pending"
+    tooltip.visible = help_state == "visible"
+    window.store = None
+    window._project_storage_unavailable = storage_unavailable
+    window._catalog_ready = catalog_ready
+    rows = ["R1"]
+
+    def remove_all() -> None:
+        assert not tooltip.pending, "Pending Type help must clear before model reset"
+        assert not tooltip.visible, "Visible Type help must clear before model reset"
+        rows.clear()
+
+    monkeypatch.setattr(window.partlist_data_model.RemoveAll, "side_effect", remove_all)
+
+    window.populate_footprint_list()
+
+    assert rows == []
+    assert not tooltip.pending
+    assert not tooltip.visible
+
+
 def test_semantic_widths_survive_schema_insertion_removal_and_reordering() -> None:
     """Follow semantic column names as saved model IDs change across releases."""
     old_schema = [

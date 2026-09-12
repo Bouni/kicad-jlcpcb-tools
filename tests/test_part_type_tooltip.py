@@ -30,6 +30,7 @@ class _Window:
         self.label = label
         self.children: list[_Window] = []
         self.shown = False
+        self.destroyed = False
         self.font = _Font()
         self.scale = parent.scale if parent else 1
         self.background = None
@@ -62,6 +63,15 @@ class _Window:
     def Hide(self) -> None:
         """Keep the popup hidden until the hover controller shows it."""
         self.shown = False
+
+    def Destroy(self) -> None:
+        """Destroy owned children and remove this window from its parent."""
+        for child in list(self.children):
+            child.Destroy()
+        self.shown = False
+        self.destroyed = True
+        if self.parent is not None and self in self.parent.children:
+            self.parent.children.remove(self)
 
     def GetBestSize(self) -> tuple[int, int]:
         """Size static text from its current font and every line of its label."""
@@ -116,8 +126,8 @@ class _Sizer:
         )
 
 
-def _construct(*, font_size: int = 12, scale: int = 1) -> SimpleNamespace:
-    """Create a real legend using strictly declared, stateful wx controls."""
+def _prepare(*, font_size: int = 12, scale: int = 1) -> SimpleNamespace:
+    """Load the real factory with an owner and stateful wx controls."""
     colours = {}
     wx = wx_stubs(
         PopupWindow=_Window,
@@ -132,8 +142,14 @@ def _construct(*, font_size: int = 12, scale: int = 1) -> SimpleNamespace:
     parent = _Window()
     parent.font = _Font(font_size)
     parent.scale = scale
-    popup = helper.create_type_fee_popup(parent)
-    return SimpleNamespace(parent=parent, popup=popup)
+    return SimpleNamespace(parent=parent, helper=helper)
+
+
+def _construct(*, font_size: int = 12, scale: int = 1) -> SimpleNamespace:
+    """Create a real legend using strictly declared, stateful wx controls."""
+    ui = _prepare(font_size=font_size, scale=scale)
+    ui.popup = ui.helper.create_type_fee_popup(ui.parent)
+    return ui
 
 
 def test_tooltip_constructs_the_approved_two_column_fee_table() -> None:
@@ -181,3 +197,50 @@ def test_tooltip_fits_content_and_scales_without_fixed_column_widths() -> None:
     assert normal.popup.size == normal.popup.sizer.GetMinSize()
     assert scaled.popup.size == scaled.popup.sizer.GetMinSize()
     assert normal.popup is not scaled.popup
+
+
+@pytest.mark.parametrize("failure_step", ["StaticText", "SetSizerAndFit"])
+def test_construction_failure_destroys_popup_and_children_before_propagating(
+    monkeypatch: pytest.MonkeyPatch, failure_step: str
+) -> None:
+    """A partially built legend must not remain owned by the working dialog."""
+    ui = _prepare()
+    sibling = _Window(ui.parent, label="Existing dialog control")
+    popups: list[_Window] = []
+    labels: list[_Window] = []
+    failure = RuntimeError(f"Failed during {failure_step}")
+
+    def create_popup(parent: _Window, *, flags: int = 0) -> _Window:
+        popup = _Window(parent, flags=flags)
+        popups.append(popup)
+        return popup
+
+    def create_label(parent: _Window, *, label: str) -> _Window:
+        if failure_step == "StaticText" and labels:
+            raise failure
+        window = _Window(parent, label=label)
+        labels.append(window)
+        return window
+
+    original_fit = _Window.SetSizerAndFit
+
+    def fail_fit(window: _Window, sizer: _Sizer) -> None:
+        original_fit(window, sizer)
+        raise failure
+
+    monkeypatch.setattr(ui.helper.wx, "PopupWindow", create_popup)
+    monkeypatch.setattr(ui.helper.wx, "StaticText", create_label)
+    if failure_step == "SetSizerAndFit":
+        monkeypatch.setattr(_Window, "SetSizerAndFit", fail_fit)
+
+    with pytest.raises(RuntimeError) as raised:
+        ui.helper.create_type_fee_popup(ui.parent)
+
+    assert raised.value is failure
+    assert len(popups) == 1
+    assert labels, "Failure must happen after child controls have been allocated"
+    assert popups[0].destroyed
+    assert all(label.destroyed for label in labels)
+    assert ui.parent.children == [sibling]
+    assert not ui.parent.destroyed
+    assert not sibling.destroyed
