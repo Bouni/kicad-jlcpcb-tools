@@ -27,12 +27,12 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Ignore the settings.json file -- when doing local development it's easy
-# to keep accruing changes to this file as you test which adds a bunch of
-# irrelevant diffs, and we may want to hardcode some recommended settings
-# for users to start with.  We can always force-add it with `git add -f`
-# when we are intentionally making changes.
+# The plugin writes the settings a user chooses to settings.json, seeded from
+# default_settings.json on first run.  Shipped defaults change in
+# default_settings.json; settings.json is only ever local state, as is the
+# settings.json.damaged copy it keeps of a file it could not parse.
 /settings.json
+/settings.json.damaged
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

@@ -1,0 +1,48 @@
+{
+  "general": {
+    "bom_estimator_boards": 5,
+    "bom_estimator_force_standard": false,
+    "bom_estimator_show": true,
+    "lcsc_priority": false,
+    "order_number": true,
+    "select_alike_auto": false,
+    "simplify_stock": true
+  },
+  "gerber": {
+    "fill_zones": true,
+    "force_drc": true,
+    "lcsc_bom_cpl": true,
+    "plot_references": true,
+    "plot_values": true,
+    "subtract_mask_from_silk": true,
+    "tented_vias": true
+  },
+  "highlighting": {
+    "matches": true,
+    "stock_concern": true
+  },
+  "hooks": {
+    "post_script": "",
+    "pre_script": "",
+    "timeout_seconds": 30
+  },
+  "library": {
+    "data_path": "",
+    "selected_library": "current-parts"
+  },
+  "mainwindow": {
+    "column_widths": {}
+  },
+  "part_preferences": {
+    "fill_empty_lcsc_assignments_on_open": true,
+    "remember_lcsc_assignments": true
+  },
+  "partselector": {
+    "basic": true,
+    "column_widths": {},
+    "extended": true,
+    "preferred": true,
+    "size": null,
+    "stock": false
+  }
+}

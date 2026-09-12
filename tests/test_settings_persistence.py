@@ -7,6 +7,7 @@ from typing import Any, Optional, TextIO
 
 import pytest
 
+from .test_settings_defaults import plugin_dir, shipped_defaults
 from .wx_harness import load_mainwindow, wx_stubs
 
 mainwindow = load_mainwindow(
@@ -15,20 +16,36 @@ mainwindow = load_mainwindow(
 )
 JLCPCBTools = mainwindow.JLCPCBTools
 
+# The plugin directory holds the shipped defaults beside the user's settings;
+# any other file left in it is an orphaned temporary file.
+PLUGIN_SETTINGS_FILES = ["default_settings.json", "settings.json"]
+
 
 @pytest.fixture
 def saved_settings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[JLCPCBTools, Path, bytes]:
-    """Seed a valid document whose formatting exposes accidental rewrites."""
+    """Seed a valid document whose formatting exposes accidental rewrites.
+
+    The shipped defaults sit beside it as they do in an installed plugin, and the
+    document already holds every setting they supply, so loading it adds nothing.
+    """
     monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    defaults = shipped_defaults()
+    plugin_dir(tmp_path, defaults)
     window = object.__new__(JLCPCBTools)
     window.settings = {
-        "gerber": {"subtract_mask_from_silk": True},
-        "general": {"simplify_stock": True},
-        "highlighting": {"matches": True, "stock_concern": True},
-        "partselector": {"size": [1200, 700]},
+        **defaults,
+        "gerber": {**defaults["gerber"], "subtract_mask_from_silk": True},
+        "general": {**defaults["general"], "simplify_stock": True},
+        "highlighting": {
+            **defaults["highlighting"],
+            "matches": True,
+            "stock_concern": True,
+        },
+        "partselector": {**defaults["partselector"], "size": [1200, 700]},
         "part_preferences": {
+            **defaults["part_preferences"],
             "remember_lcsc_assignments": False,
             "fill_empty_lcsc_assignments_on_open": False,
         },
@@ -44,7 +61,7 @@ def _assert_previous_settings_reload(
     window: JLCPCBTools, path: Path, original: bytes
 ) -> None:
     assert path.read_bytes() == original
-    assert list(path.parent.iterdir()) == [path]
+    assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
     window.settings = {}
     window.load_settings()
     assert window.settings == json.loads(original)
@@ -83,7 +100,7 @@ def test_save_replaces_complete_settings_after_closing_temporary_file(
     window.save_settings()
 
     assert len(replacements) == 1
-    assert list(path.parent.iterdir()) == [path]
+    assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
     window.settings = {}
     window.load_settings()
     assert window.settings == expected
@@ -190,7 +207,7 @@ def test_part_preference_defaults_migrate_atomically_and_settle(
 
     assert window.settings == expected
     assert json.loads(path.read_text(encoding="utf-8")) == expected
-    assert list(path.parent.iterdir()) == [path]
+    assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
     assert len(replacements) == (0 if previous == expected else 1)
     settled = path.read_bytes()
     replacement_count = len(replacements)
@@ -234,7 +251,7 @@ def test_failed_part_preference_migration_preserves_file_and_allows_retry(
             window.load_settings()
 
         assert path.read_bytes() == original
-        assert list(path.parent.iterdir()) == [path]
+        assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
 
     reopened = object.__new__(JLCPCBTools)
     reopened.load_settings()
@@ -248,7 +265,7 @@ def test_failed_part_preference_migration_preserves_file_and_allows_retry(
     }
     assert reopened.settings == expected
     assert json.loads(path.read_text(encoding="utf-8")) == expected
-    assert list(path.parent.iterdir()) == [path]
+    assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
 
 
 @pytest.mark.parametrize(
@@ -268,7 +285,11 @@ def test_simplify_stock_default_migrates_once_and_preserves_explicit_choice(
     path.write_text(json.dumps(previous), encoding="utf-8")
     expected = {
         **previous,
-        "general": {"simplify_stock": True, **previous.get("general", {})},
+        "general": {
+            **shipped_defaults()["general"],
+            "simplify_stock": True,
+            **previous.get("general", {}),
+        },
     }
     replacements: list[str] = []
     real_replace = os.replace
@@ -321,7 +342,7 @@ def test_failed_simplify_stock_migration_keeps_old_file_and_retries_on_reopen(
         with pytest.raises(OSError, match="stock migration"):
             window.load_settings()
         assert path.read_bytes() == original
-        assert list(path.parent.iterdir()) == [path]
+        assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
 
     reopened = object.__new__(JLCPCBTools)
     reopened.load_settings()

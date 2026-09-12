@@ -172,6 +172,18 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 Make sure you make use of pre-commit hooks in order to format everything nicely with `black`
 In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hooks that enforce nice and clean code style.
 
+### Settings
+
+`default_settings.json` holds the settings a fresh install starts from and is the only
+settings file tracked in git. The plugin writes the settings you actually use to
+`settings.json` beside it, which is git-ignored, so toggling a checkbox while developing
+no longer shows up as a change to commit.
+
+On every launch the stored settings are layered over the defaults, so a setting added by
+a newer version arrives with its default rather than being missing. Add new settings to
+`default_settings.json`; `tests/test_settings_defaults.py` fails if a setting the code
+reads has no default shipped for it.
+
 ## How to rebuild the parts database
 
 The parts database is rebuilt by the [update_parts_database.yml GitHub workflow](https://github.com/Bouni/kicad-jlcpcb-tools/blob/main/.github/workflows/update_parts_database.yml)

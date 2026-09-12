@@ -800,9 +800,7 @@ class PartSelectorDialog(wx.Dialog):
 
     def get_highlight_text(self) -> str:
         """Return the active keyword search text for result highlighting."""
-        if not self.parent.settings.get("partselector", {}).get(
-            "highlight_matches", True
-        ):
+        if not self.parent.settings.get("highlighting", {}).get("matches", True):
             return ""
         return self.keyword.GetValue()
 

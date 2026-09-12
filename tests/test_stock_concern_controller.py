@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from .stock_test_support import stock_modules
+from .test_settings_defaults import plugin_dir, shipped_defaults
 from .test_settings_dialog import _dialog, _fire, _settings, _wx
 from .test_stock_concern import CellAttr, part
 from .wx_harness import load_mainwindow, wx_stubs
@@ -406,6 +407,7 @@ def test_stock_concern_default_and_saved_setting_survive_reopening(
     """Old files gain enabled concern, while each explicit choice survives reload."""
     mainwindow = workflow.mainwindow
     monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    plugin_dir(tmp_path, shipped_defaults())
     path = tmp_path / "settings.json"
     settings = {"highlighting": {"matches": False}, "custom": "retained"}
     if saved is not None:
@@ -436,6 +438,7 @@ def test_failed_concern_migration_preserves_file_and_allows_retry(
     """A failed settings replacement leaves prior bytes reloadable on retry."""
     mainwindow = workflow.mainwindow
     monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    plugin_dir(tmp_path, shipped_defaults())
     path = tmp_path / "settings.json"
     original = b'{"highlighting": {"matches": false}, "custom": "retained"}'
     path.write_bytes(original)
@@ -449,7 +452,7 @@ def test_failed_concern_migration_preserves_file_and_allows_retry(
         with pytest.raises(OSError, match="replacement denied"):
             window.load_settings()
         assert path.read_bytes() == original
-        assert list(tmp_path.iterdir()) == [path]
+        assert sorted(tmp_path.iterdir()) == [tmp_path / "default_settings.json", path]
     reopened = object.__new__(mainwindow.JLCPCBTools)
     reopened.load_settings()
     assert reopened.settings["highlighting"]["stock_concern"] is True
