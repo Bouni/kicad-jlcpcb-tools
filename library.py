@@ -839,6 +839,20 @@ class Library:
                 )
             con.execute("DELETE FROM correction WHERE rowid = ?", (rowid,))
 
+    def delete_all_corrections(
+        self,
+        db_path: Optional[DatabasePath] = None,  # noqa: UP045
+    ) -> int:
+        """Empty the correction table, keeping the table, and report the row count.
+
+        The table itself is what marks a board as carrying its own corrections,
+        so dropping it would silently move the board back onto the global rules
+        rather than leaving it with none.
+        """
+        target = db_path if db_path is not None else self.correctionsdb_file
+        with self._correction_transaction(target) as con:
+            return con.execute("DELETE FROM correction").rowcount
+
     def update_correction_data(
         self, regex: object, rotation: object, offset: object
     ) -> None:
