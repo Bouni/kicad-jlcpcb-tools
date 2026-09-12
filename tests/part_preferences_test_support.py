@@ -178,6 +178,7 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         settings: Optional[dict[str, Any]] = None,
         part_preferences: Optional[dict[tuple[str, str], str]] = None,
         board: Optional[Board] = None,
+        fabrication_initialized: bool = True,
     ) -> Any:
         window = object.__new__(mainwindow.JLCPCBTools)
         window.settings = {} if settings is None else settings
@@ -213,6 +214,10 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         window._part_preferences_applied_on_open = False
         window.assembly_enrichment_generation = 0
         window.pending_assembly_enrichment = set()
+        # Assignment-only windows represent startup after fabrication initialization.
+        # Recovery tests opt out and exercise the real constructor from init_data.
+        if fabrication_initialized:
+            window.fabrication = object()
         window.store = mainwindow.Store(window, window.project_path, board)
         model = window.partlist_data_model = MagicMock()
         rows: dict[str, Any] = {}

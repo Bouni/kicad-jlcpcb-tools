@@ -303,6 +303,7 @@ def _open_selector(
             scale_factor=scale,
             settings={"partselector": settings},
             library=SimpleNamespace(categories=[]),
+            is_catalog_available=lambda: True,
             save_settings=MagicMock(),
             _part_selector=None,
         )
@@ -401,6 +402,7 @@ def _open_main(
     else:
         mainwindow.JLCPCBTools.__init__(window, None, provider)
     window.library = SimpleNamespace(categories=[])
+    window._catalog_ready = True
     window.save_settings = MagicMock()
     return window
 

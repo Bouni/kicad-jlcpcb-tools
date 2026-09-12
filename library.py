@@ -28,6 +28,7 @@ from .correction_data import (
 from .dblib import DEFAULT_LIBRARY, LIBRARY_CONFIGS
 from .events import (
     DownloadCompletedEvent,
+    DownloadFinishedEvent,
     DownloadProgressEvent,
     DownloadStartedEvent,
     MessageEvent,
@@ -150,6 +151,8 @@ class Library:
         self.part_preferences_db_file = ""
         self.state = None
         self.download_lock = Lock()
+        self._download_running = False
+        self._download_attempt = 0
         self.category_map = {}
         self._migration_session_diagnostics = {}
         self._known_legacy_sources = {}
@@ -166,8 +169,21 @@ class Library:
             return os.path.abspath(os.path.expanduser(configured.strip()))
         return os.path.join(PLUGIN_PATH, "jlcpcb")
 
-    def refresh_library_config(self) -> None:
-        """Refresh library configuration from settings."""
+    def refresh_library_config(self) -> bool:
+        """Apply settings only when no worker still uses the current catalog paths."""
+        with self.download_lock:
+            if self._download_running:
+                return False
+            try:
+                self._apply_library_config()
+            except (sqlite3.Error, OSError, ValueError):
+                self.state = LibraryState.UPDATE_NEEDED
+                raise
+            return True
+
+    def _apply_library_config(self) -> None:
+        """Refresh catalog paths while the download lock protects their identity."""
+        self.state = LibraryState.UPDATE_NEEDED
         self.datadir = self._resolve_data_directory()
 
         # Get selected library from settings, default to all-parts
@@ -1181,26 +1197,110 @@ class Library:
             cur.execute(query, {"number": number})
             return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
 
-    def update(self):
+    def is_download_running(self) -> bool:
+        """Report the live worker claim independently of catalog readiness."""
+        with self.download_lock:
+            return self._download_running
+
+    def has_usable_parts_catalog(self, *, check_integrity: bool = True) -> bool:
+        """Check queryable catalog tables, optionally scanning database integrity."""
+        try:
+            with contextlib.closing(self._read_database(self.partsdb_file)) as con:
+                if check_integrity and con.execute(
+                    "PRAGMA quick_check(1)"
+                ).fetchone() != ("ok",):
+                    return False
+                fields = ", ".join(
+                    f'parts."{field}"'
+                    for field in [*DB_FIELDS, "Second Category", "Solder Joint"]
+                )
+                first = con.execute(f"SELECT {fields} FROM parts LIMIT 1").fetchone()
+                number = str(first[0]) if first else "C1"
+                phrase = '"' + number.replace('"', '""') + '"'
+                con.execute(
+                    f"SELECT {fields} FROM parts WHERE parts MATCH ? LIMIT 1",
+                    (phrase,),
+                ).fetchone()
+                con.execute(
+                    'SELECT categories."First Category", categories."Second Category" '
+                    "FROM categories LIMIT 1"
+                ).fetchone()
+                # Metadata is optional: the window title has a no-metadata fallback.
+            return True
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning("Parts catalog is unavailable: %s", error)
+            return False
+
+    @property
+    def download_attempt(self) -> int:
+        """Identify the latest accepted worker, including failed attempts."""
+        with self.download_lock:
+            return self._download_attempt
+
+    def update(self) -> None:
         """Update the sqlite parts database from the JLCPCB CSV."""
         with self.download_lock:
-            if self.state == LibraryState.DOWNLOAD_RUNNING:
+            if self._download_running:
                 self.logger.info(
                     "Download already running, ignoring duplicate request."
                 )
                 return
+            self._download_running = True
+            self._download_attempt += 1
+            attempt = self._download_attempt
             self.state = LibraryState.DOWNLOAD_RUNNING
+            source = (self.selected_library, self.partsdb_file)
+
+        def run_download() -> None:
+            """Retain the accepted attempt identity until its worker terminates."""
+            self._download_wrapper(source, attempt)
+
         try:
-            Thread(target=self._download_wrapper).start()
+            Thread(target=run_download).start()
         except Exception:
-            with self.download_lock:
-                self.state = LibraryState.INITIALIZED
+            self._finish_download(source, attempt, False, check_integrity=False)
             raise
 
-    def _download_wrapper(self):
+    def _finish_download(
+        self,
+        source: tuple[str, str],
+        attempt: int,
+        succeeded: bool,
+        *,
+        check_integrity: bool = True,
+    ) -> None:
+        """Release the worker claim and notify queued catalog changes on every exit."""
+        # Keep the worker claim while checking the remaining file, but do not hold
+        # the lock across the integrity scan: UI settings must still be deferrable.
+        usable = succeeded or self.has_usable_parts_catalog(
+            check_integrity=check_integrity
+        )
+        with self.download_lock:
+            self.state = (
+                LibraryState.INITIALIZED if usable else LibraryState.UPDATE_NEEDED
+            )
+            self._download_running = False
+        if succeeded:
+            wx.PostEvent(
+                self.parent,
+                DownloadCompletedEvent(library=self, source=source, attempt=attempt),
+            )
+        wx.PostEvent(
+            self.parent,
+            DownloadFinishedEvent(
+                library=self, source=source, attempt=attempt, succeeded=succeeded
+            ),
+        )
+
+    def _download_wrapper(self, source: tuple[str, str], attempt: int) -> None:
         """Run the download worker with guaranteed state cleanup."""
+        succeeded = False
         try:
-            self.download()
+            wx.PostEvent(
+                self.parent,
+                DownloadStartedEvent(library=self, source=source, attempt=attempt),
+            )
+            succeeded = self.download()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.exception("Unexpected error while downloading parts database")
             wx.PostEvent(
@@ -1212,13 +1312,11 @@ class Library:
                 ),
             )
         finally:
-            with self.download_lock:
-                self.state = LibraryState.INITIALIZED
+            self._finish_download(source, attempt, succeeded)
 
-    def download(self):
+    def download(self) -> bool:
         """Actual worker thread that downloads and imports the parts data."""
         start = time.time()
-        wx.PostEvent(self.parent, DownloadStartedEvent())
 
         # Get library configuration for selected library
         library_config = LIBRARY_CONFIGS[self.selected_library]
@@ -1259,8 +1357,7 @@ class Library:
                         style="error",
                     ),
                 )
-                self.state = LibraryState.INITIALIZED
-                return
+                return False
 
             total_chunks = int(r.text)
         except Exception as e:
@@ -1272,8 +1369,7 @@ class Library:
                     style="error",
                 ),
             )
-            self.state = LibraryState.INITIALIZED
-            return
+            return False
 
         # Re-download incomplete or missing chunks
         for i in range(total_chunks):
@@ -1334,8 +1430,7 @@ class Library:
                                 style="error",
                             ),
                         )
-                        self.state = LibraryState.INITIALIZED
-                        return
+                        return False
 
                     size = int(r.headers.get("Content-Length", 0))
                     self.logger.debug(
@@ -1363,8 +1458,7 @@ class Library:
                         style="error",
                     ),
                 )
-                self.state = LibraryState.INITIALIZED
-                return
+                return False
 
         # Delete progress file to indicate the download is complete
         if os.path.exists(progress_file):
@@ -1383,11 +1477,10 @@ class Library:
                     style="error",
                 ),
             )
-            self.state = LibraryState.INITIALIZED
-            return
+            return False
 
-        # Check if the database file was successfully extracted
-        if not os.path.exists(self.partsdb_file):
+        # Extraction can leave a nonempty but incomplete or unreadable database.
+        if not self.has_usable_parts_catalog():
             wx.PostEvent(
                 self.parent,
                 MessageEvent(
@@ -1396,10 +1489,8 @@ class Library:
                     style="error",
                 ),
             )
-            self.state = LibraryState.INITIALIZED
-            return
+            return False
 
-        wx.PostEvent(self.parent, DownloadCompletedEvent())
         end = time.time()
         wx.PostEvent(
             self.parent,
@@ -1409,7 +1500,7 @@ class Library:
                 style="info",
             ),
         )
-        self.state = LibraryState.INITIALIZED
+        return True
 
     def create_tables(self, headers: Iterable[str]) -> None:
         """Create all tables."""
