@@ -1659,27 +1659,37 @@ class JLCPCBTools(wx.Dialog):
         # the click has been handled, so the focus is what has to be put
         # back to keep the viewport still.
         focused_item = self.footprint_list.GetCurrentItem()
-        if not focused_item.IsOk():
-            focused_item = selected_item
-        alike_items = self.partlist_data_model.select_alike(selected_item)
-        if all(self.footprint_list.IsSelected(item) for item in alike_items):
+        already_selected = []
+        to_select = []
+        for alike_item in self.partlist_data_model.select_alike(selected_item):
+            if self.footprint_list.IsSelected(alike_item):
+                already_selected.append(alike_item)
+            else:
+                to_select.append(alike_item)
+        if not to_select:
             # Nothing to add. Replacing the selection with itself is not free:
             # on GTK it moves the selection anchor onto the survivor, so a
-            # following shift-click ranges from the wrong row, and putting the
-            # focus back scrolls the focused row into view even when the
-            # focus did not move. Leave the control's native state alone.
+            # following shift-click ranges from the wrong row. Leave the
+            # control's native state alone.
             return
+        # SetSelections() selects every row again, and GTK leaves the
+        # shift-click anchor on the last row it selects, so the new rows go
+        # last: the anchor lands where selecting only them would leave it.
         alike = dv.DataViewItemArray()
-        for alike_item in alike_items:
+        for alike_item in already_selected + to_select:
             alike.append(alike_item)
         self.select_alike_in_progress = True
         try:
             self.footprint_list.SetSelections(alike)
-            # SetSelections() leaves the last row of the new selection focused,
-            # which would drag whichever alike row sits furthest down the list
-            # under the mouse pointer. Restoring the focus points the scroll
-            # at a row that is already on screen, so nothing moves.
-            self.footprint_list.SetCurrentItem(focused_item)
+            # wxOSX moves the focus onto the highest row of the new selection,
+            # so it goes back. GTK never moves its cursor here, and focusing a
+            # row there scrolls it into view even when the focus is unchanged,
+            # so the focus is only put back when it actually moved.
+            if (
+                focused_item.IsOk()
+                and self.footprint_list.GetCurrentItem() != focused_item
+            ):
+                self.footprint_list.SetCurrentItem(focused_item)
         finally:
             self.select_alike_in_progress = False
 
