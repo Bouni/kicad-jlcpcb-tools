@@ -1617,6 +1617,9 @@ class JLCPCBTools(wx.Dialog):
 
     def populate_footprint_list(self, *_: object) -> None:
         """Populate list of footprints."""
+        tooltip = getattr(self, "_type_cell_tooltip", None)
+        if tooltip is not None:
+            tooltip.dismiss()
         if not self.store:
             if not self._project_storage_unavailable and self.is_catalog_available():
                 self.init_store()
@@ -1630,9 +1633,6 @@ class JLCPCBTools(wx.Dialog):
 
     def _populate_footprint_rows(self) -> None:
         """Read a complete project view, allowing the caller to recover storage errors."""
-        tooltip = getattr(self, "_type_cell_tooltip", None)
-        if tooltip is not None:
-            tooltip.dismiss()
         self.partlist_data_model.RemoveAll()
         parts = self.store.read_all()
         snapshot = self.library.read_correction_data()
