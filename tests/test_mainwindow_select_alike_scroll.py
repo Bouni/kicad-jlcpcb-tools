@@ -30,7 +30,10 @@ from .wx_harness import load_mainwindow, wx_stubs
 mainwindow = load_mainwindow(
     "mainwindow_select_alike_tests",
     wx=wx_stubs(
-        Dialog=type("Dialog", (), {}), NewIdRef=object, PostEvent=lambda *_a: None
+        Dialog=type("Dialog", (), {}),
+        Frame=type("Frame", (), {}),
+        NewIdRef=object,
+        PostEvent=lambda *_a: None,
     ),
 )
 JLCPCBTools = mainwindow.JLCPCBTools
