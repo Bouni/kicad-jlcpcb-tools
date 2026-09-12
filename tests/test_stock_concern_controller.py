@@ -105,7 +105,7 @@ def workflow() -> Iterator[types.SimpleNamespace]:
         posted: list[tuple[Any, Any]] = []
         idle: list[Any] = []
         wx = wx_stubs(
-            Dialog=type("Dialog", (), {}),
+            Frame=type("Frame", (), {}),
             NewIdRef=lambda: 1,
             PostEvent=lambda window, event: posted.append((window, event)),
             CallAfter=lambda callback: idle.append(callback),

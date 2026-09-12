@@ -11,7 +11,7 @@ from .wx_harness import load_mainwindow, wx_stubs
 
 mainwindow = load_mainwindow(
     "settings_persistence_tests",
-    wx=wx_stubs(Dialog=type("Dialog", (), {}), NewIdRef=lambda: 1),
+    wx=wx_stubs(Frame=type("Frame", (), {}), NewIdRef=lambda: 1),
 )
 JLCPCBTools = mainwindow.JLCPCBTools
 

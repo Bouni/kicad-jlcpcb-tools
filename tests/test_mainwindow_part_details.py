@@ -12,7 +12,7 @@ _ids = count(1)
 mainwindow = load_mainwindow(
     "mainwindow_part_details_tests",
     wx=wx_stubs(
-        Dialog=type("Dialog", (), {}),
+        Frame=type("Frame", (), {}),
         NewIdRef=lambda: next(_ids),
     ),
 )

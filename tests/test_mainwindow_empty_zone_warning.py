@@ -17,7 +17,7 @@ def mainwindow_module():
     module = load_mainwindow(
         _PACKAGE,
         wx=wx_stubs(
-            Dialog=type("Dialog", (), {}),
+            Frame=type("Frame", (), {}),
             NewIdRef=MagicMock(side_effect=object),
             BeginBusyCursor=MagicMock(),
             EndBusyCursor=MagicMock(),
