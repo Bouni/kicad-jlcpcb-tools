@@ -407,6 +407,74 @@ def _open_main(
     return window
 
 
+def test_main_type_hover_uses_existing_column_and_live_standard_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real dialog connects Type help to its existing model and row help."""
+    install = MagicMock()
+    monkeypatch.setattr(mainwindow, "TypeCellTooltip", install)
+    monkeypatch.setattr(mainwindow.wx, "ToolTip", str, raising=False)
+    monkeypatch.setattr(mainwindow, "STANDARD_ONLY_TOOLTIP", "Standard assembly row")
+
+    window = _open_main(monkeypatch, {})
+
+    install.assert_called_once()
+    control, column, is_standard, set_standard_help = install.call_args.args
+    assert control is window.footprint_list
+    assert column == _column_by_title(control, "Type").GetModelColumn()
+    assert _column_by_title(control, "Type").sortable
+    assert len(control.GetColumns()) == len(datamodel.PartListDataModel.columns)
+    control.SetToolTip.assert_not_called()
+
+    item = object()
+    for value in (True, False):
+        window.partlist_data_model.is_standard_only.return_value = value
+        assert is_standard(item) is value
+    window.partlist_data_model.is_standard_only.assert_called_with(item)
+
+    displayed = {"text": None}
+    body = window._footprint_list_main_window
+    body.SetToolTip.side_effect = lambda text: displayed.update(text=text)
+    body.UnsetToolTip.side_effect = lambda: displayed.update(text=None)
+    set_standard_help(True)
+    assert displayed["text"] == "Standard assembly row"
+    assert window._standard_only_tooltip_active
+    set_standard_help(True)
+    body.SetToolTip.assert_called_once()
+    set_standard_help(False)
+    assert displayed["text"] is None
+    assert not window._standard_only_tooltip_active
+
+
+def test_main_type_hover_rechecks_metadata_and_stops_before_reopening(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Metadata updates and the real close handler reach the owned controller."""
+    instances: list[MagicMock] = []
+
+    def create(*_args: Any) -> MagicMock:
+        controller = MagicMock()
+        instances.append(controller)
+        return controller
+
+    monkeypatch.setattr(mainwindow, "TypeCellTooltip", create)
+    window = _open_main(monkeypatch, {})
+    original_control = window.footprint_list
+    assert window._type_cell_tooltip is instances[0]
+    window._set_standard_only_refs({"R1"})
+    window.partlist_data_model.set_standard_only_refs.assert_called_with({"R1"})
+    instances[0].refresh.assert_called_once()
+
+    window.Close()
+    instances[0].stop.assert_called_once()
+    assert window._destroyed
+    reopened = _open_main(monkeypatch, window.settings)
+    assert reopened._type_cell_tooltip is instances[1]
+    assert reopened.footprint_list is not original_control
+    assert not reopened._standard_only_tooltip_active
+    instances[1].stop.assert_not_called()
+
+
 def test_semantic_widths_survive_schema_insertion_removal_and_reordering() -> None:
     """Follow semantic column names as saved model IDs change across releases."""
     old_schema = [
