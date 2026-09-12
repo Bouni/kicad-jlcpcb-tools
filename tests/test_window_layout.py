@@ -1,7 +1,7 @@
 """Regression coverage for persisted layouts through dialog lifecycle events."""
 
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,6 +59,41 @@ class _Display:
         )
 
 
+@dataclass
+class _SizerItem:
+    child: Any
+    proportion: int
+    flag: int
+    border: int
+
+
+class _Sizer:
+    """Retain sizer membership without reproducing native layout calculations."""
+
+    def __init__(self, orientation: int, *_args: Any) -> None:
+        self.orientation = orientation
+        self.items: list[_SizerItem] = []
+        self.min_size: Optional[tuple] = None
+
+    def Add(
+        self, child: Any, proportion: int = 0, flag: int = 0, border: int = 0
+    ) -> _SizerItem:
+        item = _SizerItem(child, proportion, flag, border)
+        self.items.append(item)
+        return item
+
+    def SetMinSize(self, size: tuple) -> None:
+        self.min_size = size
+
+    def contains(self, child: Any) -> bool:
+        return any(
+            item.child is child
+            or isinstance(item.child, _Sizer)
+            and item.child.contains(child)
+            for item in self.items
+        )
+
+
 class _TopLevelWindow:
     """Dispatch bound events and retain the state read by the real handlers."""
 
@@ -75,6 +110,7 @@ class _TopLevelWindow:
         self._title = title
         self._parent = _args[0] if _args else None
         self._children: list[Any] = []
+        self._sizer: Optional[_Sizer] = None
         if isinstance(self._parent, _TopLevelWindow):
             self._parent._children.append(self)
         self.display_index = 0
@@ -88,9 +124,7 @@ class _TopLevelWindow:
         self.IsFullScreen = MagicMock(return_value=False)
         self.FromDIP = lambda value: _scale(value, self.scale_factor)
         self.ToDIP = lambda value: _scale(value, 1 / self.scale_factor)
-        for name in (
-            "SetAcceleratorTable SetSizer SetSizeHints Centre Destroy"
-        ).split():
+        for name in ("SetAcceleratorTable SetSizeHints Centre Destroy").split():
             setattr(self, name, MagicMock())
         self.Destroy.side_effect = lambda: setattr(self, "_destroyed", True)
 
@@ -112,6 +146,12 @@ class _TopLevelWindow:
     def SetTitle(self, title: str) -> None:
         self._title = title
 
+    def SetSizer(self, sizer: Optional[_Sizer]) -> None:
+        self._sizer = sizer
+
+    def GetSizer(self) -> Optional[_Sizer]:
+        return self._sizer
+
     def _set_size(self, size: tuple) -> None:
         self._size = tuple(size)
         if getattr(self, "_laid_out", False):
@@ -123,7 +163,11 @@ class _TopLevelWindow:
         for child in self._children:
             if isinstance(child, _Panel):
                 child._size = self._size
-            elif getattr(child, "_is_table", False):
+            elif (
+                getattr(child, "_is_table", False)
+                and self._sizer is not None
+                and self._sizer.contains(child)
+            ):
                 child.client_width = self._size[0] - 80
         for name in ("part_list", "footprint_list"):
             if hasattr(self, name) and not isinstance(self, _Frame):
@@ -270,6 +314,8 @@ _wx = wx_stubs(
     Dialog=_Dialog,
     Frame=_Frame,
     Panel=_Panel,
+    BoxSizer=_Sizer,
+    StaticBoxSizer=_Sizer,
     Display=_Display,
     Size=_Size,
     DefaultPosition=None,
@@ -285,8 +331,8 @@ _wx = wx_stubs(
     **{
         name: MagicMock()
         for name in (
-            "Timer StaticText TextCtrl Button ComboBox CheckBox BoxSizer ToolBar Gauge "
-            "StaticBoxSizer ScrolledWindow AcceleratorEntry AcceleratorTable"
+            "Timer StaticText TextCtrl Button ComboBox CheckBox ToolBar Gauge "
+            "ScrolledWindow AcceleratorEntry AcceleratorTable"
         ).split()
     },
 )
@@ -726,6 +772,38 @@ def test_main_form_controls_share_a_panel_and_follow_frame_layout(
 
     panel.Layout.assert_called_once()
     assert window.footprint_list.GetClientSize()[0] == 2920
+
+
+def test_main_form_sizer_is_attached_to_panel_inside_frame_sizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the table in the panel's form and the panel in the frame's sizer."""
+    window = _open_main(monkeypatch, {})
+    panel = window.content_panel
+    form_sizer = panel.GetSizer()
+    frame_sizer = window.GetSizer()
+
+    assert isinstance(form_sizer, _Sizer)
+    assert isinstance(frame_sizer, _Sizer)
+    assert form_sizer is not frame_sizer
+    assert form_sizer.orientation == _wx["wx"].VERTICAL
+    assert frame_sizer.orientation == _wx["wx"].VERTICAL
+    assert len(frame_sizer.items) == 1
+    panel_item = frame_sizer.items[0]
+    assert panel_item.child is panel
+    assert panel_item.proportion > 0
+    assert panel_item.flag & _wx["wx"].EXPAND
+
+    table_items = [
+        item
+        for item in form_sizer.items
+        if isinstance(item.child, _Sizer) and item.child.contains(window.footprint_list)
+    ]
+    assert len(table_items) == 1
+    table_item = table_items[0]
+    assert table_item.proportion > 0
+    assert table_item.flag & _wx["wx"].EXPAND
+    assert table_item.child.contains(window.right_toolbar)
 
 
 def test_main_constructor_restores_semantic_widths(
