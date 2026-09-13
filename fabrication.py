@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
-from zipfile import ZIP_DEFLATED, ZipFile
 
 from pcbnew import (  # pylint: disable=import-error
     EXCELLON_WRITER,
@@ -34,6 +33,7 @@ from pcbnew import (  # pylint: disable=import-error
 )
 
 from .correction_data import Correction, CorrectionMatch, match_correction
+from .fabrication_archive import build_archive, collect_gerber_entries
 from .footprint_helpers import get_is_dnp
 
 # Compatibility hack for V6 / V7 / V7.99
@@ -264,11 +264,19 @@ class Fabrication:
             )
             return footprint.GetPosition()
 
-    def generate_geber(self, layer_count=None):
+    def generate_geber(self, layer_count: Optional[int] = None) -> None:  # noqa: UP045
         """Generate Gerber files."""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
 
-        pctl = PLOT_CONTROLLER(self.board)
+        board = self.board
+        pctl = PLOT_CONTROLLER(board)
+        try:
+            self._plot_layers(board, pctl, layer_count)
+        finally:
+            pctl.ClosePlot()
+
+    def _plot_layers(self, board: Any, pctl: Any, layer_count: Optional[int]) -> None:  # noqa: UP045
+        """Configure and plot the selected manufacturing layers."""
         popt = pctl.GetPlotOptions()
 
         # https://github.com/KiCad/kicad-source-mirror/blob/master/pcbnew/pcb_plot_params.h
@@ -317,13 +325,9 @@ class Fabrication:
 
         popt.SetPlotFrameRef(False)
 
-        # delete all existing files in the output directory first
-        for f in os.listdir(self.gerberdir):
-            os.remove(os.path.join(self.gerberdir, f))
-
         # if no layer_count is given, get the layer count from the board
         if not layer_count:
-            layer_count = self.board.GetCopperLayerCount()
+            layer_count = board.GetCopperLayerCount()
 
         plot_plan_top = [
             ("CuTop", F_Cu, "Top layer"),
@@ -373,29 +377,47 @@ class Fabrication:
 
         # Add all JLC prefixed layers - layers must have "JLC_" in their name
         jlc_layers_to_plot = []
-        enabled_layer_ids = list(self.board.GetEnabledLayers().Seq())
+        enabled_layer_ids = list(board.GetEnabledLayers().Seq())
         for enabled_layer_id in enabled_layer_ids:
-            layer_name_string = str(self.board.GetLayerName(enabled_layer_id)).upper()
+            layer_name_string = str(board.GetLayerName(enabled_layer_id)).upper()
             if "JLC_" in layer_name_string:
                 plotter_info = (layer_name_string, enabled_layer_id, layer_name_string)
                 jlc_layers_to_plot.append(plotter_info)
         plot_plan += jlc_layers_to_plot
 
+        # KiCad appends a trimmed layer suffix to the board stem. Its filename
+        # sanitization substitutes ASCII characters without changing byte length.
+        stem = Path(board.GetFileName()).stem
+        for suffix, _layer, description in plot_plan:
+            if len(f"{stem}-{suffix.strip()}.gbr".encode()) > 255:
+                raise ValueError(
+                    f"Gerber filename for {description} exceeds 255 bytes. "
+                    "Shorten the board filename or custom layer name before generating."
+                )
+
+        # delete all existing files in the output directory first
+        for f in os.listdir(self.gerberdir):
+            os.remove(os.path.join(self.gerberdir, f))
+
         for layer_info in plot_plan:
             popt.SetSkipPlotNPTH_Pads(IsCopperLayer(layer_info[1]))
             pctl.SetLayer(layer_info[1])
-            pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
+            if (
+                pctl.OpenPlotfile(layer_info[0], PLOT_FORMAT_GERBER, layer_info[2])
+                is False
+            ):
+                raise RuntimeError(f"Could not open plot file for {layer_info[2]}")
             if pctl.PlotLayer() is False:
-                self.logger.error("Error plotting %s", layer_info[2])
+                raise RuntimeError(f"Error plotting {layer_info[2]}")
             self.logger.info("Successfully plotted %s", layer_info[2])
-        pctl.ClosePlot()
 
-    def generate_excellon(self):
+    def generate_excellon(self) -> None:
         """Generate Excellon files."""
-        drlwriter = EXCELLON_WRITER(self.board)
+        board = self.board
+        drlwriter = EXCELLON_WRITER(board)
         mirror = False
         minimalHeader = False
-        offset = self.board.GetDesignSettings().GetAuxOrigin()
+        offset = board.GetDesignSettings().GetAuxOrigin()
         mergeNPTH = False
         drlwriter.SetOptions(mirror, minimalHeader, offset, mergeNPTH)
         # JLCPCB asks for Excellon drill data in metric units.
@@ -403,25 +425,17 @@ class Fabrication:
         drlwriter.SetFormat(metric)
         genDrl = True
         genMap = True
-        drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap)
+        if drlwriter.CreateDrillandMapFilesSet(self.gerberdir, genDrl, genMap) is False:
+            raise RuntimeError("Could not generate complete drill and map files")
         self.logger.info("Finished generating Excellon files")
 
-    def zip_gerber_excellon(self):
+    def zip_gerber_excellon(self) -> Path:
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
-        zip_path = self.get_gerber_zip_path()
-        with ZipFile(
-            zip_path,
-            "w",
-            compression=ZIP_DEFLATED,
-            compresslevel=9,
-        ) as zipfile:
-            for folderName, _, filenames in os.walk(self.gerberdir):
-                for filename in filenames:
-                    if not filename.endswith(("gbr", "drl", "pdf")):
-                        continue
-                    filePath = os.path.join(folderName, filename)
-                    zipfile.write(filePath, os.path.basename(filePath))
+        zip_path = Path(self.get_gerber_zip_path())
+        entries = collect_gerber_entries(Path(self.gerberdir))
+        build_archive(zip_path, entries)
         self.logger.info("Finished generating ZIP file %s", zip_path)
+        return zip_path
 
     def generate_cpl(
         self,
