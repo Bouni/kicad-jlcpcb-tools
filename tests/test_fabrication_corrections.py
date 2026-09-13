@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from tests.test_fabrication_correction_recovery import (
+from tests.fabrication_test_support import (
     Point,
     make_fabrication,
     make_footprint,

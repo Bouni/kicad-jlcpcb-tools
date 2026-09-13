@@ -17,9 +17,9 @@ from tests.correction_test_support import (
     raw_rows,
     seed_raw,
 )
+from tests.fabrication_test_support import Point, make_fabrication, read_cpl
 from tests.modal_test_support import ModalDialog
 from tests.test_corrections_import_export import install_manager_controls
-from tests.test_fabrication_correction_recovery import Point, make_fabrication, read_cpl
 from tests.test_mainwindow_empty_zone_warning import _make_window
 from tests.wx_harness import load_correction_modules, mainwindow_stubs, wx_stubs
 
