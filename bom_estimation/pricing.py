@@ -178,12 +178,19 @@ def is_tht_part(part: Mapping[str, object]) -> bool:
     )
 
 
-def get_assembly_flags(part: Mapping[str, object]) -> dict:
-    """Parse assembly flags from persisted JSON."""
+def get_assembly_flags(part: Mapping[str, object]) -> dict[str, object]:
+    """Read legacy JSON flags, with explicitly supplied current fields taking precedence."""
     try:
-        return json.loads(str(part.get("assembly_flags") or "{}"))
+        stored = json.loads(str(part.get("assembly_flags") or "{}"))
     except (json.JSONDecodeError, TypeError, ValueError):
-        return {}
+        stored = {}
+    flags = stored if isinstance(stored, dict) else {}
+    flags.update(
+        (key, part[key])
+        for key in ("exclude_from_bom", "exclude_from_pos", "is_dnp")
+        if key in part
+    )
+    return flags
 
 
 def _safe_int(value: object, default: int = 0) -> int:
