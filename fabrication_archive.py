@@ -4,6 +4,7 @@ from collections.abc import Sequence
 import logging
 import os
 from pathlib import Path
+import shutil
 import tempfile
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
@@ -93,3 +94,72 @@ def build_archive(destination: Path, entries: Sequence[Path]) -> Path:
                 "Could not remove temporary archive %s", temporary_path, exc_info=True
             )
     return destination
+
+
+def publish_artifact_set(pairs: Sequence[tuple[Path, Path]]) -> None:
+    """Publish a prepared set, restoring previous files if any replacement fails.
+
+    Filesystem APIs cannot atomically replace several filenames. Keep recovery
+    copies until every replacement succeeds and compensate runtime failures.
+    If compensation itself fails, retain the recovery directory and report it;
+    callers must not label that generation successful. This is not a promise of
+    crash-atomic publication across power loss.
+    """
+    if not pairs:
+        raise ValueError("No fabrication artifacts were prepared")
+    paths = tuple((Path(source), Path(destination)) for source, destination in pairs)
+    destinations = [str(destination.absolute()).casefold() for _, destination in paths]
+    if len(set(destinations)) != len(destinations):
+        raise ValueError("Fabrication artifacts have conflicting destinations")
+    for source, destination in paths:
+        if not source.is_file():
+            raise FileNotFoundError(f"Fabrication artifact is missing: {source}")
+        if source.stat().st_size == 0:
+            raise ValueError(f"Fabrication artifact is empty: {source}")
+        if not destination.parent.is_dir():
+            raise NotADirectoryError(destination.parent)
+        if destination.exists() and not destination.is_file():
+            raise ValueError(f"Artifact destination is not a file: {destination}")
+    recovery = Path(
+        tempfile.mkdtemp(prefix=".jlcpcb-recovery-", dir=paths[0][1].parent)
+    )
+    backups: dict[Path, Path] = {}
+    published: list[Path] = []
+    preserve_recovery = False
+    try:
+        for index, (_, destination) in enumerate(paths):
+            if destination.exists():
+                backup = recovery / str(index)
+                shutil.copy2(destination, backup)
+                backups[destination] = backup
+        try:
+            for source, destination in paths:
+                os.replace(source, destination)
+                published.append(destination)
+        except OSError as error:
+            failed_restore = []
+            for destination in reversed(published):
+                try:
+                    if destination in backups:
+                        os.replace(backups[destination], destination)
+                    else:
+                        destination.unlink(missing_ok=True)
+                except OSError:
+                    failed_restore.append(str(destination))
+            if failed_restore:
+                preserve_recovery = True
+                raise RuntimeError(
+                    "Fabrication publication failed and these files could not be "
+                    f"restored: {', '.join(failed_restore)}. Recovery copies: {recovery}"
+                ) from error
+            raise
+    finally:
+        if not preserve_recovery:
+            try:
+                shutil.rmtree(recovery)
+            except OSError:
+                logging.getLogger(__name__).warning(
+                    "Could not remove fabrication recovery directory %s",
+                    recovery,
+                    exc_info=True,
+                )
