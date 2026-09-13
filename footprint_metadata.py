@@ -1,11 +1,17 @@
 """Helpers for deriving estimator metadata from KiCad footprints."""
 
+from collections.abc import Iterable
 import json
+from typing import Any
 
 from .footprint_helpers import get_exclude_from_bom, get_exclude_from_pos, get_is_dnp
 
+# PAD_ATTRIB in KiCad's padstack.h: PTH=0, SMD=1, CONN=2, NPTH=3.
+# pcbnew exposes these enum values as integers, not enum-name strings.
+_PAD_ATTRIB_NPTH = 3
 
-def get_footprint_pads(footprint):
+
+def get_footprint_pads(footprint: Any) -> Iterable[Any]:
     """Return an iterable of pads for a footprint across KiCad API variants."""
     pads_fn = getattr(footprint, "Pads", None)
     if callable(pads_fn):
@@ -18,52 +24,32 @@ def get_footprint_pads(footprint):
     return []
 
 
-def count_pad(pad) -> bool:
+def count_pad(pad: Any) -> bool:
     """Return True when a pad should count as a solder joint."""
-    is_npth_fn = getattr(pad, "IsNPTH", None)
-    if callable(is_npth_fn) and is_npth_fn():
-        return False
-
-    is_plated_fn = getattr(pad, "IsPlated", None)
-    if callable(is_plated_fn) and not is_plated_fn():
-        return False
-
-    get_attribute_fn = getattr(pad, "GetAttribute", None)
-    if callable(get_attribute_fn):
-        attribute_text = str(get_attribute_fn()).upper()
-        if "NPTH" in attribute_text or "NONPLATED" in attribute_text:
-            return False
-
-    return True
+    return pad.GetAttribute() != _PAD_ATTRIB_NPTH
 
 
-def get_footprint_pad_count(footprint) -> int:
+def get_footprint_pad_count(footprint: Any) -> int:
     """Count pads that likely correspond to electrical solder joints."""
     return sum(1 for pad in get_footprint_pads(footprint) if count_pad(pad))
 
 
-def footprint_has_tht(footprint) -> bool:
-    """Heuristically determine if a footprint has through-hole pads."""
+def get_footprint_pad_metadata(footprint: Any) -> tuple[int, bool]:
+    """Read electrical solder-joint count and plated-hole presence in one pass."""
+    count, has_tht = 0, False
     for pad in get_footprint_pads(footprint):
-        if not count_pad(pad):
-            continue
-
-        has_hole_fn = getattr(pad, "HasHole", None)
-        if callable(has_hole_fn) and has_hole_fn():
-            return True
-
-        get_drill_size_fn = getattr(pad, "GetDrillSize", None)
-        if callable(get_drill_size_fn):
-            drill_size = get_drill_size_fn()
-            x = getattr(drill_size, "x", 0)
-            y = getattr(drill_size, "y", 0)
-            if x > 0 or y > 0:
-                return True
-
-    return False
+        if count_pad(pad):
+            count += 1
+            has_tht = has_tht or pad.HasHole()
+    return count, has_tht
 
 
-def get_assembly_flags(footprint) -> str:
+def footprint_has_tht(footprint: Any) -> bool:
+    """Determine whether a footprint contains a plated through-hole pad."""
+    return get_footprint_pad_metadata(footprint)[1]
+
+
+def get_assembly_flags(footprint: Any) -> str:
     """Build assembly-related footprint flags for estimator persistence."""
     flags = {
         "exclude_from_bom": bool(get_exclude_from_bom(footprint)),
