@@ -17,3 +17,20 @@ jobs:
         run: pip install .
       - name: Run tests
         run: pytest
+  native-wx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install wx and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-wxgtk4.0 python3-venv xvfb xauth
+          /usr/bin/python3 -m venv --system-site-packages .venv-wx
+      - name: Install test dependencies
+        run: .venv-wx/bin/python -m pip install '.[dev]'
+      - name: Run tests with native wx
+        env:
+          KICAD_JLCPCB_NATIVE_TESTS: '1'
+        run: timeout 180s xvfb-run -a .venv-wx/bin/python -m pytest -q -rs
