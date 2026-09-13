@@ -2,13 +2,15 @@
 
 from collections.abc import Sequence
 import importlib.util
+import logging
 from pathlib import Path
 import re
-import sys
 import types
 from typing import Optional
 
 import pytest
+
+from tests.wx_harness import temporary_modules
 
 _ROOT = Path(__file__).parent.parent
 
@@ -19,20 +21,16 @@ _MIXED_PROJECT_FIXTURE = _ROOT / "tests/fixtures/kicad9_mixed_projects.kicad_sch
 
 _pcbnew = types.ModuleType("pcbnew")
 _pcbnew.GetBuildVersion = lambda: "8.0"  # type: ignore[attr-defined]
-sys.modules["pcbnew"] = _pcbnew
 
 _package = types.ModuleType("kicadplugin")
 _package.__path__ = [str(_ROOT)]
-sys.modules["kicadplugin"] = _package
 
 _core = types.ModuleType("kicadplugin.core")
 _core.__path__ = [str(_ROOT / "core")]
-sys.modules["kicadplugin.core"] = _core
 
 _version = types.ModuleType("kicadplugin.core.version")
 _version.is_version6 = lambda version: False  # type: ignore[attr-defined]
 _version.is_version7 = lambda version: False  # type: ignore[attr-defined]
-sys.modules["kicadplugin.core.version"] = _version
 
 _spec = importlib.util.spec_from_file_location(
     "kicadplugin.schematicexport", _ROOT / "schematicexport.py"
@@ -40,8 +38,17 @@ _spec = importlib.util.spec_from_file_location(
 assert _spec is not None and _spec.loader is not None
 _module = importlib.util.module_from_spec(_spec)
 _module.__package__ = "kicadplugin"
-sys.modules["kicadplugin.schematicexport"] = _module
-_spec.loader.exec_module(_module)
+with temporary_modules(
+    {
+        "pcbnew": _pcbnew,
+        "kicadplugin": _package,
+        "kicadplugin.core": _core,
+        "kicadplugin.core.version": _version,
+        "kicadplugin.schematicexport": _module,
+    },
+    namespaces=("kicadplugin",),
+):
+    _spec.loader.exec_module(_module)
 
 SchematicExport = _module.SchematicExport
 
@@ -553,6 +560,7 @@ def test_export_warns_for_stale_project_instances(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A real-world mixed project table reports a skipped symbol."""
+    caplog.set_level(logging.WARNING)
     path = tmp_path / "board.kicad_sch"
     path.write_text(_MIXED_PROJECT_FIXTURE.read_text(encoding="utf-8"))
     parts = [
@@ -672,6 +680,7 @@ def test_export_skips_ambiguous_board_project(
     match_count: Optional[int],  # noqa: UP045
 ) -> None:
     """A board-stem instance group is unsafe without one authenticated project."""
+    caplog.set_level(logging.WARNING)
     result = _run_export(
         tmp_path,
         monkeypatch,
@@ -707,6 +716,7 @@ def test_export_still_syncs_unscoped_symbol_when_project_is_ambiguous(
     match_count: Optional[int],  # noqa: UP045
 ) -> None:
     """Project authentication is unnecessary for an unscoped symbol."""
+    caplog.set_level(logging.WARNING)
     symbols = "\n".join(
         [
             _symbol(

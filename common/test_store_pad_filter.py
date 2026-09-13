@@ -1,62 +1,31 @@
 """Tests for store pad filtering helpers used by BOM estimator metadata."""
 
 import contextlib
-import importlib.util
 import logging
 from pathlib import Path
 import sqlite3
-import sys
 import types
 from typing import Any, Optional
 
 import pytest
 
-# Provide minimal wx stubs so root-level helpers/store imports succeed in tests.
-if "wx" not in sys.modules:
-    sys.modules["wx"] = types.ModuleType("wx")
-if "wx.dataview" not in sys.modules:
-    sys.modules["wx.dataview"] = types.ModuleType("wx.dataview")
+from bom_estimation.assembly_mode import ComponentProductType
+from bom_estimation.pricing import get_assembly_flags as parse_assembly_flags
+from tests.wx_harness import load_siblings, wx_stubs
 
-ROOT = Path(__file__).parent.parent
-PACKAGE = "kicad_jlcpcb_tools"
+# Keep the real Store and metadata helpers without leaving fake wx installed
+# for unrelated tests that need native grid geometry.
+with load_siblings(
+    "store_pad_tests", ("store", "footprint_metadata"), wx_stubs()
+) as _modules:
+    store_module = _modules["store"]
+    footprint_metadata_module = _modules["footprint_metadata"]
 
-if PACKAGE not in sys.modules:
-    pkg = types.ModuleType(PACKAGE)
-    pkg.__path__ = [str(ROOT)]
-    sys.modules[PACKAGE] = pkg
-
-
-def _load_root_module(name):
-    """Load a root module as part of a synthetic package for relative imports."""
-    module_name = f"{PACKAGE}.{name}"
-    if module_name in sys.modules:
-        return sys.modules[module_name]
-
-    spec = importlib.util.spec_from_file_location(module_name, str(ROOT / f"{name}.py"))
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load module spec for {module_name}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-store_module = _load_root_module("store")
-footprint_metadata_module = _load_root_module("footprint_metadata")
 Store = store_module.Store
 count_pad = footprint_metadata_module.count_pad
 get_footprint_pad_count = footprint_metadata_module.get_footprint_pad_count
 get_footprint_pads = footprint_metadata_module.get_footprint_pads
 footprint_has_tht = footprint_metadata_module.footprint_has_tht
-
-# Imported here for the round-trip test below; the import sits below the
-# package bootstrap so bom_estimation resolves correctly.
-from bom_estimation.assembly_mode import (  # noqa: E402  pylint: disable=wrong-import-position,import-error
-    ComponentProductType,
-)
-from bom_estimation.pricing import (  # noqa: E402  pylint: disable=wrong-import-position,import-error
-    get_assembly_flags as parse_assembly_flags,
-)
 
 
 class _Pad:
@@ -93,19 +62,25 @@ class _FootprintGetPads:
         return self._pads
 
 
-def _store_obj():
-    """Create a Store object without invoking full constructor side effects."""
-    return Store.__new__(Store)
+def _saved_store(tmp_path: Path, footprints: tuple[Any, ...] = ()) -> Any:
+    """Construct a real ordinary Store using a saved-board fixture."""
+    filename = tmp_path / "board.kicad_pcb"
+    filename.write_text("(kicad_pcb)\n", encoding="utf-8")
+    board = types.SimpleNamespace(
+        GetFileName=lambda: str(filename), GetFootprints=lambda: footprints
+    )
+    return Store(types.SimpleNamespace(settings={}), str(tmp_path), board)
 
 
 def _store_with_enriched_part(
-    tmp_path, *, lcsc="C1", assembly_process="SMT", product_type=2
-):
+    tmp_path: Path,
+    *,
+    lcsc: str = "C1",
+    assembly_process: str = "SMT",
+    product_type: int = 2,
+) -> Any:
     """Create a test store containing one enriched LCSC assignment."""
-    store = _store_obj()
-    store.logger = logging.getLogger(__name__)
-    store.dbfile = str(tmp_path / "project.db")
-    store.create_db()
+    store = _saved_store(tmp_path)
     with contextlib.closing(sqlite3.connect(store.dbfile)) as con, con as cur:
         cur.execute(
             "INSERT INTO part_info ("
@@ -187,13 +162,7 @@ def test_refresh_replaces_stale_npth_metadata_and_preserves_it_on_reopen(
 ) -> None:
     """Existing projects shed false joint/THT metadata on the next board sync."""
     footprint = _BackfillFootprint(pads=[_Pad(3, True), _Pad(3, True)])
-    filename = tmp_path / "board.kicad_pcb"
-    filename.write_text("(kicad_pcb)\n", encoding="utf-8")
-    board = types.SimpleNamespace(
-        GetFileName=lambda: str(filename), GetFootprints=lambda: [footprint]
-    )
-    settings = types.SimpleNamespace(settings={})
-    store = Store(settings, str(tmp_path), board)
+    store = _saved_store(tmp_path, (footprint,))
     store.set_estimator_metadata(
         "R1", 2, True, footprint_metadata_module.get_assembly_flags(footprint)
     )
@@ -202,7 +171,7 @@ def test_refresh_replaces_stale_npth_metadata_and_preserves_it_on_reopen(
     updated = store.get_part("R1")
     assert (updated["pad_count"], updated["has_tht"]) == (0, 0)
 
-    reopened = Store(settings, str(tmp_path), board).get_part("R1")
+    reopened = Store(store.parent, str(tmp_path), store.board).get_part("R1")
     assert (reopened["pad_count"], reopened["has_tht"]) == (0, 0)
     assert reopened["lcsc"] == "C1"
 
@@ -240,13 +209,9 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
     assert _part_state(store) == ("CNEW", "10k", "", None)
 
 
-def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path):
+def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path: Path) -> None:
     """Rows missing any required enrichment field should be selected."""
-    s = _store_obj()
-    s.logger = logging.getLogger(__name__)
-    s.dbfile = str(tmp_path / "project.db")
-
-    s.create_db()
+    s = _saved_store(tmp_path)
 
     with contextlib.closing(sqlite3.connect(s.dbfile)) as con, con as cur:
         cur.executemany(

@@ -141,6 +141,11 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "common", "dblib"]
+markers = [
+    "native_wx: real wx controls, enabled with KICAD_JLCPCB_NATIVE_TESTS=1",
+    "native_kicad: real KiCad variant bindings and disposable boards",
+    "os_input: real mouse/keyboard input; requires an isolated desktop",
+]
 
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false
