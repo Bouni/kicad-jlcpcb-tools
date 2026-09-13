@@ -9,7 +9,6 @@ from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
-from threading import Thread
 from typing import TYPE_CHECKING, Any, Optional
 import json
 import logging
@@ -38,10 +37,8 @@ from .dataview_highlight import (
     simplify_footprint_name,
 )
 from .derive_params import params_for_part
-from .enrichment.providers import LCSCAssemblyMetadataProvider
+from .enrichment.worker import AssemblyMetadataLookup
 from .events import (
-    EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
-    EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT,
     EVT_ASSIGN_PARTS_EVENT,
     EVT_BOM_DATA_CHANGED_EVENT,
     EVT_DOWNLOAD_COMPLETED_EVENT,
@@ -57,8 +54,6 @@ from .events import (
     EVT_UNZIP_EXTRACTING_PROGRESS_EVENT,
     EVT_UNZIP_EXTRACTING_STARTED_EVENT,
     EVT_UPDATE_SETTING,
-    AssemblyEnrichmentCompletedEvent,
-    AssemblyEnrichmentProgressEvent,
     BomDataChangedEvent,
     LogboxAppendEvent,
 )
@@ -230,11 +225,13 @@ class JLCPCBTools(wx.Frame):
         self._part_selector = None
         self._why_standard_dialog = None
         self.bom_estimator_decision = None
-        self.pending_assembly_enrichment = set()
-        # Overlapping workers share a generation until their pending work drains.
-        # Storage invalidation advances it to reject old events; individual
-        # reassignments are guarded by each result's expected LCSC identifier.
-        self.assembly_enrichment_generation = 0
+        self.assembly_lookup = AssemblyMetadataLookup(
+            self._apply_assembly_metadata,
+            self._refresh_bom_after_enrichment_update,
+            lambda message: self.logger.warning(
+                "Assembly enrichment failed: %s", message
+            ),
+        )
         # Latch used by on_bom_data_changed to coalesce a burst of mutations
         # into a single recompute. SQLite commits are synchronous, so async
         # event dispatch is safe to defer here.
@@ -717,14 +714,6 @@ class JLCPCBTools(wx.Frame):
         self.Bind(EVT_UNZIP_EXTRACTING_COMPLETED_EVENT, self.unzip_extracting_completed)
 
         self.Bind(EVT_LOGBOX_APPEND_EVENT, self.logbox_append)
-        self.Bind(
-            EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT,
-            self.on_assembly_enrichment_progress,
-        )
-        self.Bind(
-            EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT,
-            self.on_assembly_enrichment_completed,
-        )
         self.Bind(EVT_BOM_DATA_CHANGED_EVENT, self.on_bom_data_changed)
 
         self.enable_part_specific_toolbar_buttons(False)
@@ -922,6 +911,8 @@ class JLCPCBTools(wx.Frame):
         controller = getattr(self, "_variant_controller", None)
         if controller is not None and controller.session.generating:
             return
+        if lookup := getattr(self, "assembly_lookup", None):
+            lookup.close()
         tooltip = getattr(self, "_type_cell_tooltip", None)
         if tooltip is not None:
             tooltip.stop()
@@ -1019,6 +1010,7 @@ class JLCPCBTools(wx.Frame):
                 from .variant.store import VariantStore
 
                 store_type = VariantStore
+            self.assembly_lookup.invalidate()
             self.store = store_type(self, self.project_path, board)
             self._set_project_storage_error(None)
             if store_type is not Store:
@@ -1063,8 +1055,7 @@ class JLCPCBTools(wx.Frame):
             if tooltip is not None:
                 tooltip.dismiss()
             self.partlist_data_model.RemoveAll()
-            self.assembly_enrichment_generation += 1
-            self.pending_assembly_enrichment.clear()
+            self.assembly_lookup.invalidate()
         self.project_storage_status.SetLabel(
             "Part assignments are unavailable; assignment actions and generation are disabled.\n"
             "Check the log, close other windows using this project, then reopen. Settings remains available."
@@ -1536,12 +1527,12 @@ class JLCPCBTools(wx.Frame):
             refs = set()
         model.set_stock_concern_refs(refs)
 
-    def _get_enrichment_status_label(self, part: dict) -> str:
+    def _get_enrichment_status_label(self, part: dict[str, Any]) -> str:
         """Build UI status text for per-part assembly enrichment state."""
         lcsc = str(part.get("lcsc") or "")
         if not lcsc:
             return ""
-        if lcsc in self.pending_assembly_enrichment:
+        if lcsc in self.assembly_lookup.pending:
             return "Pending"
         if (
             classify_component_product_type(part.get("component_product_type"))
@@ -1563,74 +1554,20 @@ class JLCPCBTools(wx.Frame):
         except sqlite3.Error as error:
             self.logger.warning("Unable to start assembly enrichment: %s", error)
             return
-        if not targets:
-            return
-        new_targets = {
-            lcsc: refs
-            for lcsc, refs in targets.items()
-            if lcsc not in self.pending_assembly_enrichment
-        }
-
-        if not self.pending_assembly_enrichment:
-            self.assembly_enrichment_generation += 1
-        self.pending_assembly_enrichment.update(new_targets)
-        # Newly assigned references also join requests already in flight.
-        for refs in targets.values():
-            for reference in refs:
-                self.partlist_data_model.set_enrichment_status(reference, "Pending")
+        # Normal assignments store facts per reference, so a newly assigned
+        # reference may need a code fetched earlier in this same dialog.
+        self.assembly_lookup.request(targets, retry=True)
+        for lcsc, refs in targets.items():
+            if lcsc in self.assembly_lookup.pending:
+                for reference in refs:
+                    self.partlist_data_model.set_enrichment_status(reference, "Pending")
         self._refresh_assembly_tooltip()
-        if not new_targets:
-            return
 
-        generation = self.assembly_enrichment_generation
-        Thread(
-            target=self._assembly_enrichment_worker,
-            args=(new_targets, generation),
-            daemon=True,
-        ).start()
-
-    def _assembly_enrichment_worker(self, targets: dict, generation: int):
-        """Fetch assembly metadata values from LCSC API in a worker thread.
-
-        Thread ownership stays in mainwindow. This worker must not mutate store,
-        datamodel, or BOM UI state directly; it only posts progress events back
-        to the UI thread. The generation passed in is echoed back on every event
-        so the UI thread can discard results from a superseded run.
-        """
-        provider = LCSCAssemblyMetadataProvider(min_interval_seconds=1.0)
-        for lcsc, metadata in provider.fetch_iter(list(targets.keys())):
-            refs = targets[lcsc]
-            wx.PostEvent(
-                self,
-                AssemblyEnrichmentProgressEvent(
-                    lcsc=lcsc, refs=refs, metadata=metadata, generation=generation
-                ),
-            )
-        wx.PostEvent(
-            self,
-            AssemblyEnrichmentCompletedEvent(generation=generation),
-        )
-
-    def on_assembly_enrichment_progress(self, e: Any) -> None:
-        """Persist one enrichment result and update row-level feedback."""
-        if getattr(self, "_variant_controller", None):
-            return
-        # Drop events from superseded enrichment runs. A reassignment between
-        # spawn and event delivery would otherwise let stale metadata for the
-        # old LCSC be written to a reference that now points elsewhere.
-        generation = getattr(e, "generation", None)
-        if generation is not None and generation != self.assembly_enrichment_generation:
-            return
-        lcsc = getattr(e, "lcsc", "")
-        # Resolve new subscribers at delivery time, including rows hidden by a
-        # filter. Every write still checks that its assignment matches this LCSC.
-        current_targets = self.store.get_assembly_enrichment_targets().get(lcsc, ())
-        refs = tuple(dict.fromkeys([*getattr(e, "refs", []), *current_targets]))
-        metadata = getattr(e, "metadata", {}) or {}
-
+    def _apply_assembly_metadata(self, lcsc: str, metadata: dict[str, Any]) -> None:
+        """Apply results to current recipients, including assignments made in flight."""
         assembly_process = metadata.get("assembly_process", "")
         component_product_type = metadata.get("component_product_type")
-        for reference in refs:
+        for reference in self.store.get_assembly_enrichment_targets().get(lcsc, ()):
             updated = self.store.set_assembly_metadata(
                 reference,
                 assembly_process,
@@ -1640,33 +1577,22 @@ class JLCPCBTools(wx.Frame):
             if updated:
                 current_part = self.store.get_part(reference) or {}
                 self.partlist_data_model.set_assembly_metadata(reference, current_part)
-
-        self.pending_assembly_enrichment.discard(lcsc)
         self._refresh_assembly_tooltip()
 
-    def on_assembly_enrichment_completed(self, e: Any) -> None:
-        """Run a single BOM recompute after a worker finishes its batch.
-
-        Per-progress events update store/datamodel rows individually but no
-        longer trigger a recompute of their own; the cost estimate is refreshed
-        once, here, when the worker's fetch_iter exhausts. Stale completion
-        events from superseded runs are dropped.
-        """
-        if getattr(self, "_variant_controller", None):
-            return
-        generation = getattr(e, "generation", None)
-        if generation is not None and generation != self.assembly_enrichment_generation:
-            return
-        self._refresh_bom_after_enrichment_update()
-
-    def _refresh_bom_after_enrichment_update(self):
-        """Main-thread boundary after enrichment updates.
-
-        Called only from enrichment event handlers after per-row store/datamodel
-        updates are applied on the UI thread. Delegates BOM rendering/recompute
-        through the BOM controller path.
-        """
-        wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
+    def _refresh_bom_after_enrichment_update(self) -> None:
+        """Clear finished status even after failures, then refresh the BOM once."""
+        try:
+            for part in self.store.read_all():
+                self.partlist_data_model.set_assembly_metadata(
+                    part["reference"],
+                    part,
+                    pending=self._get_enrichment_status_label(part) == "Pending",
+                )
+        except (sqlite3.Error, OSError) as error:
+            self._set_project_storage_error(error)
+        finally:
+            self._refresh_assembly_tooltip()
+            wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
 
     def display_message(self, e):
         """Display a message with the data from the event."""
