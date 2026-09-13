@@ -266,3 +266,24 @@ def test_pricing_fallback_uses_shared_product_type_classifier(
 
     assert (summary.standard_setup_cost > 0) is uses_standard
     assert (summary.economic_setup_cost > 0) is (not uses_standard)
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_explicit_population_overrides_legacy_flags_for_billable_parts(
+    populated: bool,
+) -> None:
+    """An in-memory native flag takes precedence without serializing another JSON row."""
+    part = _part(is_dnp=not populated, assembly_flags='{"is_dnp": true, "custom": 7}')
+    flags = get_assembly_flags(part)
+    assert flags["is_dnp"] is (not populated)
+    assert flags["custom"] == 7
+    assert _collect_billable_bom_parts([part]) == ([part] if populated else [])
+
+
+@pytest.mark.parametrize("serialized", ["not-json", "[]", "null"])
+def test_direct_flags_remain_usable_with_unavailable_legacy_flags(
+    serialized: str,
+) -> None:
+    """Missing or malformed persisted flags do not override explicit current inputs."""
+    part = {"assembly_flags": serialized, "is_dnp": True, "exclude_from_bom": False}
+    assert get_assembly_flags(part) == {"is_dnp": True, "exclude_from_bom": False}

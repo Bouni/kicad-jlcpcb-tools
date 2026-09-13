@@ -1,5 +1,7 @@
 """Tests for BOM estimator business logic."""
 
+from unittest.mock import Mock
+
 import pytest
 
 from bom_estimation import (
@@ -349,58 +351,32 @@ def test_build_standard_mode_context_highlights_standard_parts_and_multiside_ref
     )
 
 
-def test_prepare_bom_price_labels_deduplicates_detail_fetches():
-    """Parts sharing an LCSC code cause only one get_part_details call."""
-    call_count = [0]
-
-    def counting_get(lcsc):
-        call_count[0] += 1
-        return {"price": "1-:0.50"}
-
+def test_prepare_bom_price_labels_groups_demand_and_preserves_row_mapping() -> None:
+    """Shared assignments use one tier lookup; excluded or unnamed rows add no cost."""
     parts = [
         {"reference": "R1", "lcsc": "C1", "exclude_from_bom": 0},
         {"reference": "R2", "lcsc": "C1", "exclude_from_bom": 0},
+        {"reference": "R3", "lcsc": "C2", "exclude_from_bom": 0},
+        {"reference": "R4", "lcsc": "C3", "exclude_from_bom": 1},
+        {"reference": "R5", "lcsc": "", "exclude_from_bom": 0},
+        {"lcsc": "C4", "exclude_from_bom": 0},
     ]
-    prepare_bom_price_labels(parts, board_count=5, get_part_details=counting_get)
-
-    assert call_count[0] == 1
-
-
-def test_prepare_bom_price_labels_uses_aggregate_lcsc_quantity_tiers():
-    """Rows sharing an LCSC use tier selected from aggregated quantity."""
-    parts = [
-        {"reference": "R1", "lcsc": "C1", "exclude_from_bom": 0},
-        {"reference": "R2", "lcsc": "C1", "exclude_from_bom": 0},
-    ]
-
+    get_details = Mock(
+        side_effect={
+            "C1": {"price": "1-9:1.00,10-:0.50"},
+            "C2": {"price": "5-:0.20"},
+        }.get
+    )
     labels = prepare_bom_price_labels(
         parts,
         board_count=5,
-        get_part_details=lambda _lcsc: {"price": "1-9:1.00,10-:0.50"},
+        get_part_details=get_details,
     )
-
-    # Aggregate qty is 10 across both rows -> unit price 0.50, per-row label is 5 * 0.50
-    assert labels == {"R1": "$2.5000", "R2": "$2.5000"}
-
-
-def test_prepare_bom_price_labels_skips_excluded_and_unassigned_parts():
-    """Excluded and LCSC-less parts produce empty labels, not missing keys."""
-    parts = [
-        {"reference": "R1", "lcsc": "C1", "exclude_from_bom": 1},
-        {"reference": "R2", "lcsc": "", "exclude_from_bom": 0},
-    ]
-    labels = prepare_bom_price_labels(
-        parts, board_count=5, get_part_details=lambda _: {"price": "1-:0.10"}
-    )
-
-    assert labels == {"R1": "", "R2": ""}
-
-
-def test_prepare_bom_price_labels_skips_parts_without_reference():
-    """Parts missing the reference key are silently omitted."""
-    parts = [{"lcsc": "C1", "exclude_from_bom": 0}]
-    labels = prepare_bom_price_labels(
-        parts, board_count=5, get_part_details=lambda _: {"price": "1-:0.10"}
-    )
-
-    assert labels == {}
+    assert labels == {
+        "R1": "$2.5000",
+        "R2": "$2.5000",
+        "R3": "$1.0000",
+        "R4": "",
+        "R5": "",
+    }
+    assert [call.args for call in get_details.call_args_list] == [("C1",), ("C2",)]
