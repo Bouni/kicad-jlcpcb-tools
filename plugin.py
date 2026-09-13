@@ -3,6 +3,7 @@
 import os
 
 from pcbnew import ActionPlugin  # pylint: disable=import-error
+import wx
 
 from .mainwindow import JLCPCBTools
 
@@ -23,8 +24,12 @@ class JLCPCBPlugin(ActionPlugin):
         self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
         self._pcbnew_frame = None
 
-    def Run(self):
+    def Run(self) -> None:
         """Overwrite Run."""
-        dialog = JLCPCBTools(None)
+        try:
+            dialog = JLCPCBTools(None)
+        except Exception as exc:
+            wx.MessageBox(str(exc), "JLCPCB Tools", wx.OK | wx.ICON_ERROR)
+            return
         dialog.Center()
         dialog.Show()
