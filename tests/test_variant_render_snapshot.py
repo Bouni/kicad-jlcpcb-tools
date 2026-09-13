@@ -34,7 +34,8 @@ def _complete(ui: Any) -> None:
     ui.run_worker()
     wait_until(
         ui.wx,
-        lambda: not ui.controller._pending and not ui.controller._render_queued,
+        lambda: not ui.controller.assembly_lookup.pending
+        and not ui.controller._render_queued,
     )
 
 
@@ -256,7 +257,7 @@ def test_supplier_completion_joins_captured_lcsc_without_native_snapshot_fanout(
         c = ui.controller
         snapshot = c.session.snapshot
         c.timer.Stop()
-        assert c._pending == {"C1"} and len(ui.pending_threads) == 1
+        assert c.assembly_lookup.pending == {"C1"} and len(ui.pending_threads) == 1
         ui.board.parts[0].SetField("Reference", "R1000")
         ui.board.parts[0].AddVariant("A").SetFieldValue("LCSC", "C900")
         ui.supplier.fetch_iter.return_value = iter(

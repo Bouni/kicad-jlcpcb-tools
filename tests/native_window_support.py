@@ -465,13 +465,10 @@ def window_ui(
             lambda frame: setattr(frame, "logger", logging.getLogger(__name__)),
         )
         worker = importlib.import_module(package + ".enrichment.worker")
-        for worker_module in (worker, controller):
-            monkeypatch.setattr(worker_module, "Thread", defer_thread)
-            monkeypatch.setattr(
-                worker_module,
-                "LCSCAssemblyMetadataProvider",
-                lambda **_kwargs: ui.supplier,
-            )
+        monkeypatch.setattr(worker, "Thread", defer_thread)
+        monkeypatch.setattr(
+            worker, "LCSCAssemblyMetadataProvider", lambda **_kwargs: ui.supplier
+        )
         requests = importlib.import_module("requests")
         monkeypatch.setattr(
             requests.sessions.Session,

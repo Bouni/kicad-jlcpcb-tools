@@ -174,7 +174,7 @@ def test_supply_publication_during_generation_is_deferred_until_release(
             drained: list[bool] = []
             ui.wx.CallAfter(drained.append, True)
             wait_until(ui.wx, lambda: bool(drained))
-            assert not c._pending
+            assert not c.assembly_lookup.pending
             assert (
                 ui.cache.assembly_rows(c.session.snapshot, "A")[0][
                     "component_product_type"
