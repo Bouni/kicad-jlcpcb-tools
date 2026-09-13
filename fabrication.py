@@ -475,37 +475,45 @@ class Fabrication:
             if not add_without_lcsc and not part["lcsc"]:
                 continue
             match = self._correction_for_footprint(fp, part["lcsc"])
-            try:
-                center = self.get_position(fp)
-                # Subtract in Python, before native coordinate arithmetic can wrap.
-                position = SimpleNamespace(
-                    x=center.x - aux_origin.x, y=center.y - aux_origin.y
+            rows.append(
+                self._cpl_row(
+                    fp,
+                    aux_origin,
+                    match,
+                    (part["reference"], part["value"], part["footprint"]),
                 )
-                position = self._position_for_match(fp, position, match)
-                position = _checked_position(position.x, position.y)
-                rows.append(
-                    (
-                        part["reference"],
-                        part["value"],
-                        part["footprint"],
-                        # Fixed-point millimetres follow JLCPCB's exporter:
-                        # https://github.com/JLCPCB/jlcpcb-eagle/blob/master/ulps/jlcpcb_smta_exporter.ulp
-                        # Six decimals preserve KiCad's 1 nm internal resolution:
-                        # https://docs.kicad.org/doxygen/base__units_8h.html
-                        f"{ToMM(position.x):.6f}",
-                        f"{ToMM(position.y) * -1:.6f}",
-                        self._rotation_for_match(fp, match),
-                        "top" if fp.GetLayer() == 0 else "bottom",
-                    )
-                )
-            except (OverflowError, ValueError) as error:
-                source = (
-                    f"correction {match.correction.key!r}" if match else "no correction"
-                )
-                raise ValueError(
-                    f"Cannot generate CPL for {fp.GetReference()} ({source}): {error}"
-                ) from error
+            )
         return tuple(rows)
+
+    def _cpl_row(
+        self,
+        footprint: Any,
+        origin: Any,
+        match: Optional[CorrectionMatch],  # noqa: UP045
+        identity: tuple[str, str, str],
+    ) -> tuple[Any, ...]:
+        """Format reference/value/package with the shared placement transformations."""
+        try:
+            center = self.get_position(footprint)
+            # Subtract in Python before native coordinate arithmetic can wrap.
+            position = SimpleNamespace(x=center.x - origin.x, y=center.y - origin.y)
+            position = self._position_for_match(footprint, position, match)
+            position = _checked_position(position.x, position.y)
+            return (
+                *identity,
+                # Six decimal millimetres retain KiCad's nanometre resolution.
+                f"{ToMM(position.x):.6f}",
+                f"{ToMM(position.y) * -1:.6f}",
+                self._rotation_for_match(footprint, match),
+                "top" if footprint.GetLayer() == 0 else "bottom",
+            )
+        except (OverflowError, ValueError) as error:
+            source = (
+                f"correction {match.correction.key!r}" if match else "no correction"
+            )
+            raise ValueError(
+                f"Cannot generate CPL for {identity[0]} ({source}): {error}"
+            ) from error
 
     def write_cpl(self, rows: tuple[tuple[Any, ...], ...]) -> None:
         """Write prepared placements without rereading the board or corrections."""
@@ -518,51 +526,53 @@ class Fabrication:
             writer.writerows(rows)
         self.logger.info("Finished generating CPL file %s", cpl_path)
 
-    def generate_bom(self):
-        """Generate BOM file."""
-        bom_path = self.get_bom_csv_path()
+    def generate_bom(self) -> None:
+        """Prepare every BOM row before opening the output file."""
+        self.write_bom(self.prepare_bom())
+
+    def prepare_bom(self) -> tuple[tuple[Any, ...], ...]:
+        """Resolve current BOM groups before an output file can be truncated."""
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
         footprints = {fp.GetReference(): fp for fp in self.board.Footprints()}
-        with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.writer(csvfile, delimiter=",")
-            writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
-            for part in self.parent.store.read_bom_parts():
-                if not add_without_lcsc and not part["lcsc"]:
+        rows = []
+        for part in self.parent.store.read_bom_parts():
+            if not add_without_lcsc and not part["lcsc"]:
+                self.logger.info(
+                    "Component group %s has no assigned LCSC: removing from BOM",
+                    part["refs"],
+                )
+                continue
+            components = []
+            for reference in part["refs"].split(","):
+                fp = footprints.get(reference)
+                if fp is None or get_is_dnp(fp):
                     self.logger.info(
-                        "Component group %s has no LCSC number assigned and the setting Add parts without LCSC is disabled: removing from BOM",
-                        part["refs"],
+                        "Component %s is absent or not populated: removing from BOM",
+                        reference,
                     )
                     continue
-                components = []
-                for component in part["refs"].split(","):
-                    fp = footprints.get(component)
-                    if fp is None:
-                        self.logger.info(
-                            "Component %s is no longer on the board: removing from BOM",
-                            component,
-                        )
-                        continue
-                    if get_is_dnp(fp):
-                        self.logger.info(
-                            "Component %s has 'Do not place' enabled: removing from BOM",
-                            component,
-                        )
-                        continue
-                    components.append(component)
-                if not components:
-                    continue
-                for chunk in split_bom_designators(components):
-                    writer.writerow(
-                        [
-                            part["value"],
-                            ",".join(chunk),
-                            part["footprint"],
-                            part["lcsc"],
-                            len(chunk),
-                        ]
-                    )
+                components.append(reference)
+            rows.extend(
+                (
+                    part["value"],
+                    ",".join(chunk),
+                    part["footprint"],
+                    part["lcsc"],
+                    len(chunk),
+                )
+                for chunk in split_bom_designators(components)
+            )
+        return tuple(rows)
+
+    def write_bom(self, rows: tuple[tuple[Any, ...], ...]) -> None:
+        """Write prepared BOM rows without rereading the board or store."""
+        bom_path = self.get_bom_csv_path()
+        with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
+            writer.writerows(rows)
         self.logger.info("Finished generating BOM file %s", bom_path)
 
     def get_part_consistency_warnings(self) -> str:
