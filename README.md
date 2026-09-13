@@ -21,6 +21,9 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 
 Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
 
+On KiCad 10 boards with named [design variants](#design-variants-kicad-10),
+compare and edit variants side by side and generate separate fabrication outputs.
+
 ![The main window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/main.png)
 
 ![The parts library window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_library.png)
@@ -86,6 +89,56 @@ To access the plugin choose `Tools → External Plugins → JLCPCB Tools` from t
 Checkout this screencast, it shows quickly how to use this plugin:
 
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
+
+### Design variants (KiCad 10+)
+
+Create named variants in KiCad and transfer them to the PCB to use the variant
+table. Boards without named variants keep the ordinary parts table.
+
+- **Compare variants side by side**, with Ref, Footprint, Side, PCB angle, and Correction columns fixed on the left when space permits. Ref stays fixed in narrower windows.
+- **Spot differences quickly** through highlighted settings and yellow outlines around the affected variant’s cells in each component row.
+- **Focus on differing component settings** with **Differences only** in the toolbar above the table.
+- **Edit each variant independently:** Value, LCSC assignment, and BOM/POS/POP (populated) flags. Select components within one variant for batch assignments, flag changes, and copying.
+- **Copy and paste selected components between variants:** Copy transfers Value, LCSC and BOM/POS/POP settings for every selected component; select the same components in another variant and Paste. Use **Copy cell value** for an individual value, or **Copy to variants…** to choose fields and destination variants.
+- **Drag variant headers to reorder them** and bring variants together for comparison.
+- **Compare price and stock availability** using compact indicators and hover details.
+- **Choose an Output variant** to generate its BOM, placement, and fabrication files.
+- **Review placement corrections for the Output variant** in the Correction column. Exact LCSC rules follow that variant's assigned part; pattern rules use Default's reference, Value, and placed footprint.
+
+Assignments and flags are stored in the KiCad board; save the PCB to preserve edits.
+
+The examples below use sample component data in the main JLCPCB Tools
+window. Pointer and click cues make the actions easier to follow.
+
+#### Edit settings and see differences
+
+Change a setting in one variant to compare it with **Default**. Here,
+turning off **POP** (populated) for **R4** in **Economy** highlights the
+changed cell and outlines Economy’s cells in that row. The yellow outline
+remains visible while the row is selected.
+
+Turn POP back on to match Default and clear R4’s difference highlight.
+
+![Turning R4 Economy POP off shows a yellow difference highlight on the selected row; turning it on again clears the highlight.](images/design-variants-edit-differences.gif)
+
+#### Show differences only
+
+Select **Differences only** in the toolbar above the table to focus on
+differing component settings. In this example, enabling the checkbox
+leaves **R1** and **R3** visible. Clear it to bring all five rows back.
+
+![Enabling Differences only shows R1 and R3; clearing the checkbox restores all five component rows.](images/design-variants-differences-only.gif)
+
+#### Reorder variant columns
+
+Drag a variant header to move its entire group of columns. Here,
+**Premium** moves before **Economy**.
+
+The translucent column preview follows the pointer, while the insertion
+marker and **Drop before Economy** label show the destination. Release the
+header to change the order to **Default**, **Premium**, **Economy**.
+
+![Dragging Premium before Economy shows a translucent column preview and drop position, followed by the reordered variant columns.](images/design-variants-column-dragging.gif)
 
 ## Keyboard shortcuts
 
