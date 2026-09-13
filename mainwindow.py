@@ -1972,16 +1972,19 @@ class JLCPCBTools(wx.Frame):
 
     def manage_corrections(self, *_: object) -> None:
         """Refresh displayed corrections after the manager's recovery attempts."""
-        CorrectionManagerDialog(self, "").ShowModal()
+        with CorrectionManagerDialog(self, "") as dialog:
+            dialog.ShowModal()
         self.populate_footprint_list()
 
     def manage_part_preferences(self, *_: object) -> None:
         """Manage shared part preferences."""
-        PartPreferencesDialog(self).ShowModal()
+        with PartPreferencesDialog(self) as dialog:
+            dialog.ShowModal()
 
-    def manage_settings(self, *_):
+    def manage_settings(self, *_: object) -> None:
         """Manage settings."""
-        SettingsDialog(self).ShowModal()
+        with SettingsDialog(self) as dialog:
+            dialog.ShowModal()
 
     def update_settings(self, e: Any) -> None:
         """Update the settings on change."""
@@ -2506,20 +2509,24 @@ class JLCPCBTools(wx.Frame):
         for item in self.footprint_list.GetSelections():
             if e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE:
                 if reference := self.partlist_data_model.get_reference(item):
-                    CorrectionManagerDialog(
+                    with CorrectionManagerDialog(
                         self, "^" + re.escape(reference) + "$"
-                    ).ShowModal()
+                    ) as dialog:
+                        dialog.ShowModal()
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE:
                 if footprint := self.partlist_data_model.get_footprint(item):
-                    CorrectionManagerDialog(
+                    with CorrectionManagerDialog(
                         self, "^" + re.escape(footprint)
-                    ).ShowModal()
+                    ) as dialog:
+                        dialog.ShowModal()
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
-                    CorrectionManagerDialog(self, re.escape(value)).ShowModal()
+                    with CorrectionManagerDialog(self, re.escape(value)) as dialog:
+                        dialog.ShowModal()
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_LCSC:
                 if lcsc := self.partlist_data_model.get_lcsc(item):
-                    CorrectionManagerDialog(self, "", lcsc_part=lcsc).ShowModal()
+                    with CorrectionManagerDialog(self, "", lcsc_part=lcsc) as dialog:
+                        dialog.ShowModal()
                 else:
                     without_lcsc.append(self.partlist_data_model.get_reference(item))
         if without_lcsc:
