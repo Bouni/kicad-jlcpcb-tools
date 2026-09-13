@@ -46,7 +46,7 @@ def _complete(ui: Any, classification: Optional[int] = 2, **extra: Any) -> None:
     ui.supplier.fetch_iter.return_value = iter([("C1", metadata)])
     ui.run_worker()
     wait_until(ui.wx, lambda: _standard_cell(ui)[1] != "pending")
-    assert not ui.controller._pending
+    assert not ui.controller.assembly_lookup.pending
 
 
 def test_unassigned_startup_needs_no_lookup_or_ordinary_enrichment_ui(
@@ -168,21 +168,25 @@ def test_failed_lookup_preserves_catalog_until_explicit_refresh(
             assert ui.dialog.bom_estimator_decision.classification_missing_refs == {
                 "R2"
             }
-        assert not ui.controller._pending
+        for _ in range(3):
+            ui.controller.start_enrichment()
+            ui.controller.recompute()
+        assert not ui.pending_threads
+        assert not ui.controller.assembly_lookup.pending
         assert _standard_cell(ui, "A", failed_id) == (None, "error")
         ui.controller.refresh()
         wait_until(
             ui.wx, lambda: _standard_cell(ui, "A", failed_id) == (None, "pending")
         )
-        assert not ui.controller._metadata_errors
-        assert ui.controller._pending == {failed_code}
+        assert not ui.controller.assembly_lookup.errors
+        assert ui.controller.assembly_lookup.pending == {failed_code}
         assert_catalog()
         ui.supplier.fetch_iter.side_effect = None
         ui.supplier.fetch_iter.return_value = iter([(failed_code, STANDARD_METADATA)])
         ui.run_worker()
         wait_until(ui.wx, lambda: _standard_cell(ui, "A", failed_id) == (True, "known"))
         assert_catalog()
-        assert not ui.controller._pending
+        assert not ui.controller.assembly_lookup.pending
         assert not ui.dialog.bom_estimator_decision.classification_missing_refs
         assert ui.dialog.bom_estimator_decision.board_standard
         assert ui.controller.session.reliable
@@ -204,6 +208,7 @@ def test_queued_classification_cannot_revive_a_closed_controller(
         drained: list[bool] = []
         ui.wx.CallAfter(drained.append, True)
         wait_until(ui.wx, lambda: bool(drained))
+        assert not controller.assembly_lookup.pending
         assert controller.model is model
         assert ui.dialog.bom_estimator_decision is decision
         assert not controller.view._mutations_enabled
@@ -266,7 +271,7 @@ def test_late_classification_keeps_reassigned_description_and_focus(
         }
         controller = ui.controller
         controller.refresh()
-        assert controller._pending == {"C1"}
+        assert controller.assembly_lookup.pending == {"C1"}
         assert len(ui.pending_threads) == 1
         controller._on_edit(focus(ui, "B", "lcsc"), "C2")
         ui.supplier.fetch_iter.return_value = iter([("C1", STANDARD_METADATA)])
@@ -303,7 +308,7 @@ def test_queued_supplier_results_report_invalidated_board_once_and_release_pendi
 
     def check(ui: Any) -> None:
         controller = ui.controller
-        assert controller._pending == {"C1", "C2", "C3"}
+        assert controller.assembly_lookup.pending == {"C1", "C2", "C3"}
         ui.supplier.fetch_iter.return_value = iter(
             (lcsc, STANDARD_METADATA) for lcsc in ("C1", "C2", "C3")
         )
@@ -314,7 +319,7 @@ def test_queued_supplier_results_report_invalidated_board_once_and_release_pendi
             wait_until(
                 ui.wx,
                 lambda: timer.called
-                and not controller._pending
+                and not controller.assembly_lookup.pending
                 and not controller.session.reliable,
             )
         assert len(ui.messages) == 1 and "Reopen JLCPCB Tools" in ui.messages[0]
