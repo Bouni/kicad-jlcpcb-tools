@@ -4,6 +4,8 @@ These exercise the real controller, not native tooltip display. Native rendering
 and mouse delivery remain a separate GUI check.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
@@ -11,41 +13,64 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load, module, package_stubs, wx_stubs
+from .test_part_type_tooltip import _Font, _Sizer, _Window as _ContentWindow
+from .wx_harness import load, load_siblings, module, package_stubs, wx_stubs
 
 
 class _Point(tuple):
-    def __new__(cls, x: int = 0, y: int = 0) -> "_Point":
+    def __new__(cls, x: int = 0, y: int = 0) -> _Point:
         return super().__new__(cls, (x, y))
 
     x = property(lambda self: self[0])
     y = property(lambda self: self[1])
 
 
+class _Rect:
+    def __init__(self, x: int, y: int, width: int, height: int) -> None:
+        self.x, self.y, self.width, self.height = x, y, width, height
+
+    def Contains(self, point: _Point) -> bool:
+        return (
+            self.x <= point.x < self.x + self.width
+            and self.y <= point.y < self.y + self.height
+        )
+
+
 class _Window:
     def __init__(self, parent: Any = None) -> None:
         self.parent = parent
         self.bindings: dict[Any, list[Callable]] = {}
+        self.binding_sources: dict[tuple[Any, Callable], Any] = {}
+        self.origin = _Point()
+        self.size = _Point(240, 160)
+        self.children: list[Any] = []
+        self.font = _Font()
+        self.scale = 1
         self.shown = True
         self.enabled = True
         self.active = True
         self.destroyed = False
 
-    def Bind(self, event: Any, handler: Callable, *_args: Any, **_kwargs: Any) -> None:
+    def Bind(self, event: Any, handler: Callable, source: Any = None) -> None:
         self.bindings.setdefault(event, []).append(handler)
+        self.binding_sources[event, handler] = source
 
     def Unbind(self, event: Any, **kwargs: Any) -> None:
         handler = kwargs.get("handler")
         if handler in self.bindings.get(event, []):
             self.bindings[event].remove(handler)
+            self.binding_sources.pop((event, handler), None)
 
-    def emit(self, event_type: Any) -> MagicMock:
+    def emit(self, event_type: Any, *, source: Any = None) -> MagicMock:
         event = MagicMock()
         event.GetEventObject.return_value = self
+        event.GetTimer.return_value = source
         event.GetPosition.return_value = _Point(10, 30)
         event.Dragging.return_value = False
         for handler in self.bindings.get(event_type, []):
-            handler(event)
+            bound_source = self.binding_sources[event_type, handler]
+            if bound_source is None or bound_source is source:
+                handler(event)
         return event
 
     def GetParent(self) -> Any:
@@ -68,10 +93,19 @@ class _Window:
         return self.active
 
     def ClientToScreen(self, point: _Point) -> _Point:
-        return point
+        return _Point(point.x + self.origin.x, point.y + self.origin.y)
 
     def ScreenToClient(self, point: _Point) -> _Point:
-        return point
+        return _Point(point.x - self.origin.x, point.y - self.origin.y)
+
+    def GetClientRect(self) -> _Rect:
+        return _Rect(0, 0, *self.size)
+
+    def GetScreenRect(self) -> _Rect:
+        return _Rect(*self.origin, *self.size)
+
+    def GetFont(self) -> _Font:
+        return self.font
 
     def GetCharHeight(self) -> int:
         return 16
@@ -83,30 +117,71 @@ class _Window:
 class _Control(_Window):
     def __init__(self, parent: _Window) -> None:
         super().__init__(parent)
+        self.origin = _Point(240, 160)
         self.body = _Window(self)
+        self.body.origin = self.ClientToScreen(_Point(4, 24))
+        self.body.size = _Point(232, 132)
         self.row = SimpleNamespace(IsOk=lambda: True)
         self.column = SimpleNamespace(GetModelColumn=lambda: 7)
+        self.other_column = SimpleNamespace(GetModelColumn=lambda: 2)
+        self.horizontal_scroll = 0
+        self.hit_points: list[_Point] = []
 
     def GetMainWindow(self) -> _Window:
         return self.body
 
-    def HitTest(self, _point: _Point) -> tuple:
-        return self.row, self.column
+    def HitTest(self, point: _Point) -> tuple:
+        self.hit_points.append(point)
+        body_point = self.body.ScreenToClient(self.ClientToScreen(point))
+        if not self.body.GetClientRect().Contains(body_point) or body_point.y >= 72:
+            return None, None
+        column_x = body_point.x + self.horizontal_scroll
+        if column_x < 80:
+            return self.row, self.column
+        if column_x < 160:
+            return self.row, self.other_column
+        return None, None
 
 
 class _Timer:
-    def __init__(self, owner: _Control) -> None:
+    def __init__(
+        self, owner: _Control, clock: SimpleNamespace, event_type: Any
+    ) -> None:
         self.owner = owner
+        self.clock = clock
+        self.event_type = event_type
         self.running = False
+        self.interval = 0.0
+        self.one_shot = False
+        self.next_due: float | None = None
+        self.delivered = 0
+        clock.timers.append(self)
 
-    def Start(self, _milliseconds: int, **_kwargs: Any) -> None:
+    def Start(self, milliseconds: int, oneShot: bool = False) -> bool:
+        assert milliseconds > 0
+        self.interval = milliseconds / 1000
+        self.one_shot = oneShot
         self.running = True
+        self.next_due = round(self.clock.now + self.interval, 9)
+        return True
 
     def Stop(self) -> None:
         self.running = False
+        self.next_due = None
 
     def IsRunning(self) -> bool:
         return self.running
+
+    def deliver(self) -> None:
+        """Deliver a scheduled tick only while armed and after its due time."""
+        assert self.running and self.next_due is not None
+        assert self.clock.now >= self.next_due
+        if self.one_shot:
+            self.Stop()
+        else:
+            self.next_due = round(self.next_due + self.interval, 9)
+        self.delivered += 1
+        self.owner.emit(self.event_type, source=self)
 
 
 class _Popup(_Window):
@@ -118,6 +193,7 @@ class _Popup(_Window):
 
     def Position(self, point: _Point, offset: Any) -> None:
         self.position = (point, offset)
+        self.origin = _Point(point.x + offset.x, point.y + offset.y)
 
     def Show(self, show: bool = True) -> None:
         self.shown = show
@@ -133,6 +209,16 @@ class _Popup(_Window):
         self.focus_requested = True
 
 
+class _FeePopup(_ContentWindow, _Popup):
+    """Use the fee-table sizing controls with the hover window lifecycle."""
+
+    def __init__(self, parent: _Control, *, flags: int = 0) -> None:
+        _ContentWindow.__init__(self, parent, flags=flags)
+        self.origin = _Point()
+        self.focus_requested = False
+        self.position = None
+
+
 @pytest.fixture
 def hover(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Hold pointer, hit-test results, windows, and clock across bound events."""
@@ -140,16 +226,19 @@ def hover(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     control = _Control(top)
     state = SimpleNamespace(
         now=0.0,
-        point=_Point(10, 30),
+        point=control.ClientToScreen(_Point(20, 40)),
         window=control.body,
         buttons=set(),
         standard=False,
         standard_shown=False,
+        timers=[],
     )
     wx = wx_stubs(
-        Timer=_Timer,
+        EVT_TIMER=object(),
+        Timer=lambda owner: _Timer(owner, state, wx["wx"].EVT_TIMER),
         Point=_Point,
         Size=_Point,
+        Rect=_Rect,
         GetMousePosition=lambda: state.point,
         FindWindowAtPoint=lambda _point: state.window,
         GetMouseState=lambda: SimpleNamespace(
@@ -186,9 +275,25 @@ def hover(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         control, 7, lambda _item: state.standard, standard_help
     )
 
-    def poll(seconds: float = 0.0) -> None:
-        state.now += seconds
-        control.emit(wx["wx"].EVT_TIMER)
+    def poll(seconds: float = 0.1) -> None:
+        """Advance time, dispatching only due events from running timers."""
+        target = round(state.now + seconds, 9)
+        while True:
+            due = [
+                timer
+                for timer in state.timers
+                if timer.next_due is not None and timer.next_due <= target
+            ]
+            if not due:
+                break
+            timer = min(due, key=lambda candidate: candidate.next_due)
+            state.now = timer.next_due
+            timer.deliver()
+        state.now = target
+
+    def late_timer() -> None:
+        """Explicitly inject a queued event after Stop without restarting time."""
+        control.emit(wx["wx"].EVT_TIMER, source=controller._timer)
 
     def visible() -> list[_Popup]:
         return [popup for popup in popups if popup.shown and not popup.destroyed]
@@ -202,6 +307,7 @@ def hover(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         controller=controller,
         popups=popups,
         poll=poll,
+        late_timer=late_timer,
         visible=visible,
     )
 
@@ -265,7 +371,7 @@ def test_motion_restarts_delay_and_polling_clears_a_stationary_stale_row(
     """Polling follows pointer movement and detects emptied or filtered rows."""
     hover.poll()
     hover.poll(0.4)
-    hover.state.point = _Point(20, 30)
+    hover.state.point = hover.control.ClientToScreen(_Point(30, 40))
     hover.poll()
     hover.poll(0.4)
     assert hover.visible() == []
@@ -284,7 +390,7 @@ def test_moving_to_another_type_cell_repositions_help_after_a_new_delay(
     hover.poll()
     hover.poll(0.7)
     original = hover.visible()[0]
-    hover.state.point = _Point(10, 60)
+    hover.state.point = hover.control.ClientToScreen(_Point(20, 70))
     hover.control.body.emit(hover.wx.EVT_MOTION)
     assert hover.visible() == [], "A tooltip must not remain over the previous row"
     hover.poll(0.7)
@@ -295,7 +401,16 @@ def test_moving_to_another_type_cell_repositions_help_after_a_new_delay(
 
 @pytest.mark.parametrize(
     "location",
-    ["header", "outside", "popup", "hidden", "disabled", "inactive"],
+    [
+        "header",
+        "outside",
+        "scrollbar",
+        "empty",
+        "popup",
+        "hidden",
+        "disabled",
+        "inactive",
+    ],
 )
 def test_help_clears_when_hover_is_no_longer_eligible(
     hover: SimpleNamespace,
@@ -306,11 +421,16 @@ def test_help_clears_when_hover_is_no_longer_eligible(
     hover.poll(0.7)
     assert hover.visible()
     if location == "header":
-        hover.control.row = SimpleNamespace(IsOk=lambda: False)
-        hover.control.column = None
+        hover.state.point = hover.control.ClientToScreen(_Point(20, 10))
     elif location == "outside":
+        hover.state.point = hover.control.ClientToScreen(_Point(-1, 40))
         hover.state.window = _Window()
+    elif location == "scrollbar":
+        hover.state.point = hover.control.ClientToScreen(_Point(238, 40))
+    elif location == "empty":
+        hover.state.point = hover.control.ClientToScreen(_Point(20, 130))
     elif location == "popup":
+        hover.state.point = hover.visible()[0].ClientToScreen(_Point(10, 10))
         hover.state.window = _Window(hover.visible()[0])
     elif location == "hidden":
         hover.control.shown = False
@@ -409,8 +529,14 @@ def test_stop_dismisses_help_and_disarms_late_timer_events(
     assert hover.visible()
     hover.controller.stop()
     assert hover.visible() == []
+    assert not hover.controller._timer.IsRunning()
+    delivered = hover.controller._timer.delivered
     hover.poll(1.0)
     hover.poll(1.0)
+    assert hover.controller._timer.delivered == delivered
+    hover.late_timer()
+    hover.poll(0.7)
+    hover.late_timer()
     assert hover.visible() == []
 
 
@@ -469,6 +595,219 @@ def test_destroying_popup_does_not_stop_owner_hover_help(
     assert len(hover.visible()) == 1
     hover.control.emit(hover.wx.EVT_WINDOW_DESTROY)
     assert hover.visible() == []
+    assert not hover.controller._timer.IsRunning()
     hover.poll(1.0)
+    hover.poll(1.0)
+    hover.late_timer()
+    hover.poll(0.7)
+    hover.late_timer()
+    assert hover.visible() == []
+
+
+@pytest.mark.parametrize("help_kind", ["type", "standard"])
+@pytest.mark.parametrize("already_visible", [False, True])
+def test_background_window_lookup_does_not_suppress_foreground_cell_help(
+    hover: SimpleNamespace, help_kind: str, already_visible: bool
+) -> None:
+    """A geometric lookup can report the covered dialog behind the active table."""
+    if help_kind == "standard":
+        hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
+        hover.state.standard = True
+    if already_visible:
+        hover.control.body.emit(hover.wx.EVT_MOTION)
+        hover.poll(0.7)
+        assert bool(hover.visible()) == (help_kind == "type")
+        assert hover.state.standard_shown == (help_kind == "standard")
+
+    background = _Window()
+    background.active = False
+    hover.state.window = background
+    hover.control.body.emit(hover.wx.EVT_MOTION)
+    hover.poll(0.7)
+
+    assert bool(hover.visible()) == (help_kind == "type")
+    assert hover.state.standard_shown == (help_kind == "standard")
+
+
+def test_timer_only_hover_uses_running_periodic_timer_and_its_own_source(
+    hover: SimpleNamespace,
+) -> None:
+    """A stationary pointer gets help and later refreshes without mouse events."""
+    foreign_timer = _Timer(hover.control, hover.state, hover.wx.EVT_TIMER)
+    hover.state.standard = True
+    hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
+    hover.control.emit(hover.wx.EVT_TIMER, source=foreign_timer)
+    assert not hover.state.standard_shown
+    hover.poll(0.1)
+    assert hover.state.standard_shown
+
+    hover.control.column = SimpleNamespace(GetModelColumn=lambda: 7)
+    hover.poll(0.5)
+    assert not hover.state.standard_shown
+    assert hover.visible() == []
+    hover.poll(0.3)
+    assert len(hover.visible()) == 1
+    hover.control.row = None
+    hover.poll(0.1)
+    assert hover.visible() == []
+
+
+def test_screen_coordinates_use_control_origin_and_live_scrolled_columns(
+    hover: SimpleNamespace,
+) -> None:
+    """Body and control coordinates differ; scrolling changes the model column."""
+    hover.state.standard = True
+    hover.control.body.emit(hover.wx.EVT_MOTION)
+    hover.poll(0.7)
+    assert len(hover.visible()) == 1
+    assert hover.control.hit_points[-1] == _Point(20, 40)
+    assert hover.control.body.ScreenToClient(hover.state.point) == _Point(16, 16)
+
+    hover.control.horizontal_scroll = 80
+    hover.control.emit(hover.wx.EVT_SCROLLWIN)
+    assert hover.visible() == []
+    hover.poll(0.1)
+    assert hover.state.standard_shown
+    hover.control.horizontal_scroll = 0
+    hover.poll(0.1)
+    assert not hover.state.standard_shown
+    hover.poll(0.7)
+    assert len(hover.visible()) == 1
+
+
+@pytest.mark.parametrize("help_kind", ["type", "standard"])
+def test_popup_rect_excludes_underlying_cells_when_lookup_reports_the_table(
+    hover: SimpleNamespace, help_kind: str
+) -> None:
+    """The popup can cover valid cells even when a geometric lookup misses it."""
+    hover.poll(0.8)
+    popup = hover.visible()[0]
+    hover.state.standard = True
+    if help_kind == "type":
+        # Popup placement can flip around the pointer at a display edge.
+        # Keep the pointer fixed so motion itself cannot dismiss the popup.
+        popup.origin = _Point(hover.state.point.x - 10, hover.state.point.y - 10)
+    else:
+        hover.state.point = hover.control.ClientToScreen(_Point(100, 60))
+    assert popup.GetScreenRect().Contains(hover.state.point)
+    hover.poll(0.1)
+    assert popup.destroyed
+    assert not hover.state.standard_shown
+
+
+@pytest.mark.parametrize("help_kind", ["type", "standard"])
+def test_reactivating_owner_restarts_help_for_the_stationary_pointer(
+    hover: SimpleNamespace, help_kind: str
+) -> None:
+    """A covering active dialog clears help; returning starts a fresh delay."""
+    if help_kind == "standard":
+        hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
+        hover.state.standard = True
+    hover.poll(0.8)
+    assert bool(hover.visible()) == (help_kind == "type")
+    assert hover.state.standard_shown == (help_kind == "standard")
+    hover.top.active = False
     hover.poll(1.0)
     assert hover.visible() == []
+    assert not hover.state.standard_shown
+    hover.top.active = True
+    hover.poll(0.2)
+    assert hover.visible() == []
+    assert hover.state.standard_shown == (help_kind == "standard")
+    hover.poll(0.6)
+    assert bool(hover.visible()) == (help_kind == "type")
+
+
+def test_control_without_separate_main_window_supports_hover_and_navigation(
+    hover: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backends without a distinct body bind and test the control itself."""
+    hover.controller.stop()
+    monkeypatch.setattr(hover.control, "GetMainWindow", lambda: None)
+    controller = hover.helper.TypeCellTooltip(
+        hover.control, 7, lambda _item: False, lambda _active: None
+    )
+    event = hover.control.emit(hover.wx.EVT_MOTION)
+    assert event.Skip.called
+    hover.poll(0.7)
+    assert len(hover.visible()) == 1
+    event = hover.control.emit(hover.wx.EVT_MOUSEWHEEL)
+    assert event.Skip.called
+    assert hover.visible() == []
+    controller.stop()
+
+
+def test_real_controller_constructs_shows_dismisses_and_reopens_real_fee_table(
+    hover: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Connect real sibling modules through timer events and owned popup state."""
+    hover.controller.stop()
+    hover.control.font = _Font(18)
+    hover.control.scale = 2
+    colours = {
+        hover.wx.SYS_COLOUR_INFOBK: "tooltip background",
+        hover.wx.SYS_COLOUR_INFOTEXT: "tooltip foreground",
+    }
+    hover.wx.PopupWindow = _FeePopup
+    hover.wx.StaticText = _ContentWindow
+    hover.wx.BoxSizer = _Sizer
+    hover.wx.FlexGridSizer = _Sizer
+    hover.wx.SystemSettings = SimpleNamespace(GetColour=colours.__getitem__)
+    expected_labels = [
+        "Type",
+        "Feeder loading fee",
+        "Basic",
+        "None for Economic assembly; yes for Standard assembly",
+        "Preferred",
+        "None for Economic assembly; yes for Standard assembly",
+        "Extended",
+        "Yes",
+        "Blank",
+        "No assigned part or type information available",
+    ]
+    with load_siblings(
+        "real_type_hover_integration",
+        ("part_type_tooltip", "type_cell_tooltip"),
+        {"wx": hover.wx, "wx.dataview": hover.wx.dataview},
+    ) as siblings:
+        helper = siblings["type_cell_tooltip"]
+        monkeypatch.setattr(
+            helper, "time", SimpleNamespace(monotonic=lambda: hover.state.now)
+        )
+        hidden = siblings["part_type_tooltip"].create_type_fee_popup(hover.control)
+        assert not hidden.shown
+        assert hidden.size == hidden.sizer.GetMinSize()
+        hidden.Destroy()
+        assert hover.control.children == []
+
+        for _ in range(2):
+            controller = helper.TypeCellTooltip(
+                hover.control, 7, lambda _item: False, lambda _active: None
+            )
+            hover.control.body.emit(hover.wx.EVT_MOTION)
+            hover.poll(0.3)
+            assert hover.control.children == []
+            hover.poll(0.4)
+            assert len(hover.control.children) == 1
+            popup = hover.control.children[0]
+            assert popup.parent is hover.control
+            assert popup.shown and not popup.destroyed
+            assert not popup.focus_requested
+            assert popup.position[0] == hover.state.point
+            assert [
+                " ".join(cell.label.split()) for cell in popup.children
+            ] == expected_labels
+            assert all(cell.parent is popup for cell in popup.children)
+            assert popup.font.size == 18
+            assert popup.scale == 2
+            assert popup.size == popup.sizer.GetMinSize()
+            assert all(dimension > 0 for dimension in popup.size)
+            labels = list(popup.children)
+            hover.control.body.emit(hover.wx.EVT_LEFT_DOWN)
+            assert popup.destroyed and not popup.shown
+            assert all(label.destroyed for label in labels)
+            assert hover.control.children == []
+            controller.stop()
+            hover.poll(1.0)
+            hover.control.emit(hover.wx.EVT_TIMER, source=controller._timer)
+            assert hover.control.children == []
