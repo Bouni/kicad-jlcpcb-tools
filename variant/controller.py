@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 import re
-from threading import Thread
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -20,7 +19,7 @@ from ..correction_data import resolve_shared_corrections
 from ..corrections import CorrectionManagerDialog
 from ..dataview_highlight import simplify_footprint_name
 from ..derive_params import params_for_part
-from ..enrichment.providers import LCSCAssemblyMetadataProvider
+from ..enrichment.worker import AssemblyMetadataLookup
 from ..partselector import PartSelectorDialog
 from .matrix_model import EDITABLE_FIELDS, CatalogMetadata, CorrectionState, MatrixModel
 from .matrix_view import MatrixTarget, VariantMatrixView, coordinates_for
@@ -56,11 +55,15 @@ class VariantMainController:
         self._refreshing = False
         self._clipboard: Any = None
         self._clipboard_nonce = ""
-        self._pending: set[str] = set()
         self._render_queued = False
         self._presentation: Optional[_Presentation] = None
-        self._attempted: set[str] = set()
-        self._metadata_errors: set[str] = set()
+        self.assembly_lookup = AssemblyMetadataLookup(
+            on_result=self._enriched,
+            on_finished=self._queue_render,
+            on_error=lambda error: self.dialog.logger.warning(
+                "Variant metadata unavailable; use Refresh to retry: %s", error
+            ),
+        )
         self.panel = wx.Panel(dialog.footprint_list.GetParent())
         layout = wx.BoxSizer(wx.VERTICAL)
         tools = wx.BoxSizer(wx.HORIZONTAL)
@@ -224,10 +227,8 @@ class VariantMainController:
             self.session.refresh()
             self.dialog._invalidate_catalog_details()
             self._presentation = None
-            self._attempted.intersection_update(self._pending)
-            self._metadata_errors.clear()
             self.render()
-            self.start_enrichment()
+            self.start_enrichment(retry=True)
             if getattr(self, "timer", None) is not None:
                 self.timer.Start(1500)
         except Exception as error:
@@ -343,9 +344,9 @@ class VariantMainController:
                     price_label=result.price_labels.get(part.reference, ""),
                     status=(
                         "pending"
-                        if part.lcsc in self._pending
+                        if part.lcsc in self.assembly_lookup.pending
                         else "error"
-                        if part.lcsc in self._metadata_errors
+                        if part.lcsc in self.assembly_lookup.errors
                         else "complete"
                         if classification_known
                         else "missing"
@@ -593,38 +594,20 @@ class VariantMainController:
         except Exception as error:
             self._error(error)
 
-    def start_enrichment(self) -> None:
+    def start_enrichment(self, *, retry: bool = False) -> None:
         """Request missing supplier facts once per LCSC identifier."""
         if self.closed:
             return
-        new = self.cache.get_missing_metadata(self.session.snapshot) - self._attempted
-        if not new:
-            return
-        self._pending.update(new)
-        self._attempted.update(new)
-        self._queue_render()
-
-        def worker() -> None:
-            provider = LCSCAssemblyMetadataProvider(min_interval_seconds=1.0)
-            try:
-                for lcsc, metadata in provider.fetch_iter(list(new)):
-                    wx.CallAfter(self._enriched, lcsc, metadata or {})
-            except Exception as error:
-                wx.CallAfter(self._enrichment_failed, tuple(new), str(error))
-            finally:
-                wx.CallAfter(self._enrichment_finished, tuple(new))
-
-        Thread(target=worker, daemon=True).start()
+        if self.assembly_lookup.request(
+            self.cache.get_missing_metadata(self.session.snapshot), retry=retry
+        ):
+            self._queue_render()
 
     def _enriched(self, lcsc: str, metadata: dict[str, Any]) -> None:
-        if self.closed:
-            return
-        self._pending.discard(lcsc)
-        if not self.session.reliable:
+        if self.closed or not self.session.reliable:
             return
         try:
             self.session._check_board()
-            self._metadata_errors.discard(lcsc)
             self.cache.set_assembly_metadata(
                 lcsc,
                 metadata.get("assembly_process", ""),
@@ -652,21 +635,6 @@ class VariantMainController:
         if self.session.reliable:
             self.recompute()
 
-    def _enrichment_finished(self, lcscs: tuple[str, ...]) -> None:
-        if self.closed:
-            return
-        if self._pending.intersection(lcscs):
-            self._pending.difference_update(lcscs)
-            self._queue_render()
-
-    def _enrichment_failed(self, lcscs: tuple[str, ...], message: str) -> None:
-        if self.closed:
-            return
-        self._metadata_errors.update(self._pending.intersection(lcscs))
-        self.dialog.logger.warning(
-            "Variant metadata unavailable; use Refresh to retry: %s", message
-        )
-
     def begin_generation(self, corrections: Any) -> None:
         """Freeze the explicit output source before preparing any fabrication data."""
         snapshot, variant = self.session.begin_generation()
@@ -687,6 +655,7 @@ class VariantMainController:
         """Invalidate asynchronous callbacks before the wx controls are destroyed."""
         if self.closed:
             return
+        self.assembly_lookup.close()
         self.closed = True
         self.session.reliable = False
         self.timer.Stop()
