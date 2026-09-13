@@ -48,11 +48,13 @@ def _toolbar(*_args: Any, **_kwargs: Any) -> MagicMock:
     return toolbar
 
 
-@pytest.fixture
-def open_window(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., Any]]:
-    """Construct the dialog with stateful selection, tool bindings and visible rows."""
+@pytest.fixture(params=[True, False], ids=["reset-notifies-selection", "silent-reset"])
+def open_window(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[Callable[..., Any]]:
+    """Construct the window with both native model-reset notification behaviors."""
     layout_support._after.clear()
-    bind_dialog = layout_support._Dialog.Bind
+    bind_window = mainwindow.JLCPCBTools.Bind
 
     def bind(
         window: Any,
@@ -64,13 +66,13 @@ def open_window(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., Any]]
         if event_type == mainwindow.wx.EVT_TOOL:
             window._bindings[event_type, source.GetId()] = handler
         else:
-            bind_dialog(window, event_type, handler, **kwargs)
+            bind_window(window, event_type, handler, **kwargs)
 
-    monkeypatch.setattr(layout_support._Dialog, "Bind", bind)
+    monkeypatch.setattr(mainwindow.JLCPCBTools, "Bind", bind)
     monkeypatch.setattr(mainwindow.wx, "ToolBar", _toolbar)
     monkeypatch.setattr(mainwindow.wx, "PostEvent", MagicMock(), raising=False)
 
-    def open_dialog(references: Optional[list[str]] = None) -> Any:  # noqa: UP045
+    def open_main_window(references: Optional[list[str]] = None) -> Any:  # noqa: UP045
         model = MagicMock()
         monkeypatch.setattr(
             mainwindow,
@@ -122,10 +124,11 @@ def open_window(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., Any]]
             selection_handler(MagicMock())
 
         def clear_rows() -> None:
+            had_selection = bool(selections)
             rows.clear()
-            if selections:
-                # Model reset can notify deselection; state changes before dispatch.
-                selections.clear()
+            selections.clear()
+            # Native model reset may clear selection without notifying the handler.
+            if had_selection and request.param:
                 selection_handler(MagicMock())
 
         def click(tool_id: int) -> None:
@@ -145,7 +148,7 @@ def open_window(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., Any]]
             window=window, rows=rows, parts=parts, select=select, click=click
         )
 
-    yield open_dialog
+    yield open_main_window
     layout_support._after.clear()
 
 
@@ -214,7 +217,9 @@ def test_last_visible_selected_row_can_be_hidden_and_restored(
     ui.click(tool)
     assert not ui.rows
     assert ui.window.footprint_list.GetSelectedItemsCount() == 0
-    assert not any(ui.window.right_toolbar.tools[tool].enabled for tool in PART_ACTIONS)
+    assert all(
+        ui.window.right_toolbar.tools[filter_id].enabled for filter_id in FILTERS
+    )
 
     ui.click(tool)
 
