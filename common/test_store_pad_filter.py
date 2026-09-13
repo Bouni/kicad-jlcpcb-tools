@@ -7,6 +7,9 @@ from pathlib import Path
 import sqlite3
 import sys
 import types
+from typing import Any, Optional
+
+import pytest
 
 # Provide minimal wx stubs so root-level helpers/store imports succeed in tests.
 if "wx" not in sys.modules:
@@ -56,43 +59,22 @@ from bom_estimation.pricing import (  # noqa: E402  pylint: disable=wrong-import
 )
 
 
-class _Drill:
-    def __init__(self, x=0, y=0):
-        self.x = x
-        self.y = y
-
-
 class _Pad:
+    """The numeric attribute/HasHole surface exposed by KiCad's PAD wrapper."""
+
     def __init__(
         self,
-        *,
-        npth=False,
-        plated=True,
-        attribute="",
-        has_hole=False,
-        drill_x=0,
-        drill_y=0,
-    ):
-        self._npth = npth
-        self._plated = plated
+        attribute: int = 1,
+        has_hole: bool = False,
+    ) -> None:
         self._attribute = attribute
         self._has_hole = has_hole
-        self._drill = _Drill(drill_x, drill_y)
 
-    def IsNPTH(self):
-        return self._npth
-
-    def IsPlated(self):
-        return self._plated
-
-    def GetAttribute(self):
+    def GetAttribute(self) -> int:
         return self._attribute
 
-    def HasHole(self):
+    def HasHole(self) -> bool:
         return self._has_hole
-
-    def GetDrillSize(self):
-        return self._drill
 
 
 class _FootprintPads:
@@ -159,31 +141,40 @@ def _part_state(store):
     )
 
 
-def test_count_pad_filters_npth_non_plated_and_attribute_markers():
-    """count_pad excludes clearly non-joint pads using multiple API signals."""
-    assert not count_pad(_Pad(npth=True))
-    assert not count_pad(_Pad(plated=False))
-    assert not count_pad(_Pad(attribute="PAD_ATTRIB_NPTH"))
-    assert not count_pad(_Pad(attribute="nonplated_mech"))
-    assert count_pad(_Pad())
+@pytest.mark.parametrize(
+    "attribute,expected", [(0, True), (1, True), (2, True), (3, False)]
+)
+def test_count_pad_uses_native_numeric_attributes(
+    attribute: int, expected: bool
+) -> None:
+    """PAD_ATTRIB is PTH=0, SMD=1, CONN=2, NPTH=3, not an enum name string."""
+    assert count_pad(_Pad(attribute)) is expected
 
 
-def test_get_footprint_pad_count_counts_only_countable_pads():
-    """Pad count includes only pads accepted by count_pad."""
-    fp = _FootprintPads(
-        [
-            _Pad(),
-            _Pad(npth=True),
-            _Pad(plated=False),
-            _Pad(attribute="NPTH"),
-            _Pad(),
-        ]
-    )
+@pytest.mark.parametrize(
+    "pads,expected",
+    [
+        ([], (0, False)),
+        ([_Pad(3, True), _Pad(3, True)], (0, False)),
+        ([_Pad(1), _Pad(1), _Pad(3, True)], (2, False)),
+        ([_Pad(0, True), _Pad(0, True)], (2, True)),
+        ([_Pad(0, True), _Pad(1), _Pad(2), _Pad(3, True)], (3, True)),
+    ],
+    ids=["empty", "npth-only", "smd-with-mounting-hole", "pth", "mixed"],
+)
+def test_pad_metadata_excludes_mechanical_holes(
+    pads: list[_Pad], expected: tuple[int, bool]
+) -> None:
+    """Physical mounting holes contribute neither solder joints nor THT status."""
+    footprint = _FootprintPads(pads)
+    assert (
+        get_footprint_pad_count(footprint),
+        footprint_has_tht(footprint),
+    ) == expected
+    assert footprint_metadata_module.get_footprint_pad_metadata(footprint) == expected
 
-    assert get_footprint_pad_count(fp) == 2
 
-
-def test_get_footprint_pads_supports_getpads_fallback():
+def test_get_footprint_pads_supports_getpads_fallback() -> None:
     """Footprint pad collection supports the GetPads API variant."""
     pads = [_Pad(), _Pad()]
     fp = _FootprintGetPads(pads)
@@ -191,20 +182,29 @@ def test_get_footprint_pads_supports_getpads_fallback():
     assert list(get_footprint_pads(fp)) == pads
 
 
-def test_footprint_has_tht_ignores_filtered_npth_holes():
-    """NPTH pads with holes should not trigger THT detection."""
-    fp = _FootprintPads([_Pad(npth=True, has_hole=True, drill_x=100)])
+def test_refresh_replaces_stale_npth_metadata_and_preserves_it_on_reopen(
+    tmp_path: Path,
+) -> None:
+    """Existing projects shed false joint/THT metadata on the next board sync."""
+    footprint = _BackfillFootprint(pads=[_Pad(3, True), _Pad(3, True)])
+    filename = tmp_path / "board.kicad_pcb"
+    filename.write_text("(kicad_pcb)\n", encoding="utf-8")
+    board = types.SimpleNamespace(
+        GetFileName=lambda: str(filename), GetFootprints=lambda: [footprint]
+    )
+    settings = types.SimpleNamespace(settings={})
+    store = Store(settings, str(tmp_path), board)
+    store.set_estimator_metadata(
+        "R1", 2, True, footprint_metadata_module.get_assembly_flags(footprint)
+    )
 
-    assert not footprint_has_tht(fp)
+    store.update_from_board()
+    updated = store.get_part("R1")
+    assert (updated["pad_count"], updated["has_tht"]) == (0, 0)
 
-
-def test_footprint_has_tht_detects_plated_drilled_or_holed_pad():
-    """Plated pads with holes/drill are treated as THT."""
-    fp_hole = _FootprintPads([_Pad(has_hole=True)])
-    assert footprint_has_tht(fp_hole)
-
-    fp_drill = _FootprintPads([_Pad(drill_x=100, drill_y=0)])
-    assert footprint_has_tht(fp_drill)
+    reopened = Store(settings, str(tmp_path), board).get_part("R1")
+    assert (reopened["pad_count"], reopened["has_tht"]) == (0, 0)
+    assert reopened["lcsc"] == "C1"
 
 
 def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
@@ -300,6 +300,15 @@ class _BackfillFootprint:
     def GetReference(self):
         return self._reference
 
+    def GetValue(self) -> str:
+        return "10k"
+
+    def GetFPID(self) -> types.SimpleNamespace:
+        return types.SimpleNamespace(GetLibItemName=lambda: "R_0603")
+
+    def GetProperties(self) -> dict[str, str]:
+        return {"LCSC": "C1"}
+
     def Pads(self):
         return self._pads
 
@@ -310,101 +319,35 @@ class _BackfillFootprint:
         return self._is_dnp
 
 
-def _backfill_store():
-    """Build a Store with a recording stub for set_estimator_metadata."""
-    s = _store_obj()
-    s.logger = logging.getLogger(__name__)
-    s.update_calls = []
+@pytest.mark.parametrize(
+    "previous,changed",
+    [
+        ({}, False),
+        ({"pad_count": 1}, True),
+        ({"has_tht": None}, True),
+        ({"assembly_flags": '{"is_dnp": true}'}, True),
+        (None, False),
+    ],
+    ids=["matching", "stale-pads", "unset-tht", "stale-flags", "missing-row"],
+)
+def test_backfill_updates_only_changed_existing_metadata(
+    previous: Optional[dict[str, Any]], changed: bool
+) -> None:
+    """A present stale row receives one complete update; other rows remain untouched."""
+    store = Store.__new__(Store)
+    store.logger = logging.getLogger(__name__)
+    store.get_part = lambda _ref: None
+    updates: list[tuple[Any, ...]] = []
+    store.set_estimator_metadata = lambda *values: updates.append(values)
+    footprint = _BackfillFootprint(pads=[_Pad(), _Pad()])
+    flags = footprint_metadata_module.get_assembly_flags(footprint)
+    current = {"pad_count": 2, "has_tht": 0, "assembly_flags": flags}
 
-    def _record(ref, pad_count, has_tht, assembly_flags):
-        s.update_calls.append((ref, pad_count, has_tht, assembly_flags))
+    store.backfill_estimator_metadata(
+        footprint, {} if previous is None else {**current, **previous}
+    )
 
-    s.set_estimator_metadata = _record
-    return s
-
-
-def test_backfill_skips_update_when_all_metadata_matches():
-    """Backfill must not call set_estimator_metadata when nothing changed."""
-    s = _backfill_store()
-    fp = _BackfillFootprint(reference="R1", pads=[_Pad(), _Pad()])
-    expected_flags = footprint_metadata_module.get_assembly_flags(fp)
-
-    db_part = {
-        "pad_count": 2,
-        "has_tht": 0,
-        "assembly_flags": expected_flags,
-    }
-
-    s.backfill_estimator_metadata(fp, db_part)
-
-    assert s.update_calls == []
-
-
-def test_backfill_writes_when_pad_count_differs():
-    """A stale pad_count triggers a single update."""
-    s = _backfill_store()
-    fp = _BackfillFootprint(reference="R1", pads=[_Pad(), _Pad(), _Pad()])
-    expected_flags = footprint_metadata_module.get_assembly_flags(fp)
-
-    db_part = {
-        "pad_count": 1,  # outdated
-        "has_tht": 0,
-        "assembly_flags": expected_flags,
-    }
-
-    s.backfill_estimator_metadata(fp, db_part)
-
-    assert len(s.update_calls) == 1
-    ref, pad_count, _has_tht, _flags = s.update_calls[0]
-    assert ref == "R1"
-    assert pad_count == 3
-
-
-def test_backfill_writes_when_has_tht_was_none():
-    """Existing rows with NULL has_tht always backfill."""
-    s = _backfill_store()
-    fp = _BackfillFootprint(reference="R1", pads=[_Pad()])
-    expected_flags = footprint_metadata_module.get_assembly_flags(fp)
-
-    db_part = {
-        "pad_count": 1,
-        "has_tht": None,  # never set
-        "assembly_flags": expected_flags,
-    }
-
-    s.backfill_estimator_metadata(fp, db_part)
-
-    assert len(s.update_calls) == 1
-
-
-def test_backfill_writes_when_assembly_flags_differ():
-    """Stale assembly_flags JSON triggers an update."""
-    s = _backfill_store()
-    fp = _BackfillFootprint(reference="R1", pads=[_Pad()])
-
-    db_part = {
-        "pad_count": 1,
-        "has_tht": 0,
-        "assembly_flags": '{"is_dnp": true}',  # outdated content
-    }
-
-    s.backfill_estimator_metadata(fp, db_part)
-
-    assert len(s.update_calls) == 1
-    _ref, _pad_count, _has_tht, flags = s.update_calls[0]
-    # Fresh flags should match what footprint_metadata builds for this fp.
-    assert flags == footprint_metadata_module.get_assembly_flags(fp)
-
-
-def test_backfill_returns_silently_when_db_part_empty():
-    """Missing db_part with no fallback row available is a no-op."""
-    s = _backfill_store()
-    s.get_part = lambda _ref: None
-    fp = _BackfillFootprint(reference="R-MISSING", pads=[_Pad()])
-
-    s.backfill_estimator_metadata(fp, {})
-
-    assert s.update_calls == []
+    assert updates == ([("R1", 2, False, flags)] if changed else [])
 
 
 # ---------------------------------------------------------------------------
