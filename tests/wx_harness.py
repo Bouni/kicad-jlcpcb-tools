@@ -248,6 +248,7 @@ def mainwindow_stubs(
     ``mainwindow_stubs(pkg, helpers={"getVersion": lambda: "1.2.3"})``.
     """
     stubs = package_stubs(package, ("bom_estimation", "enrichment"))
+    stubs[f"{package}.enrichment"].__path__ = [str(ROOT / "enrichment")]
     stubs.update(wx_stubs() if wx is None else wx)
     stubs["pcbnew"] = module("pcbnew") if pcbnew is None else pcbnew
 

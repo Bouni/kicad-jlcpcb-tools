@@ -466,7 +466,8 @@ def window_ui(
             "init_logger",
             lambda frame: setattr(frame, "logger", logging.getLogger(__name__)),
         )
-        for worker_module in (main, controller):
+        worker = importlib.import_module(package + ".enrichment.worker")
+        for worker_module in (worker, controller):
             monkeypatch.setattr(worker_module, "Thread", defer_thread)
             monkeypatch.setattr(
                 worker_module,

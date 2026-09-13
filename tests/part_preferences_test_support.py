@@ -222,8 +222,11 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         window.Layout = MagicMock()
         window._project_storage_unavailable = False
         window._part_preferences_applied_on_open = False
-        window.assembly_enrichment_generation = 0
-        window.pending_assembly_enrichment = set()
+        window.assembly_lookup = mainwindow.AssemblyMetadataLookup(
+            window._apply_assembly_metadata,
+            window._refresh_bom_after_enrichment_update,
+            window.logger.warning,
+        )
         # Assignment-only windows represent startup after fabrication initialization.
         # Recovery tests opt out and exercise the real constructor from init_data.
         if fabrication_initialized:

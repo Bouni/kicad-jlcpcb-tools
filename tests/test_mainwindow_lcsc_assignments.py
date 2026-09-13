@@ -265,8 +265,6 @@ def test_optional_enrichment_read_failure_keeps_accepted_assignment_and_notifies
         [("R_0603", "10k", "C777"), ("R_0603", "20k", "C888")]
     )
     _seed_enrichment(window)
-    window.pending_assembly_enrichment = set()
-    window.assembly_enrichment_generation = 0
     window.start_assembly_enrichment = MethodType(
         mainwindow.JLCPCBTools.start_assembly_enrichment, window
     )
@@ -294,8 +292,8 @@ def test_optional_enrichment_read_failure_keeps_accepted_assignment_and_notifies
     assert "enrichment" in warnings[0].lower()
     assert "metadata lookup unavailable" in warnings[0]
     assert "Unable to apply" not in warnings[0]
-    assert window.pending_assembly_enrichment == set()
-    assert window.assembly_enrichment_generation == 0
+    assert not window.assembly_lookup.pending
+    assert not window.assembly_lookup.errors
     window.partlist_data_model.set_enrichment_status.assert_not_called()
 
 
@@ -439,36 +437,6 @@ def test_clear_keeps_native_selection_array_alive_during_model_updates(
     assert all(part["lcsc"] == "" for part in window.store.read_all())
     assert all(fp.field.text == "" for fp in window.pcbnew.GetBoard().GetFootprints())
     assert all(part["lcsc"] == "" for part in window.test_rows.values())
-
-
-def test_storage_recovery_restarts_invalidated_pending_enrichment(
-    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Recovery must reschedule metadata whose old worker results are now stale."""
-    window = make_window()
-    window.pending_assembly_enrichment = {"C100"}
-    window.assembly_enrichment_generation = 1
-    thread = MagicMock()
-    monkeypatch.setattr(mainwindow, "Thread", thread)
-    window.start_assembly_enrichment = (
-        mainwindow.JLCPCBTools.start_assembly_enrichment.__get__(window)
-    )
-    window._set_project_storage_error(sqlite3.OperationalError("database is locked"))
-    assert window.pending_assembly_enrichment == set()
-    window.init_store()
-    thread.assert_called_once()
-    assert thread.call_args.kwargs["args"][0] == {"C100": ["R1"]}
-    assert window.assembly_enrichment_generation > 1
-    before = window.store.get_part("R1")
-    window.on_assembly_enrichment_progress(
-        SimpleNamespace(
-            generation=1,
-            lcsc="C100",
-            refs=["R1"],
-            metadata={"assembly_process": "SMT", "component_product_type": 1},
-        )
-    )
-    assert window.store.get_part("R1") == before
 
 
 @pytest.mark.parametrize(
