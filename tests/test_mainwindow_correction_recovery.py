@@ -17,6 +17,7 @@ from tests.correction_test_support import (
     raw_rows,
     seed_raw,
 )
+from tests.modal_test_support import ModalDialog
 from tests.test_corrections_import_export import install_manager_controls
 from tests.test_fabrication_correction_recovery import Point, make_fabrication, read_cpl
 from tests.test_mainwindow_empty_zone_warning import _make_window
@@ -29,7 +30,7 @@ def runtime(tmp_path: Path) -> Iterator[SimpleNamespace]:
     levels = {name: logging.getLogger(name).level for name in ("requests", "urllib3")}
     package = "mainwindow_correction_recovery_tests"
     wx = wx_stubs(
-        Dialog=type("Dialog", (), {}),
+        Dialog=type("Dialog", (ModalDialog,), {"instances": []}),
         Frame=type("Frame", (), {}),
         NewIdRef=MagicMock(side_effect=object),
         BeginBusyCursor=MagicMock(),
@@ -155,9 +156,6 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
     assert _displayed_corrections(window) == ["Unresolved", "Unresolved"]
     _write_sql(library.correctionsdb_file, "DROP TRIGGER reject_insert")
     install_manager_controls(runtime.modules, library, monkeypatch)
-    monkeypatch.setattr(
-        runtime.wx.Dialog, "ShowModal", lambda _dialog: runtime.wx.ID_OK, raising=False
-    )
     window.partlist_data_model.AddEntry.reset_mock()
 
     if entrypoint == "toolbar":
@@ -177,6 +175,10 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
 
     assert _displayed_corrections(window) == ["90°, 0.0/0.0 (ref)", "0°, 0.0/0.0"]
     assert not window.correction_status.IsShown()
+    assert len(runtime.wx.Dialog.instances) == 1
+    manager = runtime.wx.Dialog.instances[0]
+    assert manager.destroyed
+    assert manager.lifecycle == ["show", "end modal", "exit hook", "destroy"]
     runtime.wx.MessageBox.assert_not_called()
 
 
