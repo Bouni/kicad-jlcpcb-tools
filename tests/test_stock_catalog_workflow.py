@@ -389,7 +389,7 @@ def test_explicit_update_completion_invalidates_confirmed_missing_catalog_result
 
 @pytest.mark.parametrize("ready", [False, True])
 def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
-    monkeypatch: pytest.MonkeyPatch, ready: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ready: bool
 ) -> None:
     """The actual constructor and init_data gate lookups until catalog initialization."""
     from . import test_window_layout as layout_ui
@@ -436,13 +436,16 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
         library.get_part_details.return_value = details(1000)
         monkeypatch.setattr(module, "Library", MagicMock(return_value=library))
         provider = MagicMock()
-        provider.get_pcbnew().GetBoard().GetFileName.return_value = "test.kicad_pcb"
+        board_path = tmp_path / "test.kicad_pcb"
+        board_path.write_text("(kicad_pcb)\n", encoding="utf-8")
+        provider.get_pcbnew().GetBoard().GetFileName.return_value = str(board_path)
         window = module.JLCPCBTools(None, provider)
         assert window._catalog_details == {}
         assert window.is_catalog_available() is ready
         assert window.bom_estimator_board_count == 100
         assert window.bom_estimator_show is False
-        assert initialize_store.call_count == int(ready)
+        # Board assignments are initialized even while the catalog downloads.
+        initialize_store.assert_called_once_with()
         assert library.update.call_count == int(not ready)
         assert window._catalog_get_part_details("C1") == (
             details(1000) if ready else {}

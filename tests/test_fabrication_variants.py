@@ -11,6 +11,8 @@ from functools import partial
 import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
 from typing import Any, Optional
@@ -19,7 +21,10 @@ from zipfile import ZipFile
 
 import pytest
 
+__all__ = ["window_ui"]
+
 import fabrication_archive
+import generate_hooks
 from tests.fabrication_test_support import (
     Point,
     make_footprint,
@@ -29,6 +34,7 @@ from tests.native_kicad_support import (
     native_bindings as kicad_bindings,
     native_runtime as kicad_runtime,
 )
+from tests.native_window_support import window_ui
 from tests.variant_model_test_support import Snapshot, State
 from tests.variant_native_support import native
 
@@ -386,6 +392,89 @@ def test_complete_generation_keeps_scratch_until_release(
     assert working.exists()
     runtime.exporter.abort_generation()
     assert not working.exists()
+
+
+@pytest.mark.native_wx
+@pytest.mark.parametrize("hook_exit", [0, 1], ids=["success", "failure"])
+def test_post_hook_reads_published_variant_plots_before_generation_cleanup(
+    window_ui: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hook_exit: int,
+) -> None:
+    """Real generation handlers keep current raw plots alive through a hook subprocess."""
+    hook = tmp_path / "post_hook.py"
+    hook.write_text(
+        "import os\nfrom pathlib import Path\n"
+        'gerbers = Path(os.environ["JLCPCB_GERBER_DIR"])\n'
+        'project = Path(os.environ["JLCPCB_PROJECT_DIR"])\n'
+        'assert all(Path(os.environ["JLCPCB_ARTIFACT_" + name]).is_file()\n'
+        '           for name in ("GERBER_ZIP", "BOM_CSV", "CPL_CSV"))\n'
+        '(project / "hook-dir.txt").write_text(str(gerbers), encoding="utf-8")\n'
+        '(project / "hook-plots.txt").write_bytes(\n'
+        '    (gerbers / "copper.gbr").read_bytes() + (gerbers / "drill.drl").read_bytes())\n'
+        f"raise SystemExit({hook_exit})\n",
+        encoding="utf-8",
+    )
+    run_process = subprocess.run
+
+    def run_python_hook(
+        command: list[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        """Use this environment's Python for a portable executable hook fixture."""
+        return run_process([sys.executable, *command], **kwargs)
+
+    monkeypatch.setattr(generate_hooks.subprocess, "run", run_python_hook)
+
+    def check(ui: Any) -> None:
+        dialog, board = ui.dialog, ui.board
+        board.Drawings = lambda: ()
+        board.parts[0].AddVariant("A").SetFieldValue("LCSC", "C999")
+        ui.controller.refresh()
+        exporter = dialog.fabrication
+        original_gerbers = Path(exporter.gerberdir)
+        (original_gerbers / "copper.gbr").write_bytes(b"previous copper")
+        (original_gerbers / "drill.drl").write_bytes(b"previous drill")
+
+        def write_plot(name: str, contents: bytes, *_args: Any) -> None:
+            """Stand in only for unavailable native plotters, retaining actual files."""
+            (Path(exporter.gerberdir) / name).write_bytes(contents)
+
+        exporter.generate_geber = partial(write_plot, "copper.gbr", b"variant copper\n")
+        exporter.generate_excellon = partial(
+            write_plot, "drill.drl", b"variant drill\n"
+        )
+        exporter.fill_zones = lambda: []
+        dialog.settings["hooks"] = {"post_script": str(hook)}
+        dialog.settings["gerber"]["force_drc"] = False
+        dialog.settings["general"]["order_number"] = False
+
+        dialog.generate_fabrication_data()
+
+        assert (tmp_path / "hook-plots.txt").read_bytes() == (
+            b"variant copper\nvariant drill\n"
+        )
+        working = Path((tmp_path / "hook-dir.txt").read_text(encoding="utf-8"))
+        assert working != original_gerbers
+        assert not working.parent.exists()
+        assert Path(exporter.gerberdir) == original_gerbers
+        assert (original_gerbers / "copper.gbr").read_bytes() == b"previous copper"
+        assert exporter.output_snapshot is None
+        assert not ui.controller.session.generating
+        assert dialog.generate_button.IsEnabled()
+        assert ui.controller.view._mutations_enabled
+        assert ui.cache.get_generation_count() == 1
+        public = exporter.get_artifact_paths()
+        with ZipFile(public["gerber_zip"]) as archive:
+            assert archive.read("copper.gbr") == b"variant copper\n"
+            assert archive.read("drill.drl") == b"variant drill\n"
+        assert _read_csv(public["bom_csv"])[0]["LCSC"] == "C999"
+        assert _read_csv(public["cpl_csv"])[0]["Designator"] == "R1"
+        assert len(ui.messages) == hook_exit
+        if hook_exit:
+            assert "post-generate hook failed" in ui.messages[0].lower()
+
+    window_ui.run(check)
 
 
 @pytest.mark.parametrize("publish", [False, True], ids=["abort", "publish"])

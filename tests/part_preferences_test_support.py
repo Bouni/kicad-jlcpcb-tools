@@ -138,6 +138,11 @@ class Board:
 
     def __init__(self, footprints: Iterable[Footprint]) -> None:
         self.footprints = {fp.reference: fp for fp in footprints}
+        self.filename = ""
+
+    def GetFileName(self) -> str:
+        """Return the saved board path used to scope project assignments."""
+        return self.filename
 
     def GetFootprints(self) -> list[Footprint]:
         """Return current board footprints."""
@@ -181,9 +186,14 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         fabrication_initialized: bool = True,
     ) -> Any:
         window = object.__new__(mainwindow.JLCPCBTools)
+        window._variant_mode = False
         window.settings = {} if settings is None else settings
         window.project_path = str(tmp_path)
         board = board or Board(footprints if footprints is not None else [Footprint()])
+        if not board.GetFileName():
+            filename = tmp_path / "board.kicad_pcb"
+            filename.write_text("(kicad_pcb)\n", encoding="utf-8")
+            board.filename = str(filename)
         window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
         window.logger = MagicMock()
         library = window.library = object.__new__(mainwindow.Library)

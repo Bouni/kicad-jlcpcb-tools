@@ -17,6 +17,9 @@ from .stock_test_support import board_row, stock_modules
 
 mainwindow = storage.mainwindow
 make_window = storage.make_window
+# The constructor helper needs the saved board and callback cleanup from its
+# module's autouse fixture, which pytest does not discover through a module import.
+layout_lifecycle = layout_ui._clear_callbacks
 
 
 def _populate_selector(selector: Any) -> Any:
