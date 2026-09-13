@@ -34,7 +34,7 @@ for file in VERSION default_settings.json ./*.py ./*.png; do
 done
 
 echo "Copy directories"
-for dir in icons lib common dblib core scripts bom_estimation enrichment; do
+for dir in icons lib common dblib core scripts bom_estimation enrichment variant; do
 	cp -R "$dir" "$PLUGINS_DIR"
 done
 
