@@ -1,5 +1,7 @@
 """Contains helper function used all over the plugin."""
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 import re
@@ -44,6 +46,21 @@ def HighResWxSize(window, size):
     if hasattr(window, "FromDIP"):
         return window.FromDIP(size)
     return size
+
+
+def apply_side_cell_style(side: str, attr: wx.dataview.DataViewItemAttr) -> bool:
+    """Apply the shared TOP/BOT text color and weight to a Side cell."""
+    side_colours = {
+        "TOP": wx.Colour(200, 52, 52),
+        "BOT": wx.Colour(77, 127, 196),
+    }
+    colour = side_colours.get(side)
+    if colour is None:
+        return False
+    attr.SetColour(colour)
+    if hasattr(attr, "SetBold"):
+        attr.SetBold(True)
+    return True
 
 
 def loadBitmapScaled(filename, scale=1.0, static=False):

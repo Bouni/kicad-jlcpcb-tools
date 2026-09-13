@@ -191,16 +191,24 @@ def models() -> Iterator[types.SimpleNamespace]:
 
 
 @pytest.mark.parametrize("luminance", [0.1, 0.9])
+@pytest.mark.parametrize(
+    ("side", "side_colour"),
+    [("0", (200, 52, 52)), ("31", (77, 127, 196))],
+)
 def test_concern_styles_stock_cell_only_and_preserves_side_style(
     models: types.SimpleNamespace,
     luminance: float,
+    side: str,
+    side_colour: tuple[int, int, int],
 ) -> None:
     """Concern text contrasts with the theme without replacing native row fills."""
     models.wx.SystemSettings.GetColour = lambda _key: types.SimpleNamespace(
         GetLuminance=lambda: luminance
     )
     model = models.datamodel.PartListDataModel(1.0)
-    model.AddEntry(board_row("R1", 9))
+    row = board_row("R1", 9)
+    row[model.columns["SIDE_COL"]] = side
+    model.AddEntry(row)
     model.AddEntry(board_row("R2", 100))
     model.set_stock_concern_refs({"R1"})
     row, sufficient = model.data
@@ -223,7 +231,7 @@ def test_concern_styles_stock_cell_only_and_preserves_side_style(
     assert attr.background is None
     attr = CellAttr()
     assert model.GetAttr(row, model.columns["SIDE_COL"], attr) is True
-    assert (attr.colour, attr.bold, attr.background) == ((200, 52, 52), True, None)
+    assert (attr.colour, attr.bold, attr.background) == (side_colour, True, None)
 
 
 def test_concern_notifications_cover_changed_cells_and_clear_stale_state(

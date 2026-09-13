@@ -1,7 +1,8 @@
 """Modeless details dialog for the BOM estimator assembly mode."""
 
-# pyright: reportMissingImports=false, reportMissingModuleSource=false
+from __future__ import annotations
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
 import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
@@ -11,7 +12,27 @@ from .bom_estimation.view import (
     build_assembly_mode_reasons,
     format_assembly_mode_status,
 )
-from .helpers import HighResWxSize
+from .helpers import HighResWxSize, apply_side_cell_style
+
+_AFFECTED_PART_COLUMNS = (
+    ("relationship", "Relationship", 190),
+    ("reference", "Ref", 65),
+    ("value", "Value", 140),
+    ("lcsc", "LCSC", 105),
+    ("side", "Side", 55),
+)
+_SIDE_COLUMN = next(
+    index for index, (key, _, _) in enumerate(_AFFECTED_PART_COLUMNS) if key == "side"
+)
+
+
+class _AffectedPartsStore(dv.DataViewListStore):
+    """Apply the main window's Side-cell appearance to affected parts."""
+
+    def GetAttrByRow(self, row: int, col: int, attr: dv.DataViewItemAttr) -> bool:
+        if col == _SIDE_COLUMN:
+            return apply_side_cell_style(self.GetValueByRow(row, col), attr)
+        return False
 
 
 class WhyStandardDialog(wx.Dialog):
@@ -99,7 +120,7 @@ class WhyStandardDialog(wx.Dialog):
             self.content_sizer.Add(link, 0, wx.BOTTOM, 4)
         self.content_sizer.AddSpacer(8)
 
-    def _add_parts_table(self, rows):
+    def _add_parts_table(self, rows: list[dict[str, str]]) -> None:
         """Render the single affected-parts table when references are involved."""
         if not rows:
             return
@@ -112,21 +133,17 @@ class WhyStandardDialog(wx.Dialog):
             wx.ID_ANY,
             style=dv.DV_ROW_LINES | dv.DV_VERT_RULES,
         )
-        columns = [
-            ("relationship", "Relationship", 190),
-            ("reference", "Ref", 65),
-            ("value", "Value", 140),
-            ("lcsc", "LCSC", 105),
-            ("side", "Side", 55),
-        ]
-        for _key, label, width in columns:
+        table.AssociateModel(_AffectedPartsStore())
+        for _key, label, width in _AFFECTED_PART_COLUMNS:
             table.AppendTextColumn(
                 label,
                 width=HighResWxSize(self.parent.window, wx.Size(width, -1)).GetWidth(),
                 mode=dv.DATAVIEW_CELL_INERT,
             )
         for row in rows:
-            table.AppendItem([row[key] for key, _label, _width in columns])
+            table.AppendItem(
+                [row[key] for key, _label, _width in _AFFECTED_PART_COLUMNS]
+            )
 
         table.SetMinSize(
             HighResWxSize(
