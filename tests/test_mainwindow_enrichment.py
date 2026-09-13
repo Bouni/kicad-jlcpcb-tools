@@ -1,6 +1,8 @@
 """Assembly status through real window/model constructors and database events."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from functools import partial
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +18,7 @@ from .part_preferences_test_support import Board, Footprint
 from .stock_test_support import stock_modules
 
 database_mainwindow = database_support.mainwindow
+_clear_callbacks = layout._clear_callbacks
 
 
 @pytest.fixture
@@ -32,8 +35,33 @@ def workflow(
         monkeypatch.setattr(main, "set_lcsc_value", database_mainwindow.set_lcsc_value)
         monkeypatch.setattr(main.wx, "PostEvent", MagicMock(), raising=False)
         monkeypatch.setattr(main.wx, "ToolTip", str, raising=False)
-        monkeypatch.setattr(main, "Thread", MagicMock())
         window = layout._open_main(monkeypatch, {})
+        jobs: list[Callable[[], None]] = []
+        delivery: list[Callable[[], None]] = []
+        metadata = {
+            "C100": {"component_product_type": 2, "assembly_process": "SMT"},
+            "C200": {"component_product_type": 0, "assembly_process": "SMT"},
+            "C300": {"component_product_type": 2, "assembly_process": "SMT"},
+        }
+
+        def thread(
+            *, target: Callable[..., None], args: tuple[Any, ...], daemon: bool
+        ) -> SimpleNamespace:
+            return SimpleNamespace(start=lambda: jobs.append(partial(target, *args)))
+
+        def call_after(callback: Callable[..., None], *args: Any) -> None:
+            delivery.append(partial(callback, *args))
+
+        worker = import_module(window.assembly_lookup.__class__.__module__)
+        provider = MagicMock()
+        provider.fetch_iter.side_effect = lambda codes: iter(
+            (code, metadata[code]) for code in codes
+        )
+        monkeypatch.setattr(worker, "Thread", MagicMock(side_effect=thread))
+        monkeypatch.setattr(worker.wx, "CallAfter", call_after)
+        monkeypatch.setattr(
+            worker, "LCSCAssemblyMetadataProvider", MagicMock(return_value=provider)
+        )
         board = Board([Footprint("R1", lcsc="C100"), Footprint("R2", lcsc="C200")])
         window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
         window.store = database_mainwindow.Store(window, str(tmp_path), board)
@@ -47,7 +75,15 @@ def workflow(
         window.update_correction_status = MagicMock()
         window.populate_footprint_list()
         yield SimpleNamespace(
-            window=window, main=main, board=board, db=database_mainwindow
+            window=window,
+            main=main,
+            board=board,
+            db=database_mainwindow,
+            worker=worker,
+            provider=provider,
+            jobs=jobs,
+            delivery=delivery,
+            metadata=metadata,
         )
 
 
@@ -66,26 +102,20 @@ def tooltip(workflow: SimpleNamespace, reference: str = "R1") -> str:
     )
 
 
-def result(
-    workflow: SimpleNamespace,
-    reference: str,
-    lcsc: str,
-    metadata: dict[str, Any],
-    *,
-    generation: Any = None,
-) -> None:
-    """Deliver the same payload and generation carried by a worker event."""
-    window = workflow.window
-    window.on_assembly_enrichment_progress(
-        SimpleNamespace(
-            refs=[reference],
-            lcsc=lcsc,
-            metadata=metadata,
-            generation=window.assembly_enrichment_generation
-            if generation is None
-            else generation,
-        )
-    )
+def run_worker(workflow: SimpleNamespace) -> None:
+    """Run one production fetch while retaining its queued UI callbacks."""
+    workflow.jobs.pop(0)()
+
+
+def deliver_next(workflow: SimpleNamespace) -> None:
+    """Deliver one production result or completion on the controlled UI queue."""
+    workflow.delivery.pop(0)()
+
+
+def drain_delivery(workflow: SimpleNamespace) -> None:
+    """Deliver all remaining callbacks, including the batch completion."""
+    while workflow.delivery:
+        deliver_next(workflow)
 
 
 def test_each_result_updates_std_before_batch_completion(
@@ -97,24 +127,19 @@ def test_each_result_updates_std_before_batch_completion(
     window.start_assembly_enrichment()
     assert cell(workflow) == cell(workflow, "R2") == "◷"
     workflow.main.wx.PostEvent.reset_mock()
-    result(
-        workflow, "R1", "C100", {"component_product_type": 2, "assembly_process": "SMT"}
-    )
+    run_worker(workflow)
+    deliver_next(workflow)
     assert cell(workflow) == "✓"
     assert "Standard Only" in tooltip(workflow)
     assert "SMT" in tooltip(workflow)
     assert cell(workflow, "R2") == "◷"
     workflow.main.wx.PostEvent.assert_not_called()
-    result(
-        workflow, "R2", "C200", {"component_product_type": 0, "assembly_process": "SMT"}
-    )
+    deliver_next(workflow)
     assert cell(workflow, "R2") == "—"
-    window.on_assembly_enrichment_completed(
-        SimpleNamespace(generation=window.assembly_enrichment_generation)
-    )
+    deliver_next(workflow)
     workflow.main.wx.PostEvent.assert_called_once()
     assert workflow.main.wx.PostEvent.call_args.args[1].source == "enrichment_update"
-    assert window.pending_assembly_enrichment == set()
+    assert not window.assembly_lookup.pending
 
 
 @pytest.mark.parametrize(
@@ -130,7 +155,9 @@ def test_partial_cache_survives_empty_result_and_reopen(
     assert cell(workflow) == expected
     window.start_assembly_enrichment()
     assert cell(workflow) == ("◷" if classification is None else expected)
-    result(workflow, "R1", "C100", {})
+    workflow.metadata["C100"] = {}
+    run_worker(workflow)
+    deliver_next(workflow)
     assert cell(workflow) == expected
     assert "unavailable" in tooltip(workflow)
     assert "Retrieving" not in tooltip(workflow)
@@ -160,22 +187,22 @@ def test_reassignment_and_stale_callbacks_cannot_restore_old_classification(
 ) -> None:
     """Persisted assignment guards and model clearing agree when a result is late."""
     window = workflow.window
-    window.start_assembly_enrichment()
-    old_generation = window.assembly_enrichment_generation
+    window.start_assembly_enrichment(["R1"])
+    run_worker(workflow)
     workflow.board.footprints["R1"].SetField("LCSC", "C300")
     window.store.set_lcsc_assignments([("R1", "C300", None)])
     window.partlist_data_model.set_lcsc("R1", "C300", "Basic", 100, "")
     assert cell(workflow) == "?"
-    result(
-        workflow, "R1", "C100", {"component_product_type": 2, "assembly_process": "SMT"}
-    )
+    drain_delivery(workflow)
     assert cell(workflow) == "?"
     assert "Standard Only" not in tooltip(workflow)
-    window.assembly_enrichment_generation += 1
-    result(
-        workflow, "R1", "C300", {"component_product_type": 2}, generation=old_generation
-    )
+    window.start_assembly_enrichment(["R1"])
+    run_worker(workflow)
+    window.assembly_lookup.invalidate()
+    window.populate_footprint_list()
+    drain_delivery(workflow)
     assert cell(workflow) == "?"
+    assert window.store.get_part("R1")["component_product_type"] is None
     model = window.partlist_data_model
     model.remove_lcsc_number(model.ObjectToItem(model.data[model.find_index("R1")]))
     assert cell(workflow) == ""
@@ -190,9 +217,8 @@ def test_metadata_changes_refresh_stationary_hover(workflow: SimpleNamespace) ->
     window.start_assembly_enrichment()
     controller.refresh.assert_called_once()
     controller.refresh.reset_mock()
-    result(
-        workflow, "R1", "C100", {"component_product_type": 2, "assembly_process": "SMT"}
-    )
+    run_worker(workflow)
+    deliver_next(workflow)
     controller.refresh.assert_called_once()
 
 
@@ -202,21 +228,15 @@ def test_overlapping_batches_finish_each_still_assigned_row(
     """Assigning another part during a lookup cannot strand the first row loading."""
     window = workflow.window
     window.start_assembly_enrichment(["R1"])
-    first_generation = window.assembly_enrichment_generation
     window.start_assembly_enrichment(["R2"])
-    result(
-        workflow,
-        "R1",
-        "C100",
-        {"component_product_type": 2, "assembly_process": "SMT"},
-        generation=first_generation,
-    )
+    run_worker(workflow)
+    drain_delivery(workflow)
     assert cell(workflow) == "✓"
-    result(
-        workflow, "R2", "C200", {"component_product_type": 0, "assembly_process": "SMT"}
-    )
+    assert cell(workflow, "R2") == "◷"
+    run_worker(workflow)
+    drain_delivery(workflow)
     assert cell(workflow, "R2") == "—"
-    assert window.pending_assembly_enrichment == set()
+    assert not window.assembly_lookup.pending
 
 
 @pytest.mark.parametrize("repopulate", [False, True])
@@ -227,14 +247,43 @@ def test_new_assignment_shares_inflight_result(
     window = workflow.window
     window.start_assembly_enrichment(["R1"])
     assert window._apply_lcsc_assignments({"R2": "C100"}) == ["R2"]
-    workflow.main.Thread.assert_called_once()
+    workflow.worker.Thread.assert_called_once()
     if repopulate:
         window.populate_footprint_list()
     assert cell(workflow, "R2") == "◷"
-    result(
-        workflow, "R1", "C100", {"component_product_type": 2, "assembly_process": "SMT"}
-    )
+    run_worker(workflow)
+    drain_delivery(workflow)
     assert cell(workflow) == cell(workflow, "R2") == "✓"
     assert "Retrieving" not in tooltip(workflow, "R2")
     assert window.store.get_part("R2")["component_product_type"] == 2
-    assert window.pending_assembly_enrichment == set()
+    assert not window.assembly_lookup.pending
+
+
+def test_partial_supplier_failure_clears_pending_metadata_and_hover(
+    workflow: SimpleNamespace,
+) -> None:
+    """A failed batch preserves its first result and releases the unfinished hover."""
+
+    def partial_result(codes: tuple[str, ...]) -> Iterator[tuple[str, dict[str, Any]]]:
+        assert set(codes) == {"C100", "C200"}
+        yield "C100", workflow.metadata["C100"]
+        raise OSError("supplier disconnected")
+
+    window = workflow.window
+    controller = window._type_cell_tooltip
+    workflow.provider.fetch_iter.side_effect = partial_result
+    window.start_assembly_enrichment()
+    run_worker(workflow)
+    deliver_next(workflow)
+    assert cell(workflow) == "✓"
+    assert cell(workflow, "R2") == "◷"
+    assert "Retrieving" in tooltip(workflow, "R2")
+    controller.refresh.reset_mock()
+    deliver_next(workflow)
+    assert cell(workflow) == "✓"
+    assert cell(workflow, "R2") == "?"
+    assert "unavailable" in tooltip(workflow, "R2")
+    assert "Retrieving" not in tooltip(workflow, "R2")
+    controller.refresh.assert_called_once()
+    assert window.store.get_part("R1")["component_product_type"] == 2
+    assert not window.assembly_lookup.pending

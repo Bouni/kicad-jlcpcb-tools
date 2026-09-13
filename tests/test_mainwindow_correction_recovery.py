@@ -106,6 +106,11 @@ def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
     window.right_toolbar = MagicMock()
     window.upper_toolbar = MagicMock()
     window.library = library or fresh_library(runtime.library)
+    window.assembly_lookup = runtime.mainwindow.AssemblyMetadataLookup(
+        window._apply_assembly_metadata,
+        window._refresh_bom_after_enrichment_update,
+        window.library.logger.warning,
+    )
     window.scale_factor = 1
     window.window = object()
     window.correction_status = StatusLabel()

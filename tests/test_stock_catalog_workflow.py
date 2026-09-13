@@ -57,8 +57,11 @@ def catalog_window(
         window._why_standard_dialog = None
         window._part_selector = None
         window._project_storage_unavailable = False
-        window.assembly_enrichment_generation = 0
-        window.pending_assembly_enrichment = set()
+        window.assembly_lookup = workflow.mainwindow.AssemblyMetadataLookup(
+            window._apply_assembly_metadata,
+            window._refresh_bom_after_enrichment_update,
+            window.logger.warning,
+        )
         window.project_storage_status = MagicMock()
         window.right_toolbar = MagicMock()
         window.upper_toolbar = MagicMock()
