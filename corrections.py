@@ -12,22 +12,30 @@ import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
 
 from .correction_data import (
+    KIND_FOOTPRINT,
+    KIND_LCSC,
+    AnyCorrection,
     Correction,
     CorrectionDataError,
+    correction_kind,
     parse_corrections_csv,
     validate_correction,
+    validate_lcsc_correction,
 )
 from .events import PopulateFootprintListEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+from .lcsc import normalize_lcsc
 
 if TYPE_CHECKING:
     from .library import StoredCorrection
+
+_KIND_LABELS = {KIND_FOOTPRINT: "Footprint", KIND_LCSC: "LCSC"}
 
 
 class CorrectionManagerDialog(wx.Dialog):
     """Dialog for managing part corrections."""
 
-    def __init__(self, parent: Any, footprint: str) -> None:
+    def __init__(self, parent: Any, footprint: str, lcsc_part: str = "") -> None:
         wx.Dialog.__init__(
             self,
             parent,
@@ -70,15 +78,28 @@ class CorrectionManagerDialog(wx.Dialog):
         self.regex = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            footprint,
+            lcsc_part or footprint,
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
+        )
+        self.lcsc_mode = wx.CheckBox(self, wx.ID_ANY, "LCSC part, matched exactly")
+        self.lcsc_mode.SetValue(bool(lcsc_part))
+        self.lcsc_mode.SetToolTip(
+            "Correct one LCSC part number instead of every footprint matching "
+            "a pattern. Use this when two parts share a footprint name but JLC "
+            "assembles them in different orientations."
         )
 
         sizer_regex = wx.BoxSizer(wx.VERTICAL)
         sizer_regex.Add(regex_label, 0, wx.ALL, 5)
         sizer_regex.Add(
             self.regex,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            5,
+        )
+        sizer_regex.Add(
+            self.lcsc_mode,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
@@ -205,6 +226,12 @@ class CorrectionManagerDialog(wx.Dialog):
             "Status",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 280),
+            align=wx.ALIGN_LEFT,
+        )
+        self.corrections_list.AppendTextColumn(
+            "Kind",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
         )
         self.correction_status = wx.StaticText(self, wx.ID_ANY, "")
@@ -416,19 +443,58 @@ class CorrectionManagerDialog(wx.Dialog):
             self._record_editor_values(record),
         ):
             control.SetValue(value)
+        self.lcsc_mode.SetValue(record.kind == KIND_LCSC)
+
+    def _current_kind(self) -> str:
+        """Name the table the add/edit form is describing a rule for."""
+        return KIND_LCSC if self.lcsc_mode.GetValue() else KIND_FOOTPRINT
+
+    def _validated_input(
+        self, kind: str, target: str, rowid: int | None
+    ) -> AnyCorrection:
+        """Validate the editor text as a rule of the given kind."""
+        validate = (
+            validate_lcsc_correction if kind == KIND_LCSC else validate_correction
+        )
+        return validate(
+            self.regex.GetValue(),
+            self.rotation.GetValue(),
+            (self.offset_x.GetValue(), self.offset_y.GetValue()),
+            source=target,
+            rowid=rowid,
+        )
+
+    @staticmethod
+    def _same_key(row: StoredCorrection, correction: AnyCorrection) -> bool:
+        """Compare a stored row's key the way its own kind compares keys."""
+        if row.kind != correction_kind(correction) or not isinstance(row.pattern, str):
+            return False
+        if row.kind == KIND_LCSC:
+            return normalize_lcsc(row.pattern) == correction.key
+        return row.pattern == correction.key
 
     def populate_corrections_list(
-        self, *, selected_rowid: int | None = None, preserve_inputs: bool = False
+        self,
+        *,
+        selected: tuple[str, int] | None = None,
+        preserve_inputs: bool = False,
     ) -> None:
-        """Refresh rows without granting stale unsaved edits a newer record identity."""
+        """Refresh rows without granting stale unsaved edits a newer record identity.
+
+        ``selected`` names a row as (kind, rowid): rowids repeat across the
+        two rule tables, so a rowid alone cannot identify one.
+        """
         snapshot = self.parent.library.read_correction_data()
         preserve_inputs = preserve_inputs or (
-            selected_rowid is None
+            selected is None
             and self.selected_record is not None
-            and self._input_values() != self._record_editor_values(self.selected_record)
+            and (
+                self._input_values() != self._record_editor_values(self.selected_record)
+                or self._current_kind() != self.selected_record.kind
+            )
         )
-        if selected_rowid is None and self.selected_record is not None:
-            selected_rowid = self.selected_record.rowid
+        if selected is None and self.selected_record is not None:
+            selected = (self.selected_record.kind, self.selected_record.rowid)
         self._populating = True
         try:
             self.corrections_list.DeleteAllItems()
@@ -440,9 +506,10 @@ class CorrectionManagerDialog(wx.Dialog):
                         "; ".join(
                             f"{issue.field}: {issue.message}" for issue in record.issues
                         ),
+                        _KIND_LABELS[record.kind],
                     ]
                 )
-                if record.rowid == selected_rowid and (
+                if (record.kind, record.rowid) == selected and (
                     self.selected_record is None
                     or self.selection_db_path == snapshot.db_path
                 ):
@@ -499,11 +566,11 @@ class CorrectionManagerDialog(wx.Dialog):
         ) == os.path.realpath(self.parent.library.correctionsdb_file)
 
     def _confirm_replacement(
-        self, correction: Correction, conflicts: Sequence[StoredCorrection]
+        self, correction: AnyCorrection, conflicts: Sequence[StoredCorrection]
     ) -> bool:
-        """Ask before atomically replacing other records with the same pattern."""
+        """Ask before atomically replacing other records with the same key."""
         existing = "\n".join(
-            f"Row {row.rowid}: "
+            f"Row {row.rowid} ({_KIND_LABELS[row.kind]}): "
             + (
                 str(row.correction)
                 if row.correction is not None
@@ -513,18 +580,23 @@ class CorrectionManagerDialog(wx.Dialog):
         )
         dialog = wx.MessageDialog(
             self,
-            f"A rule for '{correction.pattern}' already exists!",
-            "Regex exists!",
+            f"A rule for '{correction.key}' already exists!",
+            "Part number exists!"
+            if correction_kind(correction) == KIND_LCSC
+            else "Regex exists!",
             wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
         )
         dialog.ExtendedMessage = (
             f"{existing}\n\nReplace these {len(conflicts)} existing entries with "
             f"{correction}?"
         )
-        if self.selected_record is not None:
+        selected = self.selected_record
+        # A selection of the other kind is not being edited: the save is an
+        # insert and that row stays as it is, so do not promise otherwise.
+        if selected is not None and selected.kind == correction_kind(correction):
             dialog.ExtendedMessage += (
-                f"\nThe selected row {self.selected_record.rowid} will become "
-                f"'{correction.pattern}'."
+                f"\nThe selected row {selected.rowid} ({_KIND_LABELS[selected.kind]}) "
+                f"will become '{correction.key}'."
             )
         try:
             return dialog.ShowModal() == wx.ID_YES
@@ -542,27 +614,27 @@ class CorrectionManagerDialog(wx.Dialog):
             return False
         library = self.parent.library
         target = str(library.correctionsdb_file)
-        rowid = self.selected_record.rowid if self.selected_record else None
+        kind = self._current_kind()
+        selected = self.selected_record
+        if selected is not None and selected.kind != kind:
+            # Switching kind describes a new rule. It is not an edit of the
+            # selected one, so that row stays exactly as it is.
+            selected = None
+        rowid = selected.rowid if selected else None
         try:
-            correction = validate_correction(
-                self.regex.GetValue(),
-                self.rotation.GetValue(),
-                (self.offset_x.GetValue(), self.offset_y.GetValue()),
-                source=target,
-                rowid=rowid,
-            )
+            correction = self._validated_input(kind, target, rowid)
             snapshot = library.read_correction_data(target)
             conflicts = [
                 row
                 for row in snapshot.rows
-                if row.pattern == correction.pattern and row.rowid != rowid
+                if row.rowid != rowid and self._same_key(row, correction)
             ]
             if (
-                self.selected_record is None
+                selected is None
                 and len(conflicts) == 1
                 and conflicts[0].correction == correction
             ):
-                self.populate_corrections_list(selected_rowid=conflicts[0].rowid)
+                self.populate_corrections_list(selected=(kind, conflicts[0].rowid))
                 return True
             if conflicts and not self._confirm_replacement(correction, conflicts):
                 return False
@@ -571,7 +643,7 @@ class CorrectionManagerDialog(wx.Dialog):
                 rowid=rowid,
                 replace=bool(conflicts),
                 db_path=target,
-                expected_record=self.selected_record,
+                expected_record=selected,
                 expected_conflicts=conflicts,
             )
         except CorrectionDataError as error:
@@ -579,7 +651,7 @@ class CorrectionManagerDialog(wx.Dialog):
             self.populate_corrections_list(preserve_inputs=True)
             return False
 
-        self.populate_corrections_list(selected_rowid=rowid)
+        self.populate_corrections_list(selected=(kind, rowid))
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
         return True
 
@@ -790,9 +862,24 @@ class CorrectionManagerDialog(wx.Dialog):
             with open(path, "w", newline="", encoding="utf-8") as destination:
                 writer = csv.writer(destination, quotechar='"', quoting=csv.QUOTE_ALL)
                 writer.writerow(["Pattern", "Rotation", "Offset X", "Offset Y"])
+                # The format is seeded from JLCKicadTools upstream and has no
+                # part-number field, so the file carries pattern rules only.
                 for correction in corrections:
-                    writer.writerow(correction.csv_row())
+                    if isinstance(correction, Correction):
+                        writer.writerow(correction.csv_row())
         except (OSError, UnicodeError, CorrectionDataError) as error:
             self._show_error("Correction Export Error", f"{path}: {error}")
             return False
+        left_out = sum(
+            1 for correction in corrections if not isinstance(correction, Correction)
+        )
+        if left_out:
+            # Say so, or a backup-and-reimport would lose them without a word.
+            wx.MessageBox(
+                f"{left_out} LCSC part-number rule(s) were not exported: the CSV "
+                "format carries pattern rules only. They stay in the database.",
+                "Correction Export",
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
         return True

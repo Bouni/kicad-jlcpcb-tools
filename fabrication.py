@@ -33,7 +33,12 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
-from .correction_data import Correction, CorrectionMatch, match_correction
+from .correction_data import (
+    Correction,
+    CorrectionMatch,
+    LcscCorrection,
+    match_correction,
+)
 from .footprint_helpers import get_is_dnp
 
 # Compatibility hack for V6 / V7 / V7.99
@@ -158,19 +163,28 @@ class Fabrication:
                 empty_pours.append(f"{zone.GetNetname() or 'no net'} on {name}")
         return empty_pours
 
-    def _correction_for_footprint(self, footprint: Any) -> Optional[CorrectionMatch]:  # noqa: UP045
-        """Select the same reference, value, or package rule as the parts table."""
+    def _correction_for_footprint(
+        self, footprint: Any, lcsc: str = ""
+    ) -> Optional[CorrectionMatch]:  # noqa: UP045
+        """Select the same part, reference, value or package rule as the parts table.
+
+        The part number is the store's, which is what the BOM orders and the
+        parts list shows. The footprint's own LCSC field is not consulted: it
+        only seeds the store when the board is read, and a field the store has
+        since moved past would rotate one part while the BOM ordered another.
+        """
         return match_correction(
             self.corrections,
             str(footprint.GetReference()),
             str(footprint.GetValue()),
             str(footprint.GetFPID().GetLibItemName()),
+            lcsc,
         )
 
-    def fix_rotation(self, footprint: Any) -> float:
+    def fix_rotation(self, footprint: Any, lcsc: str = "") -> float:
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         return self._rotation_for_match(
-            footprint, self._correction_for_footprint(footprint)
+            footprint, self._correction_for_footprint(footprint, lcsc)
         )
 
     def _rotation_for_match(
@@ -233,10 +247,10 @@ class Fabrication:
             return _checked_position(position.x + offset_x, position.y + offset_y)
         return position
 
-    def fix_position(self, footprint: Any, position: Any) -> Any:
+    def fix_position(self, footprint: Any, position: Any, lcsc: str = "") -> Any:
         """Apply the offset from the same selected rule used for rotation."""
         return self._position_for_match(
-            footprint, position, self._correction_for_footprint(footprint)
+            footprint, position, self._correction_for_footprint(footprint, lcsc)
         )
 
     def _position_for_match(
@@ -450,9 +464,12 @@ class Fabrication:
                     "to repair or retry loading before generating fabrication files."
                 )
         if not isinstance(corrections, tuple) or any(
-            not isinstance(correction, Correction) for correction in corrections
+            not isinstance(correction, (Correction, LcscCorrection))
+            for correction in corrections
         ):
-            raise TypeError("Expected an immutable tuple of Correction values")
+            raise TypeError(
+                "Expected an immutable tuple of Correction or LcscCorrection values"
+            )
         self.corrections = corrections
         aux_origin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
@@ -472,7 +489,7 @@ class Fabrication:
                 continue
             if not add_without_lcsc and not part["lcsc"]:
                 continue
-            match = self._correction_for_footprint(fp)
+            match = self._correction_for_footprint(fp, part["lcsc"])
             try:
                 center = self.get_position(fp)
                 # Subtract in Python, before native coordinate arithmetic can wrap.
@@ -498,9 +515,7 @@ class Fabrication:
                 )
             except (OverflowError, ValueError) as error:
                 source = (
-                    f"correction {match.correction.pattern!r}"
-                    if match
-                    else "no correction"
+                    f"correction {match.correction.key!r}" if match else "no correction"
                 )
                 raise ValueError(
                     f"Cannot generate CPL for {fp.GetReference()} ({source}): {error}"

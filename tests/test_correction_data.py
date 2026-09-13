@@ -1,29 +1,30 @@
 """Exercise the correction data contract without importing KiCad or wx."""
 
+from collections.abc import Iterator
 import csv
 from dataclasses import FrozenInstanceError, replace
-import importlib.util
 from io import StringIO
 import math
-from pathlib import Path
 import sqlite3
 import sys
 from types import ModuleType
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[1]
+from tests.wx_harness import load_siblings
 
 
 @pytest.fixture
-def data(monkeypatch):
-    """Load the production validator with a scoped module registration."""
-    name = "correction_data_validation_tests"
-    spec = importlib.util.spec_from_file_location(name, _ROOT / "correction_data.py")
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
-    return module
+def data() -> Iterator[ModuleType]:
+    """Load the production validator under a scoped package, without GUI imports.
+
+    The module reaches ``lcsc`` through a relative import, so it needs a
+    parent package; nothing else from the plugin is loaded.
+    """
+    with load_siblings(
+        "correction_data_validation_tests", ("correction_data",), {}
+    ) as loaded:
+        yield loaded["correction_data"]
 
 
 @pytest.mark.parametrize(
@@ -662,3 +663,56 @@ def test_serialization_roundtrips_exact_values(
     assert math.copysign(1, csv_correction.offset[0]) == math.copysign(1, offset[0])
     editor = correction.editor_values()
     assert data.Correction.parse(editor[0], editor[1], editor[2:]) == correction
+
+
+@pytest.mark.parametrize(
+    ("lcsc", "expected"),
+    [("C12345", "C12345"), ("c12345", "C12345"), (" C12345\n", "C12345")],
+)
+def test_lcsc_correction_keeps_the_canonical_part_number(
+    data: ModuleType, lcsc: str, expected: str
+) -> None:
+    """Every spelling a part number arrives in reaches one exact-match key."""
+    correction = data.LcscCorrection(lcsc, "90.0", ("0.5", 1))
+    assert correction.lcsc == correction.key == expected
+    assert (correction.rotation, correction.offset) == (90, (0.5, 1.0))
+    assert correction.db_row() == (expected, 90, 0.5, 1.0)
+    assert correction.editor_values() == (expected, "90", "0.5", "1.0")
+    assert str(correction) == "90°, 0.5/1.0"
+    assert correction == data.LcscCorrection(expected, 90, (0.5, 1))
+    with pytest.raises(FrozenInstanceError):
+        correction.lcsc = "C1"
+
+
+@pytest.mark.parametrize(
+    "lcsc", ["^C12345$", "C12345|C999", "SOT-23", "", " ", "C", "12345", None, 12345]
+)
+def test_lcsc_correction_rejects_anything_but_a_part_number(
+    data: ModuleType, lcsc: object
+) -> None:
+    """An exact key that is really a pattern would silently never match."""
+    with pytest.raises(data.CorrectionDataError) as error:
+        data.LcscCorrection(lcsc, 90, (0, 0))
+    (issue,) = error.value.issues
+    assert (issue.field, issue.value) == ("lcsc", lcsc)
+    assert "C12345" in issue.message
+    assert data.LcscCorrection.parse(lcsc, 90, (0, 0)) is None
+
+
+def test_lcsc_correction_reports_every_field_at_once(data: ModuleType) -> None:
+    """Rotation and offsets are validated by the same rules as pattern corrections."""
+    with pytest.raises(data.CorrectionDataError) as error:
+        data.validate_lcsc_correction("bad", "47u", ("x", 0), source="db", rowid=7)
+    assert [issue.field for issue in error.value.issues] == [
+        "lcsc",
+        "rotation",
+        "offset_x",
+    ]
+    assert all((issue.source, issue.rowid) == ("db", 7) for issue in error.value.issues)
+
+
+def test_correction_kind_names_the_table(data: ModuleType) -> None:
+    """Consumers route a validated value by its kind, never by inspecting text."""
+    assert data.correction_kind(data.Correction("C12345", 0, (0, 0))) == "footprint"
+    assert data.correction_kind(data.LcscCorrection("C12345", 0, (0, 0))) == "lcsc"
+    assert data.Correction("C12345", 0, (0, 0)).key == "C12345"

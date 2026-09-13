@@ -1084,7 +1084,7 @@ def test_manager_constructor_imports_only_after_controls_exist(
     parent = SimpleNamespace(library=library, scale_factor=1, window=object())
     dialog = modules.corrections.CorrectionManagerDialog(parent, "R1")
     assert len(dialog.corrections_list.rows) == 1
-    assert dialog.corrections_list.rows == [["R1", "90", "0.0", "0.0", ""]]
+    assert dialog.corrections_list.rows == [["R1", "90", "0.0", "0.0", "", "Footprint"]]
     assert (
         modules.wx.dataview.DataViewListCtrl.call_args.kwargs["style"]
         == modules.wx.dataview.DV_SINGLE
@@ -1095,6 +1095,7 @@ def test_manager_constructor_imports_only_after_controls_exist(
         "Offset X",
         "Offset Y",
         "Status",
+        "Kind",
     ]
     assert dialog.global_corrections.GetValue() is True
     select(dialog, 0)
