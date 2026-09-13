@@ -14,7 +14,7 @@ from .dataview_highlight import (
     expand_footprint,
     expand_value,
 )
-from .helpers import loadIconScaled
+from .helpers import apply_side_cell_style, loadIconScaled
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
 from .stock_display import format_stock, stock_sort_key
 
@@ -171,17 +171,7 @@ class PartListDataModel(_StockDataModel):
             row = self.ItemToObject(item)
             if not row:
                 return False
-            side_colours = {
-                "TOP": wx.Colour(200, 52, 52),
-                "BOT": wx.Colour(77, 127, 196),
-            }
-            colour = side_colours.get(row[col])
-            if colour is None:
-                return False
-            attr.SetColour(colour)
-            if hasattr(attr, "SetBold"):
-                attr.SetBold(True)
-            return True
+            return apply_side_cell_style(row[col], attr)
         return False
 
     def GetColumnCount(self):

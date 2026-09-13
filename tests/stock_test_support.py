@@ -63,9 +63,6 @@ def stock_modules() -> Iterator[types.SimpleNamespace]:
     stubs["wx.dataview"].PyDataViewModel = DataViewModel
     stubs["wx.dataview"].DataViewIconText = lambda *args: args
     stubs["wx.dataview"].NullDataViewItem = None
-    stubs[f"{package}.helpers"] = module(
-        f"{package}.helpers", loadIconScaled=lambda name, _scale: name
-    )
     stubs[f"{package}.dataview_highlight"] = module(
         f"{package}.dataview_highlight",
         decode_highlighted_value=lambda value: (value, []),
@@ -74,6 +71,7 @@ def stock_modules() -> Iterator[types.SimpleNamespace]:
         expand_value=lambda *_args: [],
     )
     with load_siblings(package, ("datamodel",), stubs) as loaded:
+        loaded["datamodel"].loadIconScaled = lambda name, _scale: name
         yield types.SimpleNamespace(**loaded, wx=stubs["wx"], package=package)
 
 
