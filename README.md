@@ -172,6 +172,31 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 Make sure you make use of pre-commit hooks in order to format everything nicely with `black`
 In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hooks that enforce nice and clean code style.
 
+### Tests
+
+Report ordinary Python tests, real wx controls, and real KiCad tests separately.
+A passing test that uses a fake board does not verify KiCad's file handling,
+project state, or native object cleanup.
+
+```sh
+python -m pytest -rs -m 'not native_wx and not native_kicad'
+python -m pytest -rs --require-native=wx -m 'not native_kicad and not os_input'
+python -m pytest -rs --require-native=wx -m os_input
+python -m pytest -rs --require-native=kicad -m native_kicad
+```
+
+The required native modes reject missing libraries, empty native selections, and
+skipped native tests. Run them with Python libraries matching the installed KiCad
+or wx packages. Mouse/keyboard tests require an isolated desktop with a window
+manager; Linux native tests can use Xvfb.
+
+To reproduce CI locally, use an Ubuntu 24.04 Docker container with the same CPU
+architecture, KiCad packages, dependencies, and commands as
+[the test workflow](.github/workflows/tests.yml). Copy the tracked source tree so
+untracked test files cannot change collection. Include the tested revision,
+Python/wx/KiCad versions, command, and pass/skip/deselection counts when reporting
+results. A required lane that was not run remains unvalidated.
+
 ### Settings
 
 `default_settings.json` holds the settings a fresh install starts from and is the only

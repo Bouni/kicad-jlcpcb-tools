@@ -339,8 +339,12 @@ def test_startup_store_population_recovers_invalid_saved_corrections(
     seed_raw(runtime.library, [("C1", "47u", 0, 0)])
     window = _population_window(runtime)
     store = window.store
+    window._variant_mode = False
     monkeypatch.setattr(runtime.mainwindow, "Store", lambda *_args: store)
     window.project_path = runtime.library.parent.project_path
+    board_path = Path(window.project_path) / "board.kicad_pcb"
+    board_path.write_text("(kicad_pcb)\n", encoding="utf-8")
+    window.pcbnew.GetBoard().GetFileName = lambda: str(board_path)
     window.settings = {
         "part_preferences": {"fill_empty_lcsc_assignments_on_open": False}
     }

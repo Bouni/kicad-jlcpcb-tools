@@ -85,6 +85,10 @@ class _Sizer:
     def SetMinSize(self, size: tuple) -> None:
         self.min_size = size
 
+    def AddStretchSpacer(self, proportion: int = 1) -> _SizerItem:
+        """Retain a stretchable gap like a native sizer item."""
+        return self.Add((0, 0), proportion)
+
     def contains(self, child: Any) -> bool:
         return any(
             item.child is child
@@ -116,6 +120,7 @@ class _TopLevelWindow:
         self.display_index = 0
         self.scale_factor = getattr(_args[0], "scale_factor", 2) if _args else 2
         self._destroyed = False
+        self._escape_id = _wx["wx"].ID_ANY
         self._bindings: dict[Any, Callable] = {}
         self.GetSize = MagicMock(side_effect=lambda: self._size)
         self.SetSize = MagicMock(side_effect=self._set_size)
@@ -139,6 +144,9 @@ class _TopLevelWindow:
 
     def GetParent(self) -> Any:
         return self._parent
+
+    def GetChildren(self) -> list[Any]:
+        return [child for child in self._children if child]
 
     def GetTitle(self) -> str:
         return self._title
@@ -184,6 +192,12 @@ class _TopLevelWindow:
 
     def Close(self) -> None:
         self.emit(_wx["wx"].EVT_CLOSE)
+
+    def SetEscapeId(self, escape_id: int) -> None:
+        self._escape_id = escape_id
+
+    def GetEscapeId(self) -> int:
+        return self._escape_id
 
 
 class _Frame(_TopLevelWindow):
@@ -290,6 +304,7 @@ def _control(
 
 _PACKAGE = "window_layout_tests"
 _after: list[tuple[Callable, tuple]] = []
+_board_path: Optional[Path] = None
 
 
 def _call_after(callback: Callable, *args: Any) -> None:
@@ -303,9 +318,17 @@ def _drain_callbacks() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clear_callbacks() -> Iterator[None]:
+def _clear_callbacks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
     _after.clear()
     _Display.areas = [(3840, 2160)]
+    # The real constructor requires a saved PCB before creating native controls.
+    # Board parsing is supplied by the provider double; retain a real identity
+    # throughout the close/reopen workflow without touching a user project.
+    board_path = tmp_path_factory.mktemp("layout-board") / "layout.kicad_pcb"
+    board_path.write_text("(kicad_pcb)\n", encoding="utf-8")
+    monkeypatch.setattr(f"{__name__}._board_path", board_path)
     yield
     _after.clear()
 
@@ -316,6 +339,7 @@ _wx = wx_stubs(
     Panel=_Panel,
     BoxSizer=_Sizer,
     StaticBoxSizer=_Sizer,
+    Platform="__WXGTK__",
     Display=_Display,
     Size=_Size,
     DefaultPosition=None,
@@ -472,7 +496,9 @@ def _open_selector(
 
 
 def _open_main(
-    monkeypatch: pytest.MonkeyPatch, settings: dict, fail_at: Optional[str] = None
+    monkeypatch: pytest.MonkeyPatch,
+    settings: dict,
+    fail_at: Optional[str] = None,
 ) -> Any:
     control = _control(scale=2, client_width=0, stretch=True)
     monkeypatch.setattr(mainwindow.dv.DataViewCtrl, "return_value", control)
@@ -516,7 +542,8 @@ def _open_main(
             control.AppendTextColumn, "side_effect", append_with_restore_failure
         )
     provider = MagicMock()
-    provider.get_pcbnew().GetBoard().GetFileName.return_value = "test.kicad_pcb"
+    assert _board_path is not None
+    provider.get_pcbnew().GetBoard().GetFileName.return_value = str(_board_path)
     window = object.__new__(mainwindow.JLCPCBTools)
     if fail_at:
         with pytest.raises(RuntimeError, match="UI construction failed"):
@@ -1413,7 +1440,7 @@ def test_unexpected_persistence_failure_cannot_strand_windows(
         selector.Destroy.assert_called_once()
         assert owner._part_selector is None
     if window is not None:
-        window.Destroy.assert_called_once()
+        window.Destroy.assert_called_once_with()
     if failure == "serialization":
         assert (tmp_path / "settings.json").read_bytes() == previous
         assert [path.name for path in tmp_path.iterdir()] == ["settings.json"]

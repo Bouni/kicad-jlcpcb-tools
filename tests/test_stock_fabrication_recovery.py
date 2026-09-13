@@ -229,6 +229,11 @@ def generation_window(
                     mainwindow.ID_GENERATE, enabled
                 )
             )
+            # The toolbar starts with automatic layer detection selected.
+            window.layer_selection = SimpleNamespace(
+                GetSelection=lambda: 0,
+                GetString=lambda index: ("Auto",)[index],
+            )
             window.gauge = MagicMock()
             window.flush_generation_ui = lambda: None
             # The DRC boundary deliberately cancels before exports or board saves.
