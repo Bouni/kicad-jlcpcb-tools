@@ -89,14 +89,13 @@ class TypeCellTooltip:
             self.dismiss()
             return
         point = wx.GetMousePosition()
-        window = wx.FindWindowAtPoint(point)
-        over_control = window is not None and (
-            window == control or control.IsDescendant(window)
-        )
-        if self._popup and window is not None:
-            if window == self._popup or self._popup.IsDescendant(window):
-                over_control = False
-        if not over_control:
+        # On macOS and GTK, FindWindowAtPoint searches window creation order,
+        # so a modeless dialog behind this active owner can hide valid cells.
+        # Use the table body's client area and native cell hit-testing instead.
+        body = control.GetMainWindow() or control
+        if not body.GetClientRect().Contains(body.ScreenToClient(point)) or (
+            self._popup and self._popup.GetScreenRect().Contains(point)
+        ):
             self.dismiss()
             return
         item, column = control.HitTest(control.ScreenToClient(point))
