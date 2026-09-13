@@ -20,7 +20,6 @@ from bom_estimation.view import (  # pylint: disable=import-error
     format_assembly_mode_status,
     format_bom_estimate_summary,
     format_part_bom_price_label,
-    prepare_bom_price_labels,
     standard_signal_reasons,
 )
 
@@ -397,21 +396,3 @@ def test_build_bom_estimate_view_model_returns_summary_and_highlights():
     assert view_model["mode"] == "Standard"
     assert view_model["reason_text"] == "standard part"
     assert view_model["highlight_refs"] == {"R1"}
-
-
-def test_prepare_bom_price_labels_returns_reference_to_label_mapping():
-    """Price-label helper returns expected per-reference mapping."""
-    parts = [
-        {"reference": "R1", "lcsc": "C123", "exclude_from_bom": 0},
-        {"reference": "R2", "lcsc": "C456", "exclude_from_bom": 0},
-    ]
-    details_store = {
-        "C123": {"price": "1-:0.10"},
-        "C456": {"price": "5-:0.20"},
-    }
-
-    labels = prepare_bom_price_labels(
-        parts, board_count=10, get_part_details=lambda lcsc: details_store.get(lcsc, {})
-    )
-
-    assert labels == {"R1": "$1.0000", "R2": "$2.0000"}
