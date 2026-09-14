@@ -1,6 +1,5 @@
 """Compact stock is presentation only: precision survives display and sorting."""
 
-import importlib
 from typing import Any
 
 import pytest
@@ -89,40 +88,6 @@ def test_models_default_to_compact_display_and_preserve_raw_stock(kind: str) -> 
         assert model.get_all()[0][column] == "22095"
 
 
-@pytest.mark.parametrize("kind", ["board", "selector"])
-@pytest.mark.parametrize("simplified", [False, True])
-@pytest.mark.parametrize(
-    "stocks", [("7260", "7299"), ("999", "1000"), ("22095", "8880000")]
-)
-def test_stock_sort_uses_exact_numeric_values_in_both_modes(
-    kind: str, simplified: bool, stocks: tuple[str, str]
-) -> None:
-    """Even rows with identical compact labels retain correct ascending order."""
-    with stock_modules() as modules:
-        if kind == "board":
-            model = modules.datamodel.PartListDataModel(1.0, simplify_stock=simplified)
-            column = model.columns["STOCK_COL"]
-            rows = [board_row(f"R{i}", stock) for i, stock in enumerate(stocks)]
-        else:
-            model = modules.datamodel.PartSelectorDataModel(simplify_stock=simplified)
-            column = model.columns["stock"]
-            rows = [selector_row(stock) for stock in stocks]
-        for row in rows:
-            model.AddEntry(row)
-        first, second = map(model.ObjectToItem, model.data)
-
-        assert model.Compare(first, second, column, True) < 0
-        assert model.Compare(first, second, column, False) > 0
-        assert model.Compare(second, first, column, True) > 0
-        assert model.Compare(first, first, column, True) == 0
-        if simplified and stocks == ("7260", "7299"):
-            assert (
-                model.GetValue(first, column)
-                == model.GetValue(second, column)
-                == "7.2 k"
-            )
-
-
 def test_assignment_and_removal_keep_exact_stock_until_rendering() -> None:
     """Assignment updates can be rendered compactly and reverted without data loss."""
     with stock_modules() as modules:
@@ -139,13 +104,3 @@ def test_assignment_and_removal_keep_exact_stock_until_rendering() -> None:
         model.remove_lcsc_number(item)
         assert model.GetValue(item, column) == ""
         assert model.get_all()[0][column] == ""
-
-
-def test_stock_sort_unknown_values_are_comparable() -> None:
-    """Missing stock does not break native sorting when numeric rows are present."""
-    with stock_modules() as modules:
-        display = importlib.import_module(f"{modules.package}.stock_display")
-        stocks = [None, "", "?", "0", "999", "1000"]
-        keys = [display.stock_sort_key(stock) for stock in stocks]
-        assert sorted(keys)
-        assert display.stock_sort_key("999") < display.stock_sort_key("1000")

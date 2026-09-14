@@ -204,51 +204,25 @@ def _window(footprint_list, alike_rows):
     return window
 
 
-def test_matches_below_the_fold_do_not_scroll_the_clicked_row_away():
-    """Alike rows further down the list must leave the viewport alone."""
-    footprint_list = _CocoaList(rows=300, page=25, top=0)
-    footprint_list.click(7)
-    window = _window(footprint_list, alike_rows=[7, 47, 187, 247])
-
+@pytest.mark.parametrize(
+    "top, clicked, alike_rows",
+    [(0, 7, [7, 47, 187, 247]), (150, 152, [3, 92, 152, 260])],
+    ids=["matches-below", "matches-above-and-below"],
+)
+def test_selecting_alike_rows_keeps_viewport_and_focus(
+    top: int,
+    clicked: int,
+    alike_rows: list[int],
+) -> None:
+    """One selection update preserves the clicked row while adding offscreen matches."""
+    footprint_list = _CocoaList(rows=300, page=25, top=top)
+    footprint_list.click(clicked)
+    window = _window(footprint_list, alike_rows)
     JLCPCBTools.select_alike_parts(window)
     footprint_list.settle()
-
-    assert footprint_list.top == 0
-    assert footprint_list.selected == {7, 47, 187, 247}
-
-
-def test_matches_above_the_fold_do_not_scroll_the_clicked_row_away():
-    """Alike rows further up the list must leave the viewport alone."""
-    footprint_list = _CocoaList(rows=300, page=25, top=150)
-    footprint_list.click(152)
-    window = _window(footprint_list, alike_rows=[3, 92, 152])
-
-    JLCPCBTools.select_alike_parts(window)
-    footprint_list.settle()
-
-    assert footprint_list.top == 150
-    assert footprint_list.selected == {3, 92, 152}
-
-
-def test_the_clicked_row_keeps_the_focus():
-    """Focus drives the platform scroll, so it must stay on the clicked row."""
-    footprint_list = _CocoaList(rows=300, page=25, top=150)
-    footprint_list.click(152)
-    window = _window(footprint_list, alike_rows=[152, 260])
-
-    JLCPCBTools.select_alike_parts(window)
-
-    assert footprint_list.current == 152
-
-
-def test_the_selection_is_replaced_in_a_single_call():
-    """One selection change, not one per row, so the list reacts once."""
-    footprint_list = _CocoaList(rows=300, page=25, top=0)
-    footprint_list.click(7)
-    window = _window(footprint_list, alike_rows=[7, 47, 187])
-
-    JLCPCBTools.select_alike_parts(window)
-
+    assert footprint_list.top == top
+    assert footprint_list.selected == set(alike_rows)
+    assert footprint_list.current == clicked
     assert footprint_list.set_selections_calls == 1
 
 
