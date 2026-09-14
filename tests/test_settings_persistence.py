@@ -7,7 +7,10 @@ from typing import Any, Optional, TextIO
 
 import pytest
 
+from core import settings_persistence
+
 from .test_settings_defaults import plugin_dir, shipped_defaults
+from .variant_data_support import SavedNativeBoard, store_module_impl
 from .wx_harness import load_mainwindow, wx_stubs
 
 mainwindow = load_mainwindow(
@@ -17,8 +20,90 @@ mainwindow = load_mainwindow(
 JLCPCBTools = mainwindow.JLCPCBTools
 
 # The plugin directory holds the shipped defaults beside the user's settings;
-# any other file left in it is an orphaned temporary file.
-PLUGIN_SETTINGS_FILES = ["default_settings.json", "settings.json"]
+# a stable lock file coordinates windows and separate KiCad processes.
+PLUGIN_SETTINGS_FILES = ["default_settings.json", "settings.json", "settings.json.lock"]
+
+
+@pytest.mark.parametrize("second_action", ["variant", "ordinary"])
+def test_independent_windows_preserve_other_boards_variant_preferences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second_action: str
+) -> None:
+    """A stale window must not erase another board's saved output or layout."""
+    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    plugin_dir(tmp_path, shipped_defaults(), shipped_defaults())
+    first, second = (object.__new__(JLCPCBTools) for _ in range(2))
+    first.load_settings()
+    second.load_settings()
+    assert first.settings is not second.settings
+    stores = [
+        store_module_impl.VariantStore(
+            window, str(tmp_path), SavedNativeBoard(tmp_path, name)
+        )
+        for window, name in ((first, "first"), (second, "second"))
+    ]
+    stores[0].set_output_variant("B")
+    stores[0].set_display_preferences(
+        {"variant_order": ["", "B", "A"], "differences_only": True}
+    )
+    if second_action == "variant":
+        stores[1].set_output_variant("A")
+    else:
+        second.settings["general"]["simplify_stock"] = False
+        second.save_settings()
+
+    reopened = object.__new__(JLCPCBTools)
+    reopened.load_settings()
+    reopened_store = store_module_impl.VariantStore(
+        reopened, str(tmp_path), SavedNativeBoard(tmp_path, "first")
+    )
+    assert reopened_store.get_output_variant() == "B"
+    assert reopened_store.get_display_preferences() == {
+        "variant_order": ["", "B", "A"],
+        "differences_only": True,
+    }
+
+
+@pytest.mark.parametrize("failure", ["partial-write", "replace"])
+def test_failed_variant_preference_save_preserves_window_and_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """Actual window/store saves publish neither memory nor bytes on failure."""
+    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    plugin_dir(tmp_path, shipped_defaults(), shipped_defaults())
+    window = object.__new__(JLCPCBTools)
+    window.load_settings()
+    store = store_module_impl.VariantStore(
+        window, str(tmp_path), SavedNativeBoard(tmp_path)
+    )
+    store.set_output_variant("A")
+    settings_identity = window.settings
+    before = json.loads(json.dumps(window.settings))
+    path = tmp_path / "settings.json"
+    original = path.read_bytes()
+
+    def fail_dump(_settings: dict[str, Any], stream: TextIO) -> None:
+        stream.write('{"variants":')
+        stream.flush()
+        raise OSError("settings write interrupted")
+
+    def fail_replace(_source: Any, _destination: Any) -> None:
+        raise OSError("settings replacement denied")
+
+    if failure == "partial-write":
+        monkeypatch.setattr(settings_persistence.json, "dump", fail_dump)
+    else:
+        monkeypatch.setattr(settings_persistence.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="settings"):
+        store.set_output_variant("B")
+    assert window.settings is settings_identity
+    assert window.settings == before
+    assert path.read_bytes() == original
+    assert sorted(entry.name for entry in tmp_path.iterdir()) == [
+        "default_settings.json",
+        "main.kicad_pcb",
+        "settings.json",
+        "settings.json.lock",
+    ]
 
 
 @pytest.fixture
@@ -95,8 +180,8 @@ def test_save_replaces_complete_settings_after_closing_temporary_file(
         replacements.append(temporary)
         real_replace(source, destination)
 
-    monkeypatch.setattr(mainwindow.json, "dump", dump)
-    monkeypatch.setattr(mainwindow.os, "replace", replace)
+    monkeypatch.setattr(settings_persistence.json, "dump", dump)
+    monkeypatch.setattr(settings_persistence.os, "replace", replace)
     window.save_settings()
 
     assert len(replacements) == 1
@@ -118,7 +203,7 @@ def test_partial_json_write_preserves_previous_settings(
         stream.flush()
         raise OSError("disk full during settings write")
 
-    monkeypatch.setattr(mainwindow.json, "dump", interrupted_dump)
+    monkeypatch.setattr(settings_persistence.json, "dump", interrupted_dump)
     with pytest.raises(OSError, match="disk full"):
         window.save_settings()
 
@@ -149,7 +234,7 @@ def test_replace_failure_preserves_previous_settings_and_removes_temporary_file(
     def fail_replace(_source: str, _destination: str) -> None:
         raise OSError("settings replacement denied")
 
-    monkeypatch.setattr(mainwindow.os, "replace", fail_replace)
+    monkeypatch.setattr(settings_persistence.os, "replace", fail_replace)
     with pytest.raises(OSError, match="replacement denied"):
         window.save_settings()
 
@@ -218,11 +303,14 @@ def test_missing_settings_migrate_atomically_and_settle(
         replacements.append(temporary)
         real_replace(source, destination)
 
-    monkeypatch.setattr(mainwindow.os, "replace", replace)
+    monkeypatch.setattr(settings_persistence.os, "replace", replace)
     window.load_settings()
     assert window.settings == expected
     assert json.loads(path.read_text(encoding="utf-8")) == expected
-    assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
+    expected_files = (
+        PLUGIN_SETTINGS_FILES if previous != expected else PLUGIN_SETTINGS_FILES[:2]
+    )
+    assert sorted(f.name for f in path.parent.iterdir()) == expected_files
     assert len(replacements) == (0 if previous == expected else 1)
     settled, replacement_count = path.read_bytes(), len(replacements)
     reopened = object.__new__(JLCPCBTools)
@@ -266,9 +354,9 @@ def test_failed_settings_migration_preserves_file_and_retries(
 
     with monkeypatch.context() as failure_patch:
         if failure == "partial-write":
-            failure_patch.setattr(mainwindow.json, "dump", interrupted_dump)
+            failure_patch.setattr(settings_persistence.json, "dump", interrupted_dump)
         else:
-            failure_patch.setattr(mainwindow.os, "replace", fail_replace)
+            failure_patch.setattr(settings_persistence.os, "replace", fail_replace)
         with pytest.raises(OSError, match="migration"):
             object.__new__(JLCPCBTools).load_settings()
         assert path.read_bytes() == original

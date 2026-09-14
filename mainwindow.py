@@ -10,13 +10,11 @@ from contextlib import contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
 from typing import TYPE_CHECKING, Any, Optional
-import json
 import logging
 import os
 import re
 import sqlite3
 import sys
-import tempfile
 import time
 
 import pcbnew as kicad_pcbnew
@@ -27,7 +25,11 @@ from wx import adv  # pylint: disable=import-error
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
-from .core.settings_defaults import resolve_settings
+from .core.settings_persistence import (
+    VariantPreferencePatch,
+    load_settings_document,
+    save_settings_document,
+)
 from .correction_data import Correction, match_correction
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
@@ -2079,9 +2081,7 @@ class JLCPCBTools(wx.Frame):
 
     def load_settings(self) -> None:
         """Load settings, seeding anything unset from default_settings.json."""
-        self.settings, needs_write = resolve_settings(PLUGIN_PATH)
-        if needs_write:
-            self.save_settings()
+        self.settings = load_settings_document(PLUGIN_PATH)
 
     def decode_mainwindow_highlight_value(self, value: str) -> tuple[str, list[str]]:
         """Decode params cell text, optionally disabling highlight terms by setting."""
@@ -2090,20 +2090,14 @@ class JLCPCBTools(wx.Frame):
             return text, []
         return text, terms
 
-    def save_settings(self) -> None:
-        """Replace settings.json only after the complete document is written."""
-        temporary_path = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=PLUGIN_PATH, delete=False
-            ) as settings_file:
-                temporary_path = settings_file.name
-                json.dump(self.settings, settings_file)
-            os.replace(temporary_path, os.path.join(PLUGIN_PATH, "settings.json"))
-        finally:
-            if temporary_path is not None:
-                with suppress(OSError):
-                    os.unlink(temporary_path)
+    def save_settings(
+        self, variant_patch: Optional[VariantPreferencePatch] = None
+    ) -> None:
+        """Merge explicit variant changes without overwriting other windows' choices."""
+        saved = save_settings_document(PLUGIN_PATH, self.settings, variant_patch)
+        # Modeless children share this dictionary with the main window.
+        self.settings.clear()
+        self.settings.update(saved)
 
     def select_part(self, *_: object) -> None:
         """Select a part from the library and assign it to the selected footprint(s)."""

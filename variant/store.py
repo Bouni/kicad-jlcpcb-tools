@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
 from ..bom_estimation.assembly_mode import ComponentProductType
+from ..core.settings_persistence import (
+    VariantPreferencePatch,
+    changed_variant_preferences,
+)
 
 if TYPE_CHECKING:
     from .native import BoardVariantSnapshot
@@ -216,26 +220,10 @@ class VariantStore:
         return preferences
 
     def _set_preference(self, key: str, value: Any) -> None:
-        """Save one board choice and restore in-memory settings if saving fails."""
+        """Save one explicit board choice against the latest persisted settings."""
         self.ensure_current_board()
-        preferences = dict(self._preferences())
-        preferences[key] = value
-        settings = self.parent.settings
-        previous = settings.get("variants")
-        existed = "variants" in settings
-        variants = dict(previous or {})
-        boards = dict(variants.get("boards", {}))
-        boards[str(self.board_path)] = preferences
-        variants["boards"] = boards
-        settings["variants"] = variants
-        try:
-            self.parent.save_settings()
-        except Exception:
-            if existed:
-                settings["variants"] = previous
-            else:
-                del settings["variants"]
-            raise
+        patch = VariantPreferencePatch({("boards", str(self.board_path), key): value})
+        self.parent.save_settings(variant_patch=patch)
 
     def get_output_variant(self) -> Optional[str]:
         """Retain canonical names, including a previously selected removed variant."""
@@ -255,9 +243,21 @@ class VariantStore:
             raise VariantSnapshotError("Stored matrix display preferences are invalid.")
         return deepcopy(value)
 
-    def set_display_preferences(self, preferences: dict[str, Any]) -> None:
-        """Save JSON display preferences without touching native fields or SQLite."""
+    def set_display_preferences(
+        self,
+        preferences: dict[str, Any],
+        *,
+        before: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Save only changed display fields, preserving other windows' updates."""
+        self.ensure_current_board()
         if not isinstance(preferences, dict):
             raise TypeError("Matrix display preferences must be a dictionary.")
         value = json.loads(json.dumps(preferences, ensure_ascii=False, allow_nan=False))
-        self._set_preference(self.DISPLAY_PREFERENCES_KEY, value)
+        patch = changed_variant_preferences(
+            self.get_display_preferences() if before is None else before,
+            value,
+            ("boards", str(self.board_path), self.DISPLAY_PREFERENCES_KEY),
+        )
+        if patch.updates or patch.removals:
+            self.parent.save_settings(variant_patch=patch)

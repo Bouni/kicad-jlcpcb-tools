@@ -1443,7 +1443,10 @@ def test_unexpected_persistence_failure_cannot_strand_windows(
         window.Destroy.assert_called_once_with()
     if failure == "serialization":
         assert (tmp_path / "settings.json").read_bytes() == previous
-        assert [path.name for path in tmp_path.iterdir()] == ["settings.json"]
+        assert sorted(path.name for path in tmp_path.iterdir()) == [
+            "settings.json",
+            "settings.json.lock",
+        ]
 
 
 def test_selector_capture_failure_also_destroys_its_parent_frame(
