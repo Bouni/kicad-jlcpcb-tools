@@ -241,6 +241,14 @@ class CorrectionManagerDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(150, -1)),
             0,
         )
+        self.delete_all_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Delete all",
+            wx.DefaultPosition,
+            HighResWxSize(parent.window, wx.Size(150, -1)),
+            0,
+        )
         self.update_button = wx.Button(
             self,
             wx.ID_ANY,
@@ -268,6 +276,7 @@ class CorrectionManagerDialog(wx.Dialog):
 
         self.save_button.Bind(wx.EVT_BUTTON, self.save_correction)
         self.delete_button.Bind(wx.EVT_BUTTON, self.delete_correction)
+        self.delete_all_button.Bind(wx.EVT_BUTTON, self.delete_all_corrections)
         self.update_button.Bind(wx.EVT_BUTTON, self.download_correction_data)
         self.import_button.Bind(wx.EVT_BUTTON, self.import_corrections_dialog)
         self.export_button.Bind(wx.EVT_BUTTON, self.export_corrections_dialog)
@@ -287,6 +296,14 @@ class CorrectionManagerDialog(wx.Dialog):
             )
         )
         self.delete_button.SetBitmapMargins((2, 0))
+
+        self.delete_all_button.SetBitmap(
+            loadBitmapScaled(
+                "mdi-trash-can-outline.png",
+                self.parent.scale_factor,
+            )
+        )
+        self.delete_all_button.SetBitmapMargins((2, 0))
 
         self.update_button.SetBitmap(
             loadBitmapScaled(
@@ -335,6 +352,7 @@ class CorrectionManagerDialog(wx.Dialog):
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.save_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.delete_button, 0, wx.ALL, 5)
+        tool_sizer.Add(self.delete_all_button, 0, wx.ALL, 5)
         tool_sizer.AddStretchSpacer()
         tool_sizer.Add(self.update_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.import_button, 0, wx.ALL, 5)
@@ -382,6 +400,8 @@ class CorrectionManagerDialog(wx.Dialog):
             self.delete_button.Enable(True)
         else:
             self.delete_button.Enable(False)
+
+        self.delete_all_button.Enable(self.corrections_list.GetItemCount() > 0)
 
     def _clear_selection(self) -> None:
         """Forget the stored row identity without changing unsaved input fields."""
@@ -599,6 +619,41 @@ class CorrectionManagerDialog(wx.Dialog):
                 self.selected_record.rowid,
                 db_path=self.selection_db_path,
                 expected_record=self.selected_record,
+            )
+        except CorrectionDataError as error:
+            self._show_error("Correction Delete Error", error)
+            self.populate_corrections_list(preserve_inputs=True)
+            return False
+        self._clear_selection()
+        self.populate_corrections_list()
+        wx.PostEvent(self.parent, PopulateFootprintListEvent())
+        return True
+
+    def delete_all_corrections(self, *_: object) -> bool:
+        """Empty the active correction database, after naming what will go."""
+        count = self.corrections_list.GetItemCount()
+        if count == 0:
+            return False
+        if self._uses_global_corrections():
+            scope = "the global corrections database"
+            recovery = "Update downloads the shared rules again."
+        else:
+            scope = "this board's local corrections database"
+            recovery = "The global corrections database is not affected."
+        noun = "rule" if count == 1 else "rules"
+        dialog = wx.MessageDialog(
+            self,
+            f"Delete all {count} correction {noun}?",
+            "Delete all corrections",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING,
+        )
+        # Rules the user wrote themselves come back only from an Export.
+        dialog.ExtendedMessage = f"This empties {scope}. {recovery}"
+        if dialog.ShowModal() != wx.ID_YES:
+            return False
+        try:
+            self.parent.library.delete_all_corrections(
+                db_path=self.correction_snapshot.db_path
             )
         except CorrectionDataError as error:
             self._show_error("Correction Delete Error", error)

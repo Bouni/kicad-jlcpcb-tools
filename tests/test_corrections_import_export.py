@@ -141,6 +141,10 @@ class CorrectionList:
         """Capture a displayed original correction row."""
         self.rows.append(values)
 
+    def GetItemCount(self) -> int:
+        """Report the displayed row count the way wx does."""
+        return len(self.rows)
+
     def SelectRow(self, index: int) -> None:
         """Select a row, optionally dispatching synchronous wx events."""
         if self.selected != index:
@@ -1552,3 +1556,78 @@ def test_empty_corrections_export_header_and_remain_ready(
     assert path.read_text() == '"Pattern","Rotation","Offset X","Offset Y"\n'
     assert fresh_library(library).get_all_correction_data() == ()
     modules.wx.MessageBox.assert_not_called()
+
+
+def test_delete_all_empties_the_active_database_after_confirmation(
+    setup_manager: tuple[SimpleNamespace, Any, Any],
+) -> None:
+    """Confirming removes every rule and leaves no stale edit target behind."""
+    modules, library, dialog = setup_manager
+    library.insert_correction_data("R1", 90, (1, 2))
+    library.insert_correction_data("R2", 180, (0, 0))
+    dialog.populate_corrections_list()
+    select(dialog, 0)
+    assert dialog.selected_record is not None
+    modules.wx.MessageDialog.return_value.ShowModal.return_value = modules.wx.ID_YES
+
+    assert dialog.delete_all_corrections() is True
+
+    assert raw_rows(library) == []
+    assert dialog.corrections_list.rows == []
+    assert dialog.selected_record is None
+    assert "2 correction rules" in modules.wx.MessageDialog.call_args.args[1]
+    assert modules.wx.MessageDialog.call_args.args[3] & modules.wx.NO_DEFAULT
+
+
+def test_delete_all_declined_leaves_every_rule_in_place(
+    setup_manager: tuple[SimpleNamespace, Any, Any],
+) -> None:
+    """The question must be answerable with no, since the wipe is not undoable."""
+    modules, library, dialog = setup_manager
+    library.insert_correction_data("R1", 90, (1, 2))
+    dialog.populate_corrections_list()
+    before = raw_rows(library)
+    modules.wx.MessageDialog.return_value.ShowModal.return_value = modules.wx.ID_NO
+
+    assert dialog.delete_all_corrections() is False
+
+    assert raw_rows(library) == before
+    assert "1 correction rule?" in modules.wx.MessageDialog.call_args.args[1]
+
+
+def test_delete_all_says_which_database_it_empties(
+    setup_manager: tuple[SimpleNamespace, Any, Any],
+) -> None:
+    """Scope decides both the warning and the recovery route offered with it."""
+    modules, library, dialog = setup_manager
+    library.insert_correction_data("R1", 90, (1, 2))
+    dialog.populate_corrections_list()
+    modules.wx.MessageDialog.return_value.ShowModal.return_value = modules.wx.ID_NO
+
+    dialog.delete_all_corrections()
+    assert "global corrections database" in (
+        modules.wx.MessageDialog.return_value.ExtendedMessage
+    )
+    assert "Update downloads" in modules.wx.MessageDialog.return_value.ExtendedMessage
+
+    library.switch_to_global_correction_database(False)
+    dialog.populate_corrections_list()
+    dialog.delete_all_corrections()
+    message = modules.wx.MessageDialog.return_value.ExtendedMessage
+    assert "board's local corrections database" in message
+    assert "global corrections database is not affected" in message
+
+
+def test_delete_all_is_offered_only_while_there_is_something_to_delete(
+    setup_manager: tuple[SimpleNamespace, Any, Any],
+) -> None:
+    """An empty list makes the button meaningless, so it must not invite a click."""
+    modules, library, dialog = setup_manager
+    dialog.populate_corrections_list()
+    assert dialog.delete_all_button.enabled is False
+    assert dialog.delete_all_corrections() is False
+    modules.wx.MessageDialog.assert_not_called()
+
+    library.insert_correction_data("R1", 90, (1, 2))
+    dialog.populate_corrections_list()
+    assert dialog.delete_all_button.enabled is True
