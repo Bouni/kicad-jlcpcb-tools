@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from common.translate import ComponentTranslator, Price, PriceEntry, process_description
 
 # ============================================================================
@@ -557,66 +559,33 @@ class TestComponentTranslator:
         assert total == 5
         assert deleted >= 1  # At least the below-cutoff entry
 
-    def test_translator_translate_preferred_with_populate_preferred_true(self):
-        """Translate uses 'Preferred' library type when populate_preferred=True."""
-        manufacturers = {1: "Samsung"}
-        categories = {1: ("Resistors", "Fixed Resistors")}
+    @pytest.mark.parametrize(
+        "enabled, expected", [(True, "Preferred"), (False, "Extended")]
+    )
+    def test_translator_preferred_type_respects_population_setting(
+        self,
+        enabled: bool,
+        expected: str,
+    ) -> None:
+        """Preferred catalog assignments become Extended when the setting is off."""
         translator = ComponentTranslator(
-            manufacturers, categories, populate_preferred=True
+            {1: "Samsung"},
+            {1: ("Resistors", "Fixed Resistors")},
+            populate_preferred=enabled,
         )
-
-        class MockRow:
-            def __getitem__(self, key):
-                data = {
-                    "lcsc": "123456",
-                    "category_id": 1,
-                    "manufacturer_id": 1,
-                    "price": json.dumps(
-                        [{"qFrom": "1", "qTo": "100", "price": "5.00"}]
-                    ),
-                    "description": "Test Resistor ROHS",
-                    "extra": None,
-                    "package": "0805",
-                    "mfr": "TESTMFR001",
-                    "joints": "2",
-                    "datasheet": "http://example.com/ds.pdf",
-                    "stock": "1000",
-                    "basic": False,
-                    "preferred": True,
-                }
-                return data[key]
-
-        result = translator.translate(MockRow())  # type: ignore
-        assert result["Library Type"] == "Preferred"
-
-    def test_translator_translate_preferred_with_populate_preferred_false(self):
-        """Translate uses 'Extended' library type for preferred when populate_preferred=False."""
-        manufacturers = {1: "Samsung"}
-        categories = {1: ("Resistors", "Fixed Resistors")}
-        translator = ComponentTranslator(
-            manufacturers, categories, populate_preferred=False
-        )
-
-        class MockRow:
-            def __getitem__(self, key):
-                data = {
-                    "lcsc": "123456",
-                    "category_id": 1,
-                    "manufacturer_id": 1,
-                    "price": json.dumps(
-                        [{"qFrom": "1", "qTo": "100", "price": "5.00"}]
-                    ),
-                    "description": "Test Resistor ROHS",
-                    "extra": None,
-                    "package": "0805",
-                    "mfr": "TESTMFR001",
-                    "joints": "2",
-                    "datasheet": "http://example.com/ds.pdf",
-                    "stock": "1000",
-                    "basic": False,
-                    "preferred": True,
-                }
-                return data[key]
-
-        result = translator.translate(MockRow())  # type: ignore
-        assert result["Library Type"] == "Extended"
+        row = {
+            "lcsc": "123456",
+            "category_id": 1,
+            "manufacturer_id": 1,
+            "price": json.dumps([{"qFrom": "1", "qTo": "100", "price": "5.00"}]),
+            "description": "Test Resistor ROHS",
+            "extra": None,
+            "package": "0805",
+            "mfr": "TESTMFR001",
+            "joints": "2",
+            "datasheet": "http://example.com/ds.pdf",
+            "stock": "1000",
+            "basic": False,
+            "preferred": True,
+        }
+        assert translator.translate(row)["Library Type"] == expected

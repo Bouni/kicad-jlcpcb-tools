@@ -1,10 +1,9 @@
 """Test FileManager split and reassemble workflow."""
 
+from collections.abc import Iterator
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 import os
 from pathlib import Path
-import shutil
-import tempfile
 import threading
 import time
 
@@ -14,59 +13,38 @@ from common.filemgr import FileManager
 
 
 @pytest.fixture
-def temp_test_dir():
-    """Create a temporary test directory and clean up after test.
-
-    This fixture creates a unique temporary directory for each test,
-    allowing tests to safely create and modify files without affecting
-    other tests or the system. The directory and all its contents are
-    automatically deleted after the test completes, even if the test fails.
-
-    All test output files should be created within this directory to ensure
-    proper cleanup.
-
-    Returns:
-        Path: The temporary directory path.
-
-    """
-    test_dir = Path(tempfile.mkdtemp(prefix="test_filemgr_"))
-    yield test_dir
-    shutil.rmtree(test_dir, ignore_errors=True)
-
-
-@pytest.fixture
-def temp_file(temp_test_dir):
+def temp_file(tmp_path: Path) -> tuple[Path, str]:
     """Create a temporary test file with content.
 
     Creates a test file in the temporary test directory with predefined content.
-    The file is automatically cleaned up when temp_test_dir is cleaned up.
+    The file is automatically cleaned up when tmp_path is cleaned up.
 
     Args:
-        temp_test_dir: The temporary test directory fixture.
+        tmp_path: The temporary test directory fixture.
 
     Returns:
         tuple: (test_file_path, test_content) for assertions and verification.
 
     """
-    test_file = temp_test_dir / "test_data.txt"
+    test_file = tmp_path / "test_data.txt"
     test_content = "Test content " * 10000
     test_file.write_text(test_content)
     return test_file, test_content
 
 
 @pytest.fixture
-def http_server(temp_test_dir):
-    """Start a temporary HTTP server serving files from temp_test_dir.
+def http_server(tmp_path: Path) -> Iterator[tuple[str, Path]]:
+    """Start a temporary HTTP server serving files from tmp_path.
 
     This fixture creates a local HTTP server that serves files from the
     temporary test directory. The server runs in a background thread and
     is automatically shut down after the test completes.
 
-    The temp_test_dir is automatically cleaned up after the fixture exits,
+    The tmp_path is automatically cleaned up after the fixture exits,
     which ensures all test files are removed.
 
     Yields:
-        tuple: (server_url, temp_test_dir) where server_url is the base URL
+        tuple: (server_url, tmp_path) where server_url is the base URL
                (e.g., http://127.0.0.1:12345) to use for requests.
 
     """
@@ -77,19 +55,19 @@ def http_server(temp_test_dir):
         def log_message(self, format, *args):
             pass  # Suppress server logs during tests
 
-        def translate_path(self, path):
-            """Override to serve from temp_test_dir."""
-            # Simplified: just map the request path directly to temp_test_dir
+        def translate_path(self, path: str) -> str:
+            """Override to serve from tmp_path."""
+            # Simplified: just map the request path directly to tmp_path
             path = path.split("?", 1)[0]  # Remove query string
             path = path.split("#", 1)[0]  # Remove fragment
             words = path.split("/")
             words = filter(None, words)  # Remove empty strings
-            path = temp_test_dir
+            destination = tmp_path
             for word in words:
                 if word in (os.curdir, os.pardir):
                     continue
-                path = path / word
-            return str(path)
+                destination = destination / word
+            return str(destination)
 
     server = HTTPServer(("localhost", 0), QuietHTTPRequestHandler)
     host, port = server.server_address[:2]
@@ -102,7 +80,7 @@ def http_server(temp_test_dir):
     # Give server time to start
     time.sleep(0.1)
 
-    yield server_url, temp_test_dir
+    yield server_url, tmp_path
 
     # Shutdown server
     server.shutdown()
@@ -114,10 +92,10 @@ def http_server(temp_test_dir):
 # ============================================================================
 
 
-def test_split_and_reassemble(temp_file, temp_test_dir):
+def test_split_and_reassemble(temp_file: tuple[Path, str], tmp_path: Path) -> None:
     """Test the split and reassemble workflow."""
     test_file, test_content = temp_file
-    output_dir = temp_test_dir / "output"
+    output_dir = tmp_path / "output"
     output_dir.mkdir()
 
     # Test the split operation
@@ -153,12 +131,12 @@ def test_split_and_reassemble(temp_file, temp_test_dir):
     assert reassembled_content == test_content, "Content should match original"
 
 
-def test_compress_and_split(temp_test_dir):
+def test_compress_and_split(tmp_path: Path) -> None:
     """Test the compress_and_split operation."""
-    test_file = temp_test_dir / "test_file.txt"
+    test_file = tmp_path / "test_file.txt"
     test_file.write_text("Test content " * 5000)
 
-    output_dir = temp_test_dir / "output"
+    output_dir = tmp_path / "output"
     output_dir.mkdir()
 
     fm = FileManager(
@@ -179,9 +157,9 @@ def test_compress_and_split(temp_test_dir):
     assert len(chunk_files) == chunk_count, "All chunks should be created"
 
 
-def test_temp_dir_context_manager(temp_test_dir):
+def test_temp_dir_context_manager(tmp_path: Path) -> None:
     """Test temporary working directory feature with context manager."""
-    test_file = temp_test_dir / "test_file.txt"
+    test_file = tmp_path / "test_file.txt"
     test_file.write_text("Hello World" * 1000)
 
     # Test with use_temp_dir=True
@@ -197,9 +175,9 @@ def test_temp_dir_context_manager(temp_test_dir):
     assert not temp_dir_path.exists(), "Temp dir should be deleted after context exit"
 
 
-def test_temp_dir_without_context_manager(temp_test_dir):
+def test_temp_dir_without_context_manager(tmp_path: Path) -> None:
     """Test temporary working directory without context manager."""
-    test_file = temp_test_dir / "test_file.txt"
+    test_file = tmp_path / "test_file.txt"
     test_file.write_text("Hello World" * 1000)
 
     fm = FileManager(test_file, use_temp_dir=True)
@@ -215,9 +193,9 @@ def test_temp_dir_without_context_manager(temp_test_dir):
     assert not temp_dir_path.exists(), "Temp dir should be deleted after cleanup"
 
 
-def test_no_temp_dir(temp_test_dir):
+def test_no_temp_dir(tmp_path: Path) -> None:
     """Test FileManager with use_temp_dir=False."""
-    test_file = temp_test_dir / "test_file.txt"
+    test_file = tmp_path / "test_file.txt"
     test_file.write_text("Hello World" * 1000)
 
     fm = FileManager(test_file, use_temp_dir=False)
@@ -231,7 +209,7 @@ def test_no_temp_dir(temp_test_dir):
 # ============================================================================
 
 
-def test_download_single_file(http_server, temp_test_dir):
+def test_download_single_file(http_server: tuple[str, Path], tmp_path: Path) -> None:
     """Test downloading a single file from GitHub."""
     server_url, serve_dir = http_server
 
@@ -241,7 +219,7 @@ def test_download_single_file(http_server, temp_test_dir):
     test_file.write_text(test_content)
 
     # Download the file
-    download_dir = temp_test_dir / "downloads"
+    download_dir = tmp_path / "downloads"
     download_dir.mkdir()
 
     fm = FileManager(
@@ -259,7 +237,9 @@ def test_download_single_file(http_server, temp_test_dir):
     )
 
 
-def test_download_and_reassemble_split_chunks(http_server, temp_test_dir):
+def test_download_and_reassemble_split_chunks(
+    http_server: tuple[str, Path], tmp_path: Path
+) -> None:
     """Test downloading split chunks and reassembling them."""
     server_url, serve_dir = http_server
 
@@ -280,7 +260,7 @@ def test_download_and_reassemble_split_chunks(http_server, temp_test_dir):
     fm.compress_and_split(output_dir=split_output_dir)
 
     # Now download and reassemble
-    download_dir = temp_test_dir / "downloads"
+    download_dir = tmp_path / "downloads"
     download_dir.mkdir()
 
     fm_download = FileManager(
@@ -301,7 +281,9 @@ def test_download_and_reassemble_split_chunks(http_server, temp_test_dir):
     )
 
 
-def test_download_and_reassemble_with_multiple_chunks(http_server, temp_test_dir):
+def test_download_and_reassemble_with_multiple_chunks(
+    http_server: tuple[str, Path], tmp_path: Path
+) -> None:
     """Test download_and_reassemble with many chunks."""
     server_url, serve_dir = http_server
 
@@ -325,7 +307,7 @@ def test_download_and_reassemble_with_multiple_chunks(http_server, temp_test_dir
     assert chunk_count > 3, "Should create multiple chunks for this test"
 
     # Download and reassemble
-    download_dir = temp_test_dir / "downloads"
+    download_dir = tmp_path / "downloads"
     download_dir.mkdir()
 
     fm_download = FileManager(
@@ -349,7 +331,9 @@ def test_download_and_reassemble_with_multiple_chunks(http_server, temp_test_dir
     )
 
 
-def test_download_missing_sentinel_file(http_server, temp_test_dir):
+def test_download_missing_sentinel_file(
+    http_server: tuple[str, Path], tmp_path: Path
+) -> None:
     """Test download_and_reassemble handles missing sentinel file gracefully."""
     server_url, serve_dir = http_server
 
@@ -357,7 +341,7 @@ def test_download_missing_sentinel_file(http_server, temp_test_dir):
     chunks_dir = serve_dir / "no_sentinel"
     chunks_dir.mkdir()
 
-    download_dir = temp_test_dir / "downloads"
+    download_dir = tmp_path / "downloads"
     download_dir.mkdir()
 
     fm_download = FileManager(
@@ -374,7 +358,7 @@ def test_download_missing_sentinel_file(http_server, temp_test_dir):
         )
 
 
-def test_download_partial_chunks(http_server, temp_test_dir):
+def test_download_partial_chunks(http_server: tuple[str, Path], tmp_path: Path) -> None:
     """Test download_and_reassemble handles incomplete chunk sets."""
     server_url, serve_dir = http_server
 
@@ -399,7 +383,7 @@ def test_download_partial_chunks(http_server, temp_test_dir):
     if len(chunk_files) > 1:
         chunk_files[-1].unlink()
 
-    download_dir = temp_test_dir / "downloads"
+    download_dir = tmp_path / "downloads"
     download_dir.mkdir()
 
     fm_download = FileManager(

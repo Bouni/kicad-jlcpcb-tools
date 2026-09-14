@@ -156,39 +156,55 @@ def test_replace_failure_preserves_previous_settings_and_removes_temporary_file(
     _assert_previous_settings_reload(window, path, original)
 
 
+_MIGRATION_DEFAULTS = {
+    "part_preferences": {
+        "remember_lcsc_assignments": True,
+        "fill_empty_lcsc_assignments_on_open": True,
+    },
+    "general": {"simplify_stock": True},
+}
+
+
 @pytest.mark.parametrize(
-    "existing",
+    "section, existing",
     [
-        None,
-        {},
-        {"remember_lcsc_assignments": False},
-        {"fill_empty_lcsc_assignments_on_open": False},
-        {
-            "remember_lcsc_assignments": False,
-            "fill_empty_lcsc_assignments_on_open": False,
-            "custom_preference": "retained",
-        },
+        ("part_preferences", None),
+        ("part_preferences", {}),
+        ("part_preferences", {"remember_lcsc_assignments": False}),
+        ("part_preferences", {"fill_empty_lcsc_assignments_on_open": False}),
+        (
+            "part_preferences",
+            {
+                "remember_lcsc_assignments": False,
+                "fill_empty_lcsc_assignments_on_open": False,
+                "custom_preference": "retained",
+            },
+        ),
+        ("general", None),
+        ("general", {"custom_general": "retained"}),
+        ("general", {"simplify_stock": False, "custom_general": "retained"}),
+        ("general", {"simplify_stock": True, "custom_general": "retained"}),
     ],
-    ids=["missing-section", "empty-section", "remember-off", "fill-off", "settled"],
 )
-def test_part_preference_defaults_migrate_atomically_and_settle(
+def test_missing_settings_migrate_atomically_and_settle(
     saved_settings: tuple[JLCPCBTools, Path, bytes],
     monkeypatch: pytest.MonkeyPatch,
+    section: str,
     existing: Optional[dict[str, Any]],
 ) -> None:
-    """Old files gain defaults once; explicit false and unrelated values survive."""
+    """Defaults arrive once without losing explicit false or unrelated settings."""
     window, path, original = saved_settings
     previous = json.loads(original)
-    previous.pop("part_preferences")
+    previous.pop(section)
     if existing is not None:
-        previous["part_preferences"] = existing
+        previous[section] = existing
     original = json.dumps(previous, indent=2).encode("utf-8")
     path.write_bytes(original)
     expected = {
         **previous,
-        "part_preferences": {
-            "remember_lcsc_assignments": True,
-            "fill_empty_lcsc_assignments_on_open": True,
+        section: {
+            **shipped_defaults()[section],
+            **_MIGRATION_DEFAULTS[section],
             **(existing or {}),
         },
     }
@@ -204,37 +220,44 @@ def test_part_preference_defaults_migrate_atomically_and_settle(
 
     monkeypatch.setattr(mainwindow.os, "replace", replace)
     window.load_settings()
-
     assert window.settings == expected
     assert json.loads(path.read_text(encoding="utf-8")) == expected
     assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
     assert len(replacements) == (0 if previous == expected else 1)
-    settled = path.read_bytes()
-    replacement_count = len(replacements)
-
-    window.settings = {}
-    window.load_settings()
-
-    assert window.settings == expected
+    settled, replacement_count = path.read_bytes(), len(replacements)
+    reopened = object.__new__(JLCPCBTools)
+    reopened.load_settings()
+    assert reopened.settings == expected
     assert path.read_bytes() == settled
     assert len(replacements) == replacement_count
 
 
-@pytest.mark.parametrize("failure", ["partial-write", "replace"])
-def test_failed_part_preference_migration_preserves_file_and_allows_retry(
+@pytest.mark.parametrize(
+    "section, missing, failure",
+    [
+        ("part_preferences", "fill_empty_lcsc_assignments_on_open", "partial-write"),
+        ("part_preferences", "fill_empty_lcsc_assignments_on_open", "replace"),
+        ("general", "simplify_stock", "partial-write"),
+        ("general", "simplify_stock", "replace"),
+        ("highlighting", "stock_concern", "replace"),
+    ],
+)
+def test_failed_settings_migration_preserves_file_and_retries(
     saved_settings: tuple[JLCPCBTools, Path, bytes],
     monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    missing: str,
     failure: str,
 ) -> None:
-    """Failed upgrades leave the old complete bytes and can succeed on reopening."""
+    """Failed upgrades preserve complete bytes and retry on the next real load."""
     _window, path, original = saved_settings
     previous = json.loads(original)
-    previous["part_preferences"] = {"remember_lcsc_assignments": False}
+    previous[section].pop(missing)
     original = json.dumps(previous, indent=2).encode("utf-8")
     path.write_bytes(original)
 
     def interrupted_dump(_settings: dict[str, Any], stream: TextIO) -> None:
-        stream.write('{"part_preferences":')
+        stream.write('{"' + section + '":')
         stream.flush()
         raise OSError("migration write interrupted")
 
@@ -246,105 +269,14 @@ def test_failed_part_preference_migration_preserves_file_and_allows_retry(
             failure_patch.setattr(mainwindow.json, "dump", interrupted_dump)
         else:
             failure_patch.setattr(mainwindow.os, "replace", fail_replace)
-        window = object.__new__(JLCPCBTools)
         with pytest.raises(OSError, match="migration"):
-            window.load_settings()
-
+            object.__new__(JLCPCBTools).load_settings()
         assert path.read_bytes() == original
         assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
 
+    expected = {**previous, section: {**previous[section], missing: True}}
     reopened = object.__new__(JLCPCBTools)
     reopened.load_settings()
-
-    expected = {
-        **previous,
-        "part_preferences": {
-            "remember_lcsc_assignments": False,
-            "fill_empty_lcsc_assignments_on_open": True,
-        },
-    }
     assert reopened.settings == expected
     assert json.loads(path.read_text(encoding="utf-8")) == expected
     assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
-
-
-@pytest.mark.parametrize(
-    "existing", [None, {}, {"simplify_stock": False}, {"simplify_stock": True}]
-)
-def test_simplify_stock_default_migrates_once_and_preserves_explicit_choice(
-    saved_settings: tuple[JLCPCBTools, Path, bytes],
-    monkeypatch: pytest.MonkeyPatch,
-    existing: Optional[dict[str, Any]],
-) -> None:
-    """Older settings gain the enabled default once without losing saved choices."""
-    window, path, original = saved_settings
-    previous = json.loads(original)
-    previous.pop("general", None)
-    if existing is not None:
-        previous["general"] = {"custom_general": "retained", **existing}
-    path.write_text(json.dumps(previous), encoding="utf-8")
-    expected = {
-        **previous,
-        "general": {
-            **shipped_defaults()["general"],
-            "simplify_stock": True,
-            **previous.get("general", {}),
-        },
-    }
-    replacements: list[str] = []
-    real_replace = os.replace
-
-    def replace(source: str, destination: str) -> None:
-        replacements.append(source)
-        real_replace(source, destination)
-
-    monkeypatch.setattr(mainwindow.os, "replace", replace)
-    window.load_settings()
-    assert window.settings == expected
-    assert json.loads(path.read_text(encoding="utf-8")) == expected
-    assert len(replacements) == (0 if previous == expected else 1)
-    settled = path.read_bytes()
-    replacement_count = len(replacements)
-
-    reopened = object.__new__(JLCPCBTools)
-    reopened.load_settings()
-    assert reopened.settings == expected
-    assert path.read_bytes() == settled
-    assert len(replacements) == replacement_count
-
-
-@pytest.mark.parametrize("failure", ["partial-write", "replace"])
-def test_failed_simplify_stock_migration_keeps_old_file_and_retries_on_reopen(
-    saved_settings: tuple[JLCPCBTools, Path, bytes],
-    monkeypatch: pytest.MonkeyPatch,
-    failure: str,
-) -> None:
-    """An interrupted migration retains reloadable data and the next open retries."""
-    window, path, original = saved_settings
-    previous = json.loads(original)
-    previous["general"].pop("simplify_stock")
-    original = json.dumps(previous, indent=2).encode("utf-8")
-    path.write_bytes(original)
-
-    def interrupted_dump(_settings: dict[str, Any], stream: TextIO) -> None:
-        stream.write('{"general":')
-        stream.flush()
-        raise OSError("stock migration interrupted")
-
-    def fail_replace(_source: str, _destination: str) -> None:
-        raise OSError("stock migration denied")
-
-    with monkeypatch.context() as failure_patch:
-        if failure == "partial-write":
-            failure_patch.setattr(mainwindow.json, "dump", interrupted_dump)
-        else:
-            failure_patch.setattr(mainwindow.os, "replace", fail_replace)
-        with pytest.raises(OSError, match="stock migration"):
-            window.load_settings()
-        assert path.read_bytes() == original
-        assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
-
-    reopened = object.__new__(JLCPCBTools)
-    reopened.load_settings()
-    assert reopened.settings["general"]["simplify_stock"] is True
-    assert json.loads(path.read_text(encoding="utf-8")) == reopened.settings

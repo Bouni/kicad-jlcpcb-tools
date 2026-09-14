@@ -435,34 +435,6 @@ def test_stock_concern_default_and_saved_setting_survive_reopening(
     )
 
 
-def test_failed_concern_migration_preserves_file_and_allows_retry(
-    workflow: types.SimpleNamespace,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A failed settings replacement leaves prior bytes reloadable on retry."""
-    mainwindow = workflow.mainwindow
-    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
-    plugin_dir(tmp_path, shipped_defaults())
-    path = tmp_path / "settings.json"
-    original = b'{"highlighting": {"matches": false}, "custom": "retained"}'
-    path.write_bytes(original)
-    with monkeypatch.context() as failure:
-        failure.setattr(
-            mainwindow.os,
-            "replace",
-            MagicMock(side_effect=OSError("replacement denied")),
-        )
-        window = object.__new__(mainwindow.JLCPCBTools)
-        with pytest.raises(OSError, match="replacement denied"):
-            window.load_settings()
-        assert path.read_bytes() == original
-        assert sorted(tmp_path.iterdir()) == [tmp_path / "default_settings.json", path]
-    reopened = object.__new__(mainwindow.JLCPCBTools)
-    reopened.load_settings()
-    assert reopened.settings["highlighting"]["stock_concern"] is True
-
-
 @pytest.mark.parametrize("enabled", [False, True])
 def test_real_settings_constructor_and_checkbox_event(enabled: bool) -> None:
     """The independently labeled setting loads and dispatches its own boolean."""

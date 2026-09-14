@@ -37,11 +37,17 @@ def test_stock_header_sort_restores_blanks_before_numeric_supply(
     kind: str, simplified: bool, ascending: bool
 ) -> None:
     """Native Compare keeps blank placement and exact ordering in either mode."""
-    stocks = ["unknown", "7299", "?", None, "", " ", "0", 7260, 1, 0]
+    stocks = ["unknown", "7299", "?", None, "", " ", "0", 7260, 1, 0] + [
+        "1000",
+        "999",
+        "8880000",
+        "22095",
+    ]
+    numeric = ["999", "1000", 7260, "7299", "22095", "8880000"]
     expected = (
-        [None, "", " ", "0", 0, 1, 7260, "7299", "?", "unknown"]
+        [None, "", " ", "0", 0, 1, *numeric, "?", "unknown"]
         if ascending
-        else ["unknown", "?", "7299", 7260, 1, "0", 0, None, "", " "]
+        else ["unknown", "?", *reversed(numeric), 1, "0", 0, None, "", " "]
     )
     with stock_modules() as modules:
         if kind == "board":
@@ -62,8 +68,18 @@ def test_stock_header_sort_restores_blanks_before_numeric_supply(
             ),
         )
         assert [model.ItemToObject(item)[column] for item in ordered] == expected
+        for first, second in zip(ordered, ordered[1:]):
+            assert model.Compare(first, second, column, ascending) <= 0
+            assert model.Compare(second, first, column, ascending) >= 0
         for item in items:
             assert model.Compare(item, item, column, ascending) == 0
+        if simplified:
+            by_stock = {model.ItemToObject(item)[column]: item for item in items}
+            assert (
+                model.GetValue(by_stock[7260], column)
+                == model.GetValue(by_stock["7299"], column)
+                == "7.2 k"
+            )
 
 
 @pytest.mark.parametrize("stock", [None, "", " "])
