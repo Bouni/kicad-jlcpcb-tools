@@ -1,6 +1,7 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import csv
 from dataclasses import dataclass
 import hashlib
@@ -48,9 +49,9 @@ from .correction_data import (
     resolve_shared_corrections,
 )
 from .fabrication_archive import (
+    artifact_publication,
     build_archive,
     collect_gerber_entries,
-    publish_artifact_set,
 )
 from .footprint_helpers import get_is_dnp
 
@@ -358,7 +359,13 @@ class Fabrication:
                 )
 
     def publish_generation(self) -> None:
-        """Publish all artifacts, retaining raw plots until post-hook cleanup."""
+        """Publish artifacts immediately, retaining raw plots until hook cleanup."""
+        with self.generation_publication():
+            pass
+
+    @contextmanager
+    def generation_publication(self) -> Iterator[None]:
+        """Retain previous artifacts until the caller's bookkeeping succeeds."""
         operation = self._generation
         if operation is None:
             raise RuntimeError("No staged fabrication generation is in progress")
@@ -379,9 +386,10 @@ class Fabrication:
                     "Project text variables changed after plotting; generate again"
                 )
         staged, final = self.get_staged_artifact_paths(), self.get_artifact_paths()
-        publish_artifact_set(
+        with artifact_publication(
             tuple((Path(staged[key]), Path(final[key])) for key in final)
-        )
+        ):
+            yield
 
     def _cleanup_directory(self, directory: TemporaryDirectory) -> None:
         """Report leftover scratch files without masking failure or published success."""

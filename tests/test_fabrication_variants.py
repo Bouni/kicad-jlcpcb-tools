@@ -5,12 +5,14 @@ session with pcbnew and wx available. They use disposable projects and do not
 exercise PCB Editor undo or dirty state.
 """
 
+from contextlib import ExitStack, closing
 import csv
 from dataclasses import replace
 from functools import partial
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -387,11 +389,60 @@ def test_complete_generation_keeps_scratch_until_release(
     public = runtime.exporter.get_artifact_paths()
     working = Path(runtime.exporter.gerberdir)
     stage_artifacts(runtime.exporter)
-    runtime.exporter.publish_generation()
+    with runtime.exporter.generation_publication():
+        assert {Path(path).read_bytes() for path in public.values()} == {b"new"}
+        assert working.exists()
     assert {Path(path).read_bytes() for path in public.values()} == {b"new"}
     assert working.exists()
     runtime.exporter.abort_generation()
     assert not working.exists()
+
+
+@pytest.mark.parametrize("previous_cpl", [False, True])
+def test_counter_commit_failure_restores_published_artifacts(
+    runtime: SimpleNamespace, tmp_path: Path, previous_cpl: bool
+) -> None:
+    """An actual SQLite commit failure must restore old files and remove new ones."""
+    begin(runtime)
+    exporter = runtime.exporter
+    public = {key: Path(value) for key, value in exporter.get_artifact_paths().items()}
+    previous = {}
+    for key, path in public.items():
+        if key != "cpl_csv" or previous_cpl:
+            previous[key] = ("previous " + key).encode()
+            path.write_bytes(previous[key])
+    stage_artifacts(exporter)
+    database = tmp_path / "counter.db"
+    with closing(sqlite3.connect(database)) as writer, writer:
+        writer.execute("PRAGMA journal_mode = DELETE")
+        writer.execute("CREATE TABLE metadata (generation_count INTEGER)")
+        writer.execute("INSERT INTO metadata VALUES (7)")
+
+    # A real reader permits BEGIN IMMEDIATE and UPDATE, but blocks COMMIT in
+    # SQLite's rollback-journal mode. Keep the timeout short, not the behavior.
+    with (
+        closing(sqlite3.connect(database, timeout=0.01)) as writer,
+        closing(sqlite3.connect(database)) as reader,
+    ):
+        reader.execute("BEGIN")
+        assert reader.execute("SELECT * FROM metadata").fetchone() == (7,)
+        with (
+            pytest.raises(sqlite3.OperationalError, match="locked"),
+            ExitStack() as publication,
+            writer,
+        ):
+            writer.execute("BEGIN IMMEDIATE")
+            writer.execute("UPDATE metadata SET generation_count = 8")
+            publication.enter_context(exporter.generation_publication())
+            assert {path.read_bytes() for path in public.values()} == {b"new"}
+        reader.rollback()
+        assert writer.execute("SELECT * FROM metadata").fetchone() == (7,)
+
+    for key, path in public.items():
+        assert (path.read_bytes() if path.exists() else None) == previous.get(key)
+    assert not list(Path(exporter.outputdir).glob(".jlcpcb-recovery-*"))
+    assert exporter.output_snapshot is not None
+    exporter.abort_generation()
 
 
 @pytest.mark.native_wx
@@ -838,12 +889,12 @@ def test_partial_publication_restores_outputs_or_retains_recovery(
     ] * 2
 
 
-@pytest.mark.parametrize("fail_publication", [False, True])
+@pytest.mark.parametrize("failure", ["none", "publication", "bookkeeping"])
 def test_recovery_cleanup_preserves_publication_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    fail_publication: bool,
+    failure: str,
 ) -> None:
     """Recovery-file cleanup does not hide either success or the original failure."""
     source = tmp_path / "new-BOM"
@@ -858,15 +909,22 @@ def test_recovery_cleanup_preserves_publication_result(
         raise OSError("publication denied")
 
     monkeypatch.setattr(fabrication_archive.shutil, "rmtree", fail_cleanup)
-    if fail_publication:
+    if failure == "publication":
         monkeypatch.setattr(fabrication_archive.os, "replace", fail_replace)
         with pytest.raises(OSError, match="publication denied"):
             fabrication_archive.publish_artifact_set(((source, destination),))
+    elif failure == "bookkeeping":
+        with (
+            pytest.raises(sqlite3.OperationalError, match="commit failed"),
+            fabrication_archive.artifact_publication(((source, destination),)),
+        ):
+            raise sqlite3.OperationalError("commit failed")
     else:
         fabrication_archive.publish_artifact_set(((source, destination),))
-    assert destination.read_bytes() == (b"previous" if fail_publication else b"new")
+    assert destination.read_bytes() == (b"new" if failure == "none" else b"previous")
     (recovery,) = tmp_path.glob(".jlcpcb-recovery-*")
-    assert (recovery / "0").read_bytes() == b"previous"
+    if failure != "bookkeeping":
+        assert (recovery / "0").read_bytes() == b"previous"
     assert str(recovery) in caplog.text
 
 

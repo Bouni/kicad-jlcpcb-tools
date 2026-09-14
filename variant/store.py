@@ -17,6 +17,7 @@ from ..core.settings_persistence import (
     VariantPreferencePatch,
     changed_variant_preferences,
 )
+from .generation_counter import generation_count_transaction, publication_guard
 
 if TYPE_CHECKING:
     from .native import BoardVariantSnapshot
@@ -113,29 +114,25 @@ class VariantStore:
 
     def increment_generation_count(self) -> int:
         """Increment the existing counter using only main's metadata schema/key."""
-        self.ensure_current_board()
-        Path(self.datadir).mkdir(parents=True, exist_ok=True)
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as connection, connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS metadata ("
-                "key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL)"
-            )
-            row = connection.execute(
-                "SELECT value FROM metadata WHERE key = ?",
-                (self.GENERATION_COUNT_KEY,),
-            ).fetchone()
-            current = 0
-            if row is not None:
-                with contextlib.suppress(ValueError, TypeError):
-                    current = max(0, int(row[0]))
-            next_count = current + 1
-            connection.execute(
-                "INSERT INTO metadata (key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (self.GENERATION_COUNT_KEY, str(next_count)),
-            )
+        with self.generation_counter_transaction() as next_count:
+            pass
         return next_count
+
+    @contextlib.contextmanager
+    def generation_publication_lock(self) -> Iterator[None]:
+        """Serialize publication until every failed export has restored its files."""
+        self.ensure_current_board()
+        with publication_guard(self.dbfile):
+            yield
+
+    @contextlib.contextmanager
+    def generation_counter_transaction(
+        self, expected_count: Optional[int] = None
+    ) -> Iterator[int]:
+        """Reserve the counter only while prepared artifact files are published."""
+        self.ensure_current_board()
+        with generation_count_transaction(self.dbfile, expected_count) as count:
+            yield count
 
     @staticmethod
     def _reference_key(reference: str) -> tuple[Any, ...]:

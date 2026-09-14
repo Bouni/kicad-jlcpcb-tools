@@ -38,6 +38,7 @@ def _properties(board: Any) -> dict[str, str]:
         "save-readonly",
         "missing-load",
         "corrupt-load",
+        "publication-save-directory",
         "lifetime",
     ],
 )
@@ -94,6 +95,9 @@ def test_native_temporary_board_save_load_and_ownership(
                     (staging / "plot-source.kicad_pcb").mkdir()
                 elif case == "save-readonly":
                     staging.chmod(0o500)
+                elif case == "publication-save-directory":
+                    exporter._get_plot_board()
+                    (staging / "validation-source.kicad_pcb").mkdir()
                 else:
                     serialize = exporter._serialize_board
 
@@ -111,7 +115,11 @@ def test_native_temporary_board_save_load_and_ownership(
 
                     monkeypatch.setattr(exporter, "_serialize_board", damage_source)
                 with pytest.raises((OSError, RuntimeError, ValueError)):
-                    exporter._get_plot_board()
+                    if case == "publication-save-directory":
+                        with exporter.generation_publication():
+                            pytest.fail("A failed board check must prevent publication")
+                    else:
+                        exporter._get_plot_board()
         finally:
             if case == "save-readonly":
                 staging.chmod(0o700)
