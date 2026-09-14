@@ -155,13 +155,14 @@ def test_shared_presentation_preserves_main_icons_and_computed_standard_cells() 
         model = modules.datamodel.PartListDataModel(1.0)
         model.AddEntry(board_row("R1", "7260"))
         model.AddEntry(board_row("R2", "7299"))
-        model.set_standard_only_refs({"R1"})
+        model.set_assembly_metadata("R1", {"component_product_type": 2})
+        model.set_assembly_metadata("R2", {"component_product_type": 0})
         standard, ordinary = model.data
         column = model.columns["STANDARD_ONLY_COL"]
         assert len(standard) == column
-        assert model.GetValue(standard, column) is True
-        assert model.GetValue(ordinary, column) is False
-        assert model.HasValue(ordinary, column) is False
+        assert model.GetValue(standard, column) == "✓"
+        assert model.GetValue(ordinary, column) == "—"
+        assert model.HasValue(ordinary, column) is True
         for key in ("BOM_COL", "POS_COL", "DNP_COL"):
             icon_column = model.columns[key]
             assert model.GetValue(standard, icon_column) == ("", standard[icon_column])

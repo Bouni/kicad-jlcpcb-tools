@@ -13,19 +13,19 @@ from .part_type_tooltip import create_type_fee_popup
 
 
 class TypeCellTooltip:
-    """Coordinate delayed Type help with the existing Standard-only row help."""
+    """Coordinate delayed Type help with assembly information for each row."""
 
     def __init__(
         self,
         control: dv.DataViewCtrl,
         type_column: int,
-        is_standard_only: Callable[[dv.DataViewItem], bool],
-        set_standard_help: Callable[[bool], None],
+        get_row_help: Callable[[dv.DataViewItem], str],
+        set_row_help: Callable[[str], None],
     ) -> None:
         self.control = control
         self.type_column = type_column
-        self.is_standard_only = is_standard_only
-        self.set_standard_help = set_standard_help
+        self.get_row_help = get_row_help
+        self.set_row_help = set_row_help
         self._popup = None
         self._pointer = None
         self._hover_started = None
@@ -61,7 +61,7 @@ class TypeCellTooltip:
     def dismiss(self) -> None:
         """Clear pending or visible help before navigation or a model reset."""
         self._clear_type_help()
-        self.set_standard_help(False)
+        self.set_row_help("")
 
     def stop(self) -> None:
         """Stop polling and close the popup before the dialog is destroyed."""
@@ -104,12 +104,12 @@ class TypeCellTooltip:
             return
         if column is None or column.GetModelColumn() != self.type_column:
             self._clear_type_help()
-            self.set_standard_help(bool(self.is_standard_only(item)))
+            self.set_row_help(self.get_row_help(item))
             return
 
-        # Library type and Standard-only eligibility describe separate things.
+        # Library type and assembly eligibility describe separate things.
         # The Type popup contains only the approved fee table.
-        self.set_standard_help(False)
+        self.set_row_help("")
         pointer = (point.x, point.y)
         now = time.monotonic()
         if pointer != self._pointer:

@@ -372,6 +372,10 @@ _stubs = mainwindow_stubs(
 _model_stubs = dict(_stubs)
 _model_stubs.pop(f"{_PACKAGE}.dataview_highlight")
 _model_stubs.pop(f"{_PACKAGE}.helpers")
+_model_stubs.pop(f"{_PACKAGE}.bom_estimation.assembly_mode")
+_model_stubs[f"{_PACKAGE}.bom_estimation"].__path__ = [
+    str(Path(_helpers.PLUGIN_PATH) / "bom_estimation")
+]
 datamodel = load(_PACKAGE, "datamodel", _model_stubs)
 _main_model = MagicMock(columns=datamodel.PartListDataModel.columns)
 mainwindow = load_mainwindow(
@@ -496,7 +500,7 @@ def _open_main(
     if fail_at == "before_controls":
         monkeypatch.setattr(mainwindow.wx.ToolBar, "side_effect", fail)
     elif fail_at == "during_columns":
-        monkeypatch.setattr(control.AppendToggleColumn, "side_effect", fail)
+        monkeypatch.setattr(control.AppendTextColumn, "side_effect", fail)
     elif fail_at == "during_restore":
         append_text = control.AppendTextColumn.side_effect
 
@@ -525,43 +529,46 @@ def _open_main(
     return window
 
 
-def test_main_type_hover_uses_existing_column_and_live_standard_metadata(
+def test_main_type_hover_uses_existing_column_and_live_assembly_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real dialog connects Type help to its existing model and row help."""
     install = MagicMock()
     monkeypatch.setattr(mainwindow, "TypeCellTooltip", install)
     monkeypatch.setattr(mainwindow.wx, "ToolTip", str, raising=False)
-    monkeypatch.setattr(mainwindow, "STANDARD_ONLY_TOOLTIP", "Standard assembly row")
 
     window = _open_main(monkeypatch, {})
 
     install.assert_called_once()
-    control, column, is_standard, set_standard_help = install.call_args.args
+    control, column, get_row_help, set_row_help = install.call_args.args
     assert control is window.footprint_list
     assert column == _column_by_title(control, "Type").GetModelColumn()
     assert _column_by_title(control, "Type").sortable
-    assert len(control.GetColumns()) == len(datamodel.PartListDataModel.columns)
+    assert len(control.GetColumns()) == len(datamodel.PartListDataModel.columns) - 1
+    assert "Enrichment" not in [column.GetTitle() for column in control.GetColumns()]
     control.SetToolTip.assert_not_called()
 
     item = object()
-    for value in (True, False):
-        window.partlist_data_model.is_standard_only.return_value = value
-        assert is_standard(item) is value
-    window.partlist_data_model.is_standard_only.assert_called_with(item)
+    for value in ("Standard Only", "Economic Only", "Retrieving assembly information."):
+        window.partlist_data_model.get_assembly_tooltip.return_value = value
+        assert get_row_help(item) == value
+    window.partlist_data_model.get_assembly_tooltip.assert_called_with(item)
 
     displayed = {"text": None}
     body = window._footprint_list_main_window
     body.SetToolTip.side_effect = lambda text: displayed.update(text=text)
     body.UnsetToolTip.side_effect = lambda: displayed.update(text=None)
-    set_standard_help(True)
+    set_row_help("Standard assembly row")
     assert displayed["text"] == "Standard assembly row"
-    assert window._standard_only_tooltip_active
-    set_standard_help(True)
+    assert window._assembly_tooltip_text == "Standard assembly row"
+    set_row_help("Standard assembly row")
     body.SetToolTip.assert_called_once()
-    set_standard_help(False)
+    set_row_help("Classification unavailable")
+    assert displayed["text"] == "Classification unavailable"
+    assert body.SetToolTip.call_count == 2
+    set_row_help("")
     assert displayed["text"] is None
-    assert not window._standard_only_tooltip_active
+    assert not window._assembly_tooltip_text
 
 
 def test_main_type_hover_rechecks_metadata_and_stops_before_reopening(
@@ -589,7 +596,7 @@ def test_main_type_hover_rechecks_metadata_and_stops_before_reopening(
     reopened = _open_main(monkeypatch, window.settings)
     assert reopened._type_cell_tooltip is instances[1]
     assert reopened.footprint_list is not original_control
-    assert not reopened._standard_only_tooltip_active
+    assert not reopened._assembly_tooltip_text
     instances[1].stop.assert_not_called()
 
 
@@ -612,17 +619,17 @@ def test_main_empty_refresh_clears_type_help_before_resetting_rows(
             self,
             _control: Any,
             _type_column: int,
-            _is_standard_only: Callable[[Any], bool],
-            set_standard_help: Callable[[bool], None],
+            _get_row_help: Callable[[Any], str],
+            set_row_help: Callable[[str], None],
         ) -> None:
             self.pending = False
             self.visible = False
-            self.set_standard_help = set_standard_help
+            self.set_row_help = set_row_help
 
         def dismiss(self) -> None:
             self.pending = False
             self.visible = False
-            self.set_standard_help(False)
+            self.set_row_help("")
 
     monkeypatch.setattr(mainwindow, "TypeCellTooltip", HoverState)
     window = _open_main(monkeypatch, {})
@@ -939,6 +946,7 @@ def test_main_constructor_restores_semantic_widths(
             "mainwindow": {
                 "column_widths": {
                     "FP_COL": 90,
+                    "ENRICH_COL": 190,
                     "STANDARD_ONLY_COL": 200,
                     "TRAILING_SPACER_COL": 200,
                 }
@@ -947,6 +955,22 @@ def test_main_constructor_restores_semantic_widths(
     )
     footprint = _column_by_title(window.footprint_list, "Footprint")
     assert footprint.GetWidth() == 180
+    assert "Enrichment" not in [
+        column.GetTitle() for column in window.footprint_list.GetColumns()
+    ]
+    std_calls = [
+        call
+        for call in window.footprint_list.AppendTextColumn.call_args_list
+        if call.args[0] == "Std"
+    ]
+    assert len(std_calls) == 1
+    assert std_calls[0].kwargs["mode"] == mainwindow.dv.DATAVIEW_CELL_INERT
+    window.Close()
+    saved = window.settings["mainwindow"]["column_widths"]
+    assert saved["FP_COL"] == 90
+    assert "ENRICH_COL" not in saved
+    reopened = _open_main(monkeypatch, window.settings)
+    assert _column_by_title(reopened.footprint_list, "Footprint").GetWidth() == 180
     for column in window.footprint_list.GetColumns():
         if column.GetTitle() in {"Std", " "}:
             column.SetWidth.assert_not_called()

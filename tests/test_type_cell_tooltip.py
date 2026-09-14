@@ -229,7 +229,8 @@ def hover(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         point=control.ClientToScreen(_Point(20, 40)),
         window=control.body,
         buttons=set(),
-        standard=False,
+        help_text="",
+        help_shown="",
         standard_shown=False,
         timers=[],
     )
@@ -268,11 +269,15 @@ def hover(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     monkeypatch.setattr(helper, "create_type_fee_popup", create_popup)
 
-    def standard_help(active: bool) -> None:
-        state.standard_shown = active
+    def row_help(text: str) -> None:
+        state.help_shown = text
+        state.standard_shown = bool(text)
 
     controller = helper.TypeCellTooltip(
-        control, 7, lambda _item: state.standard, standard_help
+        control,
+        7,
+        lambda item: getattr(item, "help_text", state.help_text),
+        row_help,
     )
 
     def poll(seconds: float = 0.1) -> None:
@@ -316,7 +321,7 @@ def test_type_cell_shows_delayed_help_without_focus_or_standard_warning(
     hover: SimpleNamespace,
 ) -> None:
     """Delay Type-only help without stealing focus or resetting stable help."""
-    hover.state.standard = True
+    hover.state.help_text = "Standard assembly required"
     event = hover.control.body.emit(hover.wx.EVT_MOTION)
     assert event.Skip.called
     hover.poll(0.3)
@@ -340,7 +345,7 @@ def test_type_help_is_based_on_model_column_including_blank_type(
     assert len(hover.visible()) == 1
     # Native hit-testing already resolves scrolling/reordering into model IDs.
     hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
-    hover.state.standard = True
+    hover.state.help_text = "Standard assembly required"
     hover.poll()
     assert hover.visible() == []
     assert hover.state.standard_shown
@@ -357,7 +362,7 @@ def test_empty_table_never_displays_type_or_standard_help(
     """No assigned rows means there is no cell to explain, including on reopen."""
     hover.control.row = None
     hover.control.column = None
-    hover.state.standard = True
+    hover.state.help_text = "Standard assembly required"
     hover.control.body.emit(hover.wx.EVT_MOTION)
     hover.poll(0.7)
     hover.poll(1.0)
@@ -504,20 +509,76 @@ def test_table_layout_events_clear_help_without_swallowing_sort_or_scroll(
     assert hover.visible() == []
 
 
-def test_metadata_refresh_updates_standard_help_without_moving_pointer(
+def test_metadata_refresh_updates_assembly_help_without_moving_pointer(
     hover: SimpleNamespace,
 ) -> None:
-    """Background metadata changes immediately refresh non-Type row help."""
+    """Pending and completed metadata retain their exact explanatory text."""
     hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
-    hover.state.standard = True
+    hover.state.help_text = "Retrieving assembly information"
     hover.poll()
-    assert hover.state.standard_shown
-    hover.state.standard = False
+    assert hover.state.help_shown == "Retrieving assembly information"
+    hover.state.help_text = "Standard assembly required\nAssembly process: SMT"
     hover.controller.refresh()
-    assert not hover.state.standard_shown
-    hover.state.standard = True
+    assert hover.state.help_shown == "Standard assembly required\nAssembly process: SMT"
+    hover.state.help_text = "Classification unavailable"
     hover.controller.refresh()
-    assert hover.state.standard_shown
+    assert hover.state.help_shown == "Classification unavailable"
+
+
+def test_moving_between_rows_replaces_nonempty_assembly_help(
+    hover: SimpleNamespace,
+) -> None:
+    """Every hovered item supplies its own help even if both texts are truthy."""
+    hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
+    hover.control.row = SimpleNamespace(
+        IsOk=lambda: True, help_text="Economic and Standard assembly"
+    )
+    hover.control.body.emit(hover.wx.EVT_MOTION)
+    assert hover.state.help_shown == "Economic and Standard assembly"
+    hover.control.row = SimpleNamespace(
+        IsOk=lambda: True, help_text="No assigned LCSC part"
+    )
+    hover.state.point = hover.control.ClientToScreen(_Point(20, 70))
+    hover.control.body.emit(hover.wx.EVT_MOTION)
+    assert hover.state.help_shown == "No assigned LCSC part"
+
+
+@pytest.mark.parametrize(
+    "event_name",
+    ["EVT_LEAVE_WINDOW", "EVT_MOUSEWHEEL", "EVT_LEFT_DOWN", "EVT_KEY_DOWN"],
+)
+def test_navigation_clears_assembly_help_as_empty_text(
+    hover: SimpleNamespace, event_name: str
+) -> None:
+    """Assembly help uses the same dismissal paths as the existing Type popup."""
+    hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
+    hover.state.help_text = "Retrieving assembly information"
+    hover.poll()
+    assert hover.state.help_shown == "Retrieving assembly information"
+    event = hover.control.body.emit(getattr(hover.wx, event_name))
+    assert event.Skip.called
+    assert hover.state.help_shown == ""
+
+
+def test_type_popup_takes_precedence_over_assembly_help(
+    hover: SimpleNamespace,
+) -> None:
+    """Moving into Type clears assembly text before the delayed fee table."""
+    hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
+    hover.state.help_text = "Standard assembly required\nAssembly process: THT"
+    hover.poll()
+    assert hover.state.help_shown == hover.state.help_text
+    hover.control.column = SimpleNamespace(GetModelColumn=lambda: 7)
+    hover.poll()
+    assert hover.state.help_shown == ""
+    assert hover.visible() == []
+    hover.poll(0.7)
+    assert len(hover.visible()) == 1
+    assert hover.state.help_shown == ""
+    hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
+    hover.poll()
+    assert hover.visible() == []
+    assert hover.state.help_shown == hover.state.help_text
 
 
 def test_stop_dismisses_help_and_disarms_late_timer_events(
@@ -553,7 +614,7 @@ def test_popup_failure_does_not_break_hover_or_repeat_on_every_timer_tick(
     assert factory.call_count == 1
     assert hover.visible() == []
     hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
-    hover.state.standard = True
+    hover.state.help_text = "Standard assembly required"
     hover.poll()
     assert hover.state.standard_shown
 
@@ -612,7 +673,7 @@ def test_background_window_lookup_does_not_suppress_foreground_cell_help(
     """A geometric lookup can report the covered dialog behind the active table."""
     if help_kind == "standard":
         hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
-        hover.state.standard = True
+        hover.state.help_text = "Standard assembly required"
     if already_visible:
         hover.control.body.emit(hover.wx.EVT_MOTION)
         hover.poll(0.7)
@@ -634,7 +695,7 @@ def test_timer_only_hover_uses_running_periodic_timer_and_its_own_source(
 ) -> None:
     """A stationary pointer gets help and later refreshes without mouse events."""
     foreign_timer = _Timer(hover.control, hover.state, hover.wx.EVT_TIMER)
-    hover.state.standard = True
+    hover.state.help_text = "Standard assembly required"
     hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
     hover.control.emit(hover.wx.EVT_TIMER, source=foreign_timer)
     assert not hover.state.standard_shown
@@ -656,7 +717,7 @@ def test_screen_coordinates_use_control_origin_and_live_scrolled_columns(
     hover: SimpleNamespace,
 ) -> None:
     """Body and control coordinates differ; scrolling changes the model column."""
-    hover.state.standard = True
+    hover.state.help_text = "Standard assembly required"
     hover.control.body.emit(hover.wx.EVT_MOTION)
     hover.poll(0.7)
     assert len(hover.visible()) == 1
@@ -682,7 +743,7 @@ def test_popup_rect_excludes_underlying_cells_when_lookup_reports_the_table(
     """The popup can cover valid cells even when a geometric lookup misses it."""
     hover.poll(0.8)
     popup = hover.visible()[0]
-    hover.state.standard = True
+    hover.state.help_text = "Standard assembly required"
     if help_kind == "type":
         # Popup placement can flip around the pointer at a display edge.
         # Keep the pointer fixed so motion itself cannot dismiss the popup.
@@ -702,7 +763,7 @@ def test_reactivating_owner_restarts_help_for_the_stationary_pointer(
     """A covering active dialog clears help; returning starts a fresh delay."""
     if help_kind == "standard":
         hover.control.column = SimpleNamespace(GetModelColumn=lambda: 2)
-        hover.state.standard = True
+        hover.state.help_text = "Standard assembly required"
     hover.poll(0.8)
     assert bool(hover.visible()) == (help_kind == "type")
     assert hover.state.standard_shown == (help_kind == "standard")
@@ -725,7 +786,7 @@ def test_control_without_separate_main_window_supports_hover_and_navigation(
     hover.controller.stop()
     monkeypatch.setattr(hover.control, "GetMainWindow", lambda: None)
     controller = hover.helper.TypeCellTooltip(
-        hover.control, 7, lambda _item: False, lambda _active: None
+        hover.control, 7, lambda _item: "", lambda _text: None
     )
     event = hover.control.emit(hover.wx.EVT_MOTION)
     assert event.Skip.called
@@ -782,7 +843,7 @@ def test_real_controller_constructs_shows_dismisses_and_reopens_real_fee_table(
 
         for _ in range(2):
             controller = helper.TypeCellTooltip(
-                hover.control, 7, lambda _item: False, lambda _active: None
+                hover.control, 7, lambda _item: "", lambda _text: None
             )
             hover.control.body.emit(hover.wx.EVT_MOTION)
             hover.poll(0.3)

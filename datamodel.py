@@ -1,13 +1,18 @@
 """Implementation of the Datamodel for the parts list with natural sort."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
 
 import wx  # pylint: disable=import-error
 import wx.dataview as dv
 
+from .bom_estimation.assembly_mode import (
+    ComponentProductType,
+    classify_component_product_type,
+)
 from .dataview_highlight import (
     decode_highlighted_value,
     encode_highlighted_value,
@@ -21,6 +26,16 @@ from .stock_display import format_stock, stock_sort_key
 STANDARD_ONLY_TOOLTIP = (
     "Part cannot be assembled in economy mode, standard must be used"
 )
+
+
+@dataclass(frozen=True)
+class _AssemblyMetadata:
+    """Keep row classification separate from its supplemental lookup state."""
+
+    lcsc: str = ""
+    classification: Optional[ComponentProductType] = None  # noqa: UP045
+    process: str = ""
+    pending: bool = False
 
 
 class _StockDataModel(dv.PyDataViewModel):
@@ -106,7 +121,8 @@ class PartListDataModel(_StockDataModel):
 
     def __init__(self, scale_factor: float, simplify_stock: bool = True) -> None:
         super().__init__(self.columns["STOCK_COL"], simplify_stock)
-        self.standard_only_refs = set()
+        self.standard_only_refs: set[str] = set()
+        self._assembly_metadata: dict[str, _AssemblyMetadata] = {}
         self.stock_concern_refs: set[str] = set()
 
         self.bom_pos_icons = [
@@ -121,22 +137,100 @@ class PartListDataModel(_StockDataModel):
         ]
         self.logger = logging.getLogger(__name__)
 
-    def set_standard_only_refs(self, refs):
-        """Set references whose JLC classification is Standard Only."""
+    def set_standard_only_refs(self, refs: Iterable[str]) -> None:
+        """Retain the estimator's Standard-only references independently of rows."""
         updated_refs = set(refs or ())
         changed_refs = self.standard_only_refs.symmetric_difference(updated_refs)
         self.standard_only_refs = updated_refs
-        column = self.columns["STANDARD_ONLY_COL"]
         for row in self.data:
             if str(row[self.columns["REF_COL"]] or "") in changed_refs:
-                self.ValueChanged(self.ObjectToItem(row), column)
+                self.ItemChanged(self.ObjectToItem(row))
 
-    def is_standard_only(self, item):
-        """Return whether an item's reference is classified Standard Only."""
+    def is_standard_only(self, item: Any) -> bool:
+        """Return whether an item's reference belongs to the estimator's set."""
         row = self.ItemToObject(item)
         return bool(
             row and str(row[self.columns["REF_COL"]] or "") in self.standard_only_refs
         )
+
+    def _assembly_metadata_for_row(self, row: list[Any]) -> _AssemblyMetadata:
+        """Return metadata only while its LCSC still matches the row assignment."""
+        if not row:
+            return _AssemblyMetadata()
+        lcsc = str(row[self.columns["LCSC_COL"]] or "").strip().upper()
+        reference = str(row[self.columns["REF_COL"]] or "")
+        metadata = self._assembly_metadata.get(reference)
+        if metadata is not None and metadata.lcsc == lcsc:
+            return metadata
+        return _AssemblyMetadata(lcsc=lcsc)
+
+    def set_assembly_metadata(
+        self, reference: str, part: Mapping[str, object], *, pending: bool = False
+    ) -> None:
+        """Project merged cached metadata into the row without estimator filtering."""
+        if (index := self.find_index(reference)) is None:
+            return
+        row = self.data[index]
+        lcsc = str(row[self.columns["LCSC_COL"]] or "").strip().upper()
+        if "lcsc" in part and str(part["lcsc"] or "").strip().upper() != lcsc:
+            return
+        metadata = (
+            _AssemblyMetadata(
+                lcsc=lcsc,
+                classification=classify_component_product_type(
+                    part.get("component_product_type")
+                ),
+                process=str(part.get("assembly_process") or "").strip(),
+                pending=bool(pending),
+            )
+            if lcsc
+            else _AssemblyMetadata()
+        )
+        previous = self._assembly_metadata_for_row(row)
+        self._assembly_metadata[reference] = metadata
+        if not metadata.lcsc:
+            status = ""
+        elif metadata.pending:
+            status = "Pending"
+        else:
+            status = "Done" if metadata.classification is not None else "Class missing"
+        old_status = row[self.columns["ENRICH_COL"]]
+        row[self.columns["ENRICH_COL"]] = status
+        if metadata != previous or old_status != status:
+            # Cocoa interprets ValueChanged's index as a displayed column. Std's
+            # retained model index exceeds the displayed count without Enrichment.
+            self.ItemChanged(self.ObjectToItem(row))
+
+    def get_assembly_tooltip(self, item: Any) -> str:
+        """Explain precise classification, assembly process, and lookup status."""
+        metadata = self._assembly_metadata_for_row(self.ItemToObject(item))
+        if not metadata.lcsc:
+            return "No assigned LCSC part."
+        classification = {
+            ComponentProductType.STANDARD_ONLY: "Standard Only",
+            ComponentProductType.ECONOMIC_ONLY: "Economic Only",
+            ComponentProductType.ECONOMIC_AND_STANDARD: "Economic and Standard",
+        }.get(metadata.classification, "unavailable")
+        lines = [f"Assembly classification: {classification}"]
+        if metadata.classification == ComponentProductType.STANDARD_ONLY:
+            lines.append(STANDARD_ONLY_TOOLTIP)
+        lines.append(f"Assembly process: {metadata.process or 'unavailable'}")
+        if metadata.pending:
+            lines.append("Retrieving assembly information.")
+        elif metadata.classification is None or not metadata.process:
+            lines.append("Some assembly information is unavailable.")
+        return "\n".join(lines)
+
+    def _assembly_indicator(self, row: list[Any]) -> str:
+        """Keep known classification visible during supplemental process lookups."""
+        metadata = self._assembly_metadata_for_row(row)
+        if not metadata.lcsc:
+            return ""
+        if metadata.classification == ComponentProductType.STANDARD_ONLY:
+            return "✓"
+        if metadata.classification is not None:
+            return "—"
+        return "◷" if metadata.pending else "?"
 
     def set_stock_concern_refs(self, refs: Iterable[str]) -> None:
         """Notify Stock cells whose concern state changed, including cleared marks."""
@@ -178,7 +272,7 @@ class PartListDataModel(_StockDataModel):
         """Get number of columns."""
         return len(self.columns)
 
-    def GetColumnType(self, col):
+    def GetColumnType(self, col: int) -> str:
         """Get type of each column."""
         columntypes = (
             "string",
@@ -196,14 +290,14 @@ class PartListDataModel(_StockDataModel):
             "string",
             "string",
             "string",
-            "bool",
+            "string",
         )
         return columntypes[col]
 
-    def HasValue(self, item, col):
-        """Leave non-Standard cells blank in the computed toggle column."""
+    def HasValue(self, item: Any, col: int) -> bool:
+        """Show assembly state for assigned rows while unassigned cells stay blank."""
         if col == self.columns["STANDARD_ONLY_COL"]:
-            return self.is_standard_only(item)
+            return bool(self._assembly_indicator(self.ItemToObject(item)))
         return super().HasValue(item, col)
 
     def GetChildren(self, parent, children):
@@ -233,7 +327,7 @@ class PartListDataModel(_StockDataModel):
         """Keep main-table computed indicators and native icon values."""
         row = self.ItemToObject(item)
         if col == self.columns["STANDARD_ONLY_COL"]:
-            return self.HasValue(item, col)
+            return self._assembly_indicator(row)
         if col in [
             self.columns["BOM_COL"],
             self.columns["POS_COL"],
@@ -334,6 +428,7 @@ class PartListDataModel(_StockDataModel):
         """Remove all entries from the data model."""
         self.data.clear()
         self.standard_only_refs.clear()
+        self._assembly_metadata.clear()
         self.stock_concern_refs.clear()
         self.Cleared()
 
@@ -366,7 +461,9 @@ class PartListDataModel(_StockDataModel):
                 alike.append(self.ObjectToItem(data))
         return alike
 
-    def set_lcsc(self, ref, lcsc, type, stock, params):
+    def set_lcsc(
+        self, ref: str, lcsc: str, type: str, stock: object, params: str
+    ) -> None:
         """Set an lcsc number, type and stock for given reference."""
         if (index := self.find_index(ref)) is None:
             return
@@ -383,6 +480,7 @@ class PartListDataModel(_StockDataModel):
         item[self.columns["ENRICH_COL"]] = ""
         item[self.columns["PRICE_COL"]] = ""
         self.standard_only_refs.discard(ref)
+        self._assembly_metadata.pop(ref, None)
         self.ItemChanged(self.ObjectToItem(item))
 
     def set_catalog_details(
@@ -413,18 +511,23 @@ class PartListDataModel(_StockDataModel):
         item[self.columns["PRICE_COL"]] = price_label
         self.ItemChanged(self.ObjectToItem(item))
 
-    def set_enrichment_status(self, ref, status):
-        """Set enrichment status text for a given part reference."""
+    def set_enrichment_status(self, ref: str, status: str) -> None:
+        """Retain hidden status text and update loading without erasing metadata."""
         if (index := self.find_index(ref)) is None:
             return
         item = self.data[index]
         item[self.columns["ENRICH_COL"]] = status
+        metadata = self._assembly_metadata_for_row(item)
+        self._assembly_metadata[ref] = replace(
+            metadata, pending=bool(metadata.lcsc) and status == "Pending"
+        )
         self.ItemChanged(self.ObjectToItem(item))
 
-    def remove_lcsc_number(self, item):
+    def remove_lcsc_number(self, item: Any) -> None:
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)
         self.standard_only_refs.discard(str(obj[self.columns["REF_COL"]] or ""))
+        self._assembly_metadata.pop(str(obj[self.columns["REF_COL"]] or ""), None)
         obj[self.columns["LCSC_COL"]] = ""
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""
