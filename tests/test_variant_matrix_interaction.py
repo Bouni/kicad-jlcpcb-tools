@@ -645,24 +645,18 @@ def test_drag_preview_keeps_original_grab_point_and_snapshot(matrix: Any) -> Non
 
 @pytest.mark.parametrize(
     "error",
-    [MemoryError, RuntimeError, None],
-    ids=["memory", "allocation", "transparency"],
+    [MemoryError, RuntimeError],
+    ids=["memory", "allocation"],
 )
 def test_preview_failure_leaves_drag_and_drop_usable(
-    matrix: Any, monkeypatch: pytest.MonkeyPatch, error: Optional[type[Exception]]
+    matrix: Any, monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
     """Failed optional artwork must not strand capture or prevent a group move."""
 
     def check(h: MatrixHarness) -> None:
         view, wx = h.view, h.wx
-        if error is None:
-            attempt = Mock(return_value=False)
-            monkeypatch.setattr(
-                h.view_module._VariantDragPreview, "SetTransparent", attempt
-            )
-        else:
-            attempt = Mock(side_effect=error("preview allocation failed"))
-            monkeypatch.setattr(view, "_drag_preview_bitmap", attempt)
+        attempt = Mock(side_effect=error("preview allocation failed"))
+        monkeypatch.setattr(view, "_drag_preview_bitmap", attempt)
         end = h.start_drag("B", "A")
         drag = view._header_drag
         assert drag.active and drag.valid and drag.preview is None
@@ -672,6 +666,46 @@ def test_preview_failure_leaves_drag_and_drop_usable(
         h.header_event(wx.wxEVT_LEFT_UP, end)
         assert h.order() == ("", "B", "A", "C", "D")
         assert view._header_drag is None and wx.Window.GetCapture() is None
+        assert not view._header_drag_timer.IsRunning()
+
+    matrix(check)
+
+
+@pytest.mark.parametrize("ending", ["drop", "escape"])
+def test_preview_remains_visible_without_native_transparency(
+    matrix: Any, monkeypatch: pytest.MonkeyPatch, ending: str
+) -> None:
+    """Unsupported popup opacity must retain the moving columns and mouse capture."""
+
+    def check(h: MatrixHarness) -> None:
+        view, wx = h.view, h.wx
+        attempt = Mock(return_value=False)
+        monkeypatch.setattr(
+            h.view_module._VariantDragPreview, "SetTransparent", attempt
+        )
+        end = h.start_drag("B", "A")
+        drag = view._header_drag
+        preview = drag.preview
+        header, body = view.GetGridColLabelWindow(), view.GetGridWindow()
+        assert preview is not None and preview.IsShown() and not preview.closed
+        assert wx.Window.GetCapture() is header
+        assert body.GetScreenRect().Contains(preview.GetScreenRect())
+        initial_rect, bitmap = preview.GetScreenRect(), preview.bitmap
+
+        h.header_event(wx.wxEVT_MOTION, end + 20, down=True)
+        assert drag.preview is preview and preview.bitmap is bitmap
+        assert preview.IsShown() and preview.GetScreenRect() != initial_rect
+        assert body.GetScreenRect().Contains(preview.GetScreenRect())
+        attempt.assert_called_once_with(153)
+
+        if ending == "drop":
+            h.header_event(wx.wxEVT_LEFT_UP, end)
+            assert h.order() == ("", "B", "A", "C", "D")
+        else:
+            h.key(wx.WXK_ESCAPE)
+            assert h.order() == ("", "A", "B", "C", "D")
+        assert preview.closed and view._header_drag is None
+        assert wx.Window.GetCapture() is None
         assert not view._header_drag_timer.IsRunning()
 
     matrix(check)
@@ -1157,7 +1191,10 @@ def test_informational_header_hover_clears_stale_cell_details(
             )
             assert not header.GetToolTip() or not header.GetToolTip().GetTip()
             assert view._header_name_hover is (tier == "name")
-            assert header.GetCursor().IsOk()
+            cursor = header.GetCursor()
+            # GTK may leave the native field header at NullCursor, which means
+            # use the default pointer. The draggable name tier owns a hand.
+            assert cursor.IsOk() or (tier == "field" and cursor.IsSameAs(wx.NullCursor))
 
     matrix(check)
 
