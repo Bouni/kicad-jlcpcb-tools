@@ -619,11 +619,13 @@ class MatrixCellRenderer(gridlib.GridCellRenderer):
         # Drawing runs separately changes kerning at their boundaries and can
         # widen a suffix after it has been fitted. Redraw the same shaped text
         # through match clips so highlighting changes only its color.
-        extents = dc.GetPartialTextExtents(text)
+        # GetPartialTextExtents can report glyph clusters instead of character
+        # positions (wxGTK 3.2). Measure complete prefixes so ligatures before a
+        # match cannot shift its clip or erase trailing highlights.
         height = dc.GetTextExtent(text)[1]
         for start, end in spans:
-            left = extents[start - 1] if start else 0
-            right = extents[end - 1]
+            left = dc.GetTextExtent(text[:start])[0] if start else 0
+            right = dc.GetTextExtent(text[:end])[0]
             if right <= left:
                 continue
             with wx.DCClipper(dc, wx.Rect(x + left, y, right - left, height)):
@@ -642,9 +644,10 @@ class _VariantDragPreview(wx.PopupWindow):
         self.view, self.drag = view, drag
         self.bitmap, self.hotspot = bitmap, hotspot
         self.closed = False
-        if not self.SetTransparent(153):
-            self.Destroy()
-            raise RuntimeError("Translucent variant preview is unavailable")
+        # wxGTK popups inherit the unsupported SetTransparent implementation.
+        # Keep their captured columns visible as an opaque surface; the header
+        # still composites its preview in software below the insertion marker.
+        self.SetTransparent(153)
         self.Bind(wx.EVT_PAINT, self._on_paint)
 
     def AcceptsFocus(self) -> bool:

@@ -243,7 +243,7 @@ def test_native_text_cache_and_font_dpi_invalidation(
 def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
     matrix: Any, modules: tuple[ModuleType, ModuleType], narrow: bool
 ) -> None:
-    source = "irrelevant AVAV prefix " * 10 + "0603 10kΩ"
+    source = "fi ffi AVAV prefix " * 10 + "0603 10kΩ"
     model = sample_model(
         modules[1],
         catalog={
@@ -255,7 +255,10 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
 
     def check(h: Any) -> None:
         col = model.column_for("A", "params")
-        painted = paint_cell(h, 0, col, width=100 if narrow else 2000)
+        dc = h.wx.ClientDC(h.view)
+        dc.SetFont(h.view.GetDefaultCellFont())
+        width = 100 if narrow else dc.GetTextExtent(source)[0] + h.view.FromDIP(20)
+        painted = paint_cell(h, 0, col, width=width)
         baseline, *colored = painted.of("DrawText")
         assert len(colored) == 2
         assert all(
@@ -264,15 +267,18 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
         )
         text, x, y = baseline["args"]
         assert text.startswith("…") is narrow
-        dc = h.wx.ClientDC(h.view)
         dc.SetFont(h.view.GetDefaultCellFont().Scaled(0.8 if narrow else 1))
-        extents = dc.GetPartialTextExtents(text)
         for item, term in zip(colored, ("0603", "10kΩ")):
             left, right = text.index(term), text.index(term) + len(term)
+            # The tokens have whitespace boundaries. Independent prefix
+            # measurements include ligatures in the preceding text without
+            # relying on GTK's cluster-indexed GetPartialTextExtents result.
+            left_width = dc.GetTextExtent(text[:left])[0] if left else 0
+            right_width = dc.GetTextExtent(text[:right])[0]
             clip = item["clip"][-4:]
-            assert clip[0] == x + (extents[left - 1] if left else 0)
-            assert clip[2] == extents[right - 1] - (extents[left - 1] if left else 0)
-            assert clip[0] >= x + (extents[0] if narrow else 0)
+            assert clip[0] == x + left_width
+            assert clip[2] == right_width - left_width
+            assert clip[0] >= x + (dc.GetTextExtent("…")[0] if narrow else 0)
             assert clip[0] + clip[2] <= x + baseline["extent"][0]
 
     matrix(check, model=model)
