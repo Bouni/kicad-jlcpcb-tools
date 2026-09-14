@@ -11,6 +11,7 @@ from .variant_native_support import PACKAGE, Board, Snapshot, State, Variant, na
 
 store_module_impl = importlib.import_module(f"{PACKAGE}.variant.store")
 session_module = importlib.import_module(f"{PACKAGE}.variant.session")
+settings_persistence = importlib.import_module(f"{PACKAGE}.core.settings_persistence")
 Assignment = native.ResolvedAssignment
 
 
@@ -44,13 +45,17 @@ def _snapshot(
 
 def _parent(project: Path) -> Any:
     """Use a persisted settings document so reopening exercises real values."""
-    path = project / ".variant-test-settings.json"
+    path = project / "settings.json"
     parent = SimpleNamespace(
         settings=json.loads(path.read_text()) if path.exists() else {}
     )
 
-    def save_settings() -> None:
-        path.write_text(json.dumps(parent.settings), encoding="utf-8")
+    def save_settings(variant_patch: Any = None) -> None:
+        saved = settings_persistence.save_settings_document(
+            project, parent.settings, variant_patch
+        )
+        parent.settings.clear()
+        parent.settings.update(saved)
 
     parent.save_settings = save_settings
     return parent

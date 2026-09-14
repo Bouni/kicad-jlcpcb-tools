@@ -91,7 +91,6 @@ def test_output_and_layout_persist_per_board_and_return_independent_copies(
 ) -> None:
     first = _store(tmp_path)
     second = _store(tmp_path, "panel")
-    second.parent = first.parent
     assert first.get_output_variant() is None
     first.set_output_variant("")
     first.set_display_preferences({"order": ["B", "", "A"]})
@@ -118,6 +117,57 @@ def test_output_and_layout_persist_per_board_and_return_independent_copies(
     assert not Path(first.dbfile).exists()
 
 
+def test_same_board_display_edits_merge_from_effective_startup_states(
+    tmp_path: Path,
+) -> None:
+    """Closing stale controls saves only the settings actually changed there."""
+    before = {
+        "differences_only": False,
+        "variant_order": ["", "A", "B"],
+        "widths": {"value": 100, "lcsc": 100},
+    }
+    _store(tmp_path).set_display_preferences(before)
+    first, second = _store(tmp_path), _store(tmp_path)
+    first.set_display_preferences(
+        {**before, "differences_only": True, "widths": {"value": 140, "lcsc": 100}},
+        before=before,
+    )
+    second.set_display_preferences(
+        {
+            **before,
+            "variant_order": ["", "B", "A"],
+            "widths": {"value": 100, "lcsc": 170},
+        },
+        before=before,
+    )
+    first.set_output_variant("B")
+    second.parent.save_settings()
+    reopened = _store(tmp_path)
+    assert reopened.get_output_variant() == "B"
+    assert reopened.get_display_preferences() == {
+        "differences_only": True,
+        "variant_order": ["", "B", "A"],
+        "widths": {"value": 140, "lcsc": 170},
+    }
+
+
+def test_unchanged_implicit_display_defaults_preserve_newer_saved_preferences(
+    tmp_path: Path,
+) -> None:
+    """Defaults absent from JSON are not user edits when a stale window closes."""
+    first, second = _store(tmp_path), _store(tmp_path)
+    implicit = {"variant_order": ["", "A", "B"], "differences_only": False}
+    first.set_display_preferences(
+        {"variant_order": ["", "B", "A"], "differences_only": True},
+        before=implicit,
+    )
+    second.set_display_preferences(implicit, before=implicit)
+    assert _store(tmp_path).get_display_preferences() == {
+        "variant_order": ["", "B", "A"],
+        "differences_only": True,
+    }
+
+
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("kind", ["output", "display"])
 def test_failed_preference_save_restores_settings(
@@ -130,7 +180,7 @@ def test_failed_preference_save_restores_settings(
         store.set_output_variant("B")
     before = json.loads(json.dumps(store.parent.settings))
 
-    def fail() -> None:
+    def fail(variant_patch: Any = None) -> None:
         raise OSError("settings unavailable")
 
     store.parent.save_settings = fail

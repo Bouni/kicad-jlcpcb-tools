@@ -140,6 +140,7 @@ class VariantMainController:
         dialog.Bind(wx.EVT_TIMER, self._on_timer, self.timer)
         self.timer.Start(1500)
         dialog.Layout()
+        self._initial_display_preferences = self._capture_display_preferences()
 
     @property
     def model(self) -> Any:
@@ -660,17 +661,25 @@ class VariantMainController:
         self.session.reliable = False
         self.timer.Stop()
         self.view.set_mutations_enabled(False)
+        state = self._capture_display_preferences()
+        try:
+            self.cache.set_display_preferences(
+                state,
+                before=self._initial_display_preferences,
+            )
+        except Exception as error:
+            self.dialog.logger.warning(
+                "Could not save variant display preferences: %s", error
+            )
+
+    def _capture_display_preferences(self) -> dict[str, Any]:
+        """Capture effective controls so unchanged defaults are not saved as edits."""
         state = self.view.capture_preferences()
         state["differences_only"] = self.differences.GetValue()
         state["show_footprint_library"] = self.show_footprint_library.GetValue()
         state["require_bom"] = self.dialog.hide_bom_parts
         state["require_pos"] = self.dialog.hide_pos_parts
-        try:
-            self.cache.set_display_preferences(state)
-        except Exception as error:
-            self.dialog.logger.warning(
-                "Could not save variant display preferences: %s", error
-            )
+        return state
 
     def dispatch_action(self, action: str, target: Any = None) -> None:
         """Dispatch explicit matrix actions through captured clipboard/edit targets."""

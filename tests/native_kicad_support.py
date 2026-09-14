@@ -109,6 +109,7 @@ def native_runtime(
             "variant.store",
             "variant.session",
             "correction_data",
+            "core.settings_persistence",
         ),
         {},
     ) as modules:
@@ -119,7 +120,16 @@ def native_runtime(
             "The native fixture board must retain its explicit saved filename"
         )
         pcbnew.PCB_IO_MGR.Save(pcbnew.PCB_IO_MGR.KICAD_SEXP, str(source), board)
-        parent = SimpleNamespace(settings={}, save_settings=lambda: None)
+        parent = SimpleNamespace(settings={})
+
+        def save_settings(variant_patch: Any = None) -> None:
+            saved = modules["core.settings_persistence"].save_settings_document(
+                tmp_path, parent.settings, variant_patch
+            )
+            parent.settings.clear()
+            parent.settings.update(saved)
+
+        parent.save_settings = save_settings
         cache = modules["variant.store"].VariantStore(parent, str(tmp_path), board)
         adapter = modules["variant.native"].VariantNativeAdapter(board, cache.board_id)
         session = modules["variant.session"].VariantSession(
