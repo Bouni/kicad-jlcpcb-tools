@@ -884,10 +884,10 @@ class JLCPCBTools(wx.Frame):
             self._update_library_title()
             self.library.category_map = {}
             self._catalog_ready = True
-            if getattr(self, "_variant_controller", None):
-                self._set_project_storage_error(None)
             if self.store is None:
                 self.init_store()
+                if self.store is None:
+                    return
             else:
                 self._initialize_catalog_parts()
             self._refresh_catalog_outputs()
@@ -995,7 +995,19 @@ class JLCPCBTools(wx.Frame):
     def init_store(self) -> None:
         """Initialize fabrication and the appropriate native or ordinary assignments."""
         if controller := getattr(self, "_variant_controller", None):
-            controller.refresh()
+            try:
+                controller.session._check_board()
+                controller.refresh()
+                if not controller.session.reliable:
+                    raise ValueError(
+                        "Variant data is unavailable. Reopen JLCPCB Tools before continuing."
+                    )
+                self.store = controller.cache
+                self._set_project_storage_error(None)
+                controller._update_enabled()
+            except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
+                self._set_project_storage_error(error)
+                controller._update_enabled()
             return
         try:
             if getattr(self, "fabrication", None) is None:
