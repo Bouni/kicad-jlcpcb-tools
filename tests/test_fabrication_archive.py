@@ -1,6 +1,7 @@
 """Verify explicit manufacturing ZIP contents and failure-safe publication."""
 
 from pathlib import Path
+import sqlite3
 from typing import Any
 from unittest.mock import Mock
 from zipfile import BadZipFile, ZipFile
@@ -156,3 +157,129 @@ def test_archive_failures_preserve_previous_output(
             "board.gbr",
             "production.zip",
         ]
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_consumer_failure_restores_old_files_and_removes_new_files(
+    tmp_path: Path, error_type: type[BaseException]
+) -> None:
+    """A failure after reading published output cannot leave the new set in place."""
+    old = _source(tmp_path, "BOM.csv", b"old BOM")
+    fresh = tmp_path / "CPL.csv"
+    sources = [
+        _source(tmp_path / "staging", "BOM.csv", b"new BOM"),
+        _source(tmp_path / "staging", "CPL.csv", b"new CPL"),
+    ]
+    failure = error_type("consumer failed")
+    with (
+        pytest.raises(error_type) as caught,
+        fabrication_archive.artifact_publication(tuple(zip(sources, (old, fresh)))),
+    ):
+        assert old.read_bytes() == b"new BOM"
+        assert fresh.read_bytes() == b"new CPL"
+        raise failure
+    assert caught.value is failure
+    assert old.read_bytes() == b"old BOM"
+    assert not fresh.exists()
+    assert not list(tmp_path.glob(".jlcpcb-recovery-*"))
+
+
+@pytest.mark.parametrize("previous_cpl", [False, True])
+def test_failed_restoration_after_bookkeeping_error_keeps_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, previous_cpl: bool
+) -> None:
+    """A late database error still identifies the recoverable original on failure."""
+    destinations = [tmp_path / name for name in ("BOM.csv", "CPL.csv", "GERBER.zip")]
+    sources = []
+    for destination in destinations:
+        if destination.name != "CPL.csv" or previous_cpl:
+            destination.write_bytes(b"previous " + destination.name.encode())
+        sources.append(_source(tmp_path / "staging", destination.name, b"new export"))
+    replace, unlink = fabrication_archive.os.replace, Path.unlink
+
+    def fail_restore(source: Any, destination: Any) -> None:
+        """Allow actual publication, but deny restoring CPL from its backup."""
+        if Path(source).parent.name.startswith(".jlcpcb-recovery-") and (
+            Path(destination) == destinations[1]
+        ):
+            raise PermissionError("restoration denied")
+        replace(source, destination)
+
+    def fail_remove(path: Path, *args: Any, **kwargs: Any) -> None:
+        """Deny compensation for CPL when no prior CPL existed."""
+        if path == destinations[1]:
+            raise PermissionError("removal denied")
+        unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(fabrication_archive.os, "replace", fail_restore)
+    if not previous_cpl:
+        monkeypatch.setattr(Path, "unlink", fail_remove)
+    failure = sqlite3.OperationalError("counter commit failed")
+    with (
+        pytest.raises(RuntimeError, match="Recovery copies:") as caught,
+        fabrication_archive.artifact_publication(tuple(zip(sources, destinations))),
+    ):
+        raise failure
+    assert caught.value.__cause__ is failure
+    assert str(destinations[1]) in str(caught.value)
+    assert destinations[0].read_bytes() == b"previous BOM.csv"
+    assert destinations[1].read_bytes() == b"new export"
+    assert destinations[2].read_bytes() == b"previous GERBER.zip"
+    (recovery,) = tmp_path.glob(".jlcpcb-recovery-*")
+    assert str(recovery) in str(caught.value)
+    if previous_cpl:
+        assert (recovery / "1").read_bytes() == b"previous CPL.csv"
+
+
+@pytest.mark.parametrize("error_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("previous_cpl", [False, True])
+def test_interrupted_restoration_keeps_remaining_originals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error_type: type[BaseException],
+    previous_cpl: bool,
+) -> None:
+    """Interrupting compensation must preserve every not-yet-restored original."""
+    destinations = [tmp_path / name for name in ("BOM.csv", "CPL.csv", "GERBER.zip")]
+    sources = []
+    for destination in destinations:
+        if destination.name != "CPL.csv" or previous_cpl:
+            destination.write_bytes(b"previous " + destination.name.encode())
+        sources.append(_source(tmp_path / "staging", destination.name, b"new export"))
+    replace, unlink = fabrication_archive.os.replace, Path.unlink
+    interruption = error_type("stop restoring")
+
+    def interrupt_restore(source: Any, destination: Any) -> None:
+        """Restore GERBER, then interrupt before replacing CPL or reaching BOM."""
+        if Path(source).parent.name.startswith(".jlcpcb-recovery-") and (
+            Path(destination) == destinations[1]
+        ):
+            raise interruption
+        replace(source, destination)
+
+    def interrupt_remove(path: Path, *args: Any, **kwargs: Any) -> None:
+        """Interrupt compensation of a file that did not previously exist."""
+        if path == destinations[1]:
+            raise interruption
+        unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(fabrication_archive.os, "replace", interrupt_restore)
+    if not previous_cpl:
+        monkeypatch.setattr(Path, "unlink", interrupt_remove)
+    with (
+        pytest.raises(error_type) as caught,
+        fabrication_archive.artifact_publication(tuple(zip(sources, destinations))),
+    ):
+        raise sqlite3.OperationalError("counter commit failed")
+    assert caught.value is interruption
+    assert destinations[0].read_bytes() == b"new export"
+    assert destinations[1].read_bytes() == b"new export"
+    assert destinations[2].read_bytes() == b"previous GERBER.zip"
+    (recovery,) = tmp_path.glob(".jlcpcb-recovery-*")
+    assert (recovery / "0").read_bytes() == b"previous BOM.csv"
+    if previous_cpl:
+        assert (recovery / "1").read_bytes() == b"previous CPL.csv"
+    assert "restoration interrupted" in caplog.text
+    assert str(recovery) in caplog.text
+    assert str(destinations[1]) in caplog.text

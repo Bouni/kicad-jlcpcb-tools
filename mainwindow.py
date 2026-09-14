@@ -6,7 +6,7 @@ from __future__ import annotations
 # ruff: noqa: I001, UP045
 
 from collections.abc import Iterable, Sequence
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
 from typing import TYPE_CHECKING, Any, Optional
@@ -2400,8 +2400,18 @@ class JLCPCBTools(wx.Frame):
             )
 
             if getattr(self, "_variant_controller", None):
-                self.fabrication.publish_generation()
-            generation_count = self.store.increment_generation_count()
+                self._current_generation_step = "Publishing fabrication files"
+                self.report_generation_step(self._current_generation_step)
+                with (
+                    self.store.generation_publication_lock(),
+                    ExitStack() as publication,
+                    self.store.generation_counter_transaction(
+                        expected_count=current_generation_count
+                    ) as generation_count,
+                ):
+                    publication.enter_context(self.fabrication.generation_publication())
+            else:
+                generation_count = self.store.increment_generation_count()
             post_hook_env = self.build_generate_hook_env(
                 stage="post",
                 placeholder_count=placeholder_count,

@@ -1,6 +1,7 @@
 """Create manufacturing archives from explicit, validated member lists."""
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 import logging
 import os
 from pathlib import Path
@@ -97,13 +98,20 @@ def build_archive(destination: Path, entries: Sequence[Path]) -> Path:
 
 
 def publish_artifact_set(pairs: Sequence[tuple[Path, Path]]) -> None:
-    """Publish a prepared set, restoring previous files if any replacement fails.
+    """Publish a set immediately, restoring previous files if replacement fails."""
+    with artifact_publication(pairs):
+        pass
+
+
+@contextmanager
+def artifact_publication(pairs: Sequence[tuple[Path, Path]]) -> Iterator[None]:
+    """Keep published files recoverable until the caller completes bookkeeping.
 
     Filesystem APIs cannot atomically replace several filenames. Keep recovery
-    copies until every replacement succeeds and compensate runtime failures.
+    copies through the context body and compensate replacement or body failures.
     If compensation itself fails, retain the recovery directory and report it;
     callers must not label that generation successful. This is not a promise of
-    crash-atomic publication across power loss.
+    atomic publication with a database across process termination or power loss.
     """
     if not pairs:
         raise ValueError("No fabrication artifacts were prepared")
@@ -136,22 +144,35 @@ def publish_artifact_set(pairs: Sequence[tuple[Path, Path]]) -> None:
             for source, destination in paths:
                 os.replace(source, destination)
                 published.append(destination)
-        except OSError as error:
+            yield
+        except BaseException as error:
+            # Until compensation finishes, these may be the only remaining
+            # originals. An interruption must never make finally discard them.
+            preserve_recovery = True
             failed_restore = []
-            for destination in reversed(published):
-                try:
-                    if destination in backups:
-                        os.replace(backups[destination], destination)
-                    else:
-                        destination.unlink(missing_ok=True)
-                except OSError:
-                    failed_restore.append(str(destination))
+            try:
+                for destination in reversed(published):
+                    try:
+                        if destination in backups:
+                            os.replace(backups[destination], destination)
+                        else:
+                            destination.unlink(missing_ok=True)
+                    except OSError:
+                        failed_restore.append(str(destination))
+            except BaseException:
+                logging.getLogger(__name__).exception(
+                    "Fabrication restoration interrupted. Check these output files: "
+                    "%s. Recovery copies: %s",
+                    ", ".join(str(path) for path in published),
+                    recovery,
+                )
+                raise
             if failed_restore:
-                preserve_recovery = True
                 raise RuntimeError(
                     "Fabrication publication failed and these files could not be "
                     f"restored: {', '.join(failed_restore)}. Recovery copies: {recovery}"
                 ) from error
+            preserve_recovery = False
             raise
     finally:
         if not preserve_recovery:
