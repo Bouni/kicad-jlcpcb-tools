@@ -40,6 +40,7 @@ class _AffectedPartsStore(dv.DataViewListStore):
             return apply_side_cell_style(self.GetValueByRow(row, col), attr)
         return False
 
+
 class WhyStandardDialog(wx.Dialog):
     """Show current assembly-mode reasons, sources, and affected parts."""
 
