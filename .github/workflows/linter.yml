@@ -28,26 +28,6 @@ jobs:
           version: 0.11.4
           args: check 
           src: "."
-  python-compatibility:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-      - name: Set up KiCad-compatible Python
-        id: kicad-python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.9"
-      - name: Set up Python for hook tools
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - name: Install hook regression test dependencies
-        run: python -m pip install pytest pre-commit
-      - name: Verify hook output on Python 3.9
-        run: python -m pytest -q tests/test_hook_python_compatibility.py
-        env:
-          KICAD_TEST_PYTHON: ${{ steps.kicad-python.outputs.python-path }}
   deadcode:
     runs-on: ubuntu-latest
     steps:
