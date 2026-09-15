@@ -21,6 +21,7 @@ from . import (
 from .stock_test_support import stock_modules
 from .test_stock_concern import part
 from .test_stock_download_lifecycle import seed_catalog
+from .wx_harness import track_selection
 
 workflow = controller_tests.workflow
 mainwindow = preferences_storage.mainwindow
@@ -109,6 +110,7 @@ def configuration_window(
             window = make_window(settings=settings)
             del window.populate_footprint_list
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
+            track_selection(window, window.partlist_data_model, [])
             window.SetTitle = MagicMock()
             window.init_fabrication = MagicMock()
             window._part_selector = None
@@ -185,7 +187,6 @@ def test_new_and_equivalently_spelled_lcsc_numbers_share_one_lookup(
     workflow.drain()
     window.library.get_part_details.reset_mock()
     for reference, lcsc in (("R2", " c2 "), ("R3", "C2")):
-        window.store.parts[reference] = part(reference, lcsc)
         window.footprints[reference] = controller_tests.Footprint(lcsc)
     window.populate_footprint_list()
     workflow.drain()
@@ -392,8 +393,7 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
     monkeypatch: pytest.MonkeyPatch, ready: bool
 ) -> None:
     """The actual constructor and init_data gate lookups until catalog initialization."""
-    from . import test_window_layout as layout_ui
-    from .stock_test_support import stock_modules
+    layout_ui = importlib.import_module(f"{__package__}.test_window_layout")
 
     module = layout_ui.mainwindow
     monkeypatch.setattr(module.JLCPCBTools, "SetTitle", MagicMock(), raising=False)
@@ -460,19 +460,19 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
 
 
 @pytest.mark.parametrize("fail_write", [False, True])
-def test_assignment_publishes_selected_stock_to_cached_siblings_only_after_commit(
+def test_assignment_publishes_selected_stock_to_cached_siblings_after_board_update(
     workflow: types.SimpleNamespace,
     catalog_window: Callable[..., Any],
     fail_write: bool,
 ) -> None:
-    """A failed assignment cannot publish supply; a committed one updates siblings."""
+    """A failed board setter cannot publish supply; a successful one updates siblings."""
     window = catalog_window(
         [part("R1"), part("R2", "C2")], {"C1": details(99), "C2": details(1000)}
     )
     window.populate_footprint_list()
     workflow.drain()
     window.library.get_part_details.reset_mock()
-    window.store.fail_write = fail_write
+    window.footprints["R2"].fail_write = fail_write
     window.assign_parts(
         types.SimpleNamespace(lcsc="C1", stock="999", type="Basic", references=["R2"])
     )
@@ -499,14 +499,14 @@ def test_assignment_catalog_failure_does_not_commit_incomplete_details(
         types.SimpleNamespace(lcsc="C2", stock="999", type="Basic", references=["R1"])
     )
     workflow.drain()
-    assert window.store.parts["R1"]["lcsc"] == "C1"
+    assert window.store.read_all()[0]["lcsc"] == "C1"
     assert raw_stocks(window) == {"R1": 99}
     assert "C2" not in window._catalog_details
 
 
 @pytest.mark.parametrize("stock", [0.1, True, -1, "5+"])
 @pytest.mark.parametrize("action", ["selector", "preferences"])
-def test_assignment_preserves_unparseable_stock_as_unknown_in_storage(
+def test_assignment_keeps_unparseable_catalog_stock_unknown_for_demand(
     workflow: types.SimpleNamespace,
     catalog_window: Callable[..., Any],
     stock: object,
@@ -525,8 +525,8 @@ def test_assignment_preserves_unparseable_stock_as_unknown_in_storage(
     else:
         window._apply_lcsc_assignments({"R1": "C2"})
     workflow.drain()
-    assert window.store.parts["R1"]["lcsc"] == "C2"
-    assert window.store.parts["R1"]["stock"] is None
+    assert window.store.read_all()[0]["lcsc"] == "C2"
+    assert window.store.read_all()[0]["stock"] is None
     assert raw_stocks(window)["R1"] == stock
     assert window.partlist_data_model.stock_concern_refs == {"R1"}
 
@@ -689,7 +689,7 @@ def test_failed_replacement_invalidates_stock_and_rejects_older_same_source_succ
 def test_first_download_source_switch_still_initializes_saved_part_preferences(
     make_window: Callable[..., Any], mainwindow: Any, tmp_path: Path, early_store: bool
 ) -> None:
-    """Deferred catalog readiness must run saved assignments against real project DBs."""
+    """Deferred catalog readiness must apply saved preferences to the live board."""
     window = make_window(
         footprints=[preferences_storage.Footprint(lcsc="")],
         part_preferences={("R_0603", "10k"): "C200"},
@@ -713,7 +713,7 @@ def test_first_download_source_switch_still_initializes_saved_part_preferences(
         library.state = mainwindow.LibraryState.DOWNLOAD_RUNNING
         if early_store:
             window.init_store()
-            assert window.store.get_part("R1")["lcsc"] == ""
+            assert window.store.read_all()[0]["lcsc"] == ""
         window.update_settings(
             types.SimpleNamespace(
                 section="library", setting="selected_library", value="catalog-B"
@@ -743,7 +743,7 @@ def test_first_download_source_switch_still_initializes_saved_part_preferences(
             library=library, source=("catalog-B", library.partsdb_file), attempt=2
         )
         window.download_completed(event)
-        assert window.store.get_part("R1")["lcsc"] == "C200"
+        assert window.store.read_all()[0]["lcsc"] == "C200"
         assert (
             window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
         )
@@ -757,7 +757,7 @@ def test_first_download_source_switch_still_initializes_saved_part_preferences(
         ]
         window.remove_lcsc_number()
         window.download_completed(event)
-        assert window.store.get_part("R1")["lcsc"] == ""
+        assert window.store.read_all()[0]["lcsc"] == ""
         library.get_part_preference.assert_called_once_with("R_0603", "10k")
 
 
@@ -965,7 +965,7 @@ def test_failed_real_update_keeps_existing_catalog_display_and_assignments(
     assert window.is_catalog_available() is True
     assert Path(library.partsdb_file).read_bytes() == old_bytes
     assert raw_stocks(window) == {"R1": 1000}
-    assert window.store.get_part("R1")["lcsc"] == "C100"
+    assert window.store.read_all()[0]["lcsc"] == "C100"
     assert window._project_storage_unavailable is False
 
 

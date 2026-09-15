@@ -1,6 +1,6 @@
 """Exercise stock concern through real model constructors and window handlers."""
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 import importlib
 import json
 from pathlib import Path
@@ -15,7 +15,7 @@ from .stock_test_support import stock_modules
 from .test_settings_defaults import plugin_dir, shipped_defaults
 from .test_settings_dialog import _dialog, _fire, _settings, _wx
 from .test_stock_concern import CellAttr, part
-from .wx_harness import load_mainwindow, wx_stubs
+from .wx_harness import DataViewItemArray, load_mainwindow, track_selection, wx_stubs
 
 
 class Footprint:
@@ -32,6 +32,20 @@ class Footprint:
         self.lcsc = lcsc
         self.attributes = (int(bom) << 3) | (int(pos) << 2)
         self.dnp = dnp
+        self.fail_write = False
+        self.selected = False
+
+    def SetSelected(self) -> None:
+        """Select this footprint in the PCB editor."""
+        self.selected = True
+
+    def ClearSelected(self) -> None:
+        """Clear the PCB editor selection flag."""
+        self.selected = False
+
+    def IsSelected(self) -> bool:
+        """Report the live native selection state."""
+        return self.selected
 
     def GetAttributes(self) -> int:
         """Read flags used by the real footprint helpers."""
@@ -52,7 +66,9 @@ class Footprint:
         ]
 
     def SetField(self, _name: str, value: str) -> None:
-        """Keep the live board assignment in sync with successful transactions."""
+        """Apply the native setter, including an injected failure before mutation."""
+        if self.fail_write:
+            raise RuntimeError("assignment write failed")
         self.lcsc = value
 
     def GetLayer(self) -> int:
@@ -69,33 +85,38 @@ class Footprint:
 
 
 class Store:
-    """Project rows with atomic assignment failures and stateful BOM updates."""
+    """Read current footprint state with deterministic supplier metadata fixtures."""
 
-    def __init__(self, records: list[dict[str, Any]]) -> None:
-        self.parts = {record["reference"]: dict(record) for record in records}
-        self.fail_write = False
+    def __init__(
+        self, records: list[dict[str, Any]], footprints: dict[str, Footprint]
+    ) -> None:
+        self.records = {record["reference"]: dict(record) for record in records}
+        self.footprints = footprints
+        self.metadata = {
+            record["lcsc"].strip().upper(): {
+                "assembly_process": record.get("assembly_process", ""),
+                "component_product_type": record.get("component_product_type"),
+            }
+            for record in records
+        }
 
     def read_all(self) -> list[dict[str, Any]]:
-        """Return fresh snapshots as the production database does."""
-        return [dict(record) for record in self.parts.values()]
-
-    def set_lcsc_assignments(
-        self, assignments: Iterable[tuple[str, str, Optional[int]]]
-    ) -> None:
-        """Commit every supplied assignment, or reject the entire transaction."""
-        pending = list(assignments)
-        if self.fail_write:
-            raise sqlite3.OperationalError("assignment write failed")
-        for reference, lcsc, stock in pending:
-            self.parts[reference].update(lcsc=lcsc, stock=stock)
-
-    def set_bom(self, reference: str, value: int) -> None:
-        """Persist the flag written by the real BOM toggle event handler."""
-        self.parts[reference]["exclude_from_bom"] = value
-
-    def set_pos(self, reference: str, value: int) -> None:
-        """Persist the placement flag without changing stock demand."""
-        self.parts[reference]["exclude_from_pos"] = value
+        """Build fresh board records; catalog stock is never persisted here."""
+        return [
+            {
+                **self.records.get(reference, part(reference)),
+                "lcsc": footprint.lcsc.strip().upper(),
+                "exclude_from_bom": bool(footprint.attributes & (1 << 3)),
+                "exclude_from_pos": bool(footprint.attributes & (1 << 2)),
+                "is_dnp": footprint.IsDNP(),
+                "stock": None,
+                **self.metadata.get(
+                    footprint.lcsc.strip().upper(),
+                    {"assembly_process": "", "component_product_type": None},
+                ),
+            }
+            for reference, footprint in self.footprints.items()
+        ]
 
 
 @pytest.fixture
@@ -129,7 +150,6 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             """Initialize the state surface consumed by actual window workflows."""
             window = object.__new__(mainwindow.JLCPCBTools)
             window.settings = {"part_preferences": {"remember_lcsc_assignments": False}}
-            window.store = Store(records)
             window.bom_estimator_board_count = 5
             window.footprints = (
                 live
@@ -144,10 +164,21 @@ def workflow() -> Iterator[types.SimpleNamespace]:
                     for record in records
                 }
             )
+            window.store = Store(records, window.footprints)
             board = types.SimpleNamespace(
-                FindFootprintByReference=window.footprints.get
+                FindFootprintByReference=window.footprints.get,
+                GetFootprints=lambda: list(window.footprints.values()),
+                SetModified=MagicMock(),
             )
-            window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
+            window.pcbnew = types.SimpleNamespace(
+                GetBoard=lambda: board,
+                GetCurrentSelection=lambda: [
+                    footprint
+                    for footprint in window.footprints.values()
+                    if footprint.IsSelected()
+                ],
+                Refresh=MagicMock(),
+            )
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
             window.library = MagicMock()
             window.library.state = mainwindow.LibraryState.INITIALIZED
@@ -168,7 +199,8 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             window.logger = MagicMock()
             window.recompute_bom_estimate = MagicMock()
             window.footprint_list = MagicMock()
-            window.footprint_list.GetSelections.return_value = []
+            window.right_toolbar = MagicMock()
+            track_selection(window, window.partlist_data_model, [])
             window._bom_recompute_scheduled = False
             window.hide_bom_parts = False
             window.hide_pos_parts = False
@@ -242,21 +274,20 @@ def test_assignment_and_removal_update_old_and_new_siblings(
         types.SimpleNamespace(lcsc="C2", stock="75", type="Basic", references=["R2"])
     )
     workflow.drain()
-    assert window.store.parts["R2"]["lcsc"] == "C2"
     assert window.footprints["R2"].lcsc == "C2"
     assert window.partlist_data_model.stock_concern_refs == {"R2", "R3"}
 
-    window.footprint_list.GetSelections.return_value = [
-        window.partlist_data_model.data[1]
-    ]
+    window.footprint_list.SetSelections(
+        DataViewItemArray([window.partlist_data_model.data[1]])
+    )
     window.remove_lcsc_number()
     workflow.drain()
-    assert window.store.parts["R2"]["lcsc"] == ""
+    assert window.footprints["R2"].lcsc == ""
     assert window.partlist_data_model.stock_concern_refs == set()
 
 
 @pytest.mark.parametrize("action", ["assignment", "removal"])
-def test_failed_assignment_transaction_preserves_existing_concerns(
+def test_failed_board_assignment_preserves_existing_concerns(
     workflow: types.SimpleNamespace,
     action: str,
 ) -> None:
@@ -264,7 +295,7 @@ def test_failed_assignment_transaction_preserves_existing_concerns(
     window = workflow.make_window([part("R1"), part("R2")], {"C1": 75, "C2": 500})
     window.populate_footprint_list()
     workflow.drain()
-    window.store.fail_write = True
+    window.footprints["R2"].fail_write = True
     if action == "assignment":
         window.assign_parts(
             types.SimpleNamespace(
@@ -272,12 +303,13 @@ def test_failed_assignment_transaction_preserves_existing_concerns(
             )
         )
     else:
-        window.footprint_list.GetSelections.return_value = [
-            window.partlist_data_model.data[1]
-        ]
+        window.footprint_list.SetSelections(
+            DataViewItemArray([window.partlist_data_model.data[1]])
+        )
         window.remove_lcsc_number()
-    assert workflow.posted == []
-    assert window.store.parts["R2"]["lcsc"] == "C1"
+    workflow.drain()
+    window.logger.warning.assert_called_once()
+    assert "assignment write failed" in str(window.logger.warning.call_args)
     assert window.footprints["R2"].lcsc == "C1"
     assert window.partlist_data_model.data[1][3] == "C1"
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
@@ -290,12 +322,16 @@ def test_bom_and_pos_toggle_events_recalculate_current_board_demand(
     window = workflow.make_window([part("R1"), part("R2")], {"C1": 75})
     window.populate_footprint_list()
     workflow.drain()
-    window.footprint_list.GetSelections.return_value = [
-        window.partlist_data_model.data[1]
-    ]
+    window.footprint_list.SetSelections(
+        DataViewItemArray([window.partlist_data_model.data[1]])
+    )
+    window.footprints["R1"].SetSelected()
     window.toggle_pos()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
+    assert not window.footprints["R1"].IsSelected()
+    assert window.footprints["R2"].IsSelected()
+    window.pcbnew.Refresh.assert_called()
     window.toggle_bom()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == set()

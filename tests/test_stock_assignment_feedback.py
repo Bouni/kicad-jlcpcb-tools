@@ -13,8 +13,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from . import test_stock_catalog_workflow as catalog_workflow
-from .part_preferences_test_support import act, project_rows
+from .part_preferences_test_support import act, board_rows
 from .test_stock_download_lifecycle import seed_catalog
+from .wx_harness import DataViewItemArray
 
 configuration_window = catalog_workflow.configuration_window
 make_window = catalog_workflow.make_window
@@ -23,15 +24,15 @@ mainwindow = catalog_workflow.mainwindow
 
 def _select_row(window: Any) -> None:
     """Select a current real model row through the GUI boundary."""
-    window.footprint_list.GetSelections.return_value = [
-        window.partlist_data_model.data[0]
-    ]
+    window.footprint_list.SetSelections(
+        DataViewItemArray([window.partlist_data_model.data[0]])
+    )
 
 
 def _state(window: Any, store: Any) -> tuple[Any, ...]:
-    """Read durable assignments, displayed cells, and live board fields."""
+    """Read current board assignments, displayed cells, and raw footprint fields."""
     return (
-        project_rows(SimpleNamespace(store=store)),
+        board_rows(SimpleNamespace(store=store)),
         deepcopy(window.partlist_data_model.data),
         {
             footprint.GetReference(): {
@@ -59,9 +60,6 @@ def _watch_action(window: Any, mainwindow: Any) -> None:
         "update",
     ):
         setattr(window.library, name, MagicMock(wraps=getattr(window.library, name)))
-    window.store.set_lcsc_assignments = MagicMock(
-        wraps=window.store.set_lcsc_assignments
-    )
     window.logger.reset_mock()
     window.start_assembly_enrichment.reset_mock()
     mainwindow.wx.PostEvent.reset_mock()
@@ -70,7 +68,6 @@ def _watch_action(window: Any, mainwindow: Any) -> None:
 def _assert_refused(window: Any, library: Any, store: Any, before: Any) -> None:
     """Require one useful explanation and no assignment or catalog side effects."""
     assert _state(window, store) == before
-    store.set_lcsc_assignments.assert_not_called()
     for name in (
         "get_part_details",
         "get_part_preference",
@@ -198,14 +195,14 @@ def test_missing_catalog_explains_assignment_then_retry_survives_reopen(
         )
     else:
         act(action, window, mainwindow, monkeypatch, "C200")
-    assert window.store.get_part("R1")["lcsc"] == "C200"
-    assert window.store.get_part("R1")["stock"] == expected_stock
+    assert window.store.read_all()[0]["lcsc"] == "C200"
+    assert window.store.read_all()[0]["stock"] is None
     assert window.partlist_data_model.data[0][3] == "C200"
     assert window.partlist_data_model.data[0][5] == expected_stock
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
     reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
-    assert reopened.get_part("R1")["lcsc"] == "C200"
-    assert reopened.get_part("R1")["stock"] == expected_stock
+    assert reopened.read_all()[0]["lcsc"] == "C200"
+    assert reopened.read_all()[0]["stock"] is None
     assert _warnings(window) == []
 
 
@@ -244,7 +241,7 @@ def test_pending_source_switch_explains_assignment_without_using_old_catalog(
 
 
 @pytest.mark.parametrize("action", ["paste", "apply", "picker"])
-def test_late_assignment_with_no_library_explains_failure_before_optional_lookup(
+def test_late_assignment_with_no_library_never_uses_optional_storage(
     configuration_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -270,7 +267,6 @@ def test_late_assignment_with_no_library_explains_failure_before_optional_lookup
         "update",
     ):
         setattr(library, name, MagicMock(wraps=getattr(library, name)))
-    store.set_lcsc_assignments = MagicMock(wraps=store.set_lcsc_assignments)
     window.logger.reset_mock()
     window.start_assembly_enrichment.reset_mock()
     before = _state(window, store)
@@ -282,13 +278,16 @@ def test_late_assignment_with_no_library_explains_failure_before_optional_lookup
     library.get_part_details.assert_not_called()
     library.save_part_preferences.assert_not_called()
     library.update.assert_not_called()
-    store.set_lcsc_assignments.assert_not_called()
     messages = _warnings(window)
-    assert len(messages) == 1
-    assert any(
-        word in messages[0].lower()
-        for word in ("settings", "reopen", "download", "select")
-    )
+    assert window.footprint_list.GetSelections() == []
+    if action == "paste":
+        assert messages == []  # Resetting the rows leaves no paste target.
+    else:
+        assert len(messages) == 1
+        assert any(
+            word in messages[0].lower()
+            for word in ("settings", "reopen", "download", "select")
+        )
 
 
 def test_automatic_empty_assignments_and_refresh_stay_quiet(
@@ -307,19 +306,18 @@ def test_automatic_empty_assignments_and_refresh_stay_quiet(
     assert _warnings(window) == []
     window.library.get_part_details.assert_not_called()
     window.library.get_part_preference.assert_not_called()
-    window.store.set_lcsc_assignments.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["catalog_read", "project_write"])
+@pytest.mark.parametrize("failure", ["catalog_read", "board_write"])
 @pytest.mark.parametrize("action", ["paste", "apply", "picker"])
-def test_real_assignment_storage_failure_keeps_single_original_warning(
+def test_real_assignment_failure_keeps_single_original_warning(
     configuration_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
     action: str,
     failure: str,
 ) -> None:
-    """Availability feedback must not double-report SQL failures from a ready catalog."""
+    """Availability feedback must not double-report catalog or native setter failures."""
     window = configuration_window(catalog_lcsc="C200")
     window.library.save_part_preferences([("R_0603", "10k", "C200")])
     if failure == "catalog_read":
@@ -329,11 +327,12 @@ def test_real_assignment_storage_failure_keeps_single_original_warning(
         ):
             connection.execute("DROP TABLE parts")
     else:
-        with closing(sqlite3.connect(window.store.dbfile)) as connection, connection:
-            connection.execute(
-                "CREATE TRIGGER reject_assignment BEFORE UPDATE OF lcsc ON part_info "
-                "BEGIN SELECT RAISE(ABORT, 'assignment write rejected'); END"
-            )
+        footprint = window.pcbnew.GetBoard().FindFootprintByReference("R1")
+        monkeypatch.setattr(
+            footprint,
+            "SetField",
+            MagicMock(side_effect=RuntimeError("assignment write rejected")),
+        )
     _select_row(window)
     before = _state(window, window.store)
     window.logger.reset_mock()
@@ -358,11 +357,11 @@ def test_save_preferences_and_clear_remain_available_without_catalog(
     window.save_selected_part_preferences()
     assert window.library.get_part_preference("R_0603", "10k") == "C100"
     window.remove_lcsc_number()
-    assert window.store.get_part("R1")["lcsc"] == ""
+    assert window.store.read_all()[0]["lcsc"] == ""
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == ""
     assert window.partlist_data_model.data[0][3] == ""
     reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
-    assert reopened.get_part("R1")["lcsc"] == ""
+    assert reopened.read_all()[0]["lcsc"] == ""
     window.footprint_list.Enable.assert_called_with(True)
     window.right_toolbar.Enable.assert_called_with(True)
     assert _warnings(window) == []
@@ -384,9 +383,43 @@ def test_known_lcsc_missing_from_available_catalog_still_assigns(
 
     act(action, window, mainwindow, monkeypatch, "C200")
 
-    assert window.store.get_part("R1")["lcsc"] == "C200"
-    assert window.store.get_part("R1")["stock"] is None
+    assert window.store.read_all()[0]["lcsc"] == "C200"
+    assert window.store.read_all()[0]["stock"] is None
     assert window.partlist_data_model.data[0][3] == "C200"
     assert window.partlist_data_model.data[0][5] == ""
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
+    assert _warnings(window) == []
+
+
+@pytest.mark.parametrize("action", ["paste", "apply", "picker", "clear"])
+def test_corrupt_project_database_does_not_disable_board_assignments(
+    configuration_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    """Project counters may fail independently of catalog-backed board editing."""
+    window = configuration_window(catalog_lcsc="C200")
+    window.library.save_part_preferences([("R_0603", "10k", "C200")])
+    project_database = Path(window.store.dbfile)
+    project_database.parent.mkdir(parents=True, exist_ok=True)
+    original = b"corrupt project database kept untouched"
+    project_database.write_bytes(original)
+    window.init_store()
+    assert window.store is not None
+    assert not window._project_storage_unavailable
+    _select_row(window)
+    window.logger.reset_mock()
+
+    act(action, window, mainwindow, monkeypatch, "C200")
+
+    expected = "" if action == "clear" else "C200"
+    assert (
+        window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == expected
+    )
+    assert window.store.read_all()[0]["lcsc"] == expected
+    assert window.partlist_data_model.data[0][3] == expected
+    assert project_database.read_bytes() == original
+    window.footprint_list.Enable.assert_called_with(True)
+    window.right_toolbar.Enable.assert_called_with(True)
     assert _warnings(window) == []

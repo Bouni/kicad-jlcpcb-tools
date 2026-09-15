@@ -13,10 +13,11 @@ class DataViewModel:
 
     def __init__(self) -> None:
         self.notifications: list[tuple[str, tuple[Any, ...]]] = []
+        self.mapper: dict[int, Any] = {}
 
-    @staticmethod
-    def ObjectToItem(value: Any) -> Any:
-        """Represent an item with its underlying row."""
+    def ObjectToItem(self, value: Any) -> Any:
+        """Retain wx's strong row mapping while representing items by their rows."""
+        self.mapper[id(value)] = value
         return value
 
     @staticmethod

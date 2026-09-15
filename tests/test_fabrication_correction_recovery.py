@@ -19,7 +19,7 @@ from tests.correction_test_support import (
     raw_rows,
     seed_raw,
 )
-from tests.wx_harness import load_correction_modules, module
+from tests.wx_harness import load_correction_modules
 
 
 @dataclass
@@ -47,11 +47,6 @@ def modules() -> Iterator[SimpleNamespace]:
         package=package,
         pcbnew=pcbnew,
         names=("fabrication",),
-        replacements={
-            f"{package}.footprint_helpers": module(
-                f"{package}.footprint_helpers", get_is_dnp=lambda _footprint: False
-            )
-        },
     ) as loaded:
         yield loaded
 
@@ -77,7 +72,7 @@ def make_footprint(
     )
 
 
-def make_fabrication(modules, library, tmp_path):
+def make_fabrication(modules: SimpleNamespace, library: Any, tmp_path: Path) -> Any:
     """Create a real generator for one top and one bottom footprint."""
     footprints = [
         make_footprint("U1", 0, 0, Point(10, 20)),
@@ -103,7 +98,9 @@ def make_fabrication(modules, library, tmp_path):
     parent = SimpleNamespace(
         library=library,
         settings={},
-        store=SimpleNamespace(get_part=parts.get),
+        store=SimpleNamespace(
+            read_all=lambda: [parts[fp.GetReference()] for fp in board.Footprints()]
+        ),
     )
     return modules.fabrication.Fabrication(parent, board)
 
@@ -169,15 +166,13 @@ def test_cpl_skipped_footprints_do_not_resolve_corrections(
             "value": "Device",
             "footprint": "Package:Device",
             "exclude_from_pos": int(index == 4),
+            "is_dnp": index == 2,
             "lcsc": "" if index == 5 else "C123",
         }
         for index in (1, 2, 4, 5, 6)
     }
-    fabrication.parent.store.get_part = parts.get
+    fabrication.parent.store.read_all = lambda: list(parts.values())
     fabrication.parent.settings = {"gerber": {"lcsc_bom_cpl": False}}
-    monkeypatch.setattr(
-        modules.fabrication, "get_is_dnp", lambda fp: fp.GetReference() == "U2"
-    )
     matcher = MagicMock(wraps=fabrication._correction_for_footprint)
     monkeypatch.setattr(fabrication, "_correction_for_footprint", matcher)
 

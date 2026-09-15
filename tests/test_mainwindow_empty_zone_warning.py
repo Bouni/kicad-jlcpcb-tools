@@ -1,7 +1,7 @@
 """Tests for empty-zone warnings during fabrication-data generation."""
 
-from types import SimpleNamespace
-from typing import Optional
+from types import MethodType, ModuleType, SimpleNamespace
+from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,6 +32,8 @@ def mainwindow_module():
 def _make_window(
     empty_pours: list[str],
     fill_zones: Optional[bool] = None,  # noqa: UP045
+    *,
+    mainwindow: ModuleType,
 ) -> tuple[SimpleNamespace, list[str]]:
     """Build the smallest object needed by generate_fabrication_data()."""
     fabrication = SimpleNamespace(
@@ -48,8 +50,12 @@ def _make_window(
     if fill_zones is not None:
         settings["gerber"]["fill_zones"] = fill_zones
 
+    board = SimpleNamespace(
+        GetFileName=lambda: "board.kicad_pcb", GetFootprints=lambda: []
+    )
     window = SimpleNamespace(
         _project_storage_unavailable=False,
+        pcbnew=SimpleNamespace(GetBoard=lambda: board),
         generate_button=MagicMock(),
         reset_gauge=MagicMock(),
         settings=settings,
@@ -66,11 +72,15 @@ def _make_window(
             read_correction_data=MagicMock(return_value=SimpleNamespace(corrections=()))
         ),
     )
+    window._get_current_board = MethodType(
+        mainwindow.JLCPCBTools._get_current_board, window
+    )
     window.read_valid_corrections_for_generation = (
         lambda: window.library.read_correction_data().corrections
     )
     window.layer_selection.GetSelection.return_value = 0
     window.layer_selection.GetString.return_value = "Auto"
+    window.store.read_all.return_value = []
     window.store.get_generation_count.return_value = 0
     window.store.increment_generation_count.return_value = 1
 
@@ -102,10 +112,12 @@ def _warning_text(logger):
     return "\n".join(messages)
 
 
-def test_no_empty_zones_skips_warning_and_completes_generation(mainwindow_module):
+def test_no_empty_zones_skips_warning_and_completes_generation(
+    mainwindow_module: tuple[ModuleType, Any],
+) -> None:
     """A board without empty fills proceeds without creating a dialog."""
     mainwindow, wx = mainwindow_module
-    window, steps = _make_window([])
+    window, steps = _make_window([], mainwindow=mainwindow)
 
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
@@ -126,14 +138,16 @@ def test_no_empty_zones_skips_warning_and_completes_generation(mainwindow_module
     ],
 )
 def test_continue_logs_all_zones_and_uses_refill_aware_wording(
-    mainwindow_module,
-    fill_zones,
-    expected_step,
-):
+    mainwindow_module: tuple[ModuleType, Any],
+    fill_zones: Optional[bool],
+    expected_step: str,
+) -> None:
     """The warning is neutral, complete, and records the continue decision."""
     mainwindow, wx = mainwindow_module
     empty_pours = ["GND on F.Cu", "VCC on In1.Cu"]
-    window, steps = _make_window(empty_pours, fill_zones=fill_zones)
+    window, steps = _make_window(
+        empty_pours, fill_zones=fill_zones, mainwindow=mainwindow
+    )
     dialog = _set_dialog_result(wx, wx.ID_YES)
 
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
@@ -157,13 +171,13 @@ def test_continue_logs_all_zones_and_uses_refill_aware_wording(
 
 @pytest.mark.parametrize("result_name", ["ID_NO", "ID_CANCEL", "unexpected"])
 def test_non_affirmative_dialog_results_stop_export(
-    mainwindow_module,
-    result_name,
-):
+    mainwindow_module: tuple[ModuleType, Any],
+    result_name: str,
+) -> None:
     """Cancel, close, and unexpected modal results all fail closed."""
     mainwindow, wx = mainwindow_module
     result = 999 if result_name == "unexpected" else getattr(wx, result_name)
-    window, _ = _make_window(["GND on F.Cu"])
+    window, _ = _make_window(["GND on F.Cu"], mainwindow=mainwindow)
     dialog = _set_dialog_result(wx, result)
 
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
@@ -182,12 +196,12 @@ def test_non_affirmative_dialog_results_stop_export(
 
 @pytest.mark.parametrize("failing_method", ["SetYesNoLabels", "ShowModal"])
 def test_dialog_is_destroyed_when_setup_or_display_raises(
-    mainwindow_module,
-    failing_method,
-):
+    mainwindow_module: tuple[ModuleType, Any],
+    failing_method: str,
+) -> None:
     """A dialog exception still releases it and restores UI state."""
     mainwindow, wx = mainwindow_module
-    window, _ = _make_window(["GND on F.Cu"])
+    window, _ = _make_window(["GND on F.Cu"], mainwindow=mainwindow)
     dialog = MagicMock()
     getattr(dialog, failing_method).side_effect = RuntimeError("dialog failed")
     wx.MessageDialog.return_value = dialog

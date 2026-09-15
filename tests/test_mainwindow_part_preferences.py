@@ -1,4 +1,4 @@
-"""Part preference lifecycle with real project and shared SQLite persistence."""
+"""Part preference lifecycle with stateful boards and real shared SQLite storage."""
 
 from collections.abc import Callable
 import sqlite3
@@ -29,7 +29,7 @@ def test_remember_part_preferences_can_be_disabled_without_blocking_assignment(
 
     act(action, window, mainwindow, monkeypatch, "C200")
 
-    assert window.store.get_part("R1")["lcsc"] == "C200"
+    assert window.store.read_all()[0]["lcsc"] == "C200"
     window.library.save_part_preferences.assert_not_called()
 
 
@@ -80,18 +80,18 @@ def test_part_preferences_fill_only_eligible_blank_parts_before_initial_populati
     window.recompute_bom_estimate.assert_called_once_with()
 
 
-def test_part_preferences_respect_existing_project_assignment(
+def test_part_preferences_respect_existing_board_assignment(
     make_window: Callable[..., Any],
 ) -> None:
-    """A saved project choice must take precedence over shared part preferences."""
+    """A live board choice must take precedence over shared part preferences."""
     window = make_window(
         footprints=[Footprint(lcsc="")], part_preferences={("R_0603", "10k"): "C200"}
     )
-    window.store.set_lcsc("R1", "C300")
+    window.pcbnew.GetBoard().FindFootprintByReference("R1").SetField("LCSC", "C300")
 
     window.init_store()
 
-    assert window.store.get_part("R1")["lcsc"] == "C300"
+    assert window.store.read_all()[0]["lcsc"] == "C300"
     window.library.get_part_preference.assert_not_called()
 
 
@@ -104,17 +104,17 @@ def test_part_preferences_wait_for_initialized_library_and_apply_once_per_open(
     )
     window.library.state = mainwindow.LibraryState.UPDATE_NEEDED
     window.init_store()
-    assert window.store.get_part("R1")["lcsc"] == ""
+    assert window.store.read_all()[0]["lcsc"] == ""
     window.library.get_part_preference.assert_not_called()
 
     window.library.state = mainwindow.LibraryState.INITIALIZED
     window.init_store()
-    assert window.store.get_part("R1")["lcsc"] == "C200"
+    assert window.store.read_all()[0]["lcsc"] == "C200"
     window.remove_lcsc_number()
     mainwindow.JLCPCBTools.populate_footprint_list(window)
     window.init_store()
 
-    assert window.store.get_part("R1")["lcsc"] == ""
+    assert window.store.read_all()[0]["lcsc"] == ""
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == ""
     window.library.get_part_preference.assert_called_once_with("R_0603", "10k")
     window.library.save_part_preferences.assert_not_called()
@@ -129,7 +129,7 @@ def test_part_preferences_wait_for_initialized_library_and_apply_once_per_open(
 
     reopened = make_window(board=window.pcbnew.GetBoard())
     reopened.init_store()
-    assert reopened.store.get_part("R1")["lcsc"] == "C200"
+    assert reopened.store.read_all()[0]["lcsc"] == "C200"
 
 
 def test_manual_part_preference_actions_work_with_automatic_settings_disabled(
@@ -150,22 +150,68 @@ def test_manual_part_preference_actions_work_with_automatic_settings_disabled(
     )
     window.remove_lcsc_number()
     window.init_store()
-    assert window.store.get_part("R1")["lcsc"] == ""
+    assert window.store.read_all()[0]["lcsc"] == ""
     window.library.get_part_preference.assert_not_called()
 
     window.apply_selected_part_preferences()
 
-    assert window.store.get_part("R1")["lcsc"] == "C100"
+    assert window.store.read_all()[0]["lcsc"] == "C100"
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C100"
     assert window.library.save_part_preferences.call_args_list == [
         call([("R_0603", "10k", "C100")])
     ]
 
 
-def test_part_preferences_skip_footprint_deleted_after_board_reconciliation(
+@pytest.mark.parametrize("autofill", [False, True])
+@pytest.mark.parametrize("state", ["removed", "blank", "replaced"])
+def test_reopening_after_external_update_cannot_recover_per_reference_preferences(
+    make_window: Callable[..., Any], autofill: bool, state: str
+) -> None:
+    """Post-update blanks can share one preference, but a replacement stays authoritative."""
+    window = make_window(
+        footprints=[Footprint("R1", lcsc=""), Footprint("R2", lcsc="")]
+    )
+    for reference, code in [("R1", "C100"), ("R2", "C200")]:
+        window.assign_parts(
+            SimpleNamespace(references=[reference], lcsc=code, type="Basic", stock=27)
+        )
+    assert [part["lcsc"] for part in window.store.read_all()] == ["C100", "C200"]
+    assert window.library.get_all_part_preferences() == [["R_0603", "10k", "C200"]]
+    board = window.pcbnew.GetBoard()
+    for footprint in board.GetFootprints():
+        footprint.fields.pop("LCSC")
+        if state != "removed":
+            footprint.SetField("LCSC", "C300" if state == "replaced" else "")
+    external_code = "C300" if state == "replaced" else ""
+    assert [part["lcsc"] for part in window.store.read_all()] == [external_code] * 2
+
+    reopened = make_window(
+        board=board,
+        settings={
+            "part_preferences": {"fill_empty_lcsc_assignments_on_open": autofill}
+        },
+    )
+    assert [part["lcsc"] for part in reopened.store.read_all()] == [external_code] * 2
+    reopened.init_store()
+
+    expected = external_code or ("C200" if autofill else "")
+    assert [part["lcsc"] for part in reopened.store.read_all()] == [expected] * 2
+    assert [row["lcsc"] for row in reopened.test_rows.values()] == [expected] * 2
+    assert [
+        {field.GetName(): field.GetText() for field in fp.GetFields()}
+        for fp in board.GetFootprints()
+    ] == ([{}] * 2 if state == "removed" and not autofill else [{"LCSC": expected}] * 2)
+    if not autofill or external_code:
+        reopened.library.get_part_preference.assert_not_called()
+    else:
+        reopened.library.get_part_preference.assert_called_once_with("R_0603", "10k")
+    reopened.library.save_part_preferences.assert_not_called()
+
+
+def test_part_preferences_skip_footprint_deleted_after_board_snapshot(
     make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A deletion between board sync and part preference lookup must not interrupt opening."""
+    """A deletion between board reading and preference lookup must not interrupt opening."""
     window = make_window(
         footprints=[Footprint(lcsc=""), Footprint("R2", lcsc="")],
         part_preferences={("R_0603", "10k"): "C200"},
@@ -179,8 +225,10 @@ def test_part_preferences_skip_footprint_deleted_after_board_reconciliation(
 
     window.init_store()
 
-    assert window.store.get_part("R1")["lcsc"] == ""
-    assert window.store.get_part("R2")["lcsc"] == "C200"
+    assert {part["reference"]: part["lcsc"] for part in window.store.read_all()} == {
+        "R1": "",
+        "R2": "C200",
+    }
 
 
 def test_part_preference_database_failure_still_opens_project(
@@ -210,7 +258,7 @@ def test_assignment_with_incomplete_part_preference_key_still_updates_project(
         SimpleNamespace(references=["R1"], lcsc="C200", type="Basic", stock=27)
     )
 
-    assert window.store.get_part("R1")["lcsc"] == "C200"
+    assert window.store.read_all()[0]["lcsc"] == "C200"
     window.library.save_part_preferences.assert_not_called()
 
 
@@ -272,7 +320,7 @@ def test_saved_preferences_are_validated_before_application(
         window.init_store()
     else:
         window.apply_selected_part_preferences()
-    assert window.store.get_part("R1")["lcsc"] == expected
+    assert window.store.read_all()[0]["lcsc"] == expected
     assert window.test_rows["R1"]["lcsc"] == expected
     assert (
         window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == expected
@@ -304,4 +352,4 @@ def test_supplier_metadata_skip_is_reported_only_for_a_usable_preference(
             and "JLC Rotation" in messages[0]
             and "90" in messages[0]
         )
-    assert window.store.get_part("R1")["lcsc"] == ""
+    assert window.store.read_all()[0]["lcsc"] == ""
