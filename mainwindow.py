@@ -31,7 +31,7 @@ from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .core.settings_defaults import resolve_settings
 from .correction_data import Correction, match_correction
 from .corrections import CorrectionManagerDialog
-from .datamodel import PartListDataModel, STANDARD_ONLY_TOOLTIP
+from .datamodel import PartListDataModel
 from .dataview_highlight import (
     HighlightedTextRenderer,
     decode_highlighted_value,
@@ -98,7 +98,7 @@ from .window_layout import get_column_widths, restore_column_widths
 FOOTPRINT_COLUMN_KEYS = {
     index: key
     for key, index in PartListDataModel.columns.items()
-    if key not in {"TRAILING_SPACER_COL", "STANDARD_ONLY_COL"}
+    if key not in {"TRAILING_SPACER_COL", "STANDARD_ONLY_COL", "ENRICH_COL"}
 }
 
 if TYPE_CHECKING:
@@ -212,11 +212,9 @@ class JLCPCBTools(wx.Frame):
         self._why_standard_dialog = None
         self.bom_estimator_decision = None
         self.pending_assembly_enrichment = set()
-        # Monotonic counter incremented each time assembly enrichment is started.
-        # Worker threads capture the value at spawn; progress events with a stale
-        # generation are discarded by on_assembly_enrichment_progress so that a
-        # mid-flight reassignment of a reference cannot have stale metadata
-        # written back to it.
+        # Overlapping workers share a generation until their pending work drains.
+        # Storage invalidation advances it to reject old events; individual
+        # reassignments are guarded by each result's expected LCSC identifier.
         self.assembly_enrichment_generation = 0
         # Latch used by on_bom_data_changed to coalesce a burst of mutations
         # into a single recompute. SQLite commits are synchronous, so async
@@ -509,7 +507,7 @@ class JLCPCBTools(wx.Frame):
         type = self.footprint_list.AppendTextColumn(
             "Type", 4, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
-        self.footprint_list.AppendToggleColumn(
+        self.footprint_list.AppendTextColumn(
             "Std",
             PartListDataModel.columns["STANDARD_ONLY_COL"],
             width=HighResWxSize(self.window, wx.Size(36, -1)).GetWidth(),
@@ -550,13 +548,6 @@ class JLCPCBTools(wx.Frame):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
-        enrichment = self.footprint_list.AppendTextColumn(
-            "Enrichment",
-            PartListDataModel.columns["ENRICH_COL"],
-            width=110,
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
-        )
         trailing_spacer = self.footprint_list.AppendTextColumn(
             " ",
             PartListDataModel.columns["TRAILING_SPACER_COL"],
@@ -575,7 +566,6 @@ class JLCPCBTools(wx.Frame):
         bom.SetSortable(True)
         pos.SetSortable(False)
         dnp.SetSortable(True)
-        enrichment.SetSortable(True)
         correction.SetSortable(True)
         side.SetSortable(True)
         params.SetSortable(True)
@@ -726,15 +716,15 @@ class JLCPCBTools(wx.Frame):
             simplify_stock=self.settings.get("general", {}).get("simplify_stock", True),
         )
         self.footprint_list.AssociateModel(self.partlist_data_model)
-        self._standard_only_tooltip_active = False
+        self._assembly_tooltip_text = ""
         self._footprint_list_main_window = (
             self.footprint_list.GetMainWindow() or self.footprint_list
         )
         self._type_cell_tooltip = TypeCellTooltip(
             self.footprint_list,
             PartListDataModel.columns["TYPE_COL"],
-            self.partlist_data_model.is_standard_only,
-            self._set_standard_only_tooltip,
+            self.partlist_data_model.get_assembly_tooltip,
+            self._set_assembly_tooltip,
         )
         self.bom_estimator_controller = BomEstimatorController(
             read_parts=lambda: (
@@ -787,18 +777,21 @@ class JLCPCBTools(wx.Frame):
         """Update computed Standard-only cells and refresh the current row help."""
         self.partlist_data_model.set_standard_only_refs(refs)
         self.footprint_list.Refresh()
-        self._type_cell_tooltip.refresh()
+        self._refresh_assembly_tooltip()
 
-    def _set_standard_only_tooltip(self, active: bool) -> None:
-        """Show or clear the Standard-only row tooltip without flicker."""
-        active = bool(active)
-        if active == self._standard_only_tooltip_active:
+    def _refresh_assembly_tooltip(self) -> None:
+        """Re-hit-test row help after metadata changes without retaining stale items."""
+        tooltip = getattr(self, "_type_cell_tooltip", None)
+        if tooltip is not None:
+            tooltip.refresh()
+
+    def _set_assembly_tooltip(self, text: str) -> None:
+        """Replace changed row help while leaving an unchanged tooltip visible."""
+        if text == self._assembly_tooltip_text:
             return
-        self._standard_only_tooltip_active = active
-        if active:
-            self._footprint_list_main_window.SetToolTip(
-                wx.ToolTip(STANDARD_ONLY_TOOLTIP)
-            )
+        self._assembly_tooltip_text = text
+        if text:
+            self._footprint_list_main_window.SetToolTip(wx.ToolTip(text))
         else:
             self._footprint_list_main_window.UnsetToolTip()
 
@@ -1470,24 +1463,29 @@ class JLCPCBTools(wx.Frame):
         except sqlite3.Error as error:
             self.logger.warning("Unable to start assembly enrichment: %s", error)
             return
-        targets = {
+        if not targets:
+            return
+        new_targets = {
             lcsc: refs
             for lcsc, refs in targets.items()
             if lcsc not in self.pending_assembly_enrichment
         }
-        if not targets:
-            return
 
-        self.pending_assembly_enrichment.update(targets.keys())
+        if not self.pending_assembly_enrichment:
+            self.assembly_enrichment_generation += 1
+        self.pending_assembly_enrichment.update(new_targets)
+        # Newly assigned references also join requests already in flight.
         for refs in targets.values():
             for reference in refs:
                 self.partlist_data_model.set_enrichment_status(reference, "Pending")
+        self._refresh_assembly_tooltip()
+        if not new_targets:
+            return
 
-        self.assembly_enrichment_generation += 1
         generation = self.assembly_enrichment_generation
         Thread(
             target=self._assembly_enrichment_worker,
-            args=(targets, generation),
+            args=(new_targets, generation),
             daemon=True,
         ).start()
 
@@ -1513,7 +1511,7 @@ class JLCPCBTools(wx.Frame):
             AssemblyEnrichmentCompletedEvent(generation=generation),
         )
 
-    def on_assembly_enrichment_progress(self, e):
+    def on_assembly_enrichment_progress(self, e: Any) -> None:
         """Persist one enrichment result and update row-level feedback."""
         # Drop events from superseded enrichment runs. A reassignment between
         # spawn and event delivery would otherwise let stale metadata for the
@@ -1522,7 +1520,10 @@ class JLCPCBTools(wx.Frame):
         if generation is not None and generation != self.assembly_enrichment_generation:
             return
         lcsc = getattr(e, "lcsc", "")
-        refs = getattr(e, "refs", [])
+        # Resolve new subscribers at delivery time, including rows hidden by a
+        # filter. Every write still checks that its assignment matches this LCSC.
+        current_targets = self.store.get_assembly_enrichment_targets().get(lcsc, ())
+        refs = tuple(dict.fromkeys([*getattr(e, "refs", []), *current_targets]))
         metadata = getattr(e, "metadata", {}) or {}
 
         assembly_process = metadata.get("assembly_process", "")
@@ -1536,17 +1537,10 @@ class JLCPCBTools(wx.Frame):
             )
             if updated:
                 current_part = self.store.get_part(reference) or {}
-                status = (
-                    "Done"
-                    if classify_component_product_type(
-                        current_part.get("component_product_type")
-                    )
-                    is not None
-                    else "Class missing"
-                )
-                self.partlist_data_model.set_enrichment_status(reference, status)
+                self.partlist_data_model.set_assembly_metadata(reference, current_part)
 
         self.pending_assembly_enrichment.discard(lcsc)
+        self._refresh_assembly_tooltip()
 
     def on_assembly_enrichment_completed(self, e):
         """Run a single BOM recompute after a worker finishes its batch.
@@ -1663,6 +1657,7 @@ class JLCPCBTools(wx.Frame):
             # don't show the part if hide POS is set
             if self.hide_pos_parts and part["exclude_from_pos"]:
                 continue
+            enrichment_status = self._get_enrichment_status_label(part)
             self.partlist_data_model.AddEntry(
                 [
                     part["reference"],
@@ -1681,9 +1676,14 @@ class JLCPCBTools(wx.Frame):
                     ),
                     str(fp.GetLayer()),
                     params_for_part(details),
-                    self._get_enrichment_status_label(part),  # enrichment
+                    enrichment_status,
                     "",  # bom price label
                 ]
+            )
+            self.partlist_data_model.set_assembly_metadata(
+                part["reference"],
+                part,
+                pending=enrichment_status == "Pending",
             )
         wx.PostEvent(self, BomDataChangedEvent(source="populate_footprint_list"))
 

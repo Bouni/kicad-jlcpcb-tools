@@ -236,7 +236,7 @@ def build_assembly_mode_reasons(
             "Assembly classification missing — "
             + _counted_heading(missing_count, "part", "parts"),
             "No Economic/Standard classification was returned for these LCSC parts.",
-            "Check the LCSC assignments and Enrichment status.",
+            "Check the LCSC assignments and hover over the part's Std cell for assembly information.",
         )
 
     if not reasons:
