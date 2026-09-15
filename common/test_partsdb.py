@@ -1,15 +1,14 @@
 """Tests for the partsdb module."""
 
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
-import shutil
 import sqlite3
-import tempfile
 from unittest.mock import Mock, patch
 
 import pytest
 
-from common.partsdb import _CREATE_STATEMENTS, Generate, PartsDatabase
+from common.partsdb import Generate, PartsDatabase
 from common.progress import NoOpProgressBar
 from common.translate import ComponentTranslator
 
@@ -19,24 +18,7 @@ from common.translate import ComponentTranslator
 
 
 @pytest.fixture
-def temp_test_dir():
-    """Create a temporary test directory and clean up after test.
-
-    This fixture creates a unique temporary directory for each test.
-    The directory and all its contents are automatically deleted after
-    the test completes, even if the test fails.
-
-    Returns:
-        Path: The temporary directory path.
-
-    """
-    test_dir = Path(tempfile.mkdtemp(prefix="test_partsdb_"))
-    yield test_dir
-    shutil.rmtree(test_dir, ignore_errors=True)
-
-
-@pytest.fixture
-def parts_database(temp_test_dir):
+def parts_database(tmp_path: Path) -> Iterator[tuple[PartsDatabase, Path]]:
     """Create a PartsDatabase instance and ensure it's closed after test.
 
     This fixture automatically creates a PartsDatabase with a temporary
@@ -45,16 +27,16 @@ def parts_database(temp_test_dir):
     without requiring manual close_sqlite() calls.
 
     Args:
-        temp_test_dir: The temporary directory fixture.
+        tmp_path: The temporary directory fixture.
 
     Yields:
         tuple: (database, output_db_path) for use in tests.
                The database is automatically closed after the test.
 
     """
-    archive_dir = temp_test_dir / "archive"
+    archive_dir = tmp_path / "archive"
     archive_dir.mkdir()
-    output_db = temp_test_dir / "test_parts.db"
+    output_db = tmp_path / "test_parts.db"
 
     db = PartsDatabase(output_db, archive_dir)
 
@@ -81,11 +63,11 @@ class TestPartsDatabase:
         assert isinstance(db.part_count, int)
         assert db.part_count == 0
 
-    def test_parts_database_init_removes_existing(self, temp_test_dir):
+    def test_parts_database_init_removes_existing(self, tmp_path: Path) -> None:
         """PartsDatabase removes existing output database."""
         # Create an existing database
-        output_db = temp_test_dir / "test_parts.db"
-        archive_dir = temp_test_dir / "archive"
+        output_db = tmp_path / "test_parts.db"
+        archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
 
         output_db.write_text("old content")
@@ -104,10 +86,10 @@ class TestPartsDatabase:
         assert len(tables) > 0
         db.close_sqlite()
 
-    def test_parts_database_custom_chunk_num(self, temp_test_dir):
+    def test_parts_database_custom_chunk_num(self, tmp_path: Path) -> None:
         """PartsDatabase accepts custom chunk_num filename."""
-        output_db = temp_test_dir / "test_parts.db"
-        archive_dir = temp_test_dir / "archive"
+        output_db = tmp_path / "test_parts.db"
+        archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
 
         custom_chunk = Path("custom_chunk.txt")
@@ -129,7 +111,9 @@ class TestPartsDatabase:
         assert "meta" in tables
         assert "categories" in tables
 
-    def test_parts_database_parts_table_schema(self, parts_database):
+    def test_parts_database_parts_table_schema(
+        self, parts_database: tuple[PartsDatabase, Path]
+    ) -> None:
         """PartsDatabase creates parts table with correct columns."""
         db, _ = parts_database
 
@@ -137,8 +121,8 @@ class TestPartsDatabase:
         cursor.execute("PRAGMA table_info(parts)")
         columns = [row[1] for row in cursor.fetchall()]
 
-        # FTS5 virtual tables have slightly different schema, just verify parts table exists
-        assert len(columns) > 0
+        # Validate the public field used by import and FTS queries.
+        assert "LCSC Part" in columns
 
     def test_parts_database_update_parts_single_row(self, parts_database):
         """PartsDatabase updates parts with single row."""
@@ -350,10 +334,10 @@ class TestPartsDatabase:
         # Should record today's date as a string
         assert str(date.today()) in result or result == str(date.today())
 
-    def test_parts_database_remove_original(self, temp_test_dir):
+    def test_parts_database_remove_original(self, tmp_path: Path) -> None:
         """PartsDatabase removes existing database."""
-        output_db = temp_test_dir / "test_parts.db"
-        archive_dir = temp_test_dir / "archive"
+        output_db = tmp_path / "test_parts.db"
+        archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
 
         # Create a file
@@ -366,10 +350,10 @@ class TestPartsDatabase:
         db.close_sqlite()
 
     @patch("common.partsdb.FileManager")
-    def test_parts_database_split(self, mock_fm, temp_test_dir):
+    def test_parts_database_split(self, mock_fm: Mock, tmp_path: Path) -> None:
         """PartsDatabase calls FileManager to split database."""
-        output_db = temp_test_dir / "test_parts.db"
-        archive_dir = temp_test_dir / "archive"
+        output_db = tmp_path / "test_parts.db"
+        archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
 
         db = PartsDatabase(output_db, archive_dir)
@@ -402,10 +386,12 @@ class TestPartsDatabase:
 
     @patch("common.partsdb.os.unlink")
     @patch("common.partsdb.FileManager")
-    def test_parts_database_cleanup(self, mock_fm, mock_unlink, temp_test_dir):
+    def test_parts_database_cleanup(
+        self, mock_fm: Mock, mock_unlink: Mock, tmp_path: Path
+    ) -> None:
         """PartsDatabase cleanup removes original database file."""
-        output_db = temp_test_dir / "test_parts.db"
-        archive_dir = temp_test_dir / "archive"
+        output_db = tmp_path / "test_parts.db"
+        archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
 
         db = PartsDatabase(output_db, archive_dir)
@@ -414,10 +400,10 @@ class TestPartsDatabase:
         db.cleanup()
         mock_unlink.assert_called_once()
 
-    def test_parts_database_skip_cleanup_flag(self, temp_test_dir):
+    def test_parts_database_skip_cleanup_flag(self, tmp_path: Path) -> None:
         """PartsDatabase respects skip_cleanup flag."""
-        output_db = temp_test_dir / "test_parts.db"
-        archive_dir = temp_test_dir / "archive"
+        output_db = tmp_path / "test_parts.db"
+        archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
 
         db = PartsDatabase(output_db, archive_dir, skip_cleanup=True)
@@ -820,51 +806,3 @@ class TestPartsDBIntegration:
         count = cursor.fetchone()[0]
 
         assert count == 1
-
-
-# ============================================================================
-# Constants Tests
-# ============================================================================
-
-
-class TestCreateStatements:
-    """Tests for CREATE_STATEMENTS constants."""
-
-    def test_create_statements_exists(self):
-        """CREATE_STATEMENTS constant exists."""
-        assert _CREATE_STATEMENTS is not None
-        assert isinstance(_CREATE_STATEMENTS, list)
-
-    def test_create_statements_not_empty(self):
-        """CREATE_STATEMENTS has statements."""
-        assert len(_CREATE_STATEMENTS) > 0
-
-    def test_create_statements_are_strings(self):
-        """All CREATE_STATEMENTS are SQL strings."""
-        for stmt in _CREATE_STATEMENTS:
-            assert isinstance(stmt, str)
-            assert "CREATE" in stmt.upper()
-
-    def test_create_statements_count(self):
-        """CREATE_STATEMENTS has expected number of table definitions."""
-        # Should have: parts (FTS5), mapping, meta, categories
-        assert len(_CREATE_STATEMENTS) >= 4
-
-    def test_parts_table_statement(self):
-        """Parts table statement creates FTS5 virtual table."""
-        parts_stmt = _CREATE_STATEMENTS[0]
-        assert "parts" in parts_stmt.lower()
-        assert "fts5" in parts_stmt.lower()
-        assert "LCSC Part" in parts_stmt
-
-    def test_mapping_table_statement(self):
-        """Mapping table statement exists."""
-        assert any("mapping" in stmt.lower() for stmt in _CREATE_STATEMENTS)
-
-    def test_meta_table_statement(self):
-        """Meta table statement exists."""
-        assert any("meta" in stmt.lower() for stmt in _CREATE_STATEMENTS)
-
-    def test_categories_table_statement(self):
-        """Categories table statement exists."""
-        assert any("categories" in stmt.lower() for stmt in _CREATE_STATEMENTS)

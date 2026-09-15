@@ -105,29 +105,22 @@ def test_settings_the_defaults_no_longer_mention_are_kept(tmp_path):
     assert settings["experiment"] == {"enabled": True}
 
 
-def test_a_damaged_settings_file_falls_back_to_the_defaults(tmp_path):
-    """Corrupt JSON must not stop the plugin from opening."""
-    plugin_path = plugin_dir(tmp_path, {"gerber": {"tented_vias": True}})
-    (plugin_path / SETTINGS_FILENAME).write_text("{not json", encoding="utf-8")
-
+def test_damaged_settings_keep_recoverable_bytes_and_load_defaults(
+    tmp_path: Path,
+) -> None:
+    """Corrupt JSON falls back to defaults while retaining the user's original file."""
+    defaults = {"gerber": {"tented_vias": True}}
+    plugin_path = plugin_dir(tmp_path, defaults)
+    original = '{"gerber": {"tented'
+    path = plugin_path / SETTINGS_FILENAME
+    path.write_text(original, encoding="utf-8")
     settings, needs_write = resolve_settings(plugin_path)
-
-    assert settings == {"gerber": {"tented_vias": True}}
+    assert settings == defaults
     assert needs_write
-
-
-def test_a_damaged_settings_file_is_kept_rather_than_overwritten(tmp_path):
-    """The unreadable file moves aside so the user can still recover from it."""
-    plugin_path = plugin_dir(tmp_path, {"gerber": {"tented_vias": True}})
-    (plugin_path / SETTINGS_FILENAME).write_text(
-        '{"gerber": {"tented', encoding="utf-8"
-    )
-
-    resolve_settings(plugin_path)
-
-    assert not (plugin_path / SETTINGS_FILENAME).exists()
-    damaged = plugin_path / (SETTINGS_FILENAME + ".damaged")
-    assert damaged.read_text(encoding="utf-8") == '{"gerber": {"tented'
+    assert not path.exists()
+    assert (plugin_path / (SETTINGS_FILENAME + ".damaged")).read_text(
+        encoding="utf-8"
+    ) == original
 
 
 def test_a_damaged_file_that_cannot_be_moved_aside_is_not_overwritten(tmp_path):

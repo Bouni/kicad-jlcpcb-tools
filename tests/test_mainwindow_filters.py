@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from copy import deepcopy
+from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -50,9 +51,14 @@ def _toolbar(*_args: Any, **_kwargs: Any) -> MagicMock:
 
 @pytest.fixture(params=[True, False], ids=["reset-notifies-selection", "silent-reset"])
 def open_window(
-    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
 ) -> Iterator[Callable[..., Any]]:
     """Construct the window with both native model-reset notification behaviors."""
+    board_path = tmp_path / "filters.kicad_pcb"
+    board_path.write_text("(kicad_pcb)\n", encoding="utf-8")
+    monkeypatch.setattr(layout_support, "_board_path", board_path)
     layout_support._after.clear()
     bind_window = mainwindow.JLCPCBTools.Bind
 

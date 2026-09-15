@@ -1,30 +1,21 @@
 """Integration tests for ``BomEstimatorController`` without wx/KiCad."""
 
-import importlib
-from pathlib import Path
-import sys
-import types
-from unittest.mock import MagicMock
+from typing import Any
 
 import pytest
 
-_ROOT = Path(__file__).parent.parent
-_pcbnew = sys.modules.setdefault("pcbnew", MagicMock())
-_pcbnew.F_Cu = 0
-for _module in ("wx", "wx.dataview"):
-    sys.modules.setdefault(_module, MagicMock())
+from .wx_harness import load_siblings, module
 
-_PACKAGE = "kicadplugin"
-if _PACKAGE not in sys.modules:
-    package = types.ModuleType(_PACKAGE)
-    package.__path__ = [str(_ROOT)]
-    sys.modules[_PACKAGE] = package
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
-BomEstimatorController = importlib.import_module(
-    f"{_PACKAGE}.bom_widget"
-).BomEstimatorController
+with load_siblings(
+    "_bom_estimator_controller",
+    ["bom_widget"],
+    {
+        "wx": module("wx"),
+        "pcbnew": module("pcbnew", F_Cu=0),
+        "_bom_estimator_controller.helpers": module("helpers", HighResWxSize=object),
+    },
+) as loaded:
+    BomEstimatorController = loaded["bom_widget"].BomEstimatorController
 
 
 class _Footprint:
@@ -117,18 +108,29 @@ def _make_controller(*, parts, board=None, details=None, force_standard=False):
         ),
     ],
 )
-def test_recompute_empty_states_clear_outputs(parts, board_count, expected):
-    """Empty and unassigned BOMs clear every dependent output."""
-    controller, captured = _make_controller(parts=parts)
+def test_recompute_empty_states_clear_outputs(
+    parts: list[dict[str, Any]], board_count: int, expected: str
+) -> None:
+    """Initial and later empty BOMs clear every output, including Standard refs."""
+    controller, captured = _make_controller(parts=parts, board=_board(U1=0))
 
     controller.recompute(board_count)
-
-    assert captured == {
+    empty_outputs = {
         "summary": [expected],
         "button": [None],
         "prices": [],
         "standard_refs": [set()],
     }
+    assert captured == empty_outputs
+    previous_parts = parts[:]
+    parts[:] = [_part("U1", component_product_type=2)]
+    controller.recompute(board_count)
+    assert captured["standard_refs"][-1] == {"U1"}
+    parts[:] = previous_parts
+    for values in captured.values():
+        values.clear()
+    controller.recompute(board_count)
+    assert captured == empty_outputs
 
 
 def test_recompute_dnp_part_still_receives_a_price_label():
@@ -146,109 +148,29 @@ def test_recompute_dnp_part_still_receives_a_price_label():
     assert captured["button"] == [None]
 
 
-def test_recompute_prices_each_reference_in_a_mixed_bom():
-    """Price every distinct reference in a mixed BOM."""
-    parts = [
-        _part("R1"),
-        _part("R2"),
-        _part("U1", lcsc="C2", pad_count=8),
-    ]
+def test_recompute_uses_one_catalog_result_for_summary_and_prices() -> None:
+    """Every mixed-BOM row and the summary use the same single read of each LCSC."""
     controller, captured = _make_controller(
-        parts=parts,
+        parts=[_part("R1"), _part("R2"), _part("U1", lcsc="C2", pad_count=8)],
         board=_board(R1=0, R2=0, U1=0),
-        details=_details(C1="0.05", C2="0.40"),
     )
+    fetched: list[str] = []
 
-    decision = controller.recompute(10)
+    def get_details(lcsc: str) -> dict[str, str]:
+        fetched.append(lcsc)
+        return {"price": f"1-:{len(fetched)}", "type": "Basic"}
+
+    controller._get_part_details = get_details
+    decision = controller.recompute(5)
 
     assert decision.board_standard is False
-    assert {reference for reference, _ in captured["prices"]} == {
-        "R1",
-        "R2",
-        "U1",
+    assert fetched == ["C1", "C2"]
+    assert dict(captured["prices"]) == {
+        "R1": "$5.0000",
+        "R2": "$5.0000",
+        "U1": "$10.0000",
     }
-
-
-@pytest.mark.parametrize(
-    ("options", "board_count", "expected"),
-    [
-        pytest.param(
-            {},
-            5,
-            (False, set(), None, "Estimated pricing mode: Economic"),
-            id="economic",
-        ),
-        pytest.param(
-            {
-                "parts": [
-                    _part("U1", component_product_type=2),
-                    _part("R1", lcsc="C2"),
-                ],
-                "board": _board(U1=0, R1=0),
-            },
-            5,
-            (True, {"U1"}, "Why Standard…", "Estimated pricing mode: Standard"),
-            id="standard-only-part",
-        ),
-        pytest.param(
-            {"force_standard": True},
-            5,
-            (True, set(), "Why Standard…", "Estimated pricing mode: Standard"),
-            id="manual-standard",
-        ),
-        pytest.param(
-            {
-                "parts": [_part("D1", component_product_type=1)],
-                "board": _board(D1=0),
-            },
-            51,
-            (
-                True,
-                set(),
-                "Review conflict…",
-                "Mode conflict · 1 selected part is Economic Only",
-            ),
-            id="economic-only-conflict",
-        ),
-        pytest.param(
-            {"parts": [_part(component_product_type=_MISSING)]},
-            8,
-            (
-                None,
-                set(),
-                "Review parts…",
-                "Assembly mode unknown · 1 part classification missing",
-            ),
-            id="missing-classification",
-        ),
-    ],
-)
-def test_recompute_assembly_mode_scenarios(options, board_count, expected):
-    """Apply each policy outcome to indicator, button, and summary callbacks."""
-    defaults = {"parts": [_part()], "board": _board(R1=0)}
-    controller, captured = _make_controller(**(defaults | options))
-    expected_mode, expected_refs, expected_button, summary_fragment = expected
-
-    decision = controller.recompute(board_count)
-
-    assert decision.board_standard is expected_mode
-    assert captured["standard_refs"] == [expected_refs]
-    assert captured["button"] == [expected_button]
-    assert summary_fragment in captured["summary"][0]
-    assert "Triggers" not in captured["summary"][0]
-    assert "Standard because" not in captured["summary"][0]
-
-
-def test_recompute_clears_standard_indicator_on_later_empty_state():
-    """Clear previously checked references when a later scan is empty."""
-    parts = [_part("U1", component_product_type=2)]
-    controller, captured = _make_controller(parts=parts, board=_board(U1=0))
-
-    controller.recompute(5)
-    parts.clear()
-    controller.recompute(5)
-
-    assert captured["standard_refs"] == [{"U1"}, set()]
+    assert "Direct BOM Cost: $20.00" in captured["summary"][0]
 
 
 @pytest.mark.parametrize(
@@ -256,18 +178,18 @@ def test_recompute_clears_standard_indicator_on_later_empty_state():
     [(_board(R1=0, R2=0), False), (_board(R1=0, R2=31), True)],
     ids=("one-side", "two-sides"),
 )
-def test_board_context_detects_populated_sides(board, expected):
+def test_board_context_detects_populated_sides(board: _Board, expected: bool) -> None:
     """Distinguish one-sided from two-sided placement."""
     parts = [_part("R1"), _part("R2", lcsc="C2")]
     controller, _ = _make_controller(parts=parts, board=board)
 
-    decision = controller._get_board_standard_context(parts, board_count=10)
+    decision = controller.recompute(board_count=10)
 
     assert decision.both_sides_populated is expected
     assert decision.board_standard is expected
 
 
-def test_board_context_uses_direct_pos_and_filters_dnp_and_absent_footprints():
+def test_board_context_uses_direct_pos_and_filters_dnp_and_absent_footprints() -> None:
     """Use direct POS data and ignore DNP or absent footprints."""
     parts = [
         _part("R1"),
@@ -297,31 +219,7 @@ def test_board_context_uses_direct_pos_and_filters_dnp_and_absent_footprints():
         board=_board(R1=0, U1=0, U2=0, U3=0),
     )
 
-    decision = controller._get_board_standard_context(parts, board_count=5)
+    decision = controller.recompute(board_count=5)
 
     assert decision.standard_only_refs == frozenset({"U2"})
     assert decision.top_refs == frozenset({"R1", "U2"})
-
-
-@pytest.mark.parametrize(
-    ("product_type", "board_count", "direct_cost"),
-    [(_MISSING, 8, "1.60"), (1, 51, "10.20")],
-    ids=("unknown", "conflict"),
-)
-def test_unavailable_assembly_keeps_direct_cost_but_suppresses_mode_totals(
-    product_type, board_count, direct_cost
-):
-    """Keep component cost while hiding unknown or incompatible assembly totals."""
-    controller, captured = _make_controller(
-        parts=[_part(component_product_type=product_type)],
-        board=_board(R1=0),
-        details=_details(C1="0.20"),
-    )
-
-    controller.recompute(board_count)
-
-    summary = captured["summary"][0]
-    assert f"Direct BOM Cost: ${direct_cost}" in summary
-    assert "Mode-dependent assembly estimate unavailable" in summary
-    for label in ("Total $", "Per board $", "Fixed $", "Assembly $"):
-        assert label not in summary

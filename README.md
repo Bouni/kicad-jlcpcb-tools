@@ -21,6 +21,9 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 
 Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
 
+On KiCad 10 boards with named [design variants](#design-variants-kicad-10),
+compare and edit variants side by side and generate separate fabrication outputs.
+
 ![The main window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/main.png)
 
 ![The parts library window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/part_library.png)
@@ -86,6 +89,55 @@ To access the plugin choose `Tools → External Plugins → JLCPCB Tools` from t
 Checkout this screencast, it shows quickly how to use this plugin:
 
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
+
+### Design variants (KiCad 10+)
+
+Create named variants in KiCad and transfer them to the PCB to use the variant
+table. Boards without named variants keep the ordinary parts table.
+
+- **Compare variants side by side**, with Ref, Footprint, Side, PCB angle, and shared Correction columns fixed on the left when space permits. Ref stays fixed in narrower windows.
+- **Spot differences quickly** through highlighted settings and yellow outlines around the affected variant’s cells in each component row.
+- **Focus on differing component settings** with **Differences only** in the toolbar above the table.
+- **Edit each variant independently:** Value, LCSC assignment, and BOM/POS/POP (populated) flags. Select components within one variant for batch assignments, flag changes, and copying.
+- **Copy and paste selected components between variants:** Copy transfers Value, LCSC and BOM/POS/POP settings for every selected component; select the same components in another variant and Paste. Use **Copy cell value** for an individual value, or **Copy to variants…** to choose fields and destination variants.
+- **Drag variant headers to reorder them** and bring variants together for comparison.
+- **Compare price and stock availability** using compact indicators and hover details.
+- **Choose an Output variant** to generate its BOM, placement, and fabrication files.
+
+Assignments and flags are stored in the KiCad board; save the PCB to preserve edits.
+
+The examples below use sample component data in the main JLCPCB Tools
+window. Pointer and click cues make the actions easier to follow.
+
+#### Edit settings and see differences
+
+Change a setting in one variant to compare it with **Default**. Here,
+turning off **POP** (populated) for **R4** in **Economy** highlights the
+changed cell and outlines Economy’s cells in that row. The yellow outline
+remains visible while the row is selected.
+
+Turn POP back on to match Default and clear R4’s difference highlight.
+
+![Turning R4 Economy POP off shows a yellow difference highlight on the selected row; turning it on again clears the highlight.](images/design-variants-edit-differences.gif)
+
+#### Show differences only
+
+Select **Differences only** in the toolbar above the table to focus on
+differing component settings. In this example, enabling the checkbox
+leaves **R1** and **R3** visible. Clear it to bring all five rows back.
+
+![Enabling Differences only shows R1 and R3; clearing the checkbox restores all five component rows.](images/design-variants-differences-only.gif)
+
+#### Reorder variant columns
+
+Drag a variant header to move its entire group of columns. Here,
+**Premium** moves before **Economy**.
+
+The translucent column preview follows the pointer, while the insertion
+marker and **Drop before Economy** label show the destination. Release the
+header to change the order to **Default**, **Premium**, **Economy**.
+
+![Dragging Premium before Economy shows a translucent column preview and drop position, followed by the reordered variant columns.](images/design-variants-column-dragging.gif)
 
 ## Keyboard shortcuts
 
@@ -171,6 +223,31 @@ This plugin makes use of a lot of icons from the excellent [Material Design Icon
 
 Make sure you make use of pre-commit hooks in order to format everything nicely with `black`
 In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hooks that enforce nice and clean code style.
+
+### Tests
+
+Report ordinary Python tests, real wx controls, and real KiCad tests separately.
+A passing test that uses a fake board does not verify KiCad's file handling,
+project state, or native object cleanup.
+
+```sh
+python -m pytest -rs -m 'not native_wx and not native_kicad'
+python -m pytest -rs --require-native=wx -m 'not native_kicad and not os_input'
+python -m pytest -rs --require-native=wx -m os_input
+python -m pytest -rs --require-native=kicad -m native_kicad
+```
+
+The required native modes reject missing libraries, empty native selections, and
+skipped native tests. Run them with Python libraries matching the installed KiCad
+or wx packages. Mouse/keyboard tests require an isolated desktop with a window
+manager; Linux native tests can use Xvfb.
+
+To reproduce CI locally, use an Ubuntu 24.04 Docker container with the same CPU
+architecture, KiCad packages, dependencies, and commands as
+[the test workflow](.github/workflows/tests.yml). Copy the tracked source tree so
+untracked test files cannot change collection. Include the tested revision,
+Python/wx/KiCad versions, command, and pass/skip/deselection counts when reporting
+results. A required lane that was not run remains unvalidated.
 
 ### Settings
 

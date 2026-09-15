@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Optional
+
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 import wx  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
@@ -13,6 +15,10 @@ from .bom_estimation.view import (
     format_assembly_mode_status,
 )
 from .helpers import HighResWxSize, apply_side_cell_style
+
+if TYPE_CHECKING:
+    from .bom_estimation.assembly_mode import AssemblyModeDecision
+    from .mainwindow import JLCPCBTools
 
 _AFFECTED_PART_COLUMNS = (
     ("relationship", "Relationship", 190),
@@ -38,7 +44,12 @@ class _AffectedPartsStore(dv.DataViewListStore):
 class WhyStandardDialog(wx.Dialog):
     """Show current assembly-mode reasons, sources, and affected parts."""
 
-    def __init__(self, parent, decision, parts):
+    def __init__(
+        self,
+        parent: JLCPCBTools,
+        decision: Optional[AssemblyModeDecision],
+        parts: list[dict[str, Any]],
+    ) -> None:
         wx.Dialog.__init__(
             self,
             parent,

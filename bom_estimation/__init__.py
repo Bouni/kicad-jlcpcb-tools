@@ -16,8 +16,10 @@ from .pricing import (
     is_tht_part,
 )
 from .view import (
+    BomEstimateResult,
     build_bom_estimate_view_model,
     build_standard_mode_context,
+    evaluate_bom_estimate,
     format_bom_estimate_summary,
     format_part_bom_price_label,
     prepare_bom_price_labels,
@@ -29,6 +31,8 @@ __all__ = [
     "BOM_ESTIMATOR_HELP_TITLE",
     "AssemblyPricing",
     "BomEstimateSummary",
+    "BomEstimateResult",
+    "evaluate_bom_estimate",
     "DEFAULT_PRICING",
     "get_bom_estimator_help_text",
     "get_unit_price",

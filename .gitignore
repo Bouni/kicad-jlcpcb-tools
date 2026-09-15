@@ -33,6 +33,7 @@ MANIFEST
 # settings.json.damaged copy it keeps of a file it could not parse.
 /settings.json
 /settings.json.damaged
+/settings.json.lock
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

@@ -16,4 +16,59 @@ jobs:
       - name: Install python packages
         run: pip install .
       - name: Run tests
-        run: pytest
+        run: pytest -m 'not native_wx and not native_kicad'
+  native-wx:
+    name: Native wx (${{ matrix.lane }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: controls
+            selection: not native_kicad and not os_input
+          - lane: isolated input
+            selection: os_input
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install wx and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-wxgtk4.0 python3-venv xvfb xauth
+          /usr/bin/python3 -m venv --system-site-packages .venv-wx
+      - name: Install test dependencies
+        run: .venv-wx/bin/python -m pip install '.[dev]'
+      - name: Install a window manager for input and focus checks
+        if: matrix.lane == 'isolated input'
+        run: sudo apt-get install -y --no-install-recommends openbox
+      - name: Run tests with native wx
+        run: |
+          timeout 360s xvfb-run -a -s '-screen 0 1920x1080x24' sh -c '
+            if [ "$1" = "os_input" ]; then
+              openbox >/dev/null 2>&1 &
+              window_manager=$!
+              trap "kill $window_manager 2>/dev/null || true" EXIT
+            fi
+            .venv-wx/bin/python -m pytest -rs --require-native=wx -m "$1"
+          ' sh '${{ matrix.selection }}'
+  native-kicad:
+    name: Native KiCad 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Install KiCad 10 and matching system Python bindings
+        run: |
+          sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends 'kicad=10.*' python3-wxgtk4.0 python3-venv xvfb xauth
+          /usr/bin/python3 -m venv --system-site-packages .venv-kicad
+      - name: Install test dependencies
+        run: .venv-kicad/bin/python -m pip install '.[dev]'
+      - name: Require native variant editing, windows, and fabrication checks
+        run: >-
+          timeout 300s xvfb-run -a -s '-screen 0 1920x1080x24'
+          .venv-kicad/bin/python -m pytest -rs
+          --require-native=kicad -m native_kicad

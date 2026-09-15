@@ -1,8 +1,11 @@
 """Contains the part details dialog."""
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 import threading
+from typing import TYPE_CHECKING
 import webbrowser
 
 import wx  # pylint: disable=import-error
@@ -12,11 +15,14 @@ from .events import MessageEvent
 from .helpers import HighResWxSize, loadBitmapScaled
 from .lcsc_api import LCSC_API
 
+if TYPE_CHECKING:
+    from .mainwindow import JLCPCBTools
+
 
 class PartDetailsDialog(wx.Dialog):
     """The part details dialog class."""
 
-    def __init__(self, parent, part):
+    def __init__(self, parent: JLCPCBTools, part: str) -> None:
         wx.Dialog.__init__(
             self,
             parent,
@@ -156,6 +162,10 @@ class PartDetailsDialog(wx.Dialog):
         right_side_layout.Add(
             self.openpage_button, 5, wx.LEFT | wx.RIGHT | wx.EXPAND, 5
         )
+        self.close_button = wx.Button(self, wx.ID_CLOSE, "Close")
+        self.Bind(wx.EVT_BUTTON, self.quit_dialog, id=wx.ID_CLOSE)
+        self.SetEscapeId(wx.ID_CLOSE)
+        right_side_layout.Add(self.close_button, 0, wx.ALL | wx.EXPAND, 5)
         layout = wx.BoxSizer(wx.HORIZONTAL)
         layout.Add(self.data_list, 30, wx.ALL | wx.EXPAND, 5)
         layout.Add(right_side_layout, 10, wx.ALL | wx.EXPAND, 5)
@@ -174,11 +184,11 @@ class PartDetailsDialog(wx.Dialog):
             daemon=True,
         ).start()
 
-    def quit_dialog(self, *_):
+    def quit_dialog(self, *_: object) -> None:
         """Close the dialog (via EVT_CLOSE → _on_close → Destroy)."""
         self.Close()
 
-    def _on_close(self, _event):
+    def _on_close(self, _event: wx.CloseEvent) -> None:
         """Destroy on close so a modeless wx.Dialog doesn't merely hide."""
         self.Destroy()
 
@@ -249,7 +259,9 @@ class PartDetailsDialog(wx.Dialog):
             return picture.replace("96x96", "900x900")
         image_id = data.get("productBigImageAccessId")
         if image_id:
-            return f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{image_id}"
+            return (
+                f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{image_id}"
+            )
         return None
 
     def _apply_part_data(self, result, image_bytes):
@@ -300,12 +312,20 @@ class PartDetailsDialog(wx.Dialog):
         for price in data.get("jlcPrices", []) or []:
             start = price.get("startNumber")
             end = price.get("endNumber")
-            label = f"JLC Price for >{start}" if end == -1 else f"JLC Price for {start}-{end}"
+            label = (
+                f"JLC Price for >{start}"
+                if end == -1
+                else f"JLC Price for {start}-{end}"
+            )
             self.data_list.AppendItem([label, str(price.get("productPrice"))])
         for price in data.get("prices", []) or []:
             start = price.get("startNumber")
             end = price.get("endNumber")
-            label = f"LCSC Price for >{start}" if end == -1 else f"LCSC Price for {start}-{end}"
+            label = (
+                f"LCSC Price for >{start}"
+                if end == -1
+                else f"LCSC Price for {start}-{end}"
+            )
             self.data_list.AppendItem([label, str(price.get("productPrice"))])
         for attribute in data.get("attributes", []) or []:
             self.data_list.AppendItem(

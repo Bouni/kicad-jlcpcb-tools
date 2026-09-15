@@ -7,16 +7,24 @@ transport concerns.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from functools import cache
+from math import isfinite
 import re
-from typing import cast
+from typing import Optional, cast
 
-from .assembly_mode import AssemblyModeDecision
+from .assembly_mode import (
+    AssemblyModeDecision,
+    ComponentProductType,
+    classify_component_product_type,
+)
 from .pricing import (
     BomEstimateSummary,
     _build_lcsc_quantities,
     _safe_int,
     calculate_bom_estimate,
     calculate_part_bom_cost,
+    get_assembly_flags,
     get_unit_price,
 )
 
@@ -58,7 +66,9 @@ def format_assembly_mode_status(decision: AssemblyModeDecision) -> str:
     return "Assembly mode: N/A"
 
 
-def assembly_mode_details_button_label(decision: AssemblyModeDecision):
+def assembly_mode_details_button_label(
+    decision: AssemblyModeDecision,
+) -> Optional[str]:
     """Return the details action label, or None when no action is useful."""
     if decision.economic_only_conflict_refs:
         return "Review conflict…"
@@ -418,44 +428,165 @@ def build_standard_mode_context(
     }
 
 
+@dataclass(frozen=True)
+class BomEstimateResult:
+    """One calculation shared by the ordinary dialog and variant comparison."""
+
+    decision: AssemblyModeDecision
+    prices: dict[str, Optional[float]]
+    price_labels: dict[str, str]
+    summary: Optional[BomEstimateSummary]
+    summary_text: str
+    details_button_label: Optional[str]
+
+
+def selected_assembly_parts(
+    parts: Iterable[Mapping[str, object]],
+) -> Iterable[Mapping[str, object]]:
+    """Yield assigned BOM parts whose physical placements enter assembly policy."""
+    return (
+        part
+        for part in parts
+        if part.get("reference")
+        and part.get("lcsc")
+        and not part.get("exclude_from_bom")
+        and not part.get("exclude_from_pos")
+        and not get_assembly_flags(part).get("is_dnp")
+    )
+
+
+def _assembly_decision(
+    parts: Iterable[Mapping[str, object]],
+    board_count: int,
+    sides: Mapping[str, str],
+    force_standard: bool,
+) -> AssemblyModeDecision:
+    """Classify selected placements from supplied physical and supplier facts."""
+    refs_by_side: dict[str, set[str]] = {"top": set(), "bottom": set()}
+    classified: dict[Optional[ComponentProductType], set[str]] = {
+        product_type: set() for product_type in [*ComponentProductType, None]
+    }
+    smt_sides: set[str] = set()
+    for part in selected_assembly_parts(parts):
+        reference = str(part["reference"])
+        side = sides.get(reference)
+        if side not in refs_by_side:
+            continue
+        refs_by_side[side].add(reference)
+        if not _safe_int(part.get("has_tht")):
+            smt_sides.add(side)
+        product_type = classify_component_product_type(
+            part.get("component_product_type")
+        )
+        classified[product_type].add(reference)
+
+    return AssemblyModeDecision(
+        board_count=board_count,
+        manual_enabled=force_standard,
+        top_refs=refs_by_side["top"],
+        bottom_refs=refs_by_side["bottom"],
+        smt_populated_side_count=len(smt_sides),
+        standard_only_refs=classified[ComponentProductType.STANDARD_ONLY],
+        economic_only_refs=classified[ComponentProductType.ECONOMIC_ONLY],
+        classification_missing_refs=classified[None],
+    )
+
+
+def _prepare_bom_prices(
+    parts: Iterable[Mapping[str, object]],
+    board_count: int,
+    get_part_details: Callable[[str], dict],
+) -> tuple[dict[str, Optional[float]], dict[str, str]]:
+    """Calculate each assigned part's unrounded cost and its display label.
+
+    Price-column tiers include assigned DNP parts, preserving ordinary mode's
+    assignment-pricing policy. BOM totals separately omit unpopulated parts.
+    """
+    rows = [part for part in parts if part.get("reference")]
+    quantities = _build_lcsc_quantities(
+        [
+            part
+            for part in rows
+            if not part.get("exclude_from_bom") and part.get("lcsc")
+        ],
+        board_count,
+    )
+    unit_prices = {
+        lcsc: get_unit_price(quantity, str(get_part_details(lcsc).get("price") or ""))
+        for lcsc, quantity in quantities.items()
+    }
+    values: dict[str, Optional[float]] = {}
+    labels: dict[str, str] = {}
+    for part in rows:
+        reference = str(part["reference"])
+        lcsc = str(part.get("lcsc") or "")
+        unit_price = None if part.get("exclude_from_bom") else unit_prices.get(lcsc)
+        cost = None if unit_price is None else unit_price * board_count
+        values[reference] = (
+            cost
+            if unit_price is not None
+            and unit_price >= 0
+            and cost is not None
+            and cost >= 0
+            and isfinite(cost)
+            else None
+        )
+        labels[reference] = (
+            "" if unit_price is None else "N/A" if unit_price < 0 else f"${cost:.4f}"
+        )
+    return values, labels
+
+
 def prepare_bom_price_labels(
     parts: Iterable[Mapping[str, object]],
     board_count: int,
     get_part_details: Callable[[str], dict],
-) -> dict:
-    """Return ``{reference: label}`` mapping for BOM price column population.
+) -> dict[str, str]:
+    """Return display costs using aggregated quantity tiers for each LCSC."""
+    return _prepare_bom_prices(parts, board_count, get_part_details)[1]
 
-    Labels are per-reference display values, while quantity-tier pricing is
-    resolved per unique LCSC code using aggregated board quantity.
+
+def evaluate_bom_estimate(
+    parts: Iterable[Mapping[str, object]],
+    board_count: int,
+    get_part_details: Callable[[str], dict],
+    *,
+    sides: Mapping[str, str],
+    force_standard: bool = False,
+) -> BomEstimateResult:
+    """Prepare the complete estimate without reading a board or updating controls.
+
+    ``sides`` maps references to ``top`` or ``bottom``; absent footprints do not
+    participate in assembly mode selection. All prices in one evaluation use
+    the same catalog response for each LCSC number.
     """
-    part_rows = [part for part in parts if part.get("reference")]
-    billable_rows = [
-        part
-        for part in part_rows
-        if not part.get("exclude_from_bom") and str(part.get("lcsc") or "")
-    ]
-    lcsc_quantities = _build_lcsc_quantities(billable_rows, board_count)
+    parts = list(parts)
+    decision = _assembly_decision(parts, board_count, sides, force_standard)
+    if not any(not part.get("exclude_from_bom") and part.get("lcsc") for part in parts):
+        reason = "no parts" if not parts else "no assigned BOM parts"
+        return BomEstimateResult(
+            decision,
+            {},
+            {},
+            None,
+            f"BOM Estimate ({board_count} boards): {reason}",
+            None,
+        )
 
-    details_cache: dict = {}
-    result: dict = {}
-    for part in part_rows:
-        reference = part.get("reference")
-        lcsc = str(part.get("lcsc") or "")
-        details: dict = {}
-        if lcsc:
-            if lcsc not in details_cache:
-                details_cache[lcsc] = get_part_details(lcsc)
-            details = details_cache[lcsc]
-
-        if not part.get("exclude_from_bom") and lcsc:
-            quantity = lcsc_quantities.get(lcsc, board_count)
-            unit_price = get_unit_price(quantity, str(details.get("price") or ""))
-            if unit_price < 0:
-                result[reference] = "N/A"
-            else:
-                result[reference] = f"${unit_price * board_count:.4f}"
-            continue
-
-        result[reference] = format_part_bom_price_label(part, details, board_count)
-
-    return result
+    details = cache(get_part_details)
+    summary = calculate_bom_estimate(
+        parts,
+        board_count,
+        details,
+        board_standard=decision.board_standard,
+        smt_populated_sides=decision.smt_populated_side_count,
+    )
+    prices, labels = _prepare_bom_prices(parts, board_count, details)
+    return BomEstimateResult(
+        decision,
+        prices,
+        labels,
+        summary,
+        "\n".join(format_bom_estimate_summary(summary, board_count, decision)),
+        assembly_mode_details_button_label(decision),
+    )

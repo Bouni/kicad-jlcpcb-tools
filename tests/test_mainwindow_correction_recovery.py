@@ -17,8 +17,9 @@ from tests.correction_test_support import (
     raw_rows,
     seed_raw,
 )
+from tests.fabrication_test_support import Point, make_fabrication, read_cpl
+from tests.modal_test_support import ModalDialog
 from tests.test_corrections_import_export import install_manager_controls
-from tests.test_fabrication_correction_recovery import Point, make_fabrication, read_cpl
 from tests.test_mainwindow_empty_zone_warning import _make_window
 from tests.wx_harness import load_correction_modules, mainwindow_stubs, wx_stubs
 
@@ -29,7 +30,7 @@ def runtime(tmp_path: Path) -> Iterator[SimpleNamespace]:
     levels = {name: logging.getLogger(name).level for name in ("requests", "urllib3")}
     package = "mainwindow_correction_recovery_tests"
     wx = wx_stubs(
-        Dialog=type("Dialog", (), {}),
+        Dialog=type("Dialog", (ModalDialog,), {"instances": []}),
         Frame=type("Frame", (), {}),
         NewIdRef=MagicMock(side_effect=object),
         BeginBusyCursor=MagicMock(),
@@ -105,6 +106,11 @@ def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
     window.right_toolbar = MagicMock()
     window.upper_toolbar = MagicMock()
     window.library = library or fresh_library(runtime.library)
+    window.assembly_lookup = runtime.mainwindow.AssemblyMetadataLookup(
+        window._apply_assembly_metadata,
+        window._refresh_bom_after_enrichment_update,
+        window.library.logger.warning,
+    )
     window.scale_factor = 1
     window.window = object()
     window.correction_status = StatusLabel()
@@ -155,9 +161,6 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
     assert _displayed_corrections(window) == ["Unresolved", "Unresolved"]
     _write_sql(library.correctionsdb_file, "DROP TRIGGER reject_insert")
     install_manager_controls(runtime.modules, library, monkeypatch)
-    monkeypatch.setattr(
-        runtime.wx.Dialog, "ShowModal", lambda _dialog: runtime.wx.ID_OK, raising=False
-    )
     window.partlist_data_model.AddEntry.reset_mock()
 
     if entrypoint == "toolbar":
@@ -177,6 +180,10 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
 
     assert _displayed_corrections(window) == ["90°, 0.0/0.0 (ref)", "0°, 0.0/0.0"]
     assert not window.correction_status.IsShown()
+    assert len(runtime.wx.Dialog.instances) == 1
+    manager = runtime.wx.Dialog.instances[0]
+    assert manager.destroyed
+    assert manager.lifecycle == ["show", "end modal", "exit hook", "destroy"]
     runtime.wx.MessageBox.assert_not_called()
 
 
@@ -337,8 +344,12 @@ def test_startup_store_population_recovers_invalid_saved_corrections(
     seed_raw(runtime.library, [("C1", "47u", 0, 0)])
     window = _population_window(runtime)
     store = window.store
+    window._variant_mode = False
     monkeypatch.setattr(runtime.mainwindow, "Store", lambda *_args: store)
     window.project_path = runtime.library.parent.project_path
+    board_path = Path(window.project_path) / "board.kicad_pcb"
+    board_path.write_text("(kicad_pcb)\n", encoding="utf-8")
+    window.pcbnew.GetBoard().GetFileName = lambda: str(board_path)
     window.settings = {
         "part_preferences": {"fill_empty_lcsc_assignments_on_open": False}
     }

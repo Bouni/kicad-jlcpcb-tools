@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from io import StringIO
 import math
 import re
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 _MIN_ROTATION = -(2**63)
 _MAX_ROTATION = 2**63 - 1
@@ -110,6 +110,32 @@ def match_correction(
         if correction is not None:
             return CorrectionMatch(correction, source)
     return None
+
+
+def resolve_shared_corrections(
+    snapshot: Any, corrections: Sequence[Correction]
+) -> dict[str, Optional[CorrectionMatch]]:  # noqa: UP045
+    """Resolve physical placement rules once from each component's Default state.
+
+    Reference and base Value rules keep their existing precedence over package
+    rules. Named-variant Value overrides cannot alter a shared footprint's
+    correction. Inputs and stored rules remain untouched.
+    """
+    if "" not in {variant.name for variant in snapshot.variants}:
+        raise ValueError("Default variant is unavailable for shared corrections")
+    resolved: dict[str, Optional[CorrectionMatch]] = {}  # noqa: UP045
+    for part in snapshot.for_variant(""):
+        if part.component_id in resolved:
+            raise ValueError(
+                f"Duplicate Default component for shared corrections: {part.component_id}"
+            )
+        resolved[part.component_id] = match_correction(
+            corrections,
+            part.reference,
+            part.value,
+            part.footprint.rsplit(":", 1)[-1],
+        )
+    return resolved
 
 
 @dataclass(frozen=True)

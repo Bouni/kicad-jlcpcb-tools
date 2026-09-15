@@ -1,267 +1,132 @@
-"""Tests for split_bom_designators – the 2048-char BOM Designator chunker.
+"""Keep BOM designators within JLCPCB's row limit without losing components.
 
-JLCPCB rejects BOM rows whose Designator field exceeds 2048 characters.
-When a single LCSC group has enough references to overflow that limit,
-generate_bom() must emit multiple rows (one per chunk).
-
-These tests exercise split_bom_designators() directly – a pure function –
-and also run generate_bom() end-to-end against a fake board that has 500
-identical LED footprints sharing one LCSC number, which is the scenario
-described in https://github.com/Bouni/kicad-jlcpcb-tools/issues/755.
+The 500-LED export reproduces https://github.com/Bouni/kicad-jlcpcb-tools/issues/755.
 """
 
+from collections.abc import Callable
 import csv
-import importlib.util
-import os
 from pathlib import Path
-import sys
-import tempfile
-import types
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from typing import Any, Optional
 
-# ---------------------------------------------------------------------------
-# Bootstrap: load fabrication.py with mocked KiCad / wx dependencies
-# ---------------------------------------------------------------------------
-_ROOT = Path(__file__).parent.parent
+import pytest
 
-for _mod in ["pcbnew", "wx", "wx.dataview"]:
-    sys.modules.setdefault(_mod, MagicMock())
+from tests.fabrication_test_support import modules as fabrication_modules
 
-_pkg = types.ModuleType("kicadplugin")
-_pkg.__path__ = [str(_ROOT)]
-sys.modules["kicadplugin"] = _pkg
+modules = fabrication_modules
+BomFactory = Callable[..., Any]
 
-_footprint_helpers = types.ModuleType("kicadplugin.footprint_helpers")
-_footprint_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
-sys.modules["kicadplugin.footprint_helpers"] = _footprint_helpers
 
-_spec = importlib.util.spec_from_file_location(
-    "kicadplugin.fabrication", _ROOT / "fabrication.py"
+@pytest.mark.parametrize(
+    "refs,limit,expected",
+    [
+        ([], 2048, []),
+        (["R1"], 2048, [["R1"]]),
+        (["R1", "R2"], 2048, [["R1", "R2"]]),
+        (["A" * 10] * 5, 25, [["A" * 10] * 2, ["A" * 10] * 2, ["A" * 10]]),
+        (["R1", "X" * 3000, "R2"], 2048, [["R1"], ["X" * 3000], ["R2"]]),
+        (["R1", "R2", "R3"], 8, [["R1", "R2", "R3"]]),
+        (["R1", "R2", "R3"], 7, [["R1", "R2"], ["R3"]]),
+    ],
+    ids=("empty", "single", "short", "custom", "oversized", "exact", "separator"),
 )
-assert _spec is not None and _spec.loader is not None
-_fab_mod = importlib.util.module_from_spec(_spec)
-_fab_mod.__package__ = "kicadplugin"
-sys.modules["kicadplugin.fabrication"] = _fab_mod
-_spec.loader.exec_module(_fab_mod)  # type: ignore[union-attr]
-
-Fabrication = _fab_mod.Fabrication  # type: ignore[attr-defined]
-split_bom_designators = _fab_mod.split_bom_designators  # type: ignore[attr-defined]
-_BOM_DESIGNATOR_MAX_LEN = _fab_mod._BOM_DESIGNATOR_MAX_LEN  # type: ignore[attr-defined]
-
-# ---------------------------------------------------------------------------
-# Unit tests for split_bom_designators()
-# ---------------------------------------------------------------------------
+def test_designator_chunks_preserve_order_and_include_separators(
+    modules: SimpleNamespace, refs: list[str], limit: int, expected: list[list[str]]
+) -> None:
+    """Exact chunks cover boundaries, custom limits, and an indivisible reference."""
+    assert modules.fabrication.split_bom_designators(refs, max_len=limit) == expected
 
 
-def test_empty_list_returns_empty():
-    """Empty input produces empty output."""
-    assert split_bom_designators([]) == []
+@pytest.fixture
+def bom_factory(modules: SimpleNamespace, tmp_path: Path) -> BomFactory:
+    """Construct the real exporter with one catalog group and explicit board refs."""
 
-
-def test_single_ref_returns_one_chunk():
-    """Single designator always stays in one chunk."""
-    assert split_bom_designators(["R1"]) == [["R1"]]
-
-
-def test_short_list_stays_in_one_chunk():
-    """A list whose joined length is well under the limit stays in one chunk."""
-    refs = [f"R{i}" for i in range(1, 11)]
-    assert split_bom_designators(refs) == [refs]
-
-
-def test_all_refs_preserved_across_chunks():
-    """Every input designator must appear in exactly one output chunk."""
-    refs = [f"LED{i}" for i in range(1, 501)]
-    chunks = split_bom_designators(refs)
-    flat = [r for chunk in chunks for r in chunk]
-    assert flat == refs
-
-
-def test_no_chunk_exceeds_max_len():
-    """No chunk's joined string may exceed the limit."""
-    refs = [f"LED{i}" for i in range(1, 501)]
-    chunks = split_bom_designators(refs)
-    for chunk in chunks:
-        assert len(",".join(chunk)) <= _BOM_DESIGNATOR_MAX_LEN
-
-
-def test_500_leds_requires_multiple_chunks():
-    """500 LED designators produce more than one chunk (the issue-755 scenario)."""
-    refs = [f"LED{i}" for i in range(1, 501)]
-    assert len(",".join(refs)) > _BOM_DESIGNATOR_MAX_LEN, (
-        "precondition: 500 LEDs joined should exceed the designator cap"
-    )
-    chunks = split_bom_designators(refs)
-    assert len(chunks) > 1
-
-
-def test_custom_max_len_respected():
-    """Custom max_len parameter is honoured."""
-    refs = ["A" * 10] * 5  # each ref is 10 chars; 5 of them joined = 54 chars
-    chunks = split_bom_designators(refs, max_len=25)
-    for chunk in chunks:
-        assert len(",".join(chunk)) <= 25
-
-
-def test_single_oversized_ref_gets_its_own_chunk():
-    """A ref that is itself longer than max_len must still appear (in its own chunk)."""
-    long_ref = "X" * 3000
-    refs = ["R1", long_ref, "R2"]
-    chunks = split_bom_designators(refs, max_len=2048)
-    flat = [r for chunk in chunks for r in chunk]
-    assert flat == refs
-    assert long_ref in flat
-
-
-def test_chunks_are_contiguous_and_ordered():
-    """Order of designators must be preserved across chunk boundaries."""
-    refs = [f"C{i:04d}" for i in range(1, 300)]
-    chunks = split_bom_designators(refs)
-    flat = [r for chunk in chunks for r in chunk]
-    assert flat == refs
-
-
-# ---------------------------------------------------------------------------
-# Integration test: generate_bom() with a 500-LED fake board
-# ---------------------------------------------------------------------------
-
-N_LEDS = 500
-_LED_REFS = [f"LED{i}" for i in range(1, N_LEDS + 1)]
-
-
-class _FakeBoard:
-    """Minimal board stub whose Footprints() returns one mock fp per ref."""
-
-    def __init__(self, refs):
-        self._refs = refs
-
-    def Footprints(self):
-        """Return mock footprints, one per reference."""
-        fps = []
-        for ref in self._refs:
-            fp = MagicMock()
-            fp.GetReference.return_value = ref
-            fps.append(fp)
-        return fps
-
-
-class _FakeStore:
-    """Minimal store stub that returns a single BOM part group."""
-
-    def __init__(self, refs, value, footprint, lcsc):
-        self._refs = refs
-        self._value = value
-        self._footprint = footprint
-        self._lcsc = lcsc
-
-    def read_bom_parts(self):
-        """Return one part group with all refs joined."""
-        return [
-            {
-                "refs": ",".join(self._refs),
-                "value": self._value,
-                "footprint": self._footprint,
-                "lcsc": self._lcsc,
-            }
+    def make(
+        refs: list[str],
+        board_refs: Optional[list[str]] = None,  # noqa: UP045
+        **fields: str,
+    ) -> Any:
+        footprints = [
+            SimpleNamespace(GetReference=lambda ref=ref: ref)
+            for ref in (refs if board_refs is None else board_refs)
         ]
-
-
-def _make_fake_fab_for_bom(
-    refs,
-    lcsc="C25741",
-    value="WS2812B",
-    footprint="LED_0805",
-    board_refs=None,
-):
-    """Build a minimal Fabrication instance whose generate_bom() we can call.
-
-    The fake board has one footprint per board ref; the fake store returns a
-    single part group with all refs joined.
-    """
-    fab = object.__new__(Fabrication)
-    fab.logger = MagicMock()
-    fab.board = _FakeBoard(refs if board_refs is None else board_refs)
-
-    fake_parent = MagicMock()
-    fake_parent.settings.get.return_value = {"lcsc_bom_cpl": True}
-    fake_parent.store = _FakeStore(refs, value, footprint, lcsc)
-    fab.parent = fake_parent
-
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
-    tmp.close()
-    fab._tmppath = tmp.name
-    fab.get_bom_csv_path = lambda: fab._tmppath
-    return fab
-
-
-def _read_bom_rows(fab):
-    """Run generate_bom() and return the data rows (excluding the header)."""
-    fab.generate_bom()
-    with open(fab._tmppath, newline="", encoding="utf-8") as fh:
-        rows = list(csv.reader(fh))
-    os.unlink(fab._tmppath)
-    return rows[1:]
-
-
-def test_generate_bom_omits_references_deleted_from_board():
-    """Store rows for footprints deleted from the board are omitted from the BOM."""
-    fab = _make_fake_fab_for_bom(["R1", "GONE"], board_refs=["R1"])
-
-    rows = _read_bom_rows(fab)
-
-    assert [(row[1], int(row[4])) for row in rows] == [("R1", 1)]
-
-
-def test_generate_bom_500_leds_all_refs_present():
-    """All 500 LED refs must appear in the output BOM (possibly across rows)."""
-    fab = _make_fake_fab_for_bom(_LED_REFS)
-    rows = _read_bom_rows(fab)
-    found_refs = []
-    for row in rows:
-        found_refs.extend(row[1].split(","))
-    assert sorted(found_refs) == sorted(_LED_REFS)
-
-
-def test_generate_bom_500_leds_no_row_exceeds_2048():
-    """No Designator field in any output row may exceed 2048 characters."""
-    fab = _make_fake_fab_for_bom(_LED_REFS)
-    rows = _read_bom_rows(fab)
-    for row in rows:
-        designator_field = row[1]
-        assert len(designator_field) <= _BOM_DESIGNATOR_MAX_LEN, (
-            f"Designator field length {len(designator_field)} exceeds {_BOM_DESIGNATOR_MAX_LEN}"
+        board = SimpleNamespace(
+            Footprints=lambda: footprints,
+            GetFileName=lambda: str(tmp_path / "board.kicad_pcb"),
         )
+        group = {
+            "refs": ",".join(refs),
+            "value": "WS2812B",
+            "footprint": "LED_0805",
+            "lcsc": "C25741",
+            **fields,
+        }
+        parent = SimpleNamespace(
+            settings={"gerber": {"lcsc_bom_cpl": True}},
+            store=SimpleNamespace(read_bom_parts=lambda: [group]),
+        )
+        return modules.fabrication.Fabrication(parent, board)
+
+    return make
 
 
-def test_generate_bom_500_leds_quantity_matches_chunk_size():
-    """The Quantity column in each row must equal the number of refs in that row."""
-    fab = _make_fake_fab_for_bom(_LED_REFS)
-    rows = _read_bom_rows(fab)
-    for row in rows:
-        designators = row[1].split(",")
-        quantity = int(row[4])
-        assert quantity == len(designators)
+def _read_bom_rows(fab: Any) -> list[list[str]]:
+    """Run generation and read the actual CSV, including its expected header."""
+    fab.generate_bom()
+    with Path(fab.get_bom_csv_path()).open(newline="", encoding="utf-8") as stream:
+        header, *rows = csv.reader(stream)
+    assert header == ["Comment", "Designator", "Footprint", "LCSC", "Quantity"]
+    return rows
 
 
-def test_generate_bom_500_leds_total_quantity_correct():
-    """Sum of Quantity across all rows must equal the total component count."""
-    fab = _make_fake_fab_for_bom(_LED_REFS)
-    rows = _read_bom_rows(fab)
-    total = sum(int(row[4]) for row in rows)
-    assert total == N_LEDS
+@pytest.mark.parametrize(
+    "refs,board_refs,expected",
+    [
+        ([], None, []),
+        (["R1", "R2"], None, [["100k", "R1,R2", "R0402", "C25741", "2"]]),
+        (["R1", "GONE"], ["R1"], [["100k", "R1", "R0402", "C25741", "1"]]),
+    ],
+    ids=("empty", "single-row", "deleted-reference"),
+)
+def test_generate_bom_keeps_only_current_board_references(
+    bom_factory: BomFactory,
+    refs: list[str],
+    board_refs: Optional[list[str]],  # noqa: UP045
+    expected: list[list[str]],
+) -> None:
+    """Empty groups emit nothing; small groups omit footprints deleted from KiCad."""
+    fab = bom_factory(refs, board_refs, value="100k", footprint="R0402")
+    assert _read_bom_rows(fab) == expected
 
 
-def test_generate_bom_500_leds_multiple_rows_emitted():
-    """500 LEDs must produce more than one BOM row (the 2048-char split must fire)."""
-    fab = _make_fake_fab_for_bom(_LED_REFS)
-    rows = _read_bom_rows(fab)
-    assert len(rows) > 1, "Expected BOM to be split into multiple rows"
+def test_generate_bom_splits_500_leds_without_losing_data(
+    bom_factory: BomFactory,
+) -> None:
+    """One real export checks every chunk's contents, limits, and quantities."""
+    refs = [f"LED{i}" for i in range(1, 501)]
+    rows = _read_bom_rows(bom_factory(refs))
+    assert len(rows) == 2
+    assert [ref for row in rows for ref in row[1].split(",")] == refs
+    assert sum(int(row[4]) for row in rows) == 500
+    for comment, designators, footprint, lcsc, quantity in rows:
+        assert len(designators) <= 2048
+        assert int(quantity) == len(designators.split(","))
+        assert (comment, footprint, lcsc) == ("WS2812B", "LED_0805", "C25741")
 
 
-def test_generate_bom_small_board_stays_single_row():
-    """A board with few components (no overflow) must still produce exactly one row."""
-    refs = [f"R{i}" for i in range(1, 11)]
-    fab = _make_fake_fab_for_bom(refs, lcsc="C25741", value="100k", footprint="R0402")
-    rows = _read_bom_rows(fab)
-    assert len(rows) == 1
-    assert int(rows[0][4]) == 10
+def test_bom_read_failure_preserves_previous_output(
+    bom_factory: BomFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A database error preparing replacement rows cannot truncate the last BOM."""
+    fab = bom_factory(["R1"])
+    fab.generate_bom()
+    destination = Path(fab.get_bom_csv_path())
+    previous = destination.read_bytes()
+
+    def fail_read() -> list[dict[str, str]]:
+        raise OSError("catalog read failed")
+
+    monkeypatch.setattr(fab.parent.store, "read_bom_parts", fail_read)
+    with pytest.raises(OSError, match="catalog read failed"):
+        fab.generate_bom()
+    assert destination.read_bytes() == previous
