@@ -193,8 +193,10 @@ def install_manager_controls(
         modules.corrections, "HighResWxSize", lambda _window, size: size
     )
     monkeypatch.setattr(modules.corrections, "loadBitmapScaled", MagicMock())
-    # Prevent automatic CSV detection from reading any real user's plugin data.
-    monkeypatch.setattr(modules.corrections, "PLUGIN_PATH", library.datadir)
+    # Confine any access to the historical plugin CSV location to this fixture.
+    monkeypatch.setattr(
+        modules.corrections, "PLUGIN_PATH", library.datadir, raising=False
+    )
 
 
 def manager(
@@ -929,161 +931,22 @@ def test_identical_existing_manual_rule_selects_without_writing(
 
 
 def legacy_csv(
-    modules: SimpleNamespace,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    contents: str = "Pattern,Rotation\nR1,90\n",
+    library: Any, contents: bytes = b"Pattern,Rotation\nR1,90\nR2,-90\n"
 ) -> Path:
-    """Place a legacy source only in this test's plugin directory."""
-    plugin = tmp_path / "plugin"
-    directory = plugin / "corrections"
+    """Place a historical source in the isolated plugin directory."""
+    directory = Path(library.datadir) / "corrections"
     directory.mkdir(parents=True)
     path = directory / "cpl_rotations_db.csv"
-    path.write_text(contents)
-    monkeypatch.setattr(modules.corrections, "PLUGIN_PATH", str(plugin))
+    path.write_bytes(contents)
     return path
 
 
-def test_legacy_success_marks_and_archives_after_commit(
-    setup_manager: tuple[SimpleNamespace, Any, Any],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_manager_constructor_populates_existing_sqlite_corrections(
+    modules: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Archival follows successful persistence and refresh waits for constructed controls."""
-    modules, library, dialog = setup_manager
-    path = legacy_csv(modules, tmp_path, monkeypatch)
-    original = path.read_bytes()
-    key = library.correction_csv_migration_key(path, original)
-    assert dialog.import_legacy_corrections() is True
-    assert fresh_library(library).has_correction_migration(key) is True
-    assert reopened_rows(library) == [("R1", 90, (0, 0))]
-    assert not path.exists()
-    assert path.with_suffix(".csv.backup").read_bytes() == original
-    assert dialog.corrections_list.rows == []
-    modules.wx.PostEvent.assert_called_once()
-    modules.wx.MessageBox.assert_not_called()
-
-
-@pytest.mark.parametrize("archive_problem", ["collision", "link_error", "unlink_error"])
-def test_archive_failure_never_replays_over_repairs(
-    setup_manager: tuple[SimpleNamespace, Any, Any],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    archive_problem: Any,
-) -> None:
-    """Committed content provenance suppresses replay when the source remains in place."""
-    modules, library, dialog = setup_manager
-    path = legacy_csv(modules, tmp_path, monkeypatch)
-    backup = path.with_suffix(".csv.backup")
-    if archive_problem == "collision":
-        backup.write_bytes(b"existing archive")
-    else:
-        operation = "link" if archive_problem == "link_error" else "unlink"
-        monkeypatch.setattr(
-            modules.corrections.os,
-            operation,
-            MagicMock(side_effect=PermissionError("archive denied")),
-        )
-    assert dialog.import_legacy_corrections() is True
-    assert path.exists()
-    if archive_problem == "collision":
-        assert backup.read_bytes() == b"existing archive"
-    library.update_correction_data("R1", 180, (1, 2))
-    repaired = raw_rows(library)
-    modules.wx.PostEvent.reset_mock()
-    dialog.parent.library = fresh_library(library)
-    assert dialog.import_legacy_corrections() is True
-    assert raw_rows(library) == repaired
-    modules.wx.PostEvent.assert_not_called()
-    assert "imported successfully" in str(modules.wx.MessageBox.call_args)
-    assert "will not be imported again" in str(modules.wx.MessageBox.call_args)
-
-
-def test_legacy_completion_survives_scope_switch(
-    setup_manager: tuple[SimpleNamespace, Any, Any],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A remaining global legacy CSV cannot replay over subsequent local repairs."""
-    modules, library, dialog = setup_manager
-    path = legacy_csv(modules, tmp_path, monkeypatch)
-    path.with_suffix(".csv.backup").write_bytes(b"old archive")
-    assert dialog.import_legacy_corrections() is True
-    library.switch_to_global_correction_database(False)
-    library.update_correction_data("R1", 180, (1, 2))
-    repaired = raw_rows(library)
-    dialog.parent.library = fresh_library(library)
-    assert dialog.import_legacy_corrections() is True
-    assert raw_rows(library) == repaired
-
-
-def test_changed_legacy_contents_can_be_imported_once(
-    setup_manager: tuple[SimpleNamespace, Any, Any],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Content changes distinguish corrected/new automatic inputs from completed ones."""
-    modules, library, dialog = setup_manager
-    path = legacy_csv(modules, tmp_path, monkeypatch)
-    path.with_suffix(".csv.backup").write_bytes(b"old archive")
-    assert dialog.import_legacy_corrections() is True
-    path.write_text("Pattern,Rotation\nR1,180\n")
-    assert dialog.import_legacy_corrections() is True
-    assert reopened_rows(library) == [("R1", 180, (0, 0))]
-
-
-@pytest.mark.parametrize("failure", ["invalid", "decoding", "read", "storage"])
-def test_legacy_failure_preserves_source_for_retry(
-    setup_manager: tuple[SimpleNamespace, Any, Any],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    failure: str,
-) -> None:
-    """Failed legacy imports retain exact unmarked input for repair and retry."""
-    modules, library, dialog = setup_manager
-    path = legacy_csv(modules, tmp_path, monkeypatch)
-    if failure == "invalid":
-        path.write_text("Pattern,Rotation\nR1,47u\n")
-    elif failure == "decoding":
-        path.write_bytes(b"\xff")
-    elif failure == "read":
-        monkeypatch.setattr(
-            modules.corrections,
-            "open",
-            MagicMock(side_effect=PermissionError("denied")),
-            raising=False,
-        )
-    else:
-        abort_writes(
-            library,
-            "CREATE TRIGGER reject_insert BEFORE INSERT ON correction BEGIN SELECT RAISE(ABORT, 'storage failure'); END",
-        )
-    before = path.read_bytes()
-    assert dialog.import_legacy_corrections() is False
-    assert path.read_bytes() == before
-    assert not path.with_suffix(".csv.backup").exists()
-    assert raw_rows(library) == []
-    assert not library.has_correction_migration(
-        library.correction_csv_migration_key(path, path.read_bytes())
-    )
-    modules.wx.PostEvent.assert_not_called()
-    if failure == "invalid":
-        path.write_text("Pattern,Rotation\nR1,90\n")
-        assert dialog.import_legacy_corrections() is True
-        assert reopened_rows(library) == [("R1", 90, (0, 0))]
-
-
-def test_manager_constructor_imports_only_after_controls_exist(
-    setup_manager: tuple[SimpleNamespace, Any, Any],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The real constructor can import legacy input without touching uncreated widgets."""
-    modules, library, _dialog = setup_manager
-    legacy_csv(modules, tmp_path, monkeypatch)
-    parent = SimpleNamespace(library=library, scale_factor=1, window=object())
-    dialog = modules.corrections.CorrectionManagerDialog(parent, "R1")
-    assert len(dialog.corrections_list.rows) == 1
+    """Stored corrections remain selectable through the real constructor's controls."""
+    library = make_library(modules.library, tmp_path, [("R1", 90, 0, 0)])
+    dialog = manager(modules, library, monkeypatch)
     assert dialog.corrections_list.rows == [["R1", "90", "0.0", "0.0", ""]]
     assert (
         modules.wx.dataview.DataViewListCtrl.call_args.kwargs["style"]
@@ -1100,8 +963,148 @@ def test_manager_constructor_imports_only_after_controls_exist(
     select(dialog, 0)
     assert field_values(dialog) == ("R1", "90", "0.0", "0.0")
     assert dialog.delete_button.enabled is True
+    modules.wx.PostEvent.assert_not_called()
+
+
+@pytest.mark.parametrize("local", [False, True], ids=["global", "local"])
+@pytest.mark.parametrize("kind", ["valid", "malformed", "undecodable", "unreadable"])
+@pytest.mark.parametrize("with_backup", [False, True], ids=["no-backup", "backup"])
+def test_manager_ignores_legacy_csv_on_open_refresh_and_reopen(
+    modules: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    local: bool,
+    kind: str,
+    with_backup: bool,
+) -> None:
+    """Legacy input cannot overwrite SQLite data, emit notices, or change files."""
+    library = make_library(modules.library, tmp_path, [("R1", 180, 1, 2)], local=local)
+    contents = {
+        "valid": b"Pattern,Rotation\nR1,90\nR2,-90\n",
+        "malformed": b"Pattern,Rotation\nR1,47u\n",
+        "undecodable": b"\xff",
+        "unreadable": b"Pattern,Rotation\nR1,90\n",
+    }[kind]
+    path = legacy_csv(library, contents)
+    backup = path.with_suffix(".csv.backup")
+    if with_backup:
+        backup.write_bytes(b"existing archive")
+    denied_read = MagicMock(side_effect=PermissionError("legacy source denied"))
+    if kind == "unreadable":
+        monkeypatch.setattr(modules.corrections, "open", denied_read, raising=False)
+    before = raw_rows(library)
+    marker = ("csv:/previous/plugin/cpl_rotations_db.csv:old-digest", "old CSV import")
+    with closing(sqlite3.connect(library.correctionsdb_file)) as connection, connection:
+        connection.execute("INSERT INTO correction_migrations VALUES (?, ?)", marker)
+
+    for changed in (False, True):
+        if changed:
+            contents = b"Pattern,Rotation\nR1,270\nR3,90\n"
+            path.write_bytes(contents)
+        library = fresh_library(library)
+        dialog = manager(modules, library, monkeypatch)
+        dialog.populate_corrections_list()
+        assert raw_rows(library) == before
+        assert dialog.corrections_list.rows == [["R1", "180", "1.0", "2.0", ""]]
+        assert dialog.global_corrections.GetValue() is (not local)
+        assert path.read_bytes() == contents
+        assert backup.exists() is with_backup
+        if with_backup:
+            assert backup.read_bytes() == b"existing archive"
+        with closing(sqlite3.connect(library.correctionsdb_file)) as connection:
+            assert (
+                connection.execute(
+                    "SELECT migration_key, source FROM correction_migrations WHERE migration_key=?",
+                    (marker[0],),
+                ).fetchone()
+                == marker
+            )
+        modules.wx.PostEvent.assert_not_called()
+        modules.wx.MessageBox.assert_not_called()
+    denied_read.assert_not_called()
+
+
+@pytest.mark.parametrize("local", [False, True], ids=["global", "local"])
+def test_explicit_legacy_csv_import_uses_selected_scope_and_survives_reopen(
+    modules: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    local: bool,
+) -> None:
+    """The import button still accepts the historical path without archiving it."""
+    library = make_library(modules.library, tmp_path, [("R1", 180, 1, 2)])
+    if local:
+        library.switch_to_global_correction_database(False)
+    path = legacy_csv(library)
+    contents = path.read_bytes()
+    backup = path.with_suffix(".csv.backup")
+    backup.write_bytes(b"existing archive")
+    original = raw_rows(library)
+    dialog = manager(modules, library, monkeypatch)
+    assert raw_rows(library) == original
+    modules.wx.PostEvent.assert_not_called()
+    picker = MagicMock()
+    picker.__enter__.return_value = picker
+    picker.ShowModal.return_value = modules.wx.ID_OK
+    picker.GetPath.return_value = str(path)
+    monkeypatch.setattr(
+        modules.wx, "FileDialog", MagicMock(return_value=picker), raising=False
+    )
+
+    handler = dialog.import_button.bindings[modules.wx.EVT_BUTTON]
+    assert handler() is True
+
+    expected_path = (
+        library.localcorrectionsdb_file if local else library.globalcorrectionsdb_file
+    )
+    assert library.correctionsdb_file == expected_path
+    assert reopened_rows(library) == [("R1", 90, (0, 0)), ("R2", -90, (0, 0))]
+    if local:
+        with closing(sqlite3.connect(library.globalcorrectionsdb_file)) as connection:
+            assert connection.execute("SELECT * FROM correction").fetchall() == [
+                ("R1", 180, 1.0, 2.0)
+            ]
     modules.wx.PostEvent.assert_called_once()
-    assert raw_rows(library)[0][1:3] == ("R1", 90)
+    modules.wx.PostEvent.reset_mock()
+    reopened = manager(modules, fresh_library(library), monkeypatch)
+    assert reopened.corrections_list.rows == [
+        ["R1", "90", "0.0", "0.0", ""],
+        ["R2", "-90", "0.0", "0.0", ""],
+    ]
+    assert path.read_bytes() == contents
+    assert backup.read_bytes() == b"existing archive"
+    modules.wx.PostEvent.assert_not_called()
+    modules.wx.MessageBox.assert_not_called()
+
+
+def test_scope_switch_and_reopening_do_not_migrate_legacy_csv(
+    modules: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The checkbox retains normal transfers while leaving legacy CSVs untouched."""
+    library = make_library(modules.library, tmp_path, [("R1", 180, 1, 2)])
+    path = legacy_csv(library)
+    contents = path.read_bytes()
+    dialog = manager(modules, library, monkeypatch)
+    assert reopened_rows(library) == [("R1", 180, (1, 2))]
+    modules.wx.PostEvent.assert_not_called()
+    modules.wx.MessageDialog.return_value.ShowModal.return_value = modules.wx.ID_YES
+
+    for use_global in (False, True):
+        dialog.global_corrections.SetValue(use_global)
+        handler = dialog.global_corrections.bindings[modules.wx.EVT_CHECKBOX]
+        assert handler() is True
+        assert dialog.global_corrections.GetValue() is use_global
+        assert reopened_rows(library) == [("R1", 180, (1, 2))]
+        modules.wx.PostEvent.assert_called_once()
+        modules.wx.PostEvent.reset_mock()
+        library = fresh_library(library)
+        dialog = manager(modules, library, monkeypatch)
+        dialog.populate_corrections_list()
+        assert reopened_rows(library) == [("R1", 180, (1, 2))]
+        assert path.read_bytes() == contents
+        assert not path.with_suffix(".csv.backup").exists()
+        modules.wx.PostEvent.assert_not_called()
+        modules.wx.MessageBox.assert_not_called()
 
 
 @pytest.mark.parametrize("kind", ["invalid", "conflicting", "schema"])
