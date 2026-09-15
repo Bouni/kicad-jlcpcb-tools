@@ -51,7 +51,7 @@ echo "$VERSION" > "$PLUGINS_DIR/VERSION"
 
 echo "Modify archive metadata.json"
 sed_inplace "s/VERSION_HERE/$VERSION/g" "$METADATA_FILE"
-sed_inplace "s/\"kicad_version\": \"6.0\",/\"kicad_version\": \"6.0\"/g" "$METADATA_FILE"
+sed_inplace '/"kicad_version":/s/,$//' "$METADATA_FILE"
 for placeholder in SHA256_HERE DOWNLOAD_SIZE_HERE DOWNLOAD_URL_HERE INSTALL_SIZE_HERE; do
 	sed_inplace "/$placeholder/d" "$METADATA_FILE"
 done

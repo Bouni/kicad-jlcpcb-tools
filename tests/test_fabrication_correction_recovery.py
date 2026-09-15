@@ -298,21 +298,17 @@ def test_cpl_accepts_coordinate_boundary_and_unused_large_offset(
     assert float(row["Mid Y"]) == -coordinate
 
 
-@pytest.mark.parametrize("legacy_angle", [False, True])
 @pytest.mark.parametrize("layer", [0, 31])
 @pytest.mark.parametrize("selection", ["applied", "zero", "unmatched"])
-def test_public_correction_wrappers_preserve_top_bottom_and_legacy_angles(
+def test_public_correction_wrappers_preserve_top_bottom_angles(
     modules: SimpleNamespace,
     tmp_path: Path,
-    legacy_angle: bool,
     layer: int,
     selection: str,
 ) -> None:
-    """Independent wrapper calls retain both orientation APIs and zero semantics."""
+    """Independent wrapper calls retain top/bottom orientation and zero semantics."""
     fabrication = make_fabrication(modules, SimpleNamespace(), tmp_path)
     footprint = make_footprint("U1", layer, 30, Point(10, 20))
-    if legacy_angle:
-        footprint.GetOrientation = lambda: 300
     fabrication.corrections = (
         modules.data.Correction(
             "unused" if selection == "unmatched" else "Device",

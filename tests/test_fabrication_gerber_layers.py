@@ -1,9 +1,11 @@
 """Regression tests for Gerber layer selection by copper-layer count."""
 
+from collections.abc import Callable
 import importlib.util
 from pathlib import Path
 import sys
 import types
+from typing import Optional
 from unittest.mock import MagicMock
 import uuid
 
@@ -29,7 +31,7 @@ _LAYER_ID_PROFILES = (
             "F_Mask": 39,
             "Edge_Cuts": 44,
         },
-        id="kicad-8",
+        id="kicad-7-8",
     ),
     pytest.param(
         {
@@ -51,7 +53,11 @@ _LAYER_ID_PROFILES = (
 
 
 @pytest.fixture(params=_LAYER_ID_PROFILES)
-def plotted_layers(request, monkeypatch, tmp_path):
+def plotted_layers(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Callable[..., types.SimpleNamespace]:
     """Load Fabrication with isolated KiCad mocks and return a plot runner."""
     pcbnew = types.ModuleType("pcbnew")
     constants = {
@@ -72,7 +78,6 @@ def plotted_layers(request, monkeypatch, tmp_path):
 
     for name in (
         "EXCELLON_WRITER",
-        "PCB_PLOT_PARAMS",
         "PCB_VIA",
         "VECTOR2I",
         "ZONE_FILLER",
@@ -111,17 +116,20 @@ def plotted_layers(request, monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, module_name, fabrication_module)
     spec.loader.exec_module(fabrication_module)
 
-    def generate(layer_count, board_layer_count=1):
+    def generate(
+        layer_count: Optional[int],  # noqa: UP045
+        board_layer_count: int = 1,
+    ) -> types.SimpleNamespace:
         board = MagicMock(name="board")
+        board.GetFileName.return_value = str(tmp_path / "board.kicad_pcb")
         board.GetCopperLayerCount.return_value = board_layer_count
         board.GetEnabledLayers.return_value.Seq.return_value = []
 
-        fabrication = object.__new__(fabrication_module.Fabrication)
-        fabrication.parent = MagicMock(settings={})
-        fabrication.board = board
-        fabrication.gerberdir = str(tmp_path)
-        fabrication.logger = MagicMock(name="logger")
+        fabrication = fabrication_module.Fabrication(
+            types.SimpleNamespace(settings={}), board
+        )
 
+        plot_options.SetDrillMarksType.reset_mock()
         plot_options.SetSkipPlotNPTH_Pads.reset_mock()
         plot_controller.OpenPlotfile.reset_mock()
         fabrication.generate_geber(layer_count)
@@ -133,9 +141,21 @@ def plotted_layers(request, monkeypatch, tmp_path):
                 call.args[0]
                 for call in plot_options.SetSkipPlotNPTH_Pads.call_args_list
             ],
+            drill_marks=[
+                call.args[0] for call in plot_options.SetDrillMarksType.call_args_list
+            ],
         )
 
     return generate
+
+
+def test_generate_gerber_disables_drill_marks(
+    plotted_layers: Callable[..., types.SimpleNamespace],
+) -> None:
+    """A supported KiCad API profile uses its module-level no-drill-marks enum."""
+    result = plotted_layers(2)
+
+    assert result.drill_marks == [0]
 
 
 @pytest.mark.parametrize(
