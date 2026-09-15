@@ -431,6 +431,7 @@ class PartListDataModel(_StockDataModel):
         self._assembly_metadata.clear()
         self.stock_concern_refs.clear()
         self.Cleared()
+        self.mapper.clear()
 
     def get_all(self):
         """Get tall items."""
@@ -460,28 +461,6 @@ class PartListDataModel(_StockDataModel):
             if data[1:3] == obj[1:3]:
                 alike.append(self.ObjectToItem(data))
         return alike
-
-    def set_lcsc(
-        self, ref: str, lcsc: str, type: str, stock: object, params: str
-    ) -> None:
-        """Set an lcsc number, type and stock for given reference."""
-        if (index := self.find_index(ref)) is None:
-            return
-        item = self.data[index]
-        item[self.columns["LCSC_COL"]] = lcsc
-        item[self.columns["TYPE_COL"]] = type
-        item[self.columns["STOCK_COL"]] = stock
-        item[self.columns["PARAMS_COL"]] = self._encode_params_value(
-            reference=str(item[self.columns["REF_COL"]] or ""),
-            value=str(item[self.columns["VALUE_COL"]] or ""),
-            footprint=str(item[self.columns["FP_COL"]] or ""),
-            params=str(params or ""),
-        )
-        item[self.columns["ENRICH_COL"]] = ""
-        item[self.columns["PRICE_COL"]] = ""
-        self.standard_only_refs.discard(ref)
-        self._assembly_metadata.pop(ref, None)
-        self.ItemChanged(self.ObjectToItem(item))
 
     def set_catalog_details(
         self, lcsc: str, part_type: str, stock: object, params: str
@@ -522,42 +501,6 @@ class PartListDataModel(_StockDataModel):
             metadata, pending=bool(metadata.lcsc) and status == "Pending"
         )
         self.ItemChanged(self.ObjectToItem(item))
-
-    def remove_lcsc_number(self, item: Any) -> None:
-        """Remove the LCSC number of an item."""
-        obj = self.ItemToObject(item)
-        self.standard_only_refs.discard(str(obj[self.columns["REF_COL"]] or ""))
-        self._assembly_metadata.pop(str(obj[self.columns["REF_COL"]] or ""), None)
-        obj[self.columns["LCSC_COL"]] = ""
-        obj[self.columns["TYPE_COL"]] = ""
-        obj[self.columns["STOCK_COL"]] = ""
-        obj[self.columns["PARAMS_COL"]] = ""
-        obj[self.columns["ENRICH_COL"]] = ""
-        obj[self.columns["PRICE_COL"]] = ""
-        self.ItemChanged(self.ObjectToItem(obj))
-
-    def toggle_bom(self, item):
-        """Toggle BOM for a given item."""
-        obj = self.ItemToObject(item)
-        if obj[self.columns["BOM_COL"]] == self.bom_pos_icons[0]:
-            obj[self.columns["BOM_COL"]] = self.bom_pos_icons[1]
-        else:
-            obj[self.columns["BOM_COL"]] = self.bom_pos_icons[0]
-        self.ItemChanged(self.ObjectToItem(obj))
-
-    def toggle_pos(self, item):
-        """Toggle POS for a given item."""
-        obj = self.ItemToObject(item)
-        if obj[self.columns["POS_COL"]] == self.bom_pos_icons[0]:
-            obj[self.columns["POS_COL"]] = self.bom_pos_icons[1]
-        else:
-            obj[self.columns["POS_COL"]] = self.bom_pos_icons[0]
-        self.ItemChanged(self.ObjectToItem(obj))
-
-    def toggle_bom_pos(self, item):
-        """Toggle BOM and POS for a given item."""
-        self.toggle_bom(item)
-        self.toggle_pos(item)
 
 
 class PartSelectorDataModel(_StockDataModel):
