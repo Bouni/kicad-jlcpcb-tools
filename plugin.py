@@ -2,9 +2,10 @@
 
 import os
 
-from pcbnew import ActionPlugin  # pylint: disable=import-error
+from pcbnew import ActionPlugin, GetBuildVersion  # pylint: disable=import-error
+import wx
 
-from .mainwindow import JLCPCBTools
+from .core.version import is_supported_version
 
 
 class JLCPCBPlugin(ActionPlugin):
@@ -23,8 +24,18 @@ class JLCPCBPlugin(ActionPlugin):
         self.icon_file_name = os.path.join(path, "jlcpcb-icon.png")
         self._pcbnew_frame = None
 
-    def Run(self):
+    def Run(self) -> None:
         """Overwrite Run."""
+        if not is_supported_version(GetBuildVersion()):
+            wx.MessageBox(
+                "JLCPCB Tools requires KiCad 7.0 or newer.",
+                "Unsupported KiCad version",
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        from .mainwindow import JLCPCBTools  # noqa: PLC0415
+
         dialog = JLCPCBTools(None)
         dialog.Center()
         dialog.Show()

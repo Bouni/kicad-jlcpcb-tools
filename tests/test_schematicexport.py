@@ -30,7 +30,6 @@ _core.__path__ = [str(_ROOT / "core")]
 sys.modules["kicadplugin.core"] = _core
 
 _version = types.ModuleType("kicadplugin.core.version")
-_version.is_version6 = lambda version: False  # type: ignore[attr-defined]
 _version.is_version7 = lambda version: False  # type: ignore[attr-defined]
 sys.modules["kicadplugin.core.version"] = _version
 
@@ -112,20 +111,12 @@ def _symbol(
     if instance_text is None:
         instances = (
             ""
-            if version == 6 or (len(refs) == 1 and not variant)
+            if len(refs) == 1 and not variant
             else _instance_block(refs, variant, project_name, include_foreign)
         )
     else:
         instances = instance_text
     inline_lib_name = '(lib_name "Device:R_modified") ' if locally_modified else ""
-    if version == 6:
-        return f"""  (symbol {inline_lib_name}(lib_id "Device:R") (at 0 0 0) (unit 1)
-    (in_bom {initial_bom}) (on_board yes)
-    (uuid "{symbol_uuid}")
-    (property "Reference" "{reference}" (id 0) (at 0 0 0))
-    (property "LCSC" "OLD" (id 1) (at 0 0 0))
-    (pin "1" (uuid "pin-uuid"))
-  )"""
     if version == 7:
         return f"""  (symbol {inline_lib_name}(lib_id "Device:R") (at 0 0 0) (unit 1)
     (in_bom {initial_bom}) (on_board yes) (dnp no)
@@ -185,25 +176,6 @@ def _schematic(
 """
 
 
-def _v6_root(refs: Sequence[str]) -> str:
-    """Return a KiCad 6 root mapping reused child symbols by UUID."""
-    paths = "\n".join(
-        f'    (path "/sheet-{index}/symbol-uuid"\n'
-        f'      (reference "{ref}") (unit 1)\n'
-        "    )"
-        for index, ref in enumerate(refs)
-    )
-    return f"""(kicad_sch
-  (symbol_instances
-{paths}
-    (path "/other/other-uuid"
-      (reference "RV99") (unit 1)
-    )
-  )
-)
-"""
-
-
 def _project_api(
     board_project: object, loaded_projects: dict[str, object]
 ) -> types.SimpleNamespace:
@@ -258,7 +230,6 @@ def _load_schematic(
     )
     exporter = SchematicExport(parent)
     monkeypatch.setattr(_module, "GetBuildVersion", lambda: str(version))
-    monkeypatch.setattr(_module, "is_version6", lambda _: version == 6)
     monkeypatch.setattr(_module, "is_version7", lambda _: version == 7)
     exporter.load_schematic([str(path) for path in paths])
 
@@ -295,11 +266,6 @@ def _run_export(
         ),
         encoding="utf-8",
     )
-    if version == 6:
-        (tmp_path / f"{project_name}.kicad_sch").write_text(
-            _v6_root(refs), encoding="utf-8"
-        )
-
     _load_schematic(
         tmp_path,
         monkeypatch,
@@ -347,8 +313,8 @@ CASES = [
 
 @pytest.mark.parametrize(
     "version",
-    [6, 7, 8],
-    ids=["kicad6", "kicad7", "kicad8+"],
+    [7, 8],
+    ids=["kicad7", "kicad8+"],
 )
 @pytest.mark.parametrize(("initial_bom", "refs", "parts", "expected_bom"), CASES)
 def test_export_syncs_bom_without_changing_lcsc_resolution(
@@ -368,14 +334,45 @@ def test_export_syncs_bom_without_changing_lcsc_resolution(
         expected_bom
     ]
     assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
-    if version in {6, 7}:
+    if version == 7:
         assert f"(in_bom {expected_bom}) (on_board yes)" in result
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_inserts_lcsc_and_replaces_backup_on_repeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """Repeated exports update one LCSC property and back up the previous state."""
+    lcsc_property = (
+        '    (property "LCSC" "OLD" (at 0 0 0))\n'
+        if version == 7
+        else '    (property "LCSC" "OLD"\n      (at 0 0 0)\n    )\n'
+    )
+    original = _schematic(version, "yes", ("RV2",)).replace(lcsc_property, "")
+    path = tmp_path / "board.kicad_sch"
+    backup = tmp_path / "board.kicad_sch_old"
+    path.write_text(original, encoding="utf-8")
+    parts = [_part("RV2", "FIRST", True)]
+
+    _load_schematic(tmp_path, monkeypatch, version, [path], parts)
+    first = path.read_text(encoding="utf-8")
+    assert backup.read_text(encoding="utf-8") == original
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', first) == ["FIRST"]
+    assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", first, re.MULTILINE) == ["no"]
+
+    _load_schematic(
+        tmp_path, monkeypatch, version, [path], [_part("RV2", "SECOND", False)]
+    )
+    second = path.read_text(encoding="utf-8")
+    assert backup.read_text(encoding="utf-8") == first
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', second) == ["SECOND"]
+    assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", second, re.MULTILINE) == ["yes"]
 
 
 @pytest.mark.parametrize(
     "version",
-    [6, 7, 8],
-    ids=["kicad6", "kicad7", "kicad8+"],
+    [7, 8],
+    ids=["kicad7", "kicad8+"],
 )
 def test_export_syncs_bom_for_locally_modified_symbol(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
@@ -446,8 +443,8 @@ def test_export_resolves_instances_in_empty_project(
 
 @pytest.mark.parametrize(
     "version",
-    [6, 7, 8],
-    ids=["kicad6", "kicad7", "kicad8+"],
+    [7, 8],
+    ids=["kicad7", "kicad8+"],
 )
 def test_export_ignores_foreign_top_reference_for_bom(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
@@ -470,28 +467,6 @@ def test_export_ignores_foreign_top_reference_for_bom(
 
     assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == ["no"]
     assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["TOP"]
-
-
-def test_kicad6_ignores_selected_instance_tables(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A selected file is not assumed to be the active project's root."""
-    child = tmp_path / "child.kicad_sch"
-    child.write_text(_schematic(6, "yes", ("RV2", "RV6")), encoding="utf-8")
-    selected_root = tmp_path / "alternate-root.kicad_sch"
-    selected_root.write_text(_v6_root(("RV2", "RV6")), encoding="utf-8")
-    (tmp_path / "alternate-root.kicad_pro").write_text("{}", encoding="utf-8")
-    parts = [_part("RV2", "NEW", True), _part("RV6", "SECONDARY", True)]
-    pcbnew = _project_api(None, {"alternate-root.kicad_pro": None})
-
-    assert not (tmp_path / "board.kicad_sch").exists()
-    _load_schematic(
-        tmp_path, monkeypatch, 6, [child, selected_root], parts, pcbnew=pcbnew
-    )
-    result = child.read_text(encoding="utf-8")
-
-    assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == ["yes"]
-    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
 
 
 @pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
@@ -616,8 +591,8 @@ def test_export_keeps_symbol_resolution_independent(
 
 @pytest.mark.parametrize(
     "version",
-    [6, 7, 8],
-    ids=["kicad6", "kicad7", "kicad8+"],
+    [7, 8],
+    ids=["kicad7", "kicad8+"],
 )
 def test_export_uses_loaded_project_for_renamed_board(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
@@ -658,8 +633,8 @@ def test_export_uses_loaded_project_for_renamed_board(
 
 @pytest.mark.parametrize(
     "version",
-    [6, 7, 8],
-    ids=["kicad6", "kicad7", "kicad8+"],
+    [7, 8],
+    ids=["kicad7", "kicad8+"],
 )
 @pytest.mark.parametrize(
     "match_count", [None, 0, 2], ids=["unloaded", "no-match", "multiple-matches"]

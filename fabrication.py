@@ -11,8 +11,8 @@ from typing import Any, Optional
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from pcbnew import (  # pylint: disable=import-error
+    DRILL_MARKS_NO_DRILL_SHAPE,
     EXCELLON_WRITER,
-    PCB_PLOT_PARAMS,
     PCB_VIA,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
@@ -35,14 +35,6 @@ from pcbnew import (  # pylint: disable=import-error
 
 from .correction_data import Correction, CorrectionMatch, match_correction
 from .footprint_helpers import get_is_dnp
-
-# Compatibility hack for V6 / V7 / V7.99
-try:
-    from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE  # pylint: disable=import-error
-
-    NO_DRILL_SHAPE = DRILL_MARKS_NO_DRILL_SHAPE
-except ImportError:
-    NO_DRILL_SHAPE = PCB_PLOT_PARAMS.NO_DRILL_SHAPE
 
 # JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
 # 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
@@ -179,14 +171,7 @@ class Fabrication:
         match: Optional[CorrectionMatch],  # noqa: UP045
     ) -> float:
         """Apply the already selected rule, including an explicit no-match result."""
-        original = footprint.GetOrientation()
-        # `.AsDegrees()` added in KiCAD 6.99
-        try:
-            rotation = original.AsDegrees()
-        except AttributeError:
-            # we need to divide by 10 to get 180 out of 1800 for example.
-            # This might be a bug in 5.99 / 6.0 RC
-            rotation = original / 10
+        rotation = footprint.GetOrientation().AsDegrees()
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
@@ -264,7 +249,7 @@ class Fabrication:
             )
             return footprint.GetPosition()
 
-    def generate_geber(self, layer_count=None):
+    def generate_geber(self, layer_count: Optional[int] = None) -> None:  # noqa: UP045
         """Generate Gerber files."""
         # inspired by https://github.com/KiCad/kicad-source-mirror/blob/master/demos/python_scripts_examples/gen_gerber_and_drill_files_board.py
 
@@ -313,7 +298,7 @@ class Fabrication:
 
         popt.SetDisableGerberMacros(False)
 
-        popt.SetDrillMarksType(NO_DRILL_SHAPE)
+        popt.SetDrillMarksType(DRILL_MARKS_NO_DRILL_SHAPE)
 
         popt.SetPlotFrameRef(False)
 

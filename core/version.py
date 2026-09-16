@@ -1,22 +1,22 @@
 """Contains helper function used all over the plugin."""
 
-import re
-
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
 
-def _is_version_in_range(version: str, min_version: str, max_version: str) -> bool:
-    """Check if version is in range. Must comply with https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers."""
-    # Remove any trailing '.fc42', '+gXXXX', or similar after the first long segment
-    ver = Version(re.sub(r"([^-]+(?:-[^-]+)*)-.*", r"\1", version))
-    return Version(min_version) <= ver < Version(max_version)
+def _parse_version(version: str) -> Version:
+    """Parse KiCad's version, including distribution and development suffixes."""
+    # Select the API using the release before KiCad's dash-separated build suffixes.
+    return Version(version.split("-", 1)[0])
 
 
 def is_version7(version: str) -> bool:
     """Check if version is 7."""
-    return _is_version_in_range(version, "6.99", "8.0")
+    return Version("6.99") <= _parse_version(version) < Version("8.0")
 
 
-def is_version6(version: str) -> bool:
-    """Check if version is 6."""
-    return _is_version_in_range(version, "5.99", "7.0")
+def is_supported_version(version: str) -> bool:
+    """Require KiCad 7.0 or newer before loading project-facing code."""
+    try:
+        return _parse_version(version) >= Version("7.0")
+    except InvalidVersion:
+        return False

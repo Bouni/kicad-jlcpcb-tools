@@ -10,20 +10,19 @@ from typing import Optional
 
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
-from .core.version import is_version6, is_version7
+from .core.version import is_version7
 
 
 class SchematicExport:
     """A class to export Schematic files."""
 
-    # This only works with KiCad v6+ files; if the format changes, this will probably break.
+    # This only works with KiCad v7+ files; if the format changes, this will probably break.
 
     _IN_BOM_RX = re.compile(r"^(\s*)\(in_bom\s+(yes|no)\)")
     _REFERENCE_RX = re.compile(r'\(property\s+"Reference"\s+"([^"]*)"')
     _INSTANCE_REF_RX = re.compile(r'\(reference\s+"([^"]*)"\)')
     _PROJECT_RX = re.compile(r'\(project\s+"([^"]*)"')
     _UUID_RX = re.compile(r'\(uuid\s+"?([^"\s)]*)"?\)')
-    _PATH_RX = re.compile(r'\(path\s+"([^"]*)"')
 
     def __init__(self, parent):
         self.logger = logging.getLogger(__name__)
@@ -93,46 +92,10 @@ class SchematicExport:
             return None
         return states.pop()
 
-    def _symbol_instances6(self) -> dict[str, set[str]]:
-        """Read KiCad 6's project-level symbol instance references by UUID."""
-        project_name = self._project_name
-        if project_name is None:
-            return {}
-        root_name = project_name + ".kicad_sch"
-        path = os.path.join(self.parent.project_path, root_name)
-        try:
-            with open(path, encoding="utf-8") as f:
-                lines = f.readlines()
-        except OSError:
-            lines = []
-
-        refs = {}
-        in_instances = False
-        symbol_uuid = ""
-        for line in lines:
-            if "(symbol_instances" in line:
-                in_instances = True
-                continue
-            if not in_instances:
-                continue
-            if match := self._PATH_RX.search(line):
-                symbol_uuid = match.group(1).rsplit("/", 1)[-1]
-            if symbol_uuid and (match := self._INSTANCE_REF_RX.search(line)):
-                refs.setdefault(symbol_uuid, set()).add(match.group(1))
-                symbol_uuid = ""
-        if in_instances:
-            return refs
-
-        self.logger.warning(
-            "Unable to find KiCad 6 symbol instances; BOM states will not be updated"
-        )
-        return {}
-
     def _bom_updates(
         self,
         lines: list[str],
         store_parts: list[dict[str, object]],
-        instance_refs: Optional[dict[str, set[str]]] = None,  # noqa: UP045
     ) -> dict[int, str]:
         """Return in_bom line updates that are safe for every symbol instance."""
         symbols = []
@@ -169,21 +132,18 @@ class SchematicExport:
                 symbol["uuid"] = match.group(1)
             if match := self._REFERENCE_RX.search(in_line):
                 symbol["reference"] = match.group(1)
-            if instance_refs is None:
-                if "(instances" in in_line:
+            if "(instances" in in_line:
+                symbol["instances"] = {}
+            if match := self._PROJECT_RX.search(in_line):
+                project = match.group(1)
+                if symbol["instances"] is None:
                     symbol["instances"] = {}
-                if match := self._PROJECT_RX.search(in_line):
-                    project = match.group(1)
-                    if symbol["instances"] is None:
-                        symbol["instances"] = {}
-                    symbol["instances"].setdefault(project, set())
-                if project is not None and (
-                    match := self._INSTANCE_REF_RX.search(in_line)
-                ):
-                    symbol["instances"][project].add(match.group(1))
+                symbol["instances"].setdefault(project, set())
+            if project is not None and (match := self._INSTANCE_REF_RX.search(in_line)):
+                symbol["instances"][project].add(match.group(1))
 
         project_name = None
-        if instance_refs is None and any(
+        if any(
             symbol["instances"] is not None and set(symbol["instances"]) != {""}
             for symbol in symbols
         ):
@@ -191,9 +151,7 @@ class SchematicExport:
 
         updates = {}
         for symbol in symbols:
-            if instance_refs is not None:
-                refs = instance_refs.get(symbol["uuid"], set())
-            elif symbol["instances"] is None:
+            if symbol["instances"] is None:
                 refs = {symbol["reference"]}
             elif set(symbol["instances"]) == {""}:
                 refs = symbol["instances"][""]
@@ -202,7 +160,7 @@ class SchematicExport:
             else:
                 refs = symbol["instances"].get(project_name, set())
             if not refs:
-                if instance_refs is None and project_name is not None:
+                if project_name is not None:
                     self.logger.warning(
                         "Not updating BOM state for %s; no instances resolve for project %s",
                         symbol["reference"] or symbol["uuid"],
@@ -216,12 +174,7 @@ class SchematicExport:
 
     def load_schematic(self, paths: list[str]) -> None:
         """Load schematic file."""
-        if is_version6(GetBuildVersion()):
-            self.logger.info("Kicad 6...")
-            instance_refs = self._symbol_instances6()
-            for path in paths:
-                self._update_schematic6(path, instance_refs)
-        elif is_version7(GetBuildVersion()):
+        if is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")
             for path in paths:
                 self._update_schematic7(path)
@@ -229,88 +182,6 @@ class SchematicExport:
             self.logger.info("Kicad 8+...")
             for path in paths:
                 self._update_schematic(path)
-
-    def _update_schematic6(self, path: str, instance_refs: dict[str, set[str]]) -> None:
-        """Only works with KiCad V6 files."""
-        self.logger.info("Reading %s...", path)
-        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
-        # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile(
-            '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(id\\s(\\d+)\\)\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
-        )
-        pinRx = re.compile('\\(pin\\s\\"(.*)\\"\\s\\(')
-
-        store_parts = self.parent.store.read_all()
-
-        lastID = -1
-        lastLoc = ""
-        lastLcsc = ""
-        newLcsc = ""
-        lastRef = ""
-
-        lines = []
-        newlines = []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        for index, desired in self._bom_updates(
-            lines, store_parts, instance_refs=instance_refs
-        ).items():
-            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-
-        if os.path.exists(path + "_old"):
-            os.remove(path + "_old")
-        os.rename(path, path + "_old")
-        partSection = False
-
-        for line in lines:
-            inLine = line.rstrip()
-            outLine = inLine
-            if "(symbol (lib_id" in inLine:  # skip library section
-                partSection = True
-            m = propRx.search(inLine)
-            if m and partSection:
-                key = m.group(1)
-                value = m.group(2)
-                lastID = int(m.group(3))
-
-                # found a LCSC property, so update it if needed
-                if key == "LCSC":
-                    lastLcsc = value
-                    if newLcsc not in (lastLcsc, ""):
-                        self.logger.info("Updating %s on %s", newLcsc, lastRef)
-                        outLine = outLine.replace(
-                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
-                        )
-                        lastLcsc = newLcsc
-
-                if key == "Reference":
-                    lastLoc = m.group(4)
-                    lastRef = value
-                    for part in store_parts:
-                        if value == part["reference"]:
-                            newLcsc = part["lcsc"]
-                            break
-            # if we hit the pin section without finding a LCSC property, add it
-            m = pinRx.search(inLine)
-            if m:
-                if lastLcsc == "" and newLcsc != "" and lastLoc != "" and lastID != -1:
-                    self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'    (property "LCSC" "{newLcsc}" (id {lastID + 1}) (at {lastLoc} 0)'
-                    newlines.append(newTxt)
-                    newlines.append("      (effects (font (size 1.27 1.27)) hide)")
-                    newlines.append("    )")
-                lastID = -1
-                lastLoc = ""
-                lastLcsc = ""
-                newLcsc = ""
-                lastRef = ""
-            newlines.append(outLine)
-
-        with open(path, "w", encoding="utf-8") as f:
-            for line in newlines:
-                f.write(line + "\n")
-        self.logger.info("Added LCSC's to %s(maybe?)", path)
 
     def _update_schematic7(self, path: str) -> None:
         """Only works with KiCad V7 files."""

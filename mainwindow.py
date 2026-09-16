@@ -2487,14 +2487,14 @@ class JLCPCBTools(wx.Frame):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
         self.populate_footprint_list()
 
-    def export_to_schematic(self, *_):
+    def export_to_schematic(self, *_: object) -> None:
         """Dialog to select schematics."""
         with wx.FileDialog(
             self,
             "Select Schematics",
             self.project_path,
             self.schematic_name,
-            "KiCad V6 Schematics (*.kicad_sch)|*.kicad_sch",
+            "KiCad Schematics (*.kicad_sch)|*.kicad_sch",
             wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
         ) as openFileDialog:
             if openFileDialog.ShowModal() == wx.CANCEL:

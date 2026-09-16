@@ -48,7 +48,9 @@ _LAYER_ID_PROFILES = (
 
 
 @pytest.fixture(params=_LAYER_ID_PROFILES)
-def zone_harness(request, monkeypatch):
+def zone_harness(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> types.SimpleNamespace:
     """Load Fabrication with isolated KiCad mocks for one layer-ID profile."""
     pcbnew = types.ModuleType("pcbnew")
     constants = {
@@ -69,7 +71,6 @@ def zone_harness(request, monkeypatch):
 
     for name in (
         "EXCELLON_WRITER",
-        "PCB_PLOT_PARAMS",
         "PCB_VIA",
         "PLOT_CONTROLLER",
         "VECTOR2I",
