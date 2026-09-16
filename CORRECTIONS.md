@@ -128,11 +128,13 @@ An interrupted initial default download resumes after recovery. Failure to start
 that optional download warns without disabling healthy corrections. Reopening
 does not refill corrections that were deliberately deleted.
 
-Automatic legacy CSV imports archive the source only after the import commits.
-An archive failure is reported separately from a successful database import.
-Rejected CSV input leaves the current stored corrections usable. Warnings about
-unreadable archives are separate from errors in active corrections and known
-incomplete transfers.
+The legacy `corrections/cpl_rotations_db.csv` file is no longer imported
+automatically. Existing CSV files and their `.backup` archives are left untouched.
+Use Import in Corrections Manager to load a legacy CSV into the selected global
+or local database. Previously imported corrections remain stored in SQLite and
+can still be edited or repaired. Rejected CSV input leaves the current stored
+corrections usable. Warnings about unreadable SQLite archives are separate from
+errors in active corrections and known incomplete transfers.
 
 Global-to-local copying completes before the active database changes. A failed
 switch preserves the active scope and its data. Errors in an inactive database

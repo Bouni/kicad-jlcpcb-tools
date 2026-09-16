@@ -4,7 +4,6 @@ from collections.abc import Iterable, Iterator, Sequence
 import contextlib
 from dataclasses import dataclass, replace
 from enum import Enum
-import hashlib
 import json
 import logging
 import os
@@ -114,7 +113,6 @@ class CorrectionSnapshot:
     rows: tuple[StoredCorrection, ...]
     corrections: Optional[tuple[Correction, ...]]  # noqa: UP045
     issues: tuple[CorrectionIssue, ...]
-    csv_migrations: tuple[tuple[str, str], ...] = ()
     state: CorrectionState = CorrectionState.READY
     warnings: tuple[CorrectionIssue, ...] = ()
 
@@ -331,8 +329,6 @@ class Library:
                 raise CorrectionDataError(destination.issues)
             with self._correction_transaction(self.localcorrectionsdb_file) as con:
                 con.execute("DROP TABLE correction")
-                # Keep automatic CSV provenance when leaving local scope, so
-                # an unarchived source cannot replay into the global database.
             self.correctionsdb_file = self.globalcorrectionsdb_file
             self._start_initial_remote_corrections(self.globalcorrectionsdb_file)
         else:
@@ -348,10 +344,6 @@ class Library:
                 con.executemany(
                     "INSERT INTO correction (regex, rotation, offset_x, offset_y) VALUES (?, ?, ?, ?)",
                     [correction.db_row() for correction in source],
-                )
-                con.executemany(
-                    "INSERT OR IGNORE INTO correction_migrations VALUES (?, ?)",
-                    source_snapshot.csv_migrations,
                 )
             self.correctionsdb_file = self.localcorrectionsdb_file
 
@@ -621,16 +613,6 @@ class Library:
             pass
 
     @staticmethod
-    def correction_csv_migration_key(
-        path: DatabasePath, contents: Union[bytes, str]
-    ) -> str:
-        """Identify an automatic CSV import by canonical path and exact contents."""
-        if isinstance(contents, str):
-            contents = contents.encode("utf-8")
-        digest = hashlib.sha256(contents).hexdigest()
-        return f"csv:{Path(path).resolve()}:{digest}"
-
-    @staticmethod
     def _correction_metadata(
         con: sqlite3.Connection,
     ) -> tuple[dict[object, str], list[tuple[object, str, str, str]]]:
@@ -668,27 +650,13 @@ class Library:
         key: str,
         db_path: Optional[DatabasePath] = None,  # noqa: UP045
     ) -> bool:
-        """Check completion, including the current project's archived CSV provenance."""
+        """Check migration completion in the requested correction database."""
         target = db_path if db_path is not None else self.correctionsdb_file
-        candidates = [target]
-        if key.startswith("csv:"):
-            candidates.extend(
-                path
-                for path in (
-                    self.localcorrectionsdb_file,
-                    self.globalcorrectionsdb_file,
-                )
-                if Path(path).resolve() != Path(target).resolve()
-                and Path(path).exists()
-            )
         try:
-            for candidate in candidates:
-                with contextlib.closing(self._read_database(candidate)) as con:
-                    if key in self._correction_metadata(con)[0]:
-                        return True
-            return False
+            with contextlib.closing(self._read_database(target)) as con:
+                return key in self._correction_metadata(con)[0]
         except (sqlite3.Error, OSError) as error:
-            raise self._storage_error(candidate, error, "migration") from error
+            raise self._storage_error(target, error, "migration") from error
 
     def _validated_corrections(
         self, records: Iterable[object], target: DatabasePath
@@ -942,7 +910,6 @@ class Library:
         rows = []
         issues = []
         corrections = {}
-        csv_migrations = ()
         raw_rows = []
         unavailable = False
         warnings = []
@@ -953,12 +920,7 @@ class Library:
                 raw_rows = con.execute(
                     "SELECT rowid, regex, rotation, offset_x, offset_y FROM correction ORDER BY regex ASC, rowid ASC"
                 ).fetchall()
-                completed, states = self._correction_metadata(con)
-                csv_migrations = tuple(
-                    (key, source)
-                    for key, source in completed.items()
-                    if isinstance(key, str) and key.startswith("csv:")
-                )
+                _, states = self._correction_metadata(con)
                 if scope == "global":
                     for _, source, status, message in states:
                         if status in {"pending", "deferred"}:
@@ -1018,7 +980,6 @@ class Library:
             tuple(rows),
             None if issues else tuple(corrections.values()),
             tuple(issues),
-            csv_migrations,
             state,
             tuple(warnings),
         )

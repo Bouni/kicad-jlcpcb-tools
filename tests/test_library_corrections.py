@@ -190,7 +190,11 @@ def test_unrecognized_metadata_keys_preserve_repair_and_pending_diagnostics(
         if table == "pending"
         else modules.library.CorrectionState.NEEDS_REPAIR
     )
-    assert snapshot.csv_migrations == ()
+    if table == "completed":
+        assert execute(
+            library.correctionsdb_file,
+            "SELECT migration_key, source FROM correction_migrations WHERE source='old-tool'",
+        ) == [(key, "old-tool")]
     if table != "completed":
         assert "restore custom corrections" in str(
             snapshot.issues if table == "pending" else snapshot.warnings
@@ -224,9 +228,7 @@ def test_old_completed_legacy_and_csv_markers_stay_settled(
     monkeypatch.setattr(reopened, "_legacy_rotation_rows", forbidden)
     reopened.check_library()
     assert correction_values(reopened) == [("repaired", 270, (1.0, 2.0))]
-    assert reopened.read_correction_data().csv_migrations == (
-        ("csv:preserved", "legacy.csv"),
-    )
+    assert ("csv:preserved", "legacy.csv") in migration_rows(reopened)
 
 
 def test_unknown_archive_warning_defers_lower_priority_and_retries(
@@ -1558,17 +1560,38 @@ def test_replacement_checks_the_exact_confirmed_records(
     assert raw_rows(library) == before
 
 
-def test_migration_key_is_stable_and_distinguishes_source_and_content(
-    library, tmp_path
-):
-    """Legacy CSV completion identifies both the source path and its contents."""
-    first = tmp_path / "legacy.csv"
-    second = tmp_path / "other.csv"
-    contents = "Pattern,Rotation\npart,90\n"
-    key = library.correction_csv_migration_key(first, contents)
-    assert key == library.correction_csv_migration_key(first, contents.encode())
-    assert key != library.correction_csv_migration_key(second, contents)
-    assert key != library.correction_csv_migration_key(first, contents + "next,180\n")
+@pytest.mark.parametrize("rotation", [270, "47u"])
+def test_historical_csv_markers_preserve_saved_rows_and_repair_across_reopen(
+    modules: SimpleNamespace, library: Any, rotation: Any
+) -> None:
+    """Old CSV bookkeeping remains inert while established SQLite rows stay repairable."""
+    seed_raw(library, [("existing", rotation, 0.25, -0.5)])
+    execute(
+        library.correctionsdb_file,
+        "INSERT INTO correction_migrations VALUES ('csv:historical', 'legacy.csv')",
+    )
+    library.parent.settings = {"library": {"data_path": library.datadir}}
+    before = raw_rows(library)
+    reopened = modules.library.Library(library.parent)
+    snapshot = reopened.read_correction_data()
+    assert raw_rows(reopened) == before
+    assert snapshot.state is (
+        modules.library.CorrectionState.READY
+        if rotation == 270
+        else modules.library.CorrectionState.NEEDS_REPAIR
+    )
+    if rotation != 270:
+        selected = snapshot.rows[0]
+        reopened.save_correction_data(
+            "existing",
+            270,
+            (0.25, -0.5),
+            rowid=selected.rowid,
+            expected_record=selected,
+        )
+    reopened = modules.library.Library(library.parent)
+    assert correction_values(reopened) == [("existing", 270, (0.25, -0.5))]
+    assert ("csv:historical", "legacy.csv") in migration_rows(reopened)
 
 
 def test_completion_marker_commits_with_data_and_prevents_replay(library: Any) -> None:
@@ -1587,23 +1610,34 @@ def test_completion_marker_commits_with_data_and_prevents_replay(library: Any) -
     ]
 
 
-def test_cloning_global_corrections_preserves_csv_completion_and_user_repairs(
-    library: Any, tmp_path: Path
+def test_cloning_global_corrections_leaves_csv_markers_in_their_original_scope(
+    modules: SimpleNamespace, library: Any
 ) -> None:
-    """A legacy CSV left after archive failure cannot replay after changing scope."""
-    key = library.correction_csv_migration_key(
-        tmp_path / "legacy.csv", "Pattern,Rotation\nexisting,90\n"
+    """Scope copying retains correction values without propagating obsolete bookkeeping."""
+    key = "csv:historical-global"
+    seed_raw(library, [("existing", 270, 0.25, -0.5)])
+    execute(
+        library.globalcorrectionsdb_file,
+        "INSERT INTO correction_migrations VALUES (?, ?)",
+        (key, "global-legacy.csv"),
     )
-    original = [("existing", 90, (0, 0))]
-    library.apply_corrections(original, migration_key=key)
-    library.update_correction_data("existing", 270, (0.25, -0.5))
+    library.create_correction_table(library.localcorrectionsdb_file)
+    execute(
+        library.localcorrectionsdb_file,
+        "INSERT INTO correction_migrations VALUES ('csv:historical-local', 'local-legacy.csv')",
+    )
     library.switch_to_global_correction_database(False)
-    assert library.has_correction_migration(key, library.localcorrectionsdb_file)
-    result = library.apply_corrections(original, migration_key=key)
-    assert not result.changed
-    assert correction_values(fresh_library(library)) == [
-        ("existing", 270, (0.25, -0.5))
-    ]
+    library.parent.settings = {"library": {"data_path": library.datadir}}
+    reopened = modules.library.Library(library.parent)
+    assert reopened.correctionsdb_file == library.localcorrectionsdb_file
+    assert correction_values(reopened) == [("existing", 270, (0.25, -0.5))]
+    assert execute(
+        library.localcorrectionsdb_file,
+        "SELECT migration_key, source FROM correction_migrations",
+    ) == [("csv:historical-local", "local-legacy.csv")]
+    assert (key, "global-legacy.csv") in migration_rows(reopened)
+    assert not reopened.has_correction_migration(key)
+    assert reopened.has_correction_migration(key, library.globalcorrectionsdb_file)
 
 
 def test_marker_write_failure_rolls_back_all_imported_data(modules, library):
@@ -2047,29 +2081,27 @@ def test_invalid_inactive_database_does_not_block_active_reads(library: Any) -> 
     assert correction_values(fresh_library(library)) == [("good", 90, (0.0, 0.0))]
 
 
-def test_local_csv_provenance_survives_switch_to_global_without_replaying(
+def test_switching_to_global_retains_local_csv_markers_without_consulting_them(
     modules: SimpleNamespace, tmp_path: Path
 ) -> None:
-    """An archived local import cannot overwrite repaired global values later."""
+    """Leaving local scope preserves archived metadata without sharing its completion state."""
     library = make_library(modules.library, tmp_path, local=True)
     library.create_correction_table(library.globalcorrectionsdb_file)
     library.apply_corrections(
         [("existing", 270, (0.25, -0.5))], db_path=library.globalcorrectionsdb_file
     )
-    key = library.correction_csv_migration_key(
-        tmp_path / "legacy.csv", "Pattern,Rotation\nexisting,90\n"
+    key = "csv:historical-local"
+    seed_raw(library, [("existing", 180, 1, 2)])
+    execute(
+        library.localcorrectionsdb_file,
+        "INSERT INTO correction_migrations VALUES (?, ?)",
+        (key, "local-legacy.csv"),
     )
-    original = [("existing", 90, (0, 0))]
-    library.apply_corrections(original, migration_key=key)
-    library.update_correction_data("existing", 180, (1, 2))
     library.switch_to_global_correction_database(True)
-    assert library.correctionsdb_file == library.globalcorrectionsdb_file
-    assert fresh_library(library).has_correction_migration(key)
-    result = fresh_library(library).apply_corrections(original, migration_key=key)
-    assert not result.changed
-    assert correction_values(fresh_library(library)) == [
-        ("existing", 270, (0.25, -0.5))
-    ]
+    library.parent.settings = {"library": {"data_path": library.datadir}}
+    reopened = modules.library.Library(library.parent)
+    assert reopened.correctionsdb_file == library.globalcorrectionsdb_file
+    assert correction_values(reopened) == [("existing", 270, (0.25, -0.5))]
     assert (
         execute(
             library.localcorrectionsdb_file,
@@ -2079,25 +2111,34 @@ def test_local_csv_provenance_survives_switch_to_global_without_replaying(
     )
     assert execute(
         library.localcorrectionsdb_file,
-        "SELECT migration_key FROM correction_migrations",
-    ) == [(key,)]
+        "SELECT migration_key, source FROM correction_migrations",
+    ) == [(key, "local-legacy.csv")]
+    assert (key, "local-legacy.csv") not in migration_rows(reopened)
+    assert not reopened.has_correction_migration(key)
+    assert reopened.has_correction_migration(key, library.localcorrectionsdb_file)
 
 
-def test_corrupt_alternate_csv_provenance_blocks_replay_but_not_active_reads(
-    modules: SimpleNamespace, library: Any, tmp_path: Path
+@pytest.mark.parametrize("key", ["csv:historical", "sqlite:fixture", "remote:fixture"])
+@pytest.mark.parametrize("completed", [False, True])
+def test_completion_lookup_ignores_unreadable_inactive_scope(
+    library: Any, key: str, completed: bool
 ) -> None:
-    """Uncertain archived provenance is surfaced without invalidating active corrections."""
+    """Completion belongs only to the requested database, regardless of old key prefixes."""
     seed_raw(library, [("existing", 270, 0.25, -0.5)])
     Path(library.localcorrectionsdb_file).write_bytes(b"unreadable archive")
-    key = library.correction_csv_migration_key(
-        tmp_path / "legacy.csv", "Pattern,Rotation\nexisting,90\n"
-    )
+    if completed:
+        execute(
+            library.correctionsdb_file,
+            "INSERT INTO correction_migrations VALUES (?, ?)",
+            (key, "historical-source"),
+        )
     before = raw_rows(library)
-    with pytest.raises(modules.data.CorrectionDataError):
-        library.has_correction_migration(key)
-    with pytest.raises(modules.data.CorrectionDataError):
-        library.apply_corrections([("existing", 90, (0, 0))], migration_key=key)
+    assert library.has_correction_migration(key) is completed
+    assert (
+        library.has_correction_migration(key, library.correctionsdb_file) is completed
+    )
     assert raw_rows(library) == before
+    assert Path(library.localcorrectionsdb_file).read_bytes() == b"unreadable archive"
     assert correction_values(fresh_library(library)) == [
         ("existing", 270, (0.25, -0.5))
     ]

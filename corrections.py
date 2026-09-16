@@ -6,7 +6,7 @@ from collections.abc import Sequence
 import csv
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
@@ -18,7 +18,7 @@ from .correction_data import (
     validate_correction,
 )
 from .events import PopulateFootprintListEvent
-from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+from .helpers import HighResWxSize, loadBitmapScaled
 
 if TYPE_CHECKING:
     from .library import StoredCorrection
@@ -358,7 +358,6 @@ class CorrectionManagerDialog(wx.Dialog):
         self.enable_toolbar_buttons()
         if self._uses_global_corrections():
             self.parent.library.retry_correction_migrations()
-        self.import_legacy_corrections()
         self.populate_corrections_list()
 
     def quit_dialog(self, *_: object) -> None:
@@ -683,40 +682,6 @@ class CorrectionManagerDialog(wx.Dialog):
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
         return True
 
-    def import_legacy_corrections(self) -> bool:
-        """Import an old CSV once, after controls exist, and preserve its archive."""
-        path = os.path.join(PLUGIN_PATH, "corrections", "cpl_rotations_db.csv")
-        if not os.path.isfile(path):
-            return False
-        library = self.parent.library
-        try:
-            with open(path, "rb") as source:
-                contents = source.read()
-            key = library.correction_csv_migration_key(path, contents)
-            completed = library.has_correction_migration(key)
-        except (OSError, CorrectionDataError) as error:
-            self._show_error("Legacy Correction Import Error", f"{path}: {error}")
-            return False
-        if not completed and not self._import_corrections(
-            path, contents=contents, migration_key=key, refresh=False
-        ):
-            return False
-        try:
-            # A hard link refuses an existing archive atomically. Keep the source
-            # if archival fails; the committed marker prevents replay after repair.
-            os.link(path, f"{path}.backup")
-            os.unlink(path)
-        except OSError as error:
-            wx.MessageBox(
-                f"The legacy corrections were already imported successfully. "
-                f"The source remains at {path}, but could not be archived: {error}. "
-                "It will not be imported again unless its contents change.",
-                "Legacy Correction Archive Warning",
-                wx.OK | wx.ICON_WARNING,
-                self,
-            )
-        return True
-
     def import_corrections_dialog(self, *_: object) -> bool:
         """Ask for a correction CSV and import it after confirmation."""
         with wx.FileDialog(
@@ -747,31 +712,23 @@ class CorrectionManagerDialog(wx.Dialog):
 
     def _import_corrections(
         self,
-        path: str | os.PathLike[str],
-        *,
-        contents: bytes | None = None,
-        migration_key: str | None = None,
-        refresh: bool = True,
+        path: Union[str, os.PathLike[str]],
     ) -> bool:
         """Validate the complete CSV before committing any insert or replacement."""
         library = self.parent.library
         target = str(library.correctionsdb_file)
         try:
-            if contents is None:
-                with open(path, "rb") as source:
-                    contents = source.read()
+            with open(path, "rb") as source:
+                contents = source.read()
             corrections = parse_corrections_csv(
                 contents.decode("utf-8"), source=str(path)
             )
-            result = library.apply_corrections(
-                corrections, db_path=target, migration_key=migration_key
-            )
+            result = library.apply_corrections(corrections, db_path=target)
         except (OSError, UnicodeError, CorrectionDataError) as error:
             self._show_error("Correction Import Error", f"{path}: {error}")
             return False
         if result.changed:
-            if refresh:
-                self.populate_corrections_list()
+            self.populate_corrections_list()
             wx.PostEvent(self.parent, PopulateFootprintListEvent())
         return True
 

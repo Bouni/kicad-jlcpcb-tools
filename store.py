@@ -2,7 +2,6 @@
 
 from collections.abc import Iterable
 import contextlib
-import csv
 import logging
 import os
 from pathlib import Path
@@ -390,7 +389,7 @@ class Store:
         self.set_estimator_metadata(ref, pad_count, has_tht, assembly_flags)
         self.logger.debug("Updated estimator metadata for %s", ref)
 
-    def update_from_board(self):
+    def update_from_board(self) -> None:
         """Read all footprints from the board and insert them into the database if they do not exist."""
         for fp in get_valid_footprints(self.board):
             board_part = {
@@ -455,7 +454,6 @@ class Store:
                 )
                 self.update_part(board_part)
             self.backfill_estimator_metadata(fp, db_part)
-        self.import_legacy_assignments()
         self.clean_database()
 
     def clean_database(self):
@@ -470,20 +468,3 @@ class Store:
                 refs,
             )
             cur.commit()
-
-    def import_legacy_assignments(self):
-        """Check if assignments of an old version are found and merge them into the database."""
-        csv_file = os.path.join(self.project_path, "jlcpcb", "part_assignments.csv")
-        if os.path.isfile(csv_file):
-            with open(csv_file, encoding="utf-8") as f:
-                csvreader = csv.DictReader(
-                    f, fieldnames=("reference", "lcsc", "bom", "pos")
-                )
-                for row in csvreader:
-                    self.set_lcsc(row["reference"], row["lcsc"])
-                    self.set_bom(row["reference"], int(row["bom"]))
-                    self.set_pos(row["reference"], int(row["pos"]))
-                    self.logger.debug(
-                        "Update %s from legacy 'part_assignments.csv'", row["reference"]
-                    )
-            os.rename(csv_file, f"{csv_file}.backup")
