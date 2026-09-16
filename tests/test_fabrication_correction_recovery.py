@@ -19,7 +19,7 @@ from tests.correction_test_support import (
     raw_rows,
     seed_raw,
 )
-from tests.wx_harness import load_correction_modules, module
+from tests.wx_harness import load_correction_modules
 
 
 @dataclass
@@ -46,12 +46,7 @@ def modules() -> Iterator[SimpleNamespace]:
     with load_correction_modules(
         package=package,
         pcbnew=pcbnew,
-        names=("fabrication",),
-        replacements={
-            f"{package}.footprint_helpers": module(
-                f"{package}.footprint_helpers", get_is_dnp=lambda _footprint: False
-            )
-        },
+        names=("fabrication", "store"),
     ) as loaded:
         yield loaded
 
@@ -74,10 +69,14 @@ def make_footprint(
         GetFPID=lambda: SimpleNamespace(GetLibItemName=lambda: "Package:Device"),
         Pads=lambda: [],
         GetPosition=lambda: position,
+        IsDNP=lambda: False,
+        GetFields=lambda: [],
+        GetAttributes=lambda: 0,
+        m_Uuid=SimpleNamespace(AsString=lambda: reference),
     )
 
 
-def make_fabrication(modules, library, tmp_path):
+def make_fabrication(modules: SimpleNamespace, library: Any, tmp_path: Path) -> Any:
     """Create a real generator for one top and one bottom footprint."""
     footprints = [
         make_footprint("U1", 0, 0, Point(10, 20)),
@@ -90,12 +89,15 @@ def make_fabrication(modules, library, tmp_path):
         ),
         Footprints=MagicMock(return_value=footprints),
     )
+    board.GetFootprints = board.Footprints
     parts = {
         reference: {
             "reference": reference,
             "value": "Device",
             "footprint": "Package:Device",
             "exclude_from_pos": 0,
+            "is_dnp": False,
+            "footprint_uuid": reference,
             "lcsc": "C123",
         }
         for reference in ("U1", "U2")
@@ -103,7 +105,10 @@ def make_fabrication(modules, library, tmp_path):
     parent = SimpleNamespace(
         library=library,
         settings={},
-        store=SimpleNamespace(get_part=parts.get),
+        store=SimpleNamespace(
+            get_part=parts.get,
+            read_all=lambda: [parts[fp.GetReference()] for fp in board.Footprints()],
+        ),
     )
     return modules.fabrication.Fabrication(parent, board)
 
@@ -112,6 +117,25 @@ def read_cpl(fabrication):
     """Read the actual generated CSV through a fresh file handle."""
     with Path(fabrication.get_cpl_csv_path()).open(newline="") as stream:
         return list(csv.DictReader(stream))
+
+
+@pytest.mark.parametrize("native_dnp", [False, True])
+def test_cpl_uses_plugin_dnp_even_when_board_disagrees(
+    modules: SimpleNamespace, tmp_path: Path, native_dnp: bool
+) -> None:
+    """Updating the PCB must not replace the user's persisted assembly choice."""
+    fabrication = make_fabrication(modules, SimpleNamespace(), tmp_path)
+    for footprint in fabrication.board.Footprints():
+        footprint.IsDNP = lambda: native_dnp
+        fabrication.parent.store.get_part(footprint.GetReference())[
+            "is_dnp"
+        ] = not native_dnp
+
+    fabrication.generate_cpl(())
+
+    assert [row["Designator"] for row in read_cpl(fabrication)] == (
+        ["U1", "U2"] if native_dnp else []
+    )
 
 
 @pytest.mark.parametrize(
@@ -163,21 +187,21 @@ def test_cpl_skipped_footprints_do_not_resolve_corrections(
     fabrication.board.Footprints.return_value = [
         make_footprint(f"U{index}", 0, 0, Point(10, 20)) for index in range(1, 7)
     ]
+    fabrication.board.Footprints.return_value[2].GetReference = lambda: ""
     parts = {
         f"U{index}": {
             "reference": f"U{index}",
             "value": "Device",
             "footprint": "Package:Device",
             "exclude_from_pos": int(index == 4),
+            "is_dnp": index == 2,
+            "footprint_uuid": f"U{index}",
             "lcsc": "" if index == 5 else "C123",
         }
         for index in (1, 2, 4, 5, 6)
     }
-    fabrication.parent.store.get_part = parts.get
+    fabrication.parent.store.read_all = lambda: list(parts.values())
     fabrication.parent.settings = {"gerber": {"lcsc_bom_cpl": False}}
-    monkeypatch.setattr(
-        modules.fabrication, "get_is_dnp", lambda fp: fp.GetReference() == "U2"
-    )
     matcher = MagicMock(wraps=fabrication._correction_for_footprint)
     monkeypatch.setattr(fabrication, "_correction_for_footprint", matcher)
 

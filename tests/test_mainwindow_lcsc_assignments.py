@@ -25,15 +25,17 @@ make_window = support.make_window
 
 
 @pytest.mark.parametrize("action", ["picker", "paste", "apply"])
-def test_assignment_syncs_board_store_model_and_survives_reopen(
+def test_assignment_changes_only_plugin_store_and_survives_reopen(
     action: str,
     make_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """All assignment paths must agree and survive normal board precedence on reopen."""
+    """All assignment paths persist plugin choices while preserving native fields."""
     window = make_window()
-    window.store.set_assembly_metadata("R1", "SMT", 2, expected_lcsc="C100")
+    window.library.merge_lcsc_metadata(
+        "C100", {"assembly_process": "SMT", "component_product_type": 2}
+    )
 
     if action == "apply":
         window.library.save_part_preferences([("R_0603", "10k", "C200")])
@@ -41,9 +43,9 @@ def test_assignment_syncs_board_store_model_and_survives_reopen(
     act(action, window, mainwindow, monkeypatch, "C200")
 
     fp = window.pcbnew.GetBoard().FindFootprintByReference("R1")
-    assert fp.field.text == "C200"
+    assert fp.field.text == "C100"
     assert window.test_rows["R1"]["lcsc"] == "C200"
-    assert window.store.get_part("R1")["stock"] == 27
+    assert window.test_rows["R1"]["stock"] == 27
     assert window.store.get_part("R1")["assembly_process"] == ""
     assert window.store.get_part("R1")["component_product_type"] is None
     reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
@@ -79,54 +81,101 @@ def test_assignment_caches_missing_catalog_details_once_per_action(
     window.library.get_part_details.assert_called_once_with("C200")
     assert [row["lcsc"] for row in project_rows(window)] == ["C200", "C200"]
     assert [row["lcsc"] for row in window.test_rows.values()] == ["C200", "C200"]
-    assert all(
-        fp.field.text == "C200" for fp in window.pcbnew.GetBoard().GetFootprints()
-    )
+    assert all(fp.field.text == "" for fp in window.pcbnew.GetBoard().GetFootprints())
     mainwindow.JLCPCBTools.populate_footprint_list(window)
     window.start_assembly_enrichment.assert_called_once()
 
 
-@pytest.mark.parametrize("action", ["paste", "apply"])
-def test_selected_deleted_footprint_is_skipped(
+@pytest.mark.parametrize("action", ["picker", "paste", "apply", "clear"])
+def test_deleted_footprint_rejects_the_entire_assignment_action(
     action: str,
     make_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Stale selections must not mutate deleted footprints or prevent live assignments."""
-    window = make_window(footprints=[Footprint(), Footprint("R2")])
-    del window.pcbnew.GetBoard().footprints["R1"]
+    """Losing a later selected part cannot silently apply only part of an action."""
+    window = make_window(
+        footprints=[Footprint(), Footprint("R2")],
+        part_preferences={("R_0603", "10k"): "C200"},
+    )
+    before_database = project_rows(window)
+    before_model = deepcopy(window.test_rows)
+    board = window.pcbnew.GetBoard()
+    deleted = board.footprints.pop("R2")
+    if action == "picker":
+        window.assign_parts(
+            SimpleNamespace(
+                references=["R1", "R2"],
+                footprint_uuids=dict(window._displayed_part_uuids),
+                lcsc="C200",
+                type="Basic",
+                stock=27,
+            )
+        )
+    else:
+        act(action, window, mainwindow, monkeypatch, "C200")
 
-    if action == "apply":
-        window.library.save_part_preferences([("R_0603", "10k", "C200")])
-        window.library.save_part_preferences.reset_mock()
-    act(action, window, mainwindow, monkeypatch, "C200")
+    board.footprints["R2"] = deleted
+    assert project_rows(window) == before_database
+    assert window.test_rows == before_model
+    assert all(fp.field.text == "C100" for fp in board.GetFootprints())
+    window.library.save_part_preferences.assert_not_called()
+    window.start_assembly_enrichment.assert_not_called()
+    mainwindow.wx.PostEvent.assert_not_called()
+    window.logger.warning.assert_called()
 
-    assert window.store.get_part("R1")["lcsc"] == "C100"
-    assert window.store.get_part("R2")["lcsc"] == "C200"
-    window.start_assembly_enrichment.assert_called_once_with(["R2"])
+
+@pytest.mark.parametrize("action", ["picker", "paste", "apply", "clear"])
+def test_stale_assignment_cannot_target_a_replacement_with_the_same_reference(
+    action: str,
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An open picker or stale selected row still identifies the original UUID."""
+    window = make_window(part_preferences={("R_0603", "10k"): "C999"})
+    original_uuids = dict(window._displayed_part_uuids)
+    replacement = Footprint("R1", lcsc="C300")
+    window.pcbnew.GetBoard().footprints["R1"] = replacement
+    if action == "picker":
+        window.populate_footprint_list()
+        window.assign_parts(
+            SimpleNamespace(
+                references=["R1"],
+                footprint_uuids=original_uuids,
+                lcsc="C999",
+                type="Basic",
+                stock=27,
+            )
+        )
+    else:
+        act(action, window, mainwindow, monkeypatch)
+
+    assert window.store.get_part("R1")["lcsc"] == "C300"
+    assert replacement.field.text == "C300"
+    window.start_assembly_enrichment.assert_not_called()
+    mainwindow.wx.PostEvent.assert_not_called()
+    assert "Selected footprints changed" in str(window.logger.warning.call_args)
 
 
 def _seed_enrichment(window: Any) -> None:
     """Give every representation observable values that a failed action must retain."""
-    with closing(sqlite3.connect(window.store.dbfile)) as connection, connection:
-        connection.executemany(
-            "UPDATE part_info SET stock = ?, assembly_process = ?, "
-            "component_product_type = ? WHERE reference = ?",
-            [(11, "SMT", 1, "R1"), (22, "THT", 2, "R2")],
-        )
+    window.library.merge_lcsc_metadata(
+        "C100", {"assembly_process": "SMT", "component_product_type": 1}
+    )
+    window.library.merge_lcsc_metadata(
+        "C200", {"assembly_process": "THT", "component_product_type": 2}
+    )
     window.populate_footprint_list()
     window.populate_footprint_list.reset_mock()
 
 
 @pytest.mark.parametrize("action", ["picker", "paste", "apply", "clear"])
-@pytest.mark.parametrize("column", ["lcsc", "stock"])
 def test_later_project_failure_preserves_entire_action_and_emits_no_success(
     make_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
     action: str,
-    column: str,
 ) -> None:
     """A selection is one transaction, including distinct manual Apply groups."""
     window = make_window(
@@ -143,7 +192,7 @@ def test_later_project_failure_preserves_entire_action_and_emits_no_success(
     before_database = project_rows(window)
     before_model = deepcopy(window.test_rows)
     before_preferences = library.get_all_part_preferences()
-    reject_second_project_update(window, column)
+    reject_second_project_update(window, "lcsc")
 
     act(action, window, mainwindow, monkeypatch)
 
@@ -185,14 +234,10 @@ def test_failed_automatic_remembering_keeps_committed_project_choice(
         SimpleNamespace(references=["R1", "R2"], lcsc="C999", type="Basic", stock=99)
     )
 
-    assert [(row["lcsc"], row["stock"]) for row in project_rows(window)] == [
-        ("C999", 99),
-        ("C999", 99),
-    ]
-    assert all(row["assembly_process"] == "" for row in project_rows(window))
-    assert all(row["component_product_type"] is None for row in project_rows(window))
+    assert [row["lcsc"] for row in project_rows(window)] == ["C999", "C999"]
+    assert all(row["stock"] == 99 for row in window.test_rows.values())
     assert all(
-        fp.field.text == "C999" for fp in window.pcbnew.GetBoard().GetFootprints()
+        fp.field.text == "C100" for fp in window.pcbnew.GetBoard().GetFootprints()
     )
     assert all(row["lcsc"] == "C999" for row in window.test_rows.values())
     assert library.get_all_part_preferences() == []
@@ -280,9 +325,10 @@ def test_optional_enrichment_read_failure_keeps_accepted_assignment_and_notifies
 
     expected = ["C999", "C999"] if action != "apply" else ["C777", "C888"]
     assert [row["lcsc"] for row in project_rows(window)] == expected
-    assert [
-        fp.field.text for fp in window.pcbnew.GetBoard().GetFootprints()
-    ] == expected
+    assert [fp.field.text for fp in window.pcbnew.GetBoard().GetFootprints()] == [
+        "C100",
+        "C200",
+    ]
     assert [window.test_rows[ref]["lcsc"] for ref in ("R1", "R2")] == expected
     assert library.get_all_part_preferences() == [
         ["R_0603", "10k", expected[0]],
@@ -326,9 +372,8 @@ def test_manual_save_rolls_back_all_preferences_when_a_later_key_fails(
     assert info_messages(window) == []
 
 
-@pytest.mark.parametrize("column", ["lcsc", "stock"])
 def test_auto_fill_rolls_back_all_groups_and_keeps_window_usable(
-    make_window: Callable[..., Any], column: str
+    make_window: Callable[..., Any],
 ) -> None:
     """A later project write failure must roll back the complete opening's fill."""
     window = make_window(
@@ -339,7 +384,7 @@ def test_auto_fill_rolls_back_all_groups_and_keeps_window_usable(
         part_preferences={("R_0603", "10k"): "C100", ("R_0603", "20k"): "C200"},
     )
     before = project_rows(window)
-    reject_second_project_update(window, column)
+    reject_second_project_update(window, "lcsc")
 
     window.init_store()
 
@@ -362,6 +407,7 @@ def test_project_database_unavailable_at_startup_keeps_settings_reachable(
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(mainwindow, "Store", unavailable_store)
+    window.store = None
     window.init_store()
 
     assert window.store is None
@@ -437,7 +483,9 @@ def test_clear_keeps_native_selection_array_alive_during_model_updates(
     )
     window.remove_lcsc_number()
     assert all(part["lcsc"] == "" for part in window.store.read_all())
-    assert all(fp.field.text == "" for fp in window.pcbnew.GetBoard().GetFootprints())
+    assert all(
+        fp.field.text == "C100" for fp in window.pcbnew.GetBoard().GetFootprints()
+    )
     assert all(part["lcsc"] == "" for part in window.test_rows.values())
 
 
@@ -477,70 +525,41 @@ def test_storage_recovery_restarts_invalidated_pending_enrichment(
         {"JLCPCB": "C100"},
         {"LCSC": "C100", "JLCPCB": "C101"},
         {"LCSC": "", "JLCPCB": "C101"},
+        *[
+            {
+                alias: "C100",
+                "JLCPCB Rotation Offset": "90",
+                "JLCPCB Position Offset": "0, 0.2",
+                "JLCPCB Layer Override": "bottom",
+                "LCSC URL": "https://example.test/component",
+                "JLCPCB empty metadata": "",
+            }
+            for alias in (
+                "LCSC",
+                "JLC_PN",
+                "LCSC P/N",
+                "JLCPCB Part #",
+                "LCSC custom code",
+            )
+        ],
     ],
 )
-def test_explicit_assignment_and_clear_keep_all_aliases_consistent(
+def test_assignment_and_clear_preserve_all_board_fields_across_reopen(
     make_window: Callable[..., Any], fields: dict[str, str]
 ) -> None:
-    """C-number assignments can be changed and cleared without leaving a hidden alias."""
+    """Persist explicit choices and clears independently of every native alias."""
     footprint = Footprint(fields=fields)
     window = make_window(footprints=[footprint])
-    window.settings["part_preferences"] = {"fill_empty_lcsc_assignments_on_open": False}
 
-    for lcsc in ("C123", "C456"):
-        window.assign_parts(
-            SimpleNamespace(references=["R1"], lcsc=lcsc, type="Basic", stock=27)
-        )
-        assert {
-            name: field.text for name, field in footprint.fields.items()
-        } == dict.fromkeys(fields, lcsc)
-        assert window.store.get_part("R1")["lcsc"] == lcsc
-
-    window.remove_lcsc_number()
-    assert {
-        name: field.text for name, field in footprint.fields.items()
-    } == dict.fromkeys(fields, "")
-    window.init_store()
-    reopened = make_window(board=window.pcbnew.GetBoard(), settings=window.settings)
-    reopened.init_store()
-    assert reopened.store.get_part("R1")["lcsc"] == ""
-    assert window.test_rows["R1"]["lcsc"] == ""
-
-
-@pytest.mark.parametrize(
-    "alias", ["LCSC", "JLC_PN", "LCSC P/N", "JLCPCB Part #", "LCSC custom code"]
-)
-def test_assignment_preserves_other_supplier_fields_when_assigning_and_clearing(
-    make_window: Callable[..., Any], alias: str
-) -> None:
-    """Explicit part choices must not corrupt placement offsets or supplier URLs."""
-    metadata = {
-        "JLCPCB Rotation Offset": "90",
-        "JLCPCB Position Offset": "0, 0.2",
-        "JLCPCB Layer Override": "bottom",
-        "LCSC URL": "https://example.test/component",
-        "JLCPCB empty metadata": "",
-    }
-    footprint = Footprint(fields={alias: "C100", **metadata})
-    window = make_window(
-        footprints=[footprint],
-        settings={"part_preferences": {"fill_empty_lcsc_assignments_on_open": False}},
-    )
-    for lcsc in ("C123", "C456"):
-        window.assign_parts(
-            SimpleNamespace(references=["R1"], lcsc=lcsc, type="Basic", stock=27)
-        )
-        assert {name: field.text for name, field in footprint.fields.items()} == {
-            alias: lcsc,
-            **metadata,
-        }
-        window = make_window(board=window.pcbnew.GetBoard(), settings=window.settings)
+    for lcsc in ("C123", "C456", ""):
+        if lcsc:
+            window.assign_parts(
+                SimpleNamespace(references=["R1"], lcsc=lcsc, type="Basic", stock=27)
+            )
+        else:
+            window.remove_lcsc_number()
+        window = make_window(board=window.pcbnew.GetBoard())
         window.init_store()
         assert window.store.get_part("R1")["lcsc"] == lcsc
-    window.remove_lcsc_number()
-    assert {name: field.text for name, field in footprint.fields.items()} == {
-        alias: "",
-        **metadata,
-    }
-    window.init_store()
-    assert window.store.get_part("R1")["lcsc"] == ""
+        assert window.test_rows["R1"]["lcsc"] == lcsc
+        assert {name: field.text for name, field in footprint.fields.items()} == fields

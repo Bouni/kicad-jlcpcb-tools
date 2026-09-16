@@ -1,6 +1,6 @@
 """Exercise catalog recovery through real generation preflight before stopping at DRC."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -146,16 +146,20 @@ def generation_window(
         real_init(generator, parent, board)
 
     def prepare(
-        generator: Any, corrections: Optional[tuple[Any, ...]] = None
+        generator: Any,
+        corrections: Optional[tuple[Any, ...]] = None,
+        parts: Optional[Sequence[dict[str, Any]]] = None,
     ) -> tuple[tuple[Any, ...], ...]:
         """Observe actual placement rows without replacing their calculation."""
-        rows = real_prepare(generator, corrections)
+        rows = real_prepare(generator, corrections, parts)
         placements.append(rows)
         return rows
 
-    def consistency(generator: Any) -> str:
+    def consistency(
+        generator: Any, parts: Optional[Sequence[dict[str, Any]]] = None
+    ) -> str:
         """Observe the real assignment consistency check."""
-        result = real_consistency(generator)
+        result = real_consistency(generator, parts)
         consistency_checks.append(result)
         return result
 

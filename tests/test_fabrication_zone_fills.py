@@ -90,14 +90,6 @@ def zone_harness(
     package.__path__ = [str(_ROOT)]
     monkeypatch.setitem(sys.modules, package_name, package)
 
-    footprint_helpers = types.ModuleType(f"{package_name}.footprint_helpers")
-    footprint_helpers.get_is_dnp = MagicMock(return_value=False)
-    monkeypatch.setitem(
-        sys.modules,
-        f"{package_name}.footprint_helpers",
-        footprint_helpers,
-    )
-
     module_name = f"{package_name}.fabrication"
     spec = importlib.util.spec_from_file_location(module_name, _ROOT / "fabrication.py")
     assert spec is not None and spec.loader is not None

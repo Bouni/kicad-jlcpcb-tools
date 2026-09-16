@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load_correction_modules, module
+from .wx_harness import load_correction_modules
 
 
 class Point:
@@ -33,12 +33,10 @@ def generate_cpl(tmp_path: Path) -> Iterator[Callable[..., list[dict[str, str]]]
         wxPoint=Point,
         VECTOR2I=Point,
     )
-    helpers = f"{package}.footprint_helpers"
     with load_correction_modules(
         package=package,
         pcbnew=pcbnew,
         names=("fabrication",),
-        replacements={helpers: module(helpers, get_is_dnp=lambda _footprint: False)},
     ) as modules:
 
         def generate(
@@ -57,19 +55,22 @@ def generate_cpl(tmp_path: Path) -> Iterator[Callable[..., list[dict[str, str]]]
                 GetOrientation=lambda: SimpleNamespace(AsDegrees=lambda: 0),
                 Pads=lambda: [],
                 GetPosition=lambda: Point(*position),
+                m_Uuid=SimpleNamespace(AsString=lambda: "R1"),
             )
             board = SimpleNamespace(
                 GetFileName=lambda: str(tmp_path / "board.kicad_pcb"),
                 GetDesignSettings=lambda: SimpleNamespace(
                     GetAuxOrigin=lambda: Point(*origin)
                 ),
-                Footprints=lambda: [footprint],
+                GetFootprints=lambda: [footprint],
             )
             part = {
                 "reference": "R1",
                 "value": "10k",
                 "footprint": "R_0603",
                 "exclude_from_pos": 0,
+                "is_dnp": False,
+                "footprint_uuid": "R1",
                 "lcsc": "C123",
             }
             snapshot = modules.library.CorrectionSnapshot(
@@ -82,7 +83,7 @@ def generate_cpl(tmp_path: Path) -> Iterator[Callable[..., list[dict[str, str]]]
             parent = SimpleNamespace(
                 settings={},
                 library=SimpleNamespace(read_correction_data=lambda: snapshot),
-                store=SimpleNamespace(get_part=lambda _reference: part),
+                store=SimpleNamespace(read_all=lambda: [part]),
             )
             fabrication = modules.fabrication.Fabrication(parent, board)
             fabrication.generate_cpl()

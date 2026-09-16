@@ -9,6 +9,7 @@ import sqlite3
 import types
 from typing import Any, Optional
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -88,6 +89,8 @@ class Footprint:
         pos: bool = False,
     ) -> None:
         self.reference, self.value, self.footprint = reference, value, footprint
+        self.uuid = str(uuid4())
+        self.m_Uuid = types.SimpleNamespace(AsString=lambda: self.uuid)
         self.fields = {
             name: Field(name, text)
             for name, text in (fields if fields is not None else {"LCSC": lcsc}).items()
@@ -138,6 +141,11 @@ class Board:
 
     def __init__(self, footprints: Iterable[Footprint]) -> None:
         self.footprints = {fp.reference: fp for fp in footprints}
+        self.filename = ""
+
+    def GetFileName(self) -> str:
+        """Return the saved board path."""
+        return self.filename
 
     def GetFootprints(self) -> list[Footprint]:
         """Return current board footprints."""
@@ -184,12 +192,17 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         window.settings = {} if settings is None else settings
         window.project_path = str(tmp_path)
         board = board or Board(footprints if footprints is not None else [Footprint()])
+        if not board.filename:
+            board.filename = str(tmp_path / "test.kicad_pcb")
         window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
+        window._schematic_notice_started = True
+        window._displayed_part_uuids = {}
         window.logger = MagicMock()
         library = window.library = object.__new__(mainwindow.Library)
         library.part_preferences_db_file = str(tmp_path / "mappings.db")
         library.logger = logging.getLogger("part_preferences_test_storage")
         library.create_part_preferences_table()
+        library.create_lcsc_metadata_table()
         seed_preferences(library, part_preferences or {})
         library.state = mainwindow.LibraryState.INITIALIZED
         library.save_part_preferences = MagicMock(wraps=library.save_part_preferences)
@@ -225,6 +238,9 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         def populate() -> None:
             rows.clear()
             rows.update({part["reference"]: part for part in window.store.read_all()})
+            window._displayed_part_uuids = {
+                ref: part["footprint_uuid"] for ref, part in rows.items()
+            }
 
         def set_lcsc(
             ref: str, lcsc: str, part_type: str, stock: Any, params: str
@@ -268,7 +284,7 @@ def act(
     if action == "picker":
         window.assign_parts(
             types.SimpleNamespace(
-                references=list(window.pcbnew.GetBoard().footprints) + ["REMOVED"],
+                references=list(window.pcbnew.GetBoard().footprints),
                 lcsc=lcsc,
                 type="Basic",
                 stock=27,
@@ -303,21 +319,29 @@ def act(
 
 
 def project_rows(window: Any) -> list[dict[str, Any]]:
-    """Read durable state using a fresh connection after an action."""
+    """Read durable rows through a fresh connection with current reference labels."""
+    references = {
+        fp.uuid: fp.reference for fp in window.pcbnew.GetBoard().GetFootprints()
+    }
     with closing(sqlite3.connect(window.store.dbfile)) as db:
         db.row_factory = sqlite3.Row
-        return [
-            dict(row)
-            for row in db.execute("SELECT * FROM part_info ORDER BY reference")
+        rows = [
+            {**dict(row), "reference": references[row["footprint_uuid"]]}
+            for row in db.execute(
+                "SELECT * FROM part_info WHERE board_key = ?", (window.store.board_key,)
+            )
+            if row["footprint_uuid"] in references
         ]
+    return sorted(rows, key=lambda row: row["reference"])
 
 
 def reject_second_project_update(window: Any, column: str) -> None:
-    """Reject the later row after an earlier update has executed."""
-    assert column in {"lcsc", "stock"}
+    """Reject the later UUID after an earlier update has executed."""
+    assert column in {"lcsc", "exclude_from_bom", "exclude_from_pos", "is_dnp"}
+    uuid = window.pcbnew.GetBoard().footprints["R2"].uuid
     with closing(sqlite3.connect(window.store.dbfile)) as db, db:
         db.execute(
-            f"CREATE TRIGGER reject_second_assignment BEFORE UPDATE OF {column} ON part_info WHEN NEW.reference = 'R2' BEGIN SELECT RAISE(ABORT, 'later assignment rejected'); END"
+            f"CREATE TRIGGER reject_second_assignment BEFORE UPDATE OF {column} ON part_info WHEN NEW.footprint_uuid = '{uuid}' BEGIN SELECT RAISE(ABORT, 'later assignment rejected'); END"
         )
 
 
