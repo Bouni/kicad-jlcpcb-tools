@@ -1,6 +1,6 @@
 """Exercise catalog recovery through real generation preflight before stopping at DRC."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -146,16 +146,20 @@ def generation_window(
         real_init(generator, parent, board)
 
     def prepare(
-        generator: Any, corrections: Optional[tuple[Any, ...]] = None
+        generator: Any,
+        corrections: Optional[tuple[Any, ...]] = None,
+        parts: Optional[Sequence[dict[str, Any]]] = None,
     ) -> tuple[tuple[Any, ...], ...]:
         """Observe actual placement rows without replacing their calculation."""
-        rows = real_prepare(generator, corrections)
+        rows = real_prepare(generator, corrections, parts)
         placements.append(rows)
         return rows
 
-    def consistency(generator: Any) -> str:
+    def consistency(
+        generator: Any, parts: Optional[Sequence[dict[str, Any]]] = None
+    ) -> str:
         """Observe the real assignment consistency check."""
-        result = real_consistency(generator)
+        result = real_consistency(generator, parts)
         consistency_checks.append(result)
         return result
 
@@ -217,7 +221,7 @@ def generation_window(
                 board=board,
                 fabrication_initialized=False,
             )
-            # The shared fixture seeds persisted assignments; startup must reopen them.
+            # Startup must construct its reader against the same live board.
             window.store = None
             del window.populate_footprint_list
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
@@ -284,7 +288,7 @@ def assert_ready(context: SimpleNamespace) -> None:
         assert snapshot.store is not None
         assert not snapshot.unavailable
         assert snapshot.directories_ready
-    assert window.store.get_part("R1")["lcsc"] == "C100"
+    assert window.store.read_all()[0]["lcsc"] == "C100"
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C100"
 
 
@@ -452,15 +456,15 @@ def test_population_read_failure_survives_recovery_until_storage_retry_succeeds(
     generation_window: Callable[[str], SimpleNamespace],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A recovered catalog cannot clear a later project read error or enable generation."""
+    """A recovered catalog cannot clear a board-read error or enable generation."""
     context = generation_window("healthy")
     window = context.window
     original_generator = window.fabrication
     real_store = context.module.Store
-    error = "project assignments cannot be read"
+    error = "board assignments cannot be read"
 
     def unreadable_store(*args: Any, **kwargs: Any) -> Any:
-        """Create real project storage before failing its first population read."""
+        """Create the real board reader before failing its first population read."""
         store = real_store(*args, **kwargs)
         store.read_all = MagicMock(side_effect=sqlite3.OperationalError(error))
         return store
@@ -495,3 +499,41 @@ def test_population_read_failure_survives_recovery_until_storage_retry_succeeds(
     assert window.fabrication is original_generator
     assert context.constructors == [original_generator]
     assert_generate_reaches_drc(context)
+
+
+def test_corrupt_project_counter_blocks_exports_without_disabling_board_reads(
+    generation_window: Callable[[str], SimpleNamespace],
+) -> None:
+    """Lazy project metadata errors stop generation before hooks or output writes."""
+    context = generation_window("healthy")
+    window = context.window
+    original = b"unreadable project counter database"
+    database = Path(window.store.dbfile)
+    database.parent.mkdir(parents=True, exist_ok=True)
+    database.write_bytes(original)
+    window.run_drc_before_gerber_export.return_value = True
+    window.layer_selection = SimpleNamespace(
+        GetSelection=lambda: 0, GetString=lambda _index: "2 layers"
+    )
+    window.count_order_number_placeholders = MagicMock(return_value=0)
+    window.run_generate_hook = MagicMock(return_value=True)
+    output_methods = (
+        "generate_geber",
+        "generate_excellon",
+        "zip_gerber_excellon",
+        "write_cpl",
+        "generate_bom",
+    )
+    for name in output_methods:
+        setattr(window.fabrication, name, MagicMock())
+
+    window.generate_fabrication_data()
+
+    context.message_box.assert_called_once()
+    assert "not a database" in context.message_box.call_args.args[0]
+    window.run_generate_hook.assert_not_called()
+    for name in output_methods:
+        getattr(window.fabrication, name).assert_not_called()
+    assert window.store.read_all()[0]["lcsc"] == "C100"
+    assert not window._project_storage_unavailable
+    assert database.read_bytes() == original

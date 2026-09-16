@@ -14,6 +14,7 @@ from . import (
     test_window_layout as layout_ui,
 )
 from .stock_test_support import board_row, stock_modules
+from .wx_harness import track_selection
 
 mainwindow = storage.mainwindow
 make_window = storage.make_window
@@ -117,13 +118,13 @@ def test_open_selector_updates_with_main_setting_and_reopens_exact_stock(
 
 
 @pytest.mark.parametrize("simplified", [False, True])
-def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
+def test_selector_assignment_keeps_exact_catalog_stock_in_board_model(
     monkeypatch: pytest.MonkeyPatch,
     make_window: Callable[..., Any],
     mainwindow: Any,
     simplified: bool,
 ) -> None:
-    """The real selection event carries raw stock through durable assignment."""
+    """The selection event carries raw catalog stock while the board owns assignment."""
     with stock_modules() as modules:
         monkeypatch.setattr(
             layout_ui.partselector,
@@ -140,6 +141,10 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
             1.0, simplify_stock=simplified
         )
         window.partlist_data_model.AddEntry(board_row("R1", "27", "C100"))
+        del window.populate_footprint_list
+        track_selection(
+            window, window.partlist_data_model, [window.partlist_data_model.data[0]]
+        )
         selector = layout_ui._open_selector(monkeypatch, {}, parent=window)
         selector.update_for({"R1": "C100"})
         item = _populate_selector(selector)
@@ -165,11 +170,12 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
         assert window._part_selector is None
         target.assign_parts(event)
 
-        assert storage.project_rows(window)[0]["stock"] == 22095
+        assert storage.board_rows(window)[0]["stock"] is None
         assert (
             window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
         )
         model = window.partlist_data_model
+        assert window.footprint_list.GetSelections() == [model.data[0]]
         assert model.get_all()[0][model.columns["STOCK_COL"]] == "22095"
         assert _stock_label(model, model.data[0], "STOCK_COL") == (
             "22 k" if simplified else "22095"
@@ -177,8 +183,8 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
         reopened = mainwindow.Store(
             window, window.project_path, window.pcbnew.GetBoard()
         )
-        assert reopened.get_part("R1")["stock"] == 22095
-        assert reopened.get_part("R1")["lcsc"] == "C200"
+        assert reopened.read_all()[0]["stock"] is None
+        assert reopened.read_all()[0]["lcsc"] == "C200"
         layout_ui._drain_callbacks()
 
 

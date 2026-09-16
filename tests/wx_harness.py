@@ -100,6 +100,35 @@ def temporary_modules(
                 sys.modules[name] = restored
 
 
+class DataViewItemArray(list[Any]):
+    """Represent the native array type required by wxOSX SetSelections."""
+
+
+def track_selection(
+    window: Any, model: Any, selected: list[Any], *, notify: bool = False
+) -> None:
+    """Retain native selection state and optionally deliver real selection handlers."""
+    window.footprint_list.GetSelections.side_effect = lambda: list(selected)
+    window.footprint_list.GetSelectedItemsCount.side_effect = lambda: len(selected)
+    remove_all = model.RemoveAll
+
+    def set_selections(items: DataViewItemArray) -> None:
+        if not isinstance(items, DataViewItemArray):
+            raise TypeError("SetSelections requires DataViewItemArray")
+        selected[:] = items
+        if notify:
+            window.OnFootprintSelected()
+
+    def clear() -> None:
+        remove_all()
+        selected.clear()
+        if notify:
+            window.OnFootprintSelected()
+
+    window.footprint_list.SetSelections.side_effect = set_selections
+    model.RemoveAll = clear
+
+
 class FakeWxModule(types.ModuleType):
     """A wx-shaped module that mints the flag constants it is asked for.
 
@@ -136,6 +165,8 @@ def wx_stubs(
     stubs = {"wx": wx}
     for submodule in submodules:
         child = FakeWxModule(f"wx.{submodule}")
+        if submodule == "dataview":
+            child.DataViewItemArray = DataViewItemArray
         setattr(wx, submodule, child)
         stubs[f"wx.{submodule}"] = child
     return stubs

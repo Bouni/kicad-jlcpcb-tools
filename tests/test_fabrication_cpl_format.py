@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load_correction_modules, module
+from .wx_harness import load_correction_modules
 
 
 class Point:
@@ -33,12 +33,10 @@ def generate_cpl(tmp_path: Path) -> Iterator[Callable[..., list[dict[str, str]]]
         wxPoint=Point,
         VECTOR2I=Point,
     )
-    helpers = f"{package}.footprint_helpers"
     with load_correction_modules(
         package=package,
         pcbnew=pcbnew,
         names=("fabrication",),
-        replacements={helpers: module(helpers, get_is_dnp=lambda _footprint: False)},
     ) as modules:
 
         def generate(
@@ -82,7 +80,7 @@ def generate_cpl(tmp_path: Path) -> Iterator[Callable[..., list[dict[str, str]]]
             parent = SimpleNamespace(
                 settings={},
                 library=SimpleNamespace(read_correction_data=lambda: snapshot),
-                store=SimpleNamespace(get_part=lambda _reference: part),
+                store=SimpleNamespace(read_all=lambda: [part]),
             )
             fabrication = modules.fabrication.Fabrication(parent, board)
             fabrication.generate_cpl()

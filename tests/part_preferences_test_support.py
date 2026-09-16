@@ -26,6 +26,7 @@ def mainwindow(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
             Frame=type("Frame", (), {}),
             NewIdRef=lambda: next(ids),
             PostEvent=MagicMock(),
+            CallAfter=lambda callback: callback(),
         ),
         derive_params={
             "params_for_part": lambda details: details.get("description", "")
@@ -94,6 +95,7 @@ class Footprint:
         }
         self.dnp = dnp
         self.attributes = (int(bom) << 3) | (int(pos) << 2)
+        self.selected = False
 
     @property
     def field(self) -> Field:
@@ -123,6 +125,18 @@ class Footprint:
     def GetAttributes(self) -> int:
         """Return assembly exclusion bits."""
         return self.attributes
+
+    def SetAttributes(self, attributes: int) -> None:
+        """Retain assembly exclusion bits changed by native-style handlers."""
+        self.attributes = attributes
+
+    def SetSelected(self) -> None:
+        """Retain the native board highlight selection."""
+        self.selected = True
+
+    def ClearSelected(self) -> None:
+        """Clear the native board highlight selection."""
+        self.selected = False
 
     def IsDNP(self) -> bool:
         """Return the live DNP flag."""
@@ -184,12 +198,19 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         window.settings = {} if settings is None else settings
         window.project_path = str(tmp_path)
         board = board or Board(footprints if footprints is not None else [Footprint()])
-        window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
+        window.pcbnew = types.SimpleNamespace(
+            GetBoard=lambda: board,
+            GetCurrentSelection=lambda: [
+                fp for fp in board.GetFootprints() if fp.selected
+            ],
+            Refresh=MagicMock(),
+        )
         window.logger = MagicMock()
         library = window.library = object.__new__(mainwindow.Library)
         library.part_preferences_db_file = str(tmp_path / "mappings.db")
         library.logger = logging.getLogger("part_preferences_test_storage")
         library.create_part_preferences_table()
+        library.create_lcsc_metadata_table()
         seed_preferences(library, part_preferences or {})
         library.state = mainwindow.LibraryState.INITIALIZED
         library.save_part_preferences = MagicMock(wraps=library.save_part_preferences)
@@ -224,23 +245,21 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
 
         def populate() -> None:
             rows.clear()
-            rows.update({part["reference"]: part for part in window.store.read_all()})
-
-        def set_lcsc(
-            ref: str, lcsc: str, part_type: str, stock: Any, params: str
-        ) -> None:
-            # The real model tolerates startup assignments before population.
-            if ref in rows:
-                rows[ref].update(lcsc=lcsc, type=part_type, stock=stock, params=params)
+            for part in window.store.read_all():
+                details = window._catalog_get_part_details(part["lcsc"])
+                rows[part["reference"]] = {
+                    **part,
+                    "type": details.get("type", ""),
+                    "stock": details.get("stock", ""),
+                }
+            mainwindow.wx.PostEvent(
+                window, mainwindow.BomDataChangedEvent(source="populate_footprint_list")
+            )
 
         model.get_reference.side_effect = lambda ref: ref
         model.get_footprint.side_effect = lambda ref: rows[ref]["footprint"]
         model.get_value.side_effect = lambda ref: rows[ref]["value"]
         model.get_lcsc.side_effect = lambda ref: rows[ref]["lcsc"]
-        model.set_lcsc.side_effect = set_lcsc
-        model.remove_lcsc_number.side_effect = lambda ref: rows[ref].update(
-            lcsc="", stock=None
-        )
         model.RemoveAll.side_effect = rows.clear
         window.footprint_list = MagicMock()
         window.footprint_list.GetSelections.return_value = list(board.footprints)
@@ -251,6 +270,8 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         window.get_correction = MagicMock(return_value="")
         window._get_enrichment_status_label = MagicMock(return_value="")
         populate()
+        library.get_part_details.reset_mock()
+        mainwindow.wx.PostEvent.reset_mock()
         window.test_rows = rows
         return window
 
@@ -302,23 +323,9 @@ def act(
         window.remove_lcsc_number()
 
 
-def project_rows(window: Any) -> list[dict[str, Any]]:
-    """Read durable state using a fresh connection after an action."""
-    with closing(sqlite3.connect(window.store.dbfile)) as db:
-        db.row_factory = sqlite3.Row
-        return [
-            dict(row)
-            for row in db.execute("SELECT * FROM part_info ORDER BY reference")
-        ]
-
-
-def reject_second_project_update(window: Any, column: str) -> None:
-    """Reject the later row after an earlier update has executed."""
-    assert column in {"lcsc", "stock"}
-    with closing(sqlite3.connect(window.store.dbfile)) as db, db:
-        db.execute(
-            f"CREATE TRIGGER reject_second_assignment BEFORE UPDATE OF {column} ON part_info WHEN NEW.reference = 'R2' BEGIN SELECT RAISE(ABORT, 'later assignment rejected'); END"
-        )
+def board_rows(window: Any) -> list[dict[str, Any]]:
+    """Read current board state independently of displayed or persisted rows."""
+    return sorted(window.store.read_all(), key=lambda part: part["reference"])
 
 
 def info_messages(window: Any) -> list[str]:

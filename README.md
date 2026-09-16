@@ -106,6 +106,10 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ### Part preferences
 
+LCSC assignments and BOM/POS exclusions are read from the current KiCad board. Save the board to keep edits made in the plugin. Old `part_info` tables and `part_assignments.csv` files are left untouched and are no longer read or imported; assignments stored only there do not appear automatically.
+
+Supplier assembly metadata is cached by LCSC number in the `lcsc_metadata` table of the existing global `mappings.db`, alongside part preferences. The cache fills when metadata is missing and is shared across projects. Old project metadata is not imported, so classifications remain unknown until fetched successfully. Catalog stock and pricing still come from the selected parts database.
+
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
 
 - **Remember my part preferences** remembers each successful part selection or pasted LCSC assignment. The latest explicit assignment replaces the preference; opening a board does not change preferences.

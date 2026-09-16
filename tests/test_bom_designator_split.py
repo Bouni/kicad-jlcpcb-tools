@@ -5,8 +5,8 @@ When a single LCSC group has enough references to overflow that limit,
 generate_bom() must emit multiple rows (one per chunk).
 
 These tests exercise split_bom_designators() directly – a pure function –
-and also run generate_bom() end-to-end against a fake board that has 500
-identical LED footprints sharing one LCSC number, which is the scenario
+and also run generate_bom() against a group of 500 identical LED parts
+sharing one LCSC number, which is the scenario
 described in https://github.com/Bouni/kicad-jlcpcb-tools/issues/755.
 """
 
@@ -17,6 +17,7 @@ from pathlib import Path
 import sys
 import tempfile
 import types
+from typing import Any
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
@@ -30,10 +31,6 @@ for _mod in ["pcbnew", "wx", "wx.dataview"]:
 _pkg = types.ModuleType("kicadplugin")
 _pkg.__path__ = [str(_ROOT)]
 sys.modules["kicadplugin"] = _pkg
-
-_footprint_helpers = types.ModuleType("kicadplugin.footprint_helpers")
-_footprint_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
-sys.modules["kicadplugin.footprint_helpers"] = _footprint_helpers
 
 _spec = importlib.util.spec_from_file_location(
     "kicadplugin.fabrication", _ROOT / "fabrication.py"
@@ -122,69 +119,28 @@ def test_chunks_are_contiguous_and_ordered():
 
 
 # ---------------------------------------------------------------------------
-# Integration test: generate_bom() with a 500-LED fake board
+# Integration test: generate_bom() with a 500-LED part group
 # ---------------------------------------------------------------------------
 
 N_LEDS = 500
 _LED_REFS = [f"LED{i}" for i in range(1, N_LEDS + 1)]
 
 
-class _FakeBoard:
-    """Minimal board stub whose Footprints() returns one mock fp per ref."""
-
-    def __init__(self, refs):
-        self._refs = refs
-
-    def Footprints(self):
-        """Return mock footprints, one per reference."""
-        fps = []
-        for ref in self._refs:
-            fp = MagicMock()
-            fp.GetReference.return_value = ref
-            fps.append(fp)
-        return fps
-
-
-class _FakeStore:
-    """Minimal store stub that returns a single BOM part group."""
-
-    def __init__(self, refs, value, footprint, lcsc):
-        self._refs = refs
-        self._value = value
-        self._footprint = footprint
-        self._lcsc = lcsc
-
-    def read_bom_parts(self):
-        """Return one part group with all refs joined."""
-        return [
-            {
-                "refs": ",".join(self._refs),
-                "value": self._value,
-                "footprint": self._footprint,
-                "lcsc": self._lcsc,
-            }
-        ]
-
-
 def _make_fake_fab_for_bom(
-    refs,
-    lcsc="C25741",
-    value="WS2812B",
-    footprint="LED_0805",
-    board_refs=None,
-):
-    """Build a minimal Fabrication instance whose generate_bom() we can call.
-
-    The fake board has one footprint per board ref; the fake store returns a
-    single part group with all refs joined.
-    """
+    refs: list[str],
+    lcsc: str = "C25741",
+    value: str = "WS2812B",
+    footprint: str = "LED_0805",
+) -> Any:
+    """Build a BOM writer with one already-grouped part returned by storage."""
     fab = object.__new__(Fabrication)
     fab.logger = MagicMock()
-    fab.board = _FakeBoard(refs if board_refs is None else board_refs)
 
     fake_parent = MagicMock()
     fake_parent.settings.get.return_value = {"lcsc_bom_cpl": True}
-    fake_parent.store = _FakeStore(refs, value, footprint, lcsc)
+    fake_parent.store.read_bom_parts.return_value = [
+        {"refs": ",".join(refs), "value": value, "footprint": footprint, "lcsc": lcsc}
+    ]
     fab.parent = fake_parent
 
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
@@ -201,15 +157,6 @@ def _read_bom_rows(fab):
         rows = list(csv.reader(fh))
     os.unlink(fab._tmppath)
     return rows[1:]
-
-
-def test_generate_bom_omits_references_deleted_from_board():
-    """Store rows for footprints deleted from the board are omitted from the BOM."""
-    fab = _make_fake_fab_for_bom(["R1", "GONE"], board_refs=["R1"])
-
-    rows = _read_bom_rows(fab)
-
-    assert [(row[1], int(row[4])) for row in rows] == [("R1", 1)]
 
 
 def test_generate_bom_500_leds_all_refs_present():

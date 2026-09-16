@@ -4,10 +4,11 @@ import importlib.util
 from pathlib import Path
 import sys
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 
+from tests.test_plugin_board_actions import Editor
 from tests.wx_harness import module, temporary_modules, wx_stubs
 
 
@@ -34,6 +35,7 @@ def test_package_launch_checks_version_before_loading_window(
     registered = []
     window_imports = []
     window = MagicMock()
+    editor = Editor()
 
     class ActionPlugin:
         def __init__(self) -> None:
@@ -56,14 +58,19 @@ def test_package_launch_checks_version_before_loading_window(
     spec = importlib.util.spec_from_file_location(package, root / "__init__.py")
     assert spec is not None and spec.loader is not None
     entry = importlib.util.module_from_spec(spec)
-    wx = wx_stubs(submodules=(), MessageBox=MagicMock())
+    wx = wx_stubs(
+        submodules=(), MessageBox=MagicMock(), GetTopLevelWindows=lambda: [editor]
+    )
     replacements = {
         package: entry,
         f"{package}.mainwindow": module(
             f"{package}.mainwindow", __getattr__=window_attribute
         ),
         "pcbnew": module(
-            "pcbnew", ActionPlugin=ActionPlugin, GetBuildVersion=lambda: version
+            "pcbnew",
+            ActionPlugin=ActionPlugin,
+            GetBuildVersion=lambda: version,
+            GetBoard=lambda: editor.board,
         ),
         **wx,
     }
@@ -77,7 +84,8 @@ def test_package_launch_checks_version_before_loading_window(
             registered[0].Run()
         if supported:
             assert window.call_count == 2
-            window.assert_called_with(None)
+            window.assert_called_with(None, board_action=ANY)
+            assert callable(window.call_args.kwargs["board_action"])
             assert window.return_value.Center.call_count == 2
             assert window.return_value.Show.call_count == 2
             wx["wx"].MessageBox.assert_not_called()

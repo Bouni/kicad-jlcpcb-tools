@@ -14,6 +14,9 @@ _PACKAGE = "standard_indicator_plugin"
 
 
 class _DataViewModel:
+    def __init__(self) -> None:
+        self.mapper: dict[int, Any] = {}
+
     ObjectToItem = ItemToObject = staticmethod(lambda value: value)
     HasValue = lambda self, _item, _column: True
     ItemAdded = ItemChanged = ValueChanged = Cleared = lambda self, *_args: None
@@ -122,10 +125,8 @@ def test_indicator_is_read_only_unstyled_and_reports_available_classification(
     attr.SetBold.assert_not_called()
 
 
-@pytest.mark.parametrize("action", ["reassign", "remove", "reset"])
-def test_indicator_state_clears_on_lcsc_reassignment_and_row_reset(
-    action: str,
-) -> None:
+@pytest.mark.parametrize("lcsc", ["", "C2"])
+def test_indicator_state_clears_on_row_reset(lcsc: str) -> None:
     """Discard stale classification state when rows or assignments change."""
     model = PartListDataModel(scale_factor=1.0)
     model.AddEntry(_row("R1"))
@@ -133,19 +134,12 @@ def test_indicator_state_clears_on_lcsc_reassignment_and_row_reset(
     model.set_assembly_metadata(
         "R1", {"lcsc": "C1", "component_product_type": 2, "assembly_process": "SMT"}
     )
-    item = model.ObjectToItem(model.data[0])
     column = model.columns["STANDARD_ONLY_COL"]
+    model.RemoveAll()
+    model.AddEntry(_row("R1", lcsc))
+    item = model.ObjectToItem(model.data[0])
 
-    if action == "reassign":
-        model.set_lcsc("R1", "C2", "Basic", "50", "new params")
-    elif action == "remove":
-        model.remove_lcsc_number(item)
-    else:
-        model.RemoveAll()
-        model.AddEntry(_row("R1", "C2"))
-        item = model.ObjectToItem(model.data[0])
-
-    assert model.GetValue(item, column) == ("" if action == "remove" else "?")
+    assert model.GetValue(item, column) == ("?" if lcsc else "")
     assert "Standard Only" not in model.get_assembly_tooltip(item)
     assert "SMT" not in model.get_assembly_tooltip(item)
     assert model.standard_only_refs == set()
@@ -237,8 +231,7 @@ def test_pending_completes_per_row_without_waiting_for_other_rows() -> None:
 def test_old_assignment_metadata_cannot_repopulate_a_reassigned_row() -> None:
     """Ignore a result belonging to the previous LCSC assignment."""
     model = PartListDataModel(scale_factor=1.0)
-    model.AddEntry(_row("R1"))
-    model.set_lcsc("R1", "C2", "Basic", "50", "")
+    model.AddEntry(_row("R1", "C2"))
 
     model.set_assembly_metadata(
         "R1", {"lcsc": "C1", "component_product_type": 2, "assembly_process": "SMT"}

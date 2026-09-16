@@ -1,5 +1,6 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
+from collections.abc import Sequence
 import csv
 from importlib import import_module
 import logging
@@ -34,7 +35,6 @@ from pcbnew import (  # pylint: disable=import-error
 )
 
 from .correction_data import Correction, CorrectionMatch, match_correction
-from .footprint_helpers import get_is_dnp
 
 # JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
 # 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
@@ -94,10 +94,21 @@ class Fabrication:
     def __init__(self, parent: Any, board: Any) -> None:
         self.parent = parent
         self.logger = logging.getLogger(__name__)
-        self.board = board
+        self._board = board
         self.corrections: tuple[Correction, ...] = ()
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
+
+    @property
+    def board(self) -> Any:
+        """Obtain a fresh validated board before accessing native export objects."""
+        getter = getattr(getattr(self, "parent", None), "_get_current_board", None)
+        return getter() if callable(getter) else self._board
+
+    @board.setter
+    def board(self, board: Any) -> None:
+        """Set the independently owned board used by standalone exporters."""
+        self._board = board
 
     def create_folders(self):
         """Create output folders if they not already exist."""
@@ -150,13 +161,19 @@ class Fabrication:
                 empty_pours.append(f"{zone.GetNetname() or 'no net'} on {name}")
         return empty_pours
 
-    def _correction_for_footprint(self, footprint: Any) -> Optional[CorrectionMatch]:  # noqa: UP045
+    def _correction_for_footprint(
+        self,
+        footprint: Any,
+        part: Optional[dict[str, Any]] = None,  # noqa: UP045
+    ) -> Optional[CorrectionMatch]:  # noqa: UP045
         """Select the same reference, value, or package rule as the parts table."""
         return match_correction(
             self.corrections,
-            str(footprint.GetReference()),
-            str(footprint.GetValue()),
-            str(footprint.GetFPID().GetLibItemName()),
+            part["reference"] if part is not None else str(footprint.GetReference()),
+            part["value"] if part is not None else str(footprint.GetValue()),
+            part["footprint"]
+            if part is not None
+            else str(footprint.GetFPID().GetLibItemName()),
         )
 
     def fix_rotation(self, footprint: Any) -> float:
@@ -411,19 +428,21 @@ class Fabrication:
     def generate_cpl(
         self,
         corrections: Optional[tuple[Correction, ...]] = None,  # noqa: UP045
+        parts: Optional[Sequence[dict[str, Any]]] = None,  # noqa: UP045
     ) -> None:
         """Prepare every placement before opening the output file."""
-        self.write_cpl(self.prepare_cpl(corrections))
+        self.write_cpl(self.prepare_cpl(corrections, parts=parts))
 
     def prepare_cpl(
         self,
         corrections: Optional[tuple[Correction, ...]] = None,  # noqa: UP045
+        parts: Optional[Sequence[dict[str, Any]]] = None,  # noqa: UP045
     ) -> tuple[tuple[Any, ...], ...]:
         """Capture placement rows from one complete immutable correction set.
 
-        Direct calls read current storage; a supplied preflight tuple stays fixed
-        for the operation. Unavailable or unresolved storage is rejected before
-        touching the board or opening an existing output file.
+        Direct calls read current board data and corrections. Supplied snapshots
+        keep assignment, exclusion and correction choices fixed for the operation.
+        Unavailable corrections are rejected before reading placement geometry.
         """
         if corrections is None:
             snapshot = self.parent.library.read_correction_data()
@@ -439,25 +458,37 @@ class Fabrication:
         ):
             raise TypeError("Expected an immutable tuple of Correction values")
         self.corrections = corrections
+        if parts is None:
+            parts = self.parent.store.read_all()
         aux_origin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
         rows = []
-        footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
-        for fp in footprints:
-            if get_is_dnp(fp):
-                self.logger.info(
-                    "Component %s has 'Do not place' enabled: removing from CPL",
-                    fp.GetReference(),
-                )
-                continue
-            part = self.parent.store.get_part(fp.GetReference())
-            if not part or part["exclude_from_pos"] == 1:
+        footprints = {}
+        duplicates = set()
+        for fp in self.board.Footprints():
+            reference = fp.GetReference()
+            if reference in footprints:
+                duplicates.add(reference)
+            footprints[reference] = fp
+        for part in sorted(parts, key=lambda part: part["reference"]):
+            if part.get("is_dnp", False) or part["exclude_from_pos"]:
                 continue
             if not add_without_lcsc and not part["lcsc"]:
                 continue
-            match = self._correction_for_footprint(fp)
+            if part["reference"] in duplicates:
+                raise ValueError(
+                    f"Duplicate footprint reference {part['reference']}. "
+                    "Assign unique references before generating fabrication files."
+                )
+            fp = footprints.get(part["reference"])
+            if fp is None:
+                raise ValueError(
+                    f"Cannot generate CPL: {part['reference']} was removed or renamed "
+                    "after parts were captured. Generate again with the current board."
+                )
+            match = self._correction_for_footprint(fp, part)
             try:
                 center = self.get_position(fp)
                 # Subtract in Python, before native coordinate arithmetic can wrap.
@@ -503,42 +534,23 @@ class Fabrication:
             writer.writerows(rows)
         self.logger.info("Finished generating CPL file %s", cpl_path)
 
-    def generate_bom(self):
-        """Generate BOM file."""
+    def generate_bom(
+        self,
+        parts: Optional[Sequence[dict[str, Any]]] = None,  # noqa: UP045
+    ) -> None:
+        """Generate the BOM from current board data or the supplied parts snapshot."""
         bom_path = self.get_bom_csv_path()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
-        footprints = {fp.GetReference(): fp for fp in self.board.Footprints()}
+        bom_parts = self.parent.store.read_bom_parts(
+            parts=parts, include_unassigned=add_without_lcsc
+        )
         with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
-            for part in self.parent.store.read_bom_parts():
-                if not add_without_lcsc and not part["lcsc"]:
-                    self.logger.info(
-                        "Component group %s has no LCSC number assigned and the setting Add parts without LCSC is disabled: removing from BOM",
-                        part["refs"],
-                    )
-                    continue
-                components = []
-                for component in part["refs"].split(","):
-                    fp = footprints.get(component)
-                    if fp is None:
-                        self.logger.info(
-                            "Component %s is no longer on the board: removing from BOM",
-                            component,
-                        )
-                        continue
-                    if get_is_dnp(fp):
-                        self.logger.info(
-                            "Component %s has 'Do not place' enabled: removing from BOM",
-                            component,
-                        )
-                        continue
-                    components.append(component)
-                if not components:
-                    continue
-                for chunk in split_bom_designators(components):
+            for part in bom_parts:
+                for chunk in split_bom_designators(part["refs"].split(",")):
                     writer.writerow(
                         [
                             part["value"],
@@ -550,13 +562,21 @@ class Fabrication:
                     )
         self.logger.info("Finished generating BOM file %s", bom_path)
 
-    def get_part_consistency_warnings(self) -> str:
+    def get_part_consistency_warnings(
+        self,
+        parts: Optional[Sequence[dict[str, Any]]] = None,  # noqa: UP045
+    ) -> str:
         """Check the plausibility of the parts, there should be just one value per LCSC number.
 
         Returns an empty sting if all parts are ok, otherwise a otherwise a overview of parts that share a LCSC number but have different values.
         """
         lcsc_numbers = {}
-        for item in self.parent.store.read_bom_parts():
+        for item in self.parent.store.read_bom_parts(
+            parts=parts,
+            include_unassigned=self.parent.settings.get("gerber", {}).get(
+                "lcsc_bom_cpl", True
+            ),
+        ):
             if not item["lcsc"]:
                 continue
             if item["lcsc"] not in lcsc_numbers:

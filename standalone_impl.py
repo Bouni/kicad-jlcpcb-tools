@@ -1,5 +1,7 @@
 """Stubs for standalone usage of the plugin."""
 
+from typing import Optional
+
 
 class LIB_ID_Stub:
     """Implementation of pcbnew.LIB_ID."""
@@ -15,9 +17,10 @@ class LIB_ID_Stub:
 class Field_Stub:
     """Implementation of pcbnew.Field."""
 
-    def __init__(self, name, text):
+    def __init__(self, name: str, text: str) -> None:
         self.name = name
         self.text = text
+        self.visible = True
 
     def GetName(self) -> str:
         """Field name."""
@@ -27,18 +30,24 @@ class Field_Stub:
         """Field text."""
         return self.text
 
-    def SetVisible(self, visible):
+    def SetVisible(self, visible: bool) -> None:
         """Set the field visibility."""
-        pass
+        self.visible = visible
+
+    def IsVisible(self) -> bool:
+        """Return the field visibility."""
+        return self.visible
 
 
 class Footprint_Stub:
     """Implementation of pcbnew.Footprint."""
 
-    def __init__(self, reference, value, fpid):
+    def __init__(self, reference: str, value: str, fpid: LIB_ID_Stub) -> None:
         self.reference = reference
         self.value = value
         self.fpid = fpid
+        self.fields: dict[str, Field_Stub] = {}
+        self.attributes = 0
 
     def GetReference(self) -> str:
         """Retrieve the reference designator string."""
@@ -52,25 +61,32 @@ class Footprint_Stub:
         """Footprint LIB_ID."""
         return self.fpid
 
-    def GetProperties(self) -> dict:
+    def GetProperties(self) -> dict[str, str]:
         """Properties."""
-        return {}
+        return {name: field.GetText() for name, field in self.fields.items()}
 
     def GetAttributes(self) -> int:
         """Attributes."""
-        return 0
+        return self.attributes
 
-    def GetFields(self) -> list:
+    def SetAttributes(self, attributes: int) -> None:
+        """Set the footprint flags."""
+        self.attributes = attributes
+
+    def GetFields(self) -> list[Field_Stub]:
         """Fields."""
-        return []
+        return list(self.fields.values())
 
-    def SetField(self, name, text):
-        """Set a field."""
-        pass
+    def SetField(self, name: str, text: str) -> None:
+        """Set a field without replacing its existing visibility or identity."""
+        if name in self.fields:
+            self.fields[name].text = text
+        else:
+            self.fields[name] = Field_Stub(name, text)
 
-    def GetFieldByName(self, name) -> Field_Stub:
+    def GetFieldByName(self, name: str) -> Optional[Field_Stub]:
         """Get a field by name."""
-        return Field_Stub(name, "stub")
+        return self.fields.get(name)
 
     def GetLayer(self) -> int:
         """Layer number."""
@@ -96,9 +112,11 @@ class BoardStub:
         """Footprint list."""
         return self.footprints
 
-    def FindFootprintByReference(self, reference):
-        """Get a list of footprints that match a reference."""
-        return Footprint_Stub(reference, "stub", 100)
+    def FindFootprintByReference(self, reference: str) -> Optional[Footprint_Stub]:
+        """Return the existing footprint matching a reference, if present."""
+        return next(
+            (fp for fp in self.footprints if fp.GetReference() == reference), None
+        )
 
     def Drawings(self):
         """Return board drawings.

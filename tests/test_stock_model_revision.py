@@ -30,6 +30,26 @@ class CellAttr:
         self.bold = bold
 
 
+def test_board_refresh_releases_previous_rows_after_native_clear() -> None:
+    """Frequent focus/edit refreshes must not retain every previous board snapshot."""
+    with stock_modules() as modules:
+        model = modules.datamodel.PartListDataModel(1)
+        for _ in range(3):
+            for reference in ("R1", "R2"):
+                model.AddEntry(board_row(reference, 100))
+            assert len(model.mapper) == len(model.data) == 2
+            rows = list(model.data)
+
+            def clearing(rows: list[list[Any]] = rows) -> None:
+                # wx can still resolve old items while notifying native views.
+                assert all(model.mapper[id(row)] is row for row in rows)
+
+            model.Cleared = clearing
+            model.RemoveAll()
+            assert model.data == []
+            assert model.mapper == {}
+
+
 @pytest.mark.parametrize("kind", ["board", "selector"])
 @pytest.mark.parametrize("simplified", [False, True])
 @pytest.mark.parametrize("ascending", [False, True])
@@ -81,12 +101,6 @@ def test_assigned_blank_stock_is_visible_without_mutating_raw_data(
         assert model.ItemToObject(item)[column] is stock
 
         model.set_simplify_stock(not simplified)
-        assert model.GetValue(item, column) == "?"
-        assert model.ItemToObject(item)[column] is stock
-
-        model.remove_lcsc_number(item)
-        assert model.GetValue(item, column) == ""
-        model.set_lcsc("R1", "C2", "Basic", stock, "")
         assert model.GetValue(item, column) == "?"
         assert model.ItemToObject(item)[column] is stock
 

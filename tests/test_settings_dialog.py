@@ -1,4 +1,4 @@
-"""Regression tests for the settings dialog's static labels and LCSC dropdown.
+"""Regression tests for the settings dialog's labels and state.
 
 ``settings.py`` normally runs inside KiCad and imports wxPython at module load
 time.  The shared harness loads it under a private synthetic package with a
@@ -6,10 +6,11 @@ fake ``wx`` whose controls record labels, values and selections, so the
 dialog's real construction and change-handling code runs without a GUI.
 
 Covers https://github.com/Bouni/kicad-jlcpcb-tools/issues/778: checkbox labels
-must describe the behaviour when checked and never change with the state, and
-the LCSC priority setting is a two-way choice rather than an on/off switch.
+must describe the behaviour when checked and never change with the state.
 """
 
+import json
+from pathlib import Path
 import types
 from typing import Any, Optional
 
@@ -266,7 +267,7 @@ def _settings(flag: bool) -> dict[str, dict[str, Any]]:
     """Return a settings dict with every boolean checkbox setting set to ``flag``."""
     settings_dict = {
         "gerber": {},
-        "general": {"lcsc_priority": True},
+        "general": {},
         "highlighting": {},
         "part_preferences": {},
         "library": {"selected_library": "current-parts", "data_path": ""},
@@ -318,42 +319,32 @@ def test_tented_vias_icon_follows_state(flag, icon):
     assert dialog.tented_vias_image.bitmap.filename == icon
 
 
-@pytest.mark.parametrize(
-    ("priority", "choice", "icon"),
-    [(True, "Schematic", "schematic.png"), (False, "Database", "database-outline.png")],
-)
-def test_lcsc_priority_dropdown_reflects_setting(priority, choice, icon):
-    """The stored boolean maps onto a Schematic/Database choice and icon."""
+@pytest.mark.parametrize("priority", [True, False, None])
+def test_lcsc_priority_setting_is_inert_and_has_no_control(
+    priority: Optional[bool],
+) -> None:
+    """Old precedence settings are left untouched and never offered in the UI."""
     settings_dict = _settings(True)
-    settings_dict["general"]["lcsc_priority"] = priority
+    if priority is not None:
+        settings_dict["general"]["lcsc_priority"] = priority
 
     dialog = _dialog(settings_dict)
-    control = dialog.lcsc_priority_setting
 
-    assert isinstance(control, _wx.ComboBox)
-    assert (control.choices, control.GetStringSelection()) == (
-        ["Schematic", "Database"],
-        choice,
+    assert not hasattr(dialog, "lcsc_priority_setting")
+    assert not hasattr(dialog, "lcsc_priority_image")
+    assert _wx.posted_events == []
+    if priority is None:
+        assert "lcsc_priority" not in settings_dict["general"]
+    else:
+        assert settings_dict["general"]["lcsc_priority"] is priority
+
+
+def test_default_settings_have_no_lcsc_precedence_option() -> None:
+    """Fresh configuration does not advertise the retired project database source."""
+    defaults = json.loads(
+        (Path(__file__).parent.parent / "default_settings.json").read_text()
     )
-    assert dialog.lcsc_priority_image.bitmap.filename == icon
-
-
-@pytest.mark.parametrize(
-    ("choice", "expected", "icon"),
-    [("Database", False, "database-outline.png"), ("Schematic", True, "schematic.png")],
-)
-def test_selecting_lcsc_priority_posts_a_boolean(choice, expected, icon):
-    """Choosing an entry persists the existing boolean setting, not the text."""
-    dialog = _dialog(_settings(True))
-    control = dialog.lcsc_priority_setting
-    assert isinstance(control, _wx.ComboBox)
-
-    control.SetStringSelection(choice)
-    events = _fire(control)
-
-    assert [(e.section, e.setting) for e in events] == [("general", "lcsc_priority")]
-    assert events[0].value is expected
-    assert dialog.lcsc_priority_image.bitmap.filename == icon
+    assert "lcsc_priority" not in defaults["general"]
 
 
 def test_force_drc_forces_and_disables_fill_zones():

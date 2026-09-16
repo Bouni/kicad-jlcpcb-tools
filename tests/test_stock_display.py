@@ -123,24 +123,6 @@ def test_stock_sort_uses_exact_numeric_values_in_both_modes(
             )
 
 
-def test_assignment_and_removal_keep_exact_stock_until_rendering() -> None:
-    """Assignment updates can be rendered compactly and reverted without data loss."""
-    with stock_modules() as modules:
-        model = modules.datamodel.PartListDataModel(1.0)
-        model.AddEntry(board_row("R1", "22095"))
-        item = model.ObjectToItem(model.data[0])
-        column = model.columns["STOCK_COL"]
-
-        model.set_lcsc("R1", "C2", "Basic", "8880000", "new params")
-        assert model.GetValue(item, column) == "8.8 M"
-        assert model.get_all()[0][column] == "8880000"
-        model.set_simplify_stock(False)
-        assert model.GetValue(item, column) == "8880000"
-        model.remove_lcsc_number(item)
-        assert model.GetValue(item, column) == ""
-        assert model.get_all()[0][column] == ""
-
-
 def test_stock_sort_unknown_values_are_comparable() -> None:
     """Missing stock does not break native sorting when numeric rows are present."""
     with stock_modules() as modules:

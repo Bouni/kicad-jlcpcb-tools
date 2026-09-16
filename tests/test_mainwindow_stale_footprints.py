@@ -1,127 +1,39 @@
-"""Regression tests for main-window actions targeting deleted footprints.
+"""Real action handlers skip stale selections and mutate only live board items."""
 
-``mainwindow.py`` normally runs inside KiCad and imports wxPython/pcbnew at
-module load time.  The shared harness loads it under a private synthetic
-package instead.  The handlers themselves are invoked directly against small
-capturing fakes, so the tests exercise production control flow without
-requiring a GUI event loop.
-"""
-
-from collections.abc import Iterable
-from itertools import count
-import types
-from typing import Any, Optional
-from unittest.mock import MagicMock, call
+from collections.abc import Callable
+from types import MethodType, SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load_mainwindow, wx_stubs
+from . import part_preferences_test_support as support
+from .part_preferences_test_support import Footprint
+from .stock_test_support import stock_modules
+from .wx_harness import track_selection
 
-_ids = count(1)
-mainwindow = load_mainwindow(
-    "mainwindow_stale_footprint_tests",
-    wx=wx_stubs(
-        Frame=type("Frame", (), {}),
-        NewIdRef=lambda: next(_ids),
-        PostEvent=lambda *_args, **_kwargs: None,
-    ),
-)
-JLCPCBTools = mainwindow.JLCPCBTools
+mainwindow = support.mainwindow
+make_window = support.make_window
 
 
-class _LiveFootprint:
-    """Small live-footprint sentinel used by list population."""
-
-    def __init__(self, layer=0):
-        self.layer = layer
-
-    def GetLayer(self):
-        return self.layer
-
-    def GetFPID(self) -> types.SimpleNamespace:
-        return types.SimpleNamespace(GetLibItemName=lambda: "R_0603")
-
-    def GetValue(self) -> str:
-        return "10k"
-
-
-class _Board:
-    def __init__(self, footprints):
-        self.footprints = dict(footprints)
-
-    def FindFootprintByReference(self, reference):
-        return self.footprints.get(reference)
-
-
-class _Pcbnew:
-    def __init__(self, board):
-        self.board = board
-
-    def GetBoard(self):
-        return self.board
-
-
-def _window(*, footprints: dict[str, object], selections: tuple[int, ...] = ()) -> Any:
-    """Build the shared state surface used by main-window action handlers."""
-    window = object.__new__(JLCPCBTools)
-    window.pcbnew = _Pcbnew(_Board(footprints))
-    window.store = MagicMock()
-    window.test_assignment_batches = []
-    window.test_assignments = {}
-
-    def set_lcsc_assignments(
-        assignments: Iterable[tuple[str, str, Optional[int]]],  # noqa: UP045
-    ) -> None:
-        batch = list(assignments)
-        window.test_assignment_batches.append(batch)
-        window.test_assignments.update(
-            {reference: (lcsc, stock) for reference, lcsc, stock in batch}
-        )
-
-    window.store.set_lcsc_assignments.side_effect = set_lcsc_assignments
-    window.settings = {}
-    window.library = MagicMock()
-    window.library.get_part_details.return_value = {}
-    window.library.read_correction_data.return_value = types.SimpleNamespace(
-        corrections=(), state=mainwindow.CorrectionState.READY
+@pytest.fixture(autouse=True)
+def immediate_callbacks(mainwindow: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most cases finish deferred work immediately; ordering cases supply a queue."""
+    monkeypatch.setattr(
+        mainwindow.wx, "CallAfter", lambda callback: callback(), raising=False
     )
-    window.correction_status = MagicMock()
-    window.Layout = MagicMock()
-    window.partlist_data_model = MagicMock()
-    window.footprint_list = MagicMock()
-    window.footprint_list.GetSelections.return_value = list(selections)
-    window.start_assembly_enrichment = MagicMock()
-    window.logger = MagicMock()
-    return window
 
 
-def _part(reference):
-    """Return the complete store row consumed by populate_footprint_list."""
-    return {
-        "reference": reference,
-        "value": "10k",
-        "footprint": "R_0603",
-        "lcsc": "",
-        "stock": None,
-        "exclude_from_bom": 0,
-        "exclude_from_pos": 0,
-        "assembly_process": "",
-        "component_product_type": None,
-    }
+def test_populate_footprint_list_skips_stale_row_and_retains_live_row(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deletion after reading a parts snapshot cannot hide the remaining live row."""
+    window = make_window(footprints=[Footprint("R_REMOVED"), Footprint("R2")])
+    snapshot = window.store.read_all()
+    del window.pcbnew.GetBoard().footprints["R_REMOVED"]
+    monkeypatch.setattr(window.store, "read_all", lambda: snapshot)
 
-
-def test_populate_footprint_list_skips_stale_row_and_retains_live_row(monkeypatch):
-    """A refresh must omit deleted store rows without losing live rows."""
-    live_footprint = _LiveFootprint()
-    window = _window(footprints={"R2": live_footprint})
-    window.store.read_all.return_value = [_part("R_REMOVED"), _part("R2")]
-    window.hide_bom_parts = False
-    window.hide_pos_parts = False
-    window.get_correction = MagicMock(return_value="0°, 0.0/0.0")
-    window._get_enrichment_status_label = MagicMock(return_value="")
-    monkeypatch.setattr(mainwindow, "get_is_dnp", lambda _footprint: False)
-
-    JLCPCBTools.populate_footprint_list(window)
+    mainwindow.JLCPCBTools.populate_footprint_list(window)
 
     added_references = [
         invocation.args[0][0]
@@ -130,113 +42,207 @@ def test_populate_footprint_list_skips_stale_row_and_retains_live_row(monkeypatc
     assert added_references == ["R2"]
 
 
-def test_assign_parts_skips_stale_refs_and_continues_live_refs() -> None:
+def test_assign_parts_skips_stale_refs_and_continues_live_refs(
+    make_window: Callable[..., Any],
+) -> None:
     """Assignment must mutate and enrich only references still on the board."""
-    live_footprint = _LiveFootprint()
-    window = _window(footprints={"R2": live_footprint})
-    event = types.SimpleNamespace(
-        lcsc="C12345",
-        stock="27",
-        type="Basic",
-        references=["R_REMOVED", "R2"],
+    live_footprint = Footprint("R2")
+    window = make_window(footprints=[live_footprint])
+
+    window.assign_parts(
+        SimpleNamespace(
+            lcsc="C12345", stock="27", type="Basic", references=["R_REMOVED", "R2"]
+        )
     )
 
-    JLCPCBTools.assign_parts(window, event)
-
-    observed = {
-        "store_assignments": window.test_assignment_batches,
-        "store_lcsc": window.store.set_lcsc.call_args_list,
-        "store_stock": window.store.set_stock.call_args_list,
-        "model_lcsc": window.partlist_data_model.set_lcsc.call_args_list,
-        "enrichment": window.start_assembly_enrichment.call_args_list,
-    }
-    expected = {
-        "store_assignments": [[("R2", "C12345", 27)]],
-        "store_lcsc": [],
-        "store_stock": [],
-        "model_lcsc": [call("R2", "C12345", "Basic", "27", "params")],
-        "enrichment": [call(["R2"])],
-    }
-    assert observed == expected
-    window.store.set_lcsc_assignments.assert_called_once()
-    assert window.test_assignments == {"R2": ("C12345", 27)}
-
-
-def test_assign_parts_with_only_stale_refs_does_not_start_enrichment() -> None:
-    """An all-stale selector result must be a no-op, including enrichment."""
-    window = _window(footprints={})
-    event = types.SimpleNamespace(
-        lcsc="C12345",
-        stock="27",
-        type="Basic",
-        references=["R_REMOVED"],
+    assert live_footprint.field.text == "C12345"
+    assert all(part["reference"] != "R_REMOVED" for part in window.store.read_all())
+    assert window.store.read_all()[0]["lcsc"] == "C12345"
+    assert window.store.read_all()[0]["stock"] is None
+    assert window.test_rows["R2"]["stock"] == "27"
+    assert window.test_rows["R2"]["lcsc"] == "C12345"
+    window.start_assembly_enrichment.assert_called_once_with(["R2"])
+    window.library.save_part_preferences.assert_called_once_with(
+        [("R_0603", "10k", "C12345")]
     )
 
-    JLCPCBTools.assign_parts(window, event)
 
-    observed = {
-        "store_assignments": window.test_assignment_batches,
-        "store_lcsc": window.store.set_lcsc.call_args_list,
-        "store_stock": window.store.set_stock.call_args_list,
-        "model_lcsc": window.partlist_data_model.set_lcsc.call_args_list,
-        "enrichment": window.start_assembly_enrichment.call_args_list,
-    }
-    assert observed == {
-        "store_assignments": [],
-        "store_lcsc": [],
-        "store_stock": [],
-        "model_lcsc": [],
-        "enrichment": [],
-    }
-    window.store.set_lcsc_assignments.assert_not_called()
-    assert window.test_assignments == {}
+def test_assign_parts_with_only_stale_refs_does_not_start_enrichment(
+    make_window: Callable[..., Any],
+) -> None:
+    """An all-stale selector result must leave board, assignment rows and preferences alone."""
+    window = make_window(footprints=[])
+
+    window.assign_parts(
+        SimpleNamespace(
+            lcsc="C12345", stock="27", type="Basic", references=["R_REMOVED"]
+        )
+    )
+
+    assert window.pcbnew.GetBoard().GetFootprints() == []
+    assert window.store.read_all() == []
+    window.start_assembly_enrichment.assert_not_called()
+    window.library.save_part_preferences.assert_not_called()
 
 
 @pytest.mark.parametrize("handler_name", ["toggle_bom", "toggle_pos", "toggle_bom_pos"])
 def test_toggle_handlers_skip_stale_refs_and_continue_live_refs(
-    monkeypatch, handler_name
-):
-    """BOM/POS actions must not mutate store or model state for deleted rows."""
-    stale_item = object()
-    live_item = object()
-    live_footprint = _LiveFootprint()
-    window = _window(
-        footprints={"R2": live_footprint},
-        selections=[stale_item, live_item],
-    )
+    make_window: Callable[..., Any], handler_name: str
+) -> None:
+    """BOM/POS actions mutate native flags and displayed cells only for live selections."""
+    stale_item, live_item = object(), object()
+    live_footprint = Footprint("R2")
+    window = make_window(footprints=[live_footprint])
+    window.footprint_list.GetSelections.return_value = [stale_item, live_item]
     references = {stale_item: "R_REMOVED", live_item: "R2"}
     window.partlist_data_model.get_reference.side_effect = references.__getitem__
-    monkeypatch.setattr(
-        mainwindow,
-        "toggle_exclude_from_bom",
-        lambda footprint: None if footprint is None else True,
-    )
-    monkeypatch.setattr(
-        mainwindow,
-        "toggle_exclude_from_pos",
-        lambda footprint: None if footprint is None else True,
-    )
 
-    getattr(JLCPCBTools, handler_name)(window)
+    getattr(window, handler_name)()
 
-    expected = {
-        "store_bom": [],
-        "store_pos": [],
-        "model_bom": [],
-        "model_pos": [],
-        "model_bom_pos": [],
-    }
-    if handler_name in {"toggle_bom", "toggle_bom_pos"}:
-        expected["store_bom"] = [call("R2", 1)]
-    if handler_name in {"toggle_pos", "toggle_bom_pos"}:
-        expected["store_pos"] = [call("R2", 1)]
-    expected[f"model_{handler_name.removeprefix('toggle_')}"] = [call(live_item)]
+    window.populate_footprint_list.assert_called_once_with()
+    part = window.store.read_all()[0]
+    assert part["exclude_from_bom"] is (handler_name != "toggle_pos")
+    assert part["exclude_from_pos"] is (handler_name != "toggle_bom")
+    assert window.test_rows["R2"]["exclude_from_bom"] is (handler_name != "toggle_pos")
+    assert window.test_rows["R2"]["exclude_from_pos"] is (handler_name != "toggle_bom")
+    assert all(part["reference"] != "R_REMOVED" for part in window.store.read_all())
 
-    observed = {
-        "store_bom": window.store.set_bom.call_args_list,
-        "store_pos": window.store.set_pos.call_args_list,
-        "model_bom": window.partlist_data_model.toggle_bom.call_args_list,
-        "model_pos": window.partlist_data_model.toggle_pos.call_args_list,
-        "model_bom_pos": window.partlist_data_model.toggle_bom_pos.call_args_list,
-    }
-    assert observed == expected
+
+@pytest.mark.parametrize("handler_name", ["toggle_bom", "toggle_pos", "toggle_bom_pos"])
+def test_toggle_with_only_stale_selection_has_no_native_or_model_changes(
+    make_window: Callable[..., Any], handler_name: str
+) -> None:
+    """A deleted selection cannot toggle an unrelated footprint still on the board."""
+    live_footprint = Footprint("R2")
+    window = make_window(footprints=[live_footprint])
+    window.footprint_list.GetSelections.return_value = ["R_REMOVED"]
+
+    getattr(window, handler_name)()
+
+    assert live_footprint.GetAttributes() == 0
+    window.populate_footprint_list.assert_not_called()
+
+
+@pytest.mark.parametrize("handler_name", ["toggle_bom", "toggle_pos", "toggle_bom_pos"])
+def test_toggle_refreshes_both_exclusion_cells_from_current_board_flags(
+    make_window: Callable[..., Any], mainwindow: Any, handler_name: str
+) -> None:
+    """External flag edits cannot make subsequent native and displayed toggles diverge."""
+    footprint = Footprint("R1")
+    window = make_window(footprints=[footprint])
+    with stock_modules() as modules:
+        model = window.partlist_data_model = modules.datamodel.PartListDataModel(1)
+        window.populate_footprint_list = MethodType(
+            mainwindow.JLCPCBTools.populate_footprint_list, window
+        )
+        window.populate_footprint_list()
+        selected = [model.ObjectToItem(model.data[0])]
+        track_selection(window, model, selected)
+        footprint.SetAttributes((1 << 3) | (1 << 2))
+
+        getattr(window, handler_name)()
+
+        expected_bom = handler_name == "toggle_pos"
+        expected_pos = handler_name == "toggle_bom"
+        part = window.store.read_all()[0]
+        assert part["exclude_from_bom"] is expected_bom
+        assert part["exclude_from_pos"] is expected_pos
+        assert (
+            model.data[0][model.columns["BOM_COL"]]
+            == model.bom_pos_icons[int(expected_bom)]
+        )
+        assert (
+            model.data[0][model.columns["POS_COL"]]
+            == model.bom_pos_icons[int(expected_pos)]
+        )
+        assert len(selected) == 1
+        assert model.ItemToObject(selected[0]) is model.data[0]
+
+
+@pytest.mark.parametrize("handler_name", ["toggle_bom", "toggle_pos"])
+def test_toggle_reapplies_exclusion_filter_and_drops_only_hidden_selection(
+    make_window: Callable[..., Any], mainwindow: Any, handler_name: str
+) -> None:
+    """Newly excluded rows leave a filtered view without selecting an unrelated row."""
+    window = make_window(footprints=[Footprint("R1"), Footprint("R2")])
+    window.hide_bom_parts = handler_name == "toggle_bom"
+    window.hide_pos_parts = handler_name == "toggle_pos"
+    with stock_modules() as modules:
+        model = window.partlist_data_model = modules.datamodel.PartListDataModel(1)
+        window.populate_footprint_list = MethodType(
+            mainwindow.JLCPCBTools.populate_footprint_list, window
+        )
+        window.populate_footprint_list()
+        selected = [model.ObjectToItem(model.data[0])]
+        track_selection(window, model, selected)
+
+        getattr(window, handler_name)()
+
+        assert [row[model.columns["REF_COL"]] for row in model.data] == ["R2"]
+        assert selected == []
+        assert len(window.store.read_all()) == 2
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["normal", "new_selection", "closing", "unavailable", "no_store", "refresh_again"],
+)
+def test_deferred_selection_restore_uses_fresh_rows_and_respects_window_changes(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+) -> None:
+    """Queued selection restoration cannot retain stale items or override a new user choice."""
+    callbacks = []
+    monkeypatch.setattr(mainwindow.wx, "CallAfter", callbacks.append)
+    first, second = Footprint("R1"), Footprint("R2")
+    window = make_window(footprints=[first, second])
+    window.auto_select_alike = True
+    window.select_alike_in_progress = False
+    window.select_alike_parts = MagicMock()
+    with stock_modules() as modules:
+        model = window.partlist_data_model = modules.datamodel.PartListDataModel(1)
+        window.populate_footprint_list = MethodType(
+            mainwindow.JLCPCBTools.populate_footprint_list, window
+        )
+        window.populate_footprint_list()
+        old_row = model.data[0]
+        selected = [model.ObjectToItem(old_row)]
+        track_selection(window, model, selected, notify=True)
+        first.SetSelected()
+
+        window.toggle_bom()
+        assert selected == []
+        assert not first.selected
+        if state == "new_selection":
+            selected[:] = [model.ObjectToItem(model.data[1])]
+        elif state == "closing":
+            window._closing = True
+        elif state == "unavailable":
+            window._board_context_unavailable = True
+        elif state == "no_store":
+            window.store = None
+        elif state == "refresh_again":
+            window._refresh_footprints_preserving_selection()
+        while callbacks:
+            callbacks.pop(0)()
+
+        if state in {"closing", "unavailable", "no_store"}:
+            assert selected == []
+            window.footprint_list.SetSelections.assert_not_called()
+        else:
+            assert len(selected) == 1
+            expected = 1 if state == "new_selection" else 0
+            assert model.ItemToObject(selected[0]) is model.data[expected]
+            assert model.ItemToObject(selected[0]) is not old_row
+            if state == "new_selection":
+                window.footprint_list.SetSelections.assert_not_called()
+            else:
+                window.footprint_list.SetSelections.assert_called_once()
+            assert [fp.selected for fp in (first, second)] == [
+                expected == 0,
+                expected == 1,
+            ]
+            window.pcbnew.Refresh.assert_called()
+            window.select_alike_parts.assert_not_called()

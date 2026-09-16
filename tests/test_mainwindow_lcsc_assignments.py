@@ -1,8 +1,8 @@
-"""Complete LCSC assignment actions, durable failure recovery and native lifetimes."""
+"""Complete LCSC actions with live board state, storage failures and item lifetimes."""
 
 from collections.abc import Callable
 from contextlib import closing
-from copy import deepcopy
+from pathlib import Path
 import sqlite3
 from types import MethodType, SimpleNamespace
 from typing import Any
@@ -12,28 +12,24 @@ import weakref
 import pytest
 
 from . import part_preferences_test_support as support
-from .part_preferences_test_support import (
-    Footprint,
-    act,
-    info_messages,
-    project_rows,
-    reject_second_project_update,
-)
+from .part_preferences_test_support import Footprint, act, board_rows, info_messages
 
 mainwindow = support.mainwindow
 make_window = support.make_window
 
 
 @pytest.mark.parametrize("action", ["picker", "paste", "apply"])
-def test_assignment_syncs_board_store_model_and_survives_reopen(
+def test_assignment_syncs_board_store_model_and_survives_window_recreation(
     action: str,
     make_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """All assignment paths must agree and survive normal board precedence on reopen."""
+    """All assignment paths agree after reopening against the same unsaved board."""
     window = make_window()
-    window.store.set_assembly_metadata("R1", "SMT", 2, expected_lcsc="C100")
+    window.library.merge_lcsc_metadata(
+        "C100", {"assembly_process": "SMT", "component_product_type": 2}
+    )
 
     if action == "apply":
         window.library.save_part_preferences([("R_0603", "10k", "C200")])
@@ -43,11 +39,12 @@ def test_assignment_syncs_board_store_model_and_survives_reopen(
     fp = window.pcbnew.GetBoard().FindFootprintByReference("R1")
     assert fp.field.text == "C200"
     assert window.test_rows["R1"]["lcsc"] == "C200"
-    assert window.store.get_part("R1")["stock"] == 27
-    assert window.store.get_part("R1")["assembly_process"] == ""
-    assert window.store.get_part("R1")["component_product_type"] is None
+    assert window.store.read_all()[0]["stock"] is None
+    assert window.test_rows["R1"]["stock"] == 27
+    assert window.store.read_all()[0]["assembly_process"] == ""
+    assert window.store.read_all()[0]["component_product_type"] is None
     reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
-    assert reopened.get_part("R1")["lcsc"] == "C200"
+    assert reopened.read_all()[0]["lcsc"] == "C200"
     window.start_assembly_enrichment.assert_called_once_with(["R1"])
     assert mainwindow.wx.PostEvent.called or window.recompute_bom_estimate.called
     if action == "apply":
@@ -77,7 +74,7 @@ def test_assignment_caches_missing_catalog_details_once_per_action(
     else:
         act(action, window, mainwindow, monkeypatch, "C200")
     window.library.get_part_details.assert_called_once_with("C200")
-    assert [row["lcsc"] for row in project_rows(window)] == ["C200", "C200"]
+    assert [row["lcsc"] for row in board_rows(window)] == ["C200", "C200"]
     assert [row["lcsc"] for row in window.test_rows.values()] == ["C200", "C200"]
     assert all(
         fp.field.text == "C200" for fp in window.pcbnew.GetBoard().GetFootprints()
@@ -102,33 +99,32 @@ def test_selected_deleted_footprint_is_skipped(
         window.library.save_part_preferences.reset_mock()
     act(action, window, mainwindow, monkeypatch, "C200")
 
-    assert window.store.get_part("R1")["lcsc"] == "C100"
-    assert window.store.get_part("R2")["lcsc"] == "C200"
+    assert [(row["reference"], row["lcsc"]) for row in window.store.read_all()] == [
+        ("R2", "C200")
+    ]
     window.start_assembly_enrichment.assert_called_once_with(["R2"])
 
 
-def _seed_enrichment(window: Any) -> None:
-    """Give every representation observable values that a failed action must retain."""
-    with closing(sqlite3.connect(window.store.dbfile)) as connection, connection:
-        connection.executemany(
-            "UPDATE part_info SET stock = ?, assembly_process = ?, "
-            "component_product_type = ? WHERE reference = ?",
-            [(11, "SMT", 1, "R1"), (22, "THT", 2, "R2")],
+def _seed_enrichment(window: Any, mainwindow: Any) -> None:
+    """Store reusable metadata for the currently assigned supplier codes."""
+    for lcsc, process, product_type in (("C100", "SMT", 1), ("C200", "THT", 2)):
+        window.library.merge_lcsc_metadata(
+            lcsc,
+            {"assembly_process": process, "component_product_type": product_type},
         )
     window.populate_footprint_list()
     window.populate_footprint_list.reset_mock()
+    mainwindow.wx.PostEvent.reset_mock()
 
 
 @pytest.mark.parametrize("action", ["picker", "paste", "apply", "clear"])
-@pytest.mark.parametrize("column", ["lcsc", "stock"])
-def test_later_project_failure_preserves_entire_action_and_emits_no_success(
+def test_later_native_failure_reports_partial_changes_and_refreshes_actual_board(
     make_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
     action: str,
-    column: str,
 ) -> None:
-    """A selection is one transaction, including distinct manual Apply groups."""
+    """A failed second footprint cannot hide an earlier successful native edit."""
     window = make_window(
         footprints=[
             Footprint("R1", value="10k", lcsc="C100"),
@@ -139,25 +135,25 @@ def test_later_project_failure_preserves_entire_action_and_emits_no_success(
     library.save_part_preferences(
         [("R_0603", "10k", "C777"), ("R_0603", "20k", "C888")]
     )
-    _seed_enrichment(window)
-    before_database = project_rows(window)
-    before_model = deepcopy(window.test_rows)
+    _seed_enrichment(window, mainwindow)
     before_preferences = library.get_all_part_preferences()
-    reject_second_project_update(window, column)
+    monkeypatch.setattr(
+        window.pcbnew.GetBoard().FindFootprintByReference("R2"),
+        "SetField",
+        MagicMock(side_effect=RuntimeError("later assignment rejected")),
+    )
 
     act(action, window, mainwindow, monkeypatch)
 
-    assert project_rows(window) == before_database
-    assert window.test_rows == before_model
+    first = "" if action == "clear" else "C777" if action == "apply" else "C999"
+    assert [row["lcsc"] for row in board_rows(window)] == [first, "C200"]
+    assert [window.test_rows[ref]["lcsc"] for ref in ("R1", "R2")] == [first, "C200"]
     assert [fp.field.text for fp in window.pcbnew.GetBoard().GetFootprints()] == [
-        "C100",
+        first,
         "C200",
     ]
     assert library.get_all_part_preferences() == before_preferences
-    window.partlist_data_model.set_lcsc.assert_not_called()
-    window.partlist_data_model.remove_lcsc_number.assert_not_called()
-    window.start_assembly_enrichment.assert_not_called()
-    mainwindow.wx.PostEvent.assert_not_called()
+    assert mainwindow.wx.PostEvent.called or window.recompute_bom_estimate.called
     assert info_messages(window) == []
     assert "later assignment rejected" in str(window.logger.warning.call_args)
 
@@ -170,7 +166,7 @@ def test_failed_automatic_remembering_keeps_committed_project_choice(
         footprints=[Footprint("R1", value="10k"), Footprint("R2", value="20k")]
     )
     library = window.library
-    _seed_enrichment(window)
+    _seed_enrichment(window, mainwindow)
     with (
         closing(sqlite3.connect(library.part_preferences_db_file)) as connection,
         connection,
@@ -185,12 +181,12 @@ def test_failed_automatic_remembering_keeps_committed_project_choice(
         SimpleNamespace(references=["R1", "R2"], lcsc="C999", type="Basic", stock=99)
     )
 
-    assert [(row["lcsc"], row["stock"]) for row in project_rows(window)] == [
-        ("C999", 99),
-        ("C999", 99),
+    assert [(row["lcsc"], row["stock"]) for row in board_rows(window)] == [
+        ("C999", None),
+        ("C999", None),
     ]
-    assert all(row["assembly_process"] == "" for row in project_rows(window))
-    assert all(row["component_product_type"] is None for row in project_rows(window))
+    assert all(row["assembly_process"] == "" for row in board_rows(window))
+    assert all(row["component_product_type"] is None for row in board_rows(window))
     assert all(
         fp.field.text == "C999" for fp in window.pcbnew.GetBoard().GetFootprints()
     )
@@ -264,7 +260,7 @@ def test_optional_enrichment_read_failure_keeps_accepted_assignment_and_notifies
     library.save_part_preferences(
         [("R_0603", "10k", "C777"), ("R_0603", "20k", "C888")]
     )
-    _seed_enrichment(window)
+    _seed_enrichment(window, mainwindow)
     window.pending_assembly_enrichment = set()
     window.assembly_enrichment_generation = 0
     window.start_assembly_enrichment = MethodType(
@@ -279,7 +275,7 @@ def test_optional_enrichment_read_failure_keeps_accepted_assignment_and_notifies
     act(action, window, mainwindow, monkeypatch)
 
     expected = ["C999", "C999"] if action != "apply" else ["C777", "C888"]
-    assert [row["lcsc"] for row in project_rows(window)] == expected
+    assert [row["lcsc"] for row in board_rows(window)] == expected
     assert [
         fp.field.text for fp in window.pcbnew.GetBoard().GetFootprints()
     ] == expected
@@ -319,18 +315,17 @@ def test_manual_save_rolls_back_all_preferences_when_a_later_key_fails(
     window.save_selected_part_preferences()
 
     assert window.library.get_all_part_preferences() == []
-    assert window.store.get_part("R1")["lcsc"] == "C100"
-    assert window.store.get_part("R2")["lcsc"] == "C200"
+    assert window.store.read_all()[0]["lcsc"] == "C100"
+    assert window.store.read_all()[1]["lcsc"] == "C200"
     window.logger.warning.assert_called()
 
     assert info_messages(window) == []
 
 
-@pytest.mark.parametrize("column", ["lcsc", "stock"])
-def test_auto_fill_rolls_back_all_groups_and_keeps_window_usable(
-    make_window: Callable[..., Any], column: str
+def test_auto_fill_native_failure_keeps_window_usable_and_exposes_actual_changes(
+    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A later project write failure must roll back the complete opening's fill."""
+    """Opening displays successful earlier fills if a later footprint rejects its edit."""
     window = make_window(
         footprints=[
             Footprint("R1", value="10k", lcsc=""),
@@ -338,43 +333,126 @@ def test_auto_fill_rolls_back_all_groups_and_keeps_window_usable(
         ],
         part_preferences={("R_0603", "10k"): "C100", ("R_0603", "20k"): "C200"},
     )
-    before = project_rows(window)
-    reject_second_project_update(window, column)
+    monkeypatch.setattr(
+        window.pcbnew.GetBoard().FindFootprintByReference("R2"),
+        "SetField",
+        MagicMock(side_effect=RuntimeError("later assignment rejected")),
+    )
 
     window.init_store()
 
-    assert project_rows(window) == before
-    assert all(not fp.field.text for fp in window.pcbnew.GetBoard().GetFootprints())
-    assert all(not part["lcsc"] for part in window.test_rows.values())
-    window.populate_footprint_list.assert_called_once()
+    assert [row["lcsc"] for row in board_rows(window)] == ["C100", ""]
+    assert [window.test_rows[ref]["lcsc"] for ref in ("R1", "R2")] == ["C100", ""]
+    assert window.populate_footprint_list.called
     window.logger.warning.assert_called()
-
     assert info_messages(window) == []
 
 
-def test_project_database_unavailable_at_startup_keeps_settings_reachable(
-    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+def test_corrupt_project_database_does_not_block_board_reads_or_assignment(
+    make_window: Callable[..., Any], mainwindow: Any
 ) -> None:
-    """Failure before preference lookup must not abort the already-created window."""
+    """Project counter corruption is reported only when counter persistence is used."""
     window = make_window()
+    project_database = Path(window.store.dbfile)
+    project_database.parent.mkdir(parents=True, exist_ok=True)
+    project_database.write_bytes(b"invalid SQLite project database")
 
-    def unavailable_store(*_args: object) -> None:
-        raise sqlite3.OperationalError("database is locked")
-
-    monkeypatch.setattr(mainwindow, "Store", unavailable_store)
     window.init_store()
-
-    assert window.store is None
-    assert window.test_rows == {}
-    assert window.upper_toolbar.enabled[mainwindow.ID_GENERATE] is False
-    assert window.upper_toolbar.enabled.get(mainwindow.ID_SETTINGS, True) is True
-    window.footprint_list.Enable.assert_called_with(False)
-    window.right_toolbar.Enable.assert_called_with(False)
-    assert (
-        "Settings remains available"
-        in window.project_storage_status.SetLabel.call_args.args[0]
+    window.assign_parts(
+        SimpleNamespace(references=["R1"], lcsc="C999", type="Basic", stock=99)
     )
-    window.logger.warning.assert_called()
+
+    assert window.store.read_all()[0]["lcsc"] == "C999"
+    assert window.test_rows["R1"]["lcsc"] == "C999"
+    assert window.upper_toolbar.enabled.get(mainwindow.ID_SETTINGS, True) is True
+    assert window.right_toolbar.Enable.call_args.args == (True,)
+    assert project_database.read_bytes() == b"invalid SQLite project database"
+    with pytest.raises(sqlite3.DatabaseError):
+        window.store.get_generation_count()
+    with pytest.raises(sqlite3.DatabaseError):
+        window.store.increment_generation_count()
+    assert window.store.read_all()[0]["lcsc"] == "C999"
+
+
+def test_existing_project_assignments_are_ignored_and_preserved_during_edits(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """Obsolete project records and CSV cannot restore an explicitly cleared board field."""
+    window = make_window(
+        settings={"part_preferences": {"fill_empty_lcsc_assignments_on_open": False}}
+    )
+    project_database = Path(window.store.dbfile)
+    project_database.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(project_database)) as database, database:
+        database.execute(
+            "CREATE TABLE part_info (reference TEXT, lcsc TEXT, stock INTEGER)"
+        )
+        database.execute("INSERT INTO part_info VALUES ('R1', 'C777', 999)")
+    database_before = project_database.read_bytes()
+    csv_file = project_database.parent / "part_assignments.csv"
+    csv_file.write_text("Reference,LCSC\nR1,C888\n")
+    csv_before = csv_file.read_bytes()
+
+    window.init_store()
+    assert window.store.read_all()[0]["lcsc"] == "C100"
+    window.remove_lcsc_number()
+    window.init_store()
+    reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
+
+    assert reopened.read_all()[0]["lcsc"] == ""
+    assert window.test_rows["R1"]["lcsc"] == ""
+    assert project_database.read_bytes() == database_before
+    assert csv_file.read_bytes() == csv_before
+
+
+def test_assignment_creates_hidden_field_and_preserves_other_metadata(
+    make_window: Callable[..., Any],
+) -> None:
+    """A missing assignment field is created once and kept hidden through clearing."""
+    footprint = Footprint(fields={"JLCPCB Rotation Offset": "90"})
+    window = make_window(footprints=[footprint])
+
+    window.assign_parts(
+        SimpleNamespace(references=["R1"], lcsc="C999", type="Basic", stock=99)
+    )
+
+    assert footprint.field.text == "C999"
+    assert footprint.field.visible is False
+    assert footprint.fields["JLCPCB Rotation Offset"].text == "90"
+    window.remove_lcsc_number()
+    assert footprint.field.text == ""
+    assert footprint.field.visible is False
+    assert footprint.fields["JLCPCB Rotation Offset"].text == "90"
+
+
+def test_alias_failure_after_first_field_change_refreshes_actual_assignment(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial edit within one footprint is visible even before a reference completes."""
+    footprint = Footprint(fields={"LCSC": "C100", "JLCPCB": "C100"})
+    window = make_window(footprints=[footprint])
+    original_set_field = footprint.SetField
+
+    def reject_second_alias(name: str, value: str) -> None:
+        if name == "JLCPCB":
+            raise RuntimeError("second alias rejected")
+        original_set_field(name, value)
+
+    monkeypatch.setattr(footprint, "SetField", reject_second_alias)
+    window.assign_parts(
+        SimpleNamespace(references=["R1"], lcsc="C999", type="Basic", stock=99)
+    )
+
+    assert footprint.field.text == "C999"
+    assert footprint.fields["JLCPCB"].text == "C100"
+    assert window.store.read_all()[0]["lcsc"] == "C999"
+    assert window.test_rows["R1"]["lcsc"] == "C999"
+    window.library.save_part_preferences.assert_not_called()
+    assert "second alias rejected" in str(window.logger.warning.call_args)
+    assert info_messages(window) == []
+    assert mainwindow.wx.PostEvent.called or window.recompute_bom_estimate.called
 
 
 def test_library_bootstrap_failure_disables_dependent_tools_until_recovery(
@@ -399,7 +477,7 @@ def test_library_bootstrap_failure_disables_dependent_tools_until_recovery(
     assert all(window.upper_toolbar.enabled.values())
 
 
-def test_clear_keeps_native_selection_array_alive_during_model_updates(
+def test_clear_keeps_native_selection_array_alive_while_reading_references(
     make_window: Callable[..., Any],
 ) -> None:
     """Wx selection items borrow their native storage from the returned array."""
@@ -428,13 +506,6 @@ def test_clear_keeps_native_selection_array_alive_during_model_updates(
     window.partlist_data_model.get_reference.side_effect = (
         lambda item: item.get_reference()
     )
-    window.partlist_data_model.get_lcsc.side_effect = lambda item: window.test_rows[
-        item.get_reference()
-    ]["lcsc"]
-    remove_row = window.partlist_data_model.remove_lcsc_number.side_effect
-    window.partlist_data_model.remove_lcsc_number.side_effect = lambda item: remove_row(
-        item.get_reference()
-    )
     window.remove_lcsc_number()
     assert all(part["lcsc"] == "" for part in window.store.read_all())
     assert all(fp.field.text == "" for fp in window.pcbnew.GetBoard().GetFootprints())
@@ -457,18 +528,17 @@ def test_storage_recovery_restarts_invalidated_pending_enrichment(
     assert window.pending_assembly_enrichment == set()
     window.init_store()
     thread.assert_called_once()
-    assert thread.call_args.kwargs["args"][0] == {"C100": ["R1"]}
+    assert thread.call_args.kwargs["args"][0] == ["C100"]
     assert window.assembly_enrichment_generation > 1
-    before = window.store.get_part("R1")
+    before = window.store.read_all()[0]
     window.on_assembly_enrichment_progress(
         SimpleNamespace(
             generation=1,
             lcsc="C100",
-            refs=["R1"],
             metadata={"assembly_process": "SMT", "component_product_type": 1},
         )
     )
-    assert window.store.get_part("R1") == before
+    assert window.store.read_all()[0] == before
 
 
 @pytest.mark.parametrize(
@@ -494,7 +564,7 @@ def test_explicit_assignment_and_clear_keep_all_aliases_consistent(
         assert {
             name: field.text for name, field in footprint.fields.items()
         } == dict.fromkeys(fields, lcsc)
-        assert window.store.get_part("R1")["lcsc"] == lcsc
+        assert window.store.read_all()[0]["lcsc"] == lcsc
 
     window.remove_lcsc_number()
     assert {
@@ -503,7 +573,7 @@ def test_explicit_assignment_and_clear_keep_all_aliases_consistent(
     window.init_store()
     reopened = make_window(board=window.pcbnew.GetBoard(), settings=window.settings)
     reopened.init_store()
-    assert reopened.store.get_part("R1")["lcsc"] == ""
+    assert reopened.store.read_all()[0]["lcsc"] == ""
     assert window.test_rows["R1"]["lcsc"] == ""
 
 
@@ -536,11 +606,11 @@ def test_assignment_preserves_other_supplier_fields_when_assigning_and_clearing(
         }
         window = make_window(board=window.pcbnew.GetBoard(), settings=window.settings)
         window.init_store()
-        assert window.store.get_part("R1")["lcsc"] == lcsc
+        assert window.store.read_all()[0]["lcsc"] == lcsc
     window.remove_lcsc_number()
     assert {name: field.text for name, field in footprint.fields.items()} == {
         alias: "",
         **metadata,
     }
     window.init_store()
-    assert window.store.get_part("R1")["lcsc"] == ""
+    assert window.store.read_all()[0]["lcsc"] == ""

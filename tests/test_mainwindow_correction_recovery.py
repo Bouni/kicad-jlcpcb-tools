@@ -17,10 +17,16 @@ from tests.correction_test_support import (
     raw_rows,
     seed_raw,
 )
+from tests.stock_test_support import stock_modules
 from tests.test_corrections_import_export import install_manager_controls
 from tests.test_fabrication_correction_recovery import Point, make_fabrication, read_cpl
 from tests.test_mainwindow_empty_zone_warning import _make_window
-from tests.wx_harness import load_correction_modules, mainwindow_stubs, wx_stubs
+from tests.wx_harness import (
+    load_correction_modules,
+    mainwindow_stubs,
+    track_selection,
+    wx_stubs,
+)
 
 
 @pytest.fixture
@@ -180,9 +186,57 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
     runtime.wx.MessageBox.assert_not_called()
 
 
+@pytest.mark.parametrize("kind", ["reference", "package", "name"])
+def test_correction_dialog_activation_preserves_remaining_selected_patterns(
+    runtime: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Closing one modal may rebuild rows before the next selected correction opens."""
+    window = _population_window(runtime)
+    window.start_assembly_enrichment = MagicMock()
+    window.pcbnew.GetCurrentSelection = lambda: []
+    window.pcbnew.Refresh = MagicMock()
+    footprint = window.pcbnew.GetBoard().FindFootprintByReference("C1")
+    footprint.SetSelected = lambda: setattr(footprint, "selected", True)
+    window.select_alike_in_progress = False
+    monkeypatch.setattr(
+        runtime.wx, "CallAfter", lambda callback: callback(), raising=False
+    )
+    with stock_modules() as modules:
+        model = window.partlist_data_model = modules.datamodel.PartListDataModel(1)
+        # Match wx's ID lookup: rows cease to resolve when its mapper releases them.
+        model.ItemToObject = lambda item: model.mapper[id(item)]
+        window.populate_footprint_list()
+        selected = [model.ObjectToItem(row) for row in model.data]
+        track_selection(window, model, selected)
+        patterns = []
+
+        def show(parent: Any, pattern: str) -> Any:
+            patterns.append(pattern)
+            return SimpleNamespace(
+                ShowModal=lambda: parent.on_window_activated(
+                    SimpleNamespace(GetActive=lambda: True, Skip=lambda: None)
+                )
+            )
+
+        monkeypatch.setattr(runtime.mainwindow, "CorrectionManagerDialog", show)
+        event_id = getattr(
+            runtime.mainwindow, "ID_CONTEXT_MENU_ADD_ROT_BY_" + kind.upper()
+        )
+        window.add_correction(SimpleNamespace(GetId=lambda: event_id))
+
+        expected = {
+            "reference": ["^C1$", "^C2$"],
+            "package": ["^Capacitor_SMD:C_0603"] * 2,
+            "name": ["47u"] * 2,
+        }
+        assert patterns == expected[kind]
+        assert len(model.mapper) == len(model.data) == 2
+
+
 def _generation_window(runtime: SimpleNamespace) -> tuple[SimpleNamespace, list[str]]:
     """Bind real preflight methods to the established generation test harness."""
-    window, steps = _make_window([])
+    window, steps = _make_window([], mainwindow=runtime.mainwindow)
+    window.store.read_all.return_value = []
     window.library = fresh_library(runtime.library)
     window.correction_status = StatusLabel()
     window.Layout = MagicMock()
@@ -196,6 +250,15 @@ def _generation_window(runtime: SimpleNamespace) -> tuple[SimpleNamespace, list[
             MethodType(getattr(runtime.mainwindow.JLCPCBTools, name), window),
         )
     return window, steps
+
+
+def _use_real_fabrication(window: Any, fabrication: Any) -> None:
+    """Give generation and placement the same board reader and parent window."""
+    board = fabrication.board
+    window.store.read_all.side_effect = fabrication.parent.store.read_all
+    window.fabrication = fabrication
+    window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+    fabrication.parent = window
 
 
 def _displayed_corrections(window: Any) -> list[str]:
@@ -484,7 +547,12 @@ def test_unknown_archive_warnings_keep_healthy_display_and_generation_ready(
     generation, steps = _generation_window(runtime)
     runtime.mainwindow.JLCPCBTools.generate_fabrication_data(generation)
     assert steps[0] == "Validating corrections"
-    generation.fabrication.prepare_cpl.assert_called_once_with(snapshot.corrections)
+    generation.store.read_all.assert_called_once_with()
+    parts = generation.store.read_all.return_value
+    generation.fabrication.prepare_cpl.assert_called_once_with(
+        snapshot.corrections, parts
+    )
+    generation.fabrication.generate_bom.assert_called_once_with(parts)
     generation.fabrication.write_cpl.assert_called_once_with(
         generation.fabrication.prepare_cpl.return_value
     )
@@ -551,7 +619,7 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     runtime.library.save_correction_data("Device", 90, (1, 2))
     window, _steps = _generation_window(runtime)
     fabrication = make_fabrication(runtime.modules, window.library, tmp_path)
-    window.fabrication = fabrication
+    _use_real_fabrication(window, fabrication)
     matcher = MagicMock(wraps=fabrication._correction_for_footprint)
     fabrication._correction_for_footprint = matcher
     for method in (
@@ -563,7 +631,7 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     ):
         setattr(fabrication, method, MagicMock(return_value=[]))
 
-    def damage_storage_after_preflight() -> str:
+    def damage_storage_after_preflight(_parts: list[dict[str, Any]]) -> str:
         """Simulate an external legacy write after the complete snapshot was read."""
         _write_sql(
             runtime.library.correctionsdb_file,
@@ -617,7 +685,7 @@ def test_generation_prepares_placements_before_any_output_or_board_changes(
     runtime.library.save_correction_data("Device", 0, (offset, 0))
     window, steps = _generation_window(runtime)
     fabrication = make_fabrication(runtime.modules, window.library, tmp_path)
-    window.fabrication = fabrication
+    _use_real_fabrication(window, fabrication)
     destination = Path(fabrication.get_cpl_csv_path())
     destination.write_bytes(b"previous complete CPL\x00\xff")
     later_steps = (
