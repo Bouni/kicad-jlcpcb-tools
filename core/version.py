@@ -9,11 +9,6 @@ def _parse_version(version: str) -> Version:
     return Version(version.split("-", 1)[0])
 
 
-def is_version7(version: str) -> bool:
-    """Check if version is 7."""
-    return Version("6.99") <= _parse_version(version) < Version("8.0")
-
-
 def is_supported_version(version: str) -> bool:
     """Require KiCad 7.0 or newer before loading project-facing code."""
     try:

@@ -17,6 +17,7 @@ from typing import Any, NamedTuple, Optional, Union
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
+from .bom_estimation.assembly_mode import classify_component_product_type
 from .correction_data import (
     Correction,
     CorrectionDataError,
@@ -274,6 +275,118 @@ class Library:
         except (sqlite3.Error, OSError) as error:
             # Preferences are optional; keep the catalog and Settings accessible.
             self.logger.warning("Part preference storage is unavailable: %s", error)
+        else:
+            self.create_lcsc_metadata_table()
+
+    def create_lcsc_metadata_table(self) -> None:
+        """Initialize optional supplier facts after existing preference migration."""
+        try:
+            with (
+                contextlib.closing(
+                    sqlite3.connect(self.part_preferences_db_file)
+                ) as con,
+                con,
+            ):
+                con.execute(
+                    "CREATE TABLE IF NOT EXISTS lcsc_metadata ("
+                    "lcsc TEXT PRIMARY KEY NOT NULL, assembly_process TEXT, "
+                    "component_product_type INTEGER CHECK ("
+                    "component_product_type IS NULL OR component_product_type IN (0, 1, 2)))"
+                )
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning("LCSC metadata storage is unavailable: %s", error)
+
+    def _pending_lcsc_metadata(self) -> dict[str, dict[str, Any]]:
+        """Retain only failed optional writes, isolated by the global data path."""
+        caches = self.__dict__.setdefault("_lcsc_metadata_pending", {})
+        return caches.setdefault(os.path.realpath(self.part_preferences_db_file), {})
+
+    def get_lcsc_metadata(
+        self, lcsc_codes: Iterable[object]
+    ) -> dict[str, dict[str, Any]]:
+        """Read shared facts by code, overlaying this session's failed writes."""
+        codes = sorted(
+            {
+                code
+                for value in lcsc_codes
+                if (code := _normalize_part_preference_lcsc(value)) is not None
+            }
+        )
+        if not codes:
+            return {}
+        result = {}
+        try:
+            with contextlib.closing(
+                sqlite3.connect(self.part_preferences_db_file)
+            ) as con:
+                for offset in range(0, len(codes), 900):
+                    batch = codes[offset : offset + 900]
+                    placeholders = ",".join("?" for _ in batch)
+                    for code, process, product_type in con.execute(
+                        "SELECT lcsc, assembly_process, component_product_type "
+                        f"FROM lcsc_metadata WHERE lcsc IN ({placeholders})",
+                        batch,
+                    ):
+                        result[code] = {
+                            "assembly_process": process.strip() or None
+                            if isinstance(process, str)
+                            else None,
+                            "component_product_type": classify_component_product_type(
+                                product_type
+                            ),
+                        }
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning("Cannot read LCSC metadata: %s", error)
+        pending = self._pending_lcsc_metadata()
+        for code in codes:
+            if code in pending:
+                result.setdefault(
+                    code, {"assembly_process": None, "component_product_type": None}
+                ).update(pending[code])
+        return result
+
+    def merge_lcsc_metadata(self, lcsc: object, metadata: dict[str, Any]) -> None:
+        """Merge valid partial facts; an optional cache failure cannot fail an edit."""
+        code = _normalize_part_preference_lcsc(lcsc)
+        if code is None:
+            return
+        process = metadata.get("assembly_process")
+        process = process.strip() or None if isinstance(process, str) else None
+        product_type = classify_component_product_type(
+            metadata.get("component_product_type")
+        )
+        fields = {
+            key: value
+            for key, value in (
+                ("assembly_process", process),
+                ("component_product_type", product_type),
+            )
+            if value is not None
+        }
+        if not fields:
+            return
+        pending = self._pending_lcsc_metadata()
+        try:
+            with (
+                contextlib.closing(
+                    sqlite3.connect(self.part_preferences_db_file)
+                ) as con,
+                con,
+            ):
+                con.execute(
+                    "INSERT INTO lcsc_metadata VALUES (?, ?, ?) "
+                    "ON CONFLICT(lcsc) DO UPDATE SET "
+                    "assembly_process=COALESCE(excluded.assembly_process, lcsc_metadata.assembly_process), "
+                    "component_product_type=COALESCE(excluded.component_product_type, lcsc_metadata.component_product_type)",
+                    (code, process, product_type),
+                )
+            for field in fields:
+                pending.get(code, {}).pop(field, None)
+            if not pending.get(code):
+                pending.pop(code, None)
+        except (sqlite3.Error, OSError) as error:
+            pending.setdefault(code, {}).update(fields)
+            self.logger.warning("Cannot save LCSC metadata: %s", error)
 
     def uses_global_correction_database(self):
         """Check for a project correction table without creating a project database."""

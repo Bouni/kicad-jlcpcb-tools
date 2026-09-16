@@ -1,9 +1,5 @@
 """Helpers for deriving estimator metadata from KiCad footprints."""
 
-import json
-
-from .footprint_helpers import get_exclude_from_bom, get_exclude_from_pos, get_is_dnp
-
 
 def get_footprint_pads(footprint):
     """Return an iterable of pads for a footprint across KiCad API variants."""
@@ -61,13 +57,3 @@ def footprint_has_tht(footprint) -> bool:
                 return True
 
     return False
-
-
-def get_assembly_flags(footprint) -> str:
-    """Build assembly-related footprint flags for estimator persistence."""
-    flags = {
-        "exclude_from_bom": bool(get_exclude_from_bom(footprint)),
-        "exclude_from_pos": bool(get_exclude_from_pos(footprint)),
-        "is_dnp": bool(get_is_dnp(footprint)),
-    }
-    return json.dumps(flags, sort_keys=True)

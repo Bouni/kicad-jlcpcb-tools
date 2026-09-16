@@ -15,12 +15,6 @@ from .helpers import HighResWxSize, loadBitmapScaled
 if TYPE_CHECKING:
     from .mainwindow import JLCPCBTools
 
-# Display strings for the LCSC priority dropdown; the stored setting stays a boolean.
-LCSC_PRIORITY_SCHEMATIC = "Schematic"
-LCSC_PRIORITY_DATABASE = "Database"
-LCSC_PRIORITY_CHOICES = [LCSC_PRIORITY_SCHEMATIC, LCSC_PRIORITY_DATABASE]
-
-
 # Side of the square icon cell in every settings row (largest icon is 48 px).
 ICON_CELL_SIZE = 48
 
@@ -215,50 +209,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.subtract_mask_from_silk_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        ##### LCSC priority #####
-
-        lcsc_priority_label = wx.StaticText(
-            self,
-            id=wx.ID_ANY,
-            label="Prefer LCSC numbers from:",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-        )
-
-        self.lcsc_priority_setting = wx.ComboBox(
-            self,
-            id=wx.ID_ANY,
-            value="",
-            choices=LCSC_PRIORITY_CHOICES,
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=wx.CB_READONLY,
-            name="general_lcsc_priority",
-        )
-
-        self.lcsc_priority_setting.SetToolTip(
-            wx.ToolTip(
-                "When a part has an LCSC number in both the schematic and the plugin database, which one is used"
-            )
-        )
-
-        self.lcsc_priority_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("schematic.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.lcsc_priority_setting.Bind(wx.EVT_COMBOBOX, self.update_settings)
-
-        lcsc_priority_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        lcsc_priority_sizer.Add(
-            lcsc_priority_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        lcsc_priority_sizer.Add(self.lcsc_priority_setting, 0, wx.ALIGN_CENTER_VERTICAL)
 
         ##### Only parts with LCSC number in BOM/CPL #####
 
@@ -459,16 +409,15 @@ class SettingsDialog(wx.Dialog):
         self.part_preferences_fill_empty_lcsc_assignments_on_open_setting = wx.CheckBox(
             self,
             id=wx.ID_ANY,
-            label="Parts preferences fill in empty LCSC assignments",
+            label="Part preferences fill empty LCSC assignments for new parts",
             name="part_preferences.fill_empty_lcsc_assignments_on_open",
         )
         self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.SetToolTip(
             wx.ToolTip(
-                "When the plugin window opens, use the preferred LCSC part for"
-                " each matching value and footprint. Existing assignments are"
-                " kept. Skip DNP parts and parts excluded from BOM or placement."
-                " Cleared assignments may fill again on the next opening unless"
-                " the part is excluded or this setting is disabled."
+                "For newly initialized parts with no LCSC assignment, use the"
+                " preferred part for the matching value and footprint. Skip DNP"
+                " parts and parts excluded from BOM or placement. Existing"
+                " assignments and intentionally cleared assignments are kept."
             )
         )
         self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.Bind(
@@ -702,9 +651,6 @@ class SettingsDialog(wx.Dialog):
         )
         self._add_setting_row(settings_grid, None, self.subtract_mask_from_silk_setting)
         self._add_setting_row(
-            settings_grid, self.lcsc_priority_image, lcsc_priority_sizer
-        )
-        self._add_setting_row(
             settings_grid, self.lcsc_bom_cpl_image, self.lcsc_bom_cpl_setting
         )
         self._add_setting_row(
@@ -823,18 +769,6 @@ class SettingsDialog(wx.Dialog):
         """Update subtract-mask-from-silk setting value."""
         self.subtract_mask_from_silk_setting.SetValue(bool(enabled))
 
-    def update_lcsc_priority(self, priority):
-        """Update settings dialog according to the settings."""
-        if priority:
-            self.lcsc_priority_setting.SetStringSelection(LCSC_PRIORITY_SCHEMATIC)
-            icon = "schematic.png"
-        else:
-            self.lcsc_priority_setting.SetStringSelection(LCSC_PRIORITY_DATABASE)
-            icon = "database-outline.png"
-        self.lcsc_priority_image.SetBitmap(
-            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
-        )
-
     def update_lcsc_bom_cpl(self, add):
         """Update settings dialog according to the settings."""
         self.lcsc_bom_cpl_setting.SetValue(add)
@@ -882,7 +816,7 @@ class SettingsDialog(wx.Dialog):
     def update_part_preferences_fill_empty_lcsc_assignments_on_open(
         self, enabled: bool
     ) -> None:
-        """Update whether part preferences fill empty assignments on opening."""
+        """Update whether part preferences fill newly initialized assignments."""
         self.part_preferences_fill_empty_lcsc_assignments_on_open_setting.SetValue(
             bool(enabled)
         )
@@ -906,9 +840,6 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_subtract_mask_from_silk(
             self.parent.settings.get("gerber", {}).get("subtract_mask_from_silk", True)
-        )
-        self.update_lcsc_priority(
-            self.parent.settings.get("general", {}).get("lcsc_priority", True)
         )
         self.update_lcsc_bom_cpl(
             self.parent.settings.get("gerber", {}).get("lcsc_bom_cpl", True)
@@ -1012,11 +943,6 @@ class SettingsDialog(wx.Dialog):
                     self.logger.debug("Selected library key: %s", key)
                     value = key
                     break
-
-        # Special handling for LCSC priority: the dropdown text maps onto the
-        # boolean that has always been stored (True = schematic wins).
-        if section == "general" and name == "lcsc_priority":
-            value = value == LCSC_PRIORITY_SCHEMATIC
 
         # If forced DRC is enabled, fill zones must stay enabled.
         if (

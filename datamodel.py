@@ -536,29 +536,6 @@ class PartListDataModel(_StockDataModel):
         obj[self.columns["PRICE_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(obj))
 
-    def toggle_bom(self, item):
-        """Toggle BOM for a given item."""
-        obj = self.ItemToObject(item)
-        if obj[self.columns["BOM_COL"]] == self.bom_pos_icons[0]:
-            obj[self.columns["BOM_COL"]] = self.bom_pos_icons[1]
-        else:
-            obj[self.columns["BOM_COL"]] = self.bom_pos_icons[0]
-        self.ItemChanged(self.ObjectToItem(obj))
-
-    def toggle_pos(self, item):
-        """Toggle POS for a given item."""
-        obj = self.ItemToObject(item)
-        if obj[self.columns["POS_COL"]] == self.bom_pos_icons[0]:
-            obj[self.columns["POS_COL"]] = self.bom_pos_icons[1]
-        else:
-            obj[self.columns["POS_COL"]] = self.bom_pos_icons[0]
-        self.ItemChanged(self.ObjectToItem(obj))
-
-    def toggle_bom_pos(self, item):
-        """Toggle BOM and POS for a given item."""
-        self.toggle_bom(item)
-        self.toggle_pos(item)
-
 
 class PartSelectorDataModel(_StockDataModel):
     """Datamodel for use with the DataViewCtrl of the partselector modal window."""

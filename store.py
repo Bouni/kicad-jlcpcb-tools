@@ -1,470 +1,341 @@
-"""Contains the data storge for a project."""
+"""Persist plugin assembly choices independently of live PCB design data."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 import contextlib
-import logging
+from functools import cmp_to_key
+import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Optional, Union
+from typing import Any, Optional
 
 from .bom_estimation.assembly_mode import ComponentProductType
 from .footprint_helpers import (
+    footprint_uuid,
     get_exclude_from_bom,
     get_exclude_from_pos,
+    get_is_dnp,
     get_lcsc_value,
     get_valid_footprints,
 )
-from .footprint_metadata import (
-    footprint_has_tht,
-    get_assembly_flags,
-    get_footprint_pad_count,
+from .footprint_metadata import footprint_has_tht, get_footprint_pad_count
+from .helpers import natural_sort_collation
+from .part_info_migration import migrate_part_info
+
+_PART_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS part_info ("
+    "board_key TEXT NOT NULL, footprint_uuid TEXT NOT NULL, "
+    "lcsc TEXT NOT NULL DEFAULT '', "
+    "exclude_from_bom INTEGER NOT NULL DEFAULT 0 CHECK(exclude_from_bom IN (0,1)), "
+    "exclude_from_pos INTEGER NOT NULL DEFAULT 0 CHECK(exclude_from_pos IN (0,1)), "
+    "is_dnp INTEGER NOT NULL DEFAULT 0 CHECK(is_dnp IN (0,1)), "
+    "PRIMARY KEY(board_key, footprint_uuid))"
 )
-from .helpers import dict_factory, natural_sort_collation
+_FIELDS = ("lcsc", "exclude_from_bom", "exclude_from_pos", "is_dnp")
 
 
 class Store:
-    """A storage class to get data from a sqlite database and write it back."""
+    """Join durable assembly choices with the current board and supplier catalog."""
 
     GENERATION_COUNT_KEY = "generation_count"
-    PART_INFO_ESTIMATOR_COLUMNS = {
-        "pad_count": "INTEGER",
-        "has_tht": "NUMERIC",
-        "assembly_process": "TEXT",
-        "component_product_type": "INTEGER",
-        "assembly_flags": "TEXT",
-    }
 
-    def __init__(self, parent, project_path, board):
-        self.logger = logging.getLogger(__name__)
-        self.parent = parent
-        self.project_path = project_path
-        self.board = board
+    def __init__(self, parent: Any, project_path: str, board: Any) -> None:
+        self.parent, self._board = parent, board
+        filename = board.GetFileName()
+        if not filename:
+            raise sqlite3.DatabaseError("Save the PCB before editing assembly choices.")
+        self.project_path = str(Path(project_path).resolve())
+        self._board_path = Path(filename).resolve()
+        try:
+            self.board_key = self._board_path.relative_to(self.project_path).as_posix()
+        except ValueError as error:
+            raise sqlite3.DatabaseError(
+                "The PCB is outside this project directory."
+            ) from error
         self.datadir = os.path.join(self.project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
-        self.order_by = "reference"
-        self.order_dir = "ASC"
-        self.setup()
-        self.update_from_board()
-
-    def setup(self):
-        """Check if folders and database exist, setup if not."""
-        if not os.path.isdir(self.datadir):
-            self.logger.info(
-                "Data directory 'jlcpcb' does not exist and will be created."
+        self.new_part_uuids: set[str] = set()
+        parts = self._board_parts()
+        Path(self.datadir).mkdir(parents=True, exist_ok=True)
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
+            con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
             )
-            Path(self.datadir).mkdir(parents=True, exist_ok=True)
-        self.create_db()
+            migrate_part_info(
+                con,
+                _PART_SCHEMA,
+                self.board_key,
+                parts,
+                Path(self.project_path),
+                getattr(parent, "confirm_part_info_migration", None),
+            )
+            con.execute(_PART_SCHEMA)
+            self._validate_schema(con)
+        self.read_all()
 
-    def set_order_by(self, n: int):
-        """Set which value we want to order by when getting data from the database."""
-        if n > 7:
+    @property
+    def board(self) -> Any:
+        """Reject modeless callbacks after the board was replaced or saved elsewhere."""
+        getter = getattr(self.parent, "_get_current_board", None)
+        board = getter() if callable(getter) else self._board
+        if board is None or Path(board.GetFileName()).resolve() != self._board_path:
+            raise sqlite3.DatabaseError("The PCB changed. Reopen kicad-jlcpcb-tools.")
+        return board
+
+    @staticmethod
+    def _validate_schema(con: sqlite3.Connection) -> None:
+        """Refuse an unsupported table instead of falling back to native settings."""
+        columns = con.execute("PRAGMA table_info(part_info)").fetchall()
+        if {column[1] for column in columns} != {
+            "board_key",
+            "footprint_uuid",
+            *_FIELDS,
+        } or {column[1]: column[5] for column in columns if column[5]} != {
+            "board_key": 1,
+            "footprint_uuid": 2,
+        }:
+            raise sqlite3.DatabaseError(
+                "Unsupported part_info schema; assignments were not changed."
+            )
+
+    def _board_parts(self) -> list[dict[str, Any]]:
+        """Capture live design facts and initial values, checking unique identities."""
+        parts = []
+        refs: set[str] = set()
+        uuids: set[str] = set()
+        for fp in get_valid_footprints(self.board):
+            ref, uuid = fp.GetReference(), footprint_uuid(fp)
+            if ref in refs or uuid in uuids:
+                raise sqlite3.IntegrityError(
+                    "Duplicate footprint reference or UUID; assign unique references before using the plugin."
+                )
+            refs.add(ref)
+            uuids.add(uuid)
+            parts.append(
+                {
+                    "reference": ref,
+                    "footprint_uuid": uuid,
+                    "value": fp.GetValue(),
+                    "footprint": str(fp.GetFPID().GetLibItemName()),
+                    "lcsc": get_lcsc_value(fp),
+                    "exclude_from_bom": int(bool(get_exclude_from_bom(fp))),
+                    "exclude_from_pos": int(bool(get_exclude_from_pos(fp))),
+                    "is_dnp": int(get_is_dnp(fp)),
+                    "pad_count": get_footprint_pad_count(fp),
+                    "has_tht": footprint_has_tht(fp),
+                }
+            )
+        return parts
+
+    def read_all(self) -> list[dict[str, Any]]:
+        """Initialize missing UUIDs once, then overlay their authoritative choices."""
+        parts = self._board_parts()
+        inserted = set()
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
+            con.row_factory = sqlite3.Row
+            saved = {
+                row["footprint_uuid"]: dict(row)
+                for row in con.execute(
+                    "SELECT * FROM part_info WHERE board_key = ?", (self.board_key,)
+                )
+            }
+            for part in parts:
+                uuid = part["footprint_uuid"]
+                if uuid not in saved:
+                    cursor = con.execute(
+                        "INSERT INTO part_info VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(board_key, footprint_uuid) DO NOTHING",
+                        (self.board_key, uuid, *(part[key] for key in _FIELDS)),
+                    )
+                    if cursor.rowcount:
+                        inserted.add(uuid)
+                    saved[uuid] = dict(
+                        con.execute(
+                            "SELECT * FROM part_info WHERE board_key = ? AND footprint_uuid = ?",
+                            (self.board_key, uuid),
+                        ).fetchone()
+                    )
+                part.update({key: saved[uuid][key] for key in _FIELDS})
+        self.new_part_uuids.update(inserted)
+        library = getattr(self.parent, "library", None)
+        getter = getattr(library, "get_lcsc_metadata", None)
+        metadata = (
+            getter({part["lcsc"] for part in parts if part["lcsc"]})
+            if callable(getter)
+            else {}
+        )
+        for part in parts:
+            cached = metadata.get(part["lcsc"], {})
+            part.update(
+                assembly_process=cached.get("assembly_process") or "",
+                component_product_type=cached.get("component_product_type"),
+                stock=None,
+            )
+            part["assembly_flags"] = json.dumps(
+                {key: bool(part[key]) for key in _FIELDS[1:]}, sort_keys=True
+            )
+        natural_key = cmp_to_key(natural_sort_collation)
+        return sorted(parts, key=lambda part: natural_key(part["reference"]))
+
+    def get_part(self, ref: str) -> Optional[dict[str, Any]]:
+        """Resolve an active reference without exposing deleted footprint records."""
+        return next(
+            (part for part in self.read_all() if part["reference"] == ref), None
+        )
+
+    def update_from_board(self) -> None:
+        """Refresh current membership without ever overwriting existing choices."""
+        self.read_all()
+
+    def update_parts(
+        self,
+        changes: dict[str, dict[str, Any]],
+        expected_uuids: Optional[dict[str, str]] = None,
+    ) -> None:
+        """Commit one complete UI action after validating its current identities."""
+        if not changes:
             return
-        # The following two cases are just a temporary hack and will eventually be replaced by
-        # direct sorting via DataViewListCtrl rather than via SQL query
-        if n == 4:
-            return
-        if n > 4:
-            n = n - 1
-        order_by = [
-            "reference",
-            "value",
-            "footprint",
-            "lcsc",
-            "stock",
-            "exclude_from_bom",
-            "exclude_from_pos",
-        ]
-        if self.order_by == order_by[n] and self.order_dir == "ASC":
-            self.order_dir = "DESC"
-        else:
-            self.order_by = order_by[n]
-            self.order_dir = "ASC"
+        current = {part["reference"]: part for part in self._board_parts()}
+        updates = []
+        for ref, fields in changes.items():
+            if ref not in current or (
+                expected_uuids is not None
+                and expected_uuids.get(ref) != current[ref]["footprint_uuid"]
+            ):
+                raise sqlite3.IntegrityError(
+                    "Selected footprints changed. Refresh the list and try again."
+                )
+            if not fields or not set(fields) <= set(_FIELDS):
+                raise ValueError("Only plugin assembly choices can be edited.")
+            for key, value in fields.items():
+                if (key == "lcsc" and not isinstance(value, str)) or (
+                    key != "lcsc" and value not in (0, 1)
+                ):
+                    raise ValueError("Invalid assembly choice.")
+            updates.append((current[ref]["footprint_uuid"], fields))
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
+            for uuid, fields in updates:
+                columns = ", ".join(f"{key} = ?" for key in fields)
+                cursor = con.execute(
+                    f"UPDATE part_info SET {columns} WHERE board_key = ? AND footprint_uuid = ?",
+                    (*fields.values(), self.board_key, uuid),
+                )
+                if cursor.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        "An assembly record is missing. Reopen the plugin."
+                    )
+        self.new_part_uuids.difference_update(uuid for uuid, _fields in updates)
 
-    def create_db(self):
-        """Create the sqlite database tables."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "CREATE TABLE IF NOT EXISTS part_info ("
-                "reference NOT NULL PRIMARY KEY,"
-                "value TEXT NOT NULL,"
-                "footprint TEXT NOT NULL,"
-                "lcsc TEXT,"
-                "stock NUMERIC,"
-                "exclude_from_bom NUMERIC DEFAULT 0,"
-                "exclude_from_pos NUMERIC DEFAULT 0"
-                ")",
-            )
-            self.ensure_part_info_columns(cur)
-            cur.execute(
-                "CREATE TABLE IF NOT EXISTS metadata ("
-                "key TEXT NOT NULL PRIMARY KEY,"
-                "value TEXT NOT NULL"
-                ")",
-            )
-            cur.commit()
+    def set_lcsc_assignments(
+        self,
+        assignments: Iterable[tuple[str, str, Optional[int]]],
+        expected_uuids: Optional[dict[str, str]] = None,
+    ) -> None:
+        """Persist assignments atomically; stock belongs to the supplier catalog."""
+        self.update_parts(
+            {ref: {"lcsc": lcsc} for ref, lcsc, _stock in assignments}, expected_uuids
+        )
 
-    def ensure_part_info_columns(self, cur):
-        """Idempotently ensure estimator metadata columns exist in part_info."""
-        existing_columns = {
-            row[1] for row in cur.execute("PRAGMA table_info(part_info)").fetchall()
-        }
-        for column_name, column_type in self.PART_INFO_ESTIMATOR_COLUMNS.items():
-            if column_name in existing_columns:
+    def read_bom_parts(
+        self,
+        parts: Optional[Sequence[dict[str, Any]]] = None,
+        *,
+        include_unassigned: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Group assigned value/code pairs, excluding plugin BOM/DNP decisions."""
+        groups: dict[tuple[str, str], dict[str, Any]] = {}
+        unassigned = []
+        references: set[str] = set()
+        for part in sorted(
+            self.read_all() if parts is None else parts,
+            key=lambda row: (row["lcsc"], row["reference"]),
+        ):
+            if (
+                part["exclude_from_bom"]
+                or part.get("is_dnp", False)
+                or (not include_unassigned and not part["lcsc"])
+            ):
                 continue
-            cur.execute(
-                f"ALTER TABLE part_info ADD COLUMN {column_name} {column_type}",
+            if part["reference"] in references:
+                raise ValueError(
+                    "Duplicate footprint reference. Assign unique references before generating files."
+                )
+            references.add(part["reference"])
+            row = {
+                "value": part["value"],
+                "refs": part["reference"],
+                "footprint": part["footprint"],
+                "lcsc": part["lcsc"],
+            }
+            if not part["lcsc"]:
+                unassigned.append(row)
+                continue
+            key = part["value"], part["lcsc"]
+            if key in groups:
+                groups[key]["refs"] += "," + part["reference"]
+            else:
+                groups[key] = row
+        return [groups[key] for key in sorted(groups)] + unassigned
+
+    def get_assembly_enrichment_targets(
+        self, references: Optional[Iterable[str]] = None
+    ) -> dict[str, list[str]]:
+        """Group current assigned codes missing supplier classification."""
+        selected = set(references) if references is not None else None
+        targets: dict[str, list[str]] = {}
+        valid_types = {member.value for member in ComponentProductType}
+        for part in self.read_all():
+            if (
+                part["lcsc"]
+                and (selected is None or part["reference"] in selected)
+                and (
+                    not part["assembly_process"]
+                    or part["component_product_type"] not in valid_types
+                )
+            ):
+                targets.setdefault(part["lcsc"], []).append(part["reference"])
+        return targets
+
+    def get_metadata(self, key: str) -> Optional[str]:
+        """Read independent project counters and per-board notice acknowledgments."""
+        self.board
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con:
+            row = con.execute(
+                "SELECT value FROM metadata WHERE key = ?", (key,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def set_metadata(self, key: str, value: str) -> None:
+        """Persist project metadata without touching assembly records."""
+        self.board
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
+            con.execute(
+                "INSERT INTO metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
             )
 
     def get_generation_count(self) -> int:
-        """Return the per-project generation counter."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            row = cur.execute(
-                "SELECT value FROM metadata WHERE key = :key",
-                {"key": self.GENERATION_COUNT_KEY},
-            ).fetchone()
-
-        if not row:
+        """Return the existing per-project manufacturing counter."""
+        try:
+            return max(0, int(self.get_metadata(self.GENERATION_COUNT_KEY) or 0))
+        except ValueError:
             return 0
 
-        with contextlib.suppress(ValueError, TypeError):
-            return max(0, int(row[0]))
-        return 0
-
     def increment_generation_count(self) -> int:
-        """Increment and persist the per-project generation counter."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            row = cur.execute(
-                "SELECT value FROM metadata WHERE key = :key",
-                {"key": self.GENERATION_COUNT_KEY},
+        """Serialize counter increments across concurrent plugin windows."""
+        self.board
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT value FROM metadata WHERE key = ?", (self.GENERATION_COUNT_KEY,)
             ).fetchone()
-
             current = 0
             if row:
                 with contextlib.suppress(ValueError, TypeError):
                     current = max(0, int(row[0]))
-
-            next_count = current + 1
-            cur.execute(
-                "INSERT INTO metadata (key, value) VALUES (:key, :value) "
-                "ON CONFLICT(key) DO UPDATE SET value = :value",
-                {
-                    "key": self.GENERATION_COUNT_KEY,
-                    "value": str(next_count),
-                },
+            value = current + 1
+            con.execute(
+                "INSERT INTO metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (self.GENERATION_COUNT_KEY, str(value)),
             )
-            cur.commit()
-
-        return next_count
-
-    def read_all(self) -> dict:
-        """Read all parts from the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            con.create_collation("naturalsort", natural_sort_collation)
-            con.row_factory = dict_factory
-            return cur.execute(
-                f"SELECT * FROM part_info ORDER BY {self.order_by} COLLATE naturalsort {self.order_dir}"
-            ).fetchall()
-
-    def read_bom_parts(self) -> dict:
-        """Read all parts that should be included in the BOM."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            con.row_factory = dict_factory
-            # Query all parts that are supposed to be in the BOM an have an lcsc number, group the references together
-            subquery = "SELECT value, reference, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc != '' ORDER BY lcsc, reference"
-            query = f"SELECT value, GROUP_CONCAT(reference) AS refs, footprint, lcsc  FROM ({subquery}) GROUP BY value, lcsc"
-            a = cur.execute(query).fetchall()
-            # Query all parts that are supposed to be in the BOM but have no lcsc number
-            query = "SELECT value, reference AS refs, footprint, lcsc FROM part_info WHERE exclude_from_bom = '0' AND lcsc = ''"
-            b = cur.execute(query).fetchall()
-            return a + b
-
-    def create_part(self, part: dict):
-        """Create a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "INSERT INTO part_info ("
-                "reference, value, footprint, lcsc, stock, exclude_from_bom, "
-                "exclude_from_pos"
-                ") VALUES ("
-                ":reference, :value, :footprint, :lcsc, '', :exclude_from_bom, "
-                ":exclude_from_pos"
-                ")",
-                part,
-            )
-            cur.commit()
-
-    def update_part(self, part: dict):
-        """Update a part, clearing assembly metadata only when LCSC changes."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "UPDATE part_info set "
-                "value = :value, footprint = :footprint, "
-                "assembly_process = CASE "
-                "WHEN COALESCE(lcsc, '') != COALESCE(:lcsc, '') THEN '' "
-                "ELSE assembly_process END, "
-                "component_product_type = CASE "
-                "WHEN COALESCE(lcsc, '') != COALESCE(:lcsc, '') THEN NULL "
-                "ELSE component_product_type END, "
-                "lcsc = :lcsc, "
-                "exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos "
-                "WHERE reference = :reference",
-                part,
-            )
-            cur.commit()
-
-    def get_part(self, ref: str) -> dict:
-        """Get a part from the database by its reference."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            con.row_factory = dict_factory
-            return cur.execute(
-                "SELECT * FROM part_info WHERE reference = :reference",
-                {"reference": ref},
-            ).fetchone()
-
-    def set_stock(self, ref: str, stock: Union[int, None]):
-        """Set the stock value for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "UPDATE part_info SET stock = :stock WHERE reference = :reference",
-                {"reference": ref, "stock": stock},
-            )
-            cur.commit()
-
-    def set_bom(self, ref: str, state: int):
-        """Change the BOM attribute for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "UPDATE part_info SET exclude_from_bom = :state WHERE reference = :reference",
-                {"reference": ref, "state": state},
-            )
-            cur.commit()
-
-    def set_pos(self, ref: str, state: int):
-        """Change the POS attribute for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "UPDATE part_info SET exclude_from_pos = :state WHERE reference = :reference",
-                {"reference": ref, "state": state},
-            )
-            cur.commit()
-
-    def set_lcsc(self, ref: str, lcsc: str):
-        """Change the LCSC attribute for a part in the database."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "UPDATE part_info SET "
-                "lcsc = :lcsc, "
-                "assembly_process = '', "
-                "component_product_type = NULL "
-                "WHERE reference = :reference",
-                {
-                    "reference": ref,
-                    "lcsc": lcsc,
-                },
-            )
-            cur.commit()
-
-    def set_lcsc_assignments(
-        self, assignments: Iterable[tuple[str, str, Optional[int]]]
-    ) -> None:
-        """Commit assignment, stock, and enrichment invalidation for a whole action."""
-        batch = list(assignments)
-        if not batch:
-            return
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con:
-            con.executemany(
-                "UPDATE part_info SET "
-                "lcsc = ?, stock = ?, assembly_process = '', "
-                "component_product_type = NULL WHERE reference = ?",
-                ((lcsc, stock, reference) for reference, lcsc, stock in batch),
-            )
-
-    def set_assembly_metadata(
-        self,
-        ref: str,
-        assembly_process: str,
-        component_product_type,
-        expected_lcsc=None,
-    ):
-        """Persist metadata if LCSC still matches, preserving known class data."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            result = cur.execute(
-                "UPDATE part_info SET "
-                "assembly_process = COALESCE(NULLIF(:assembly_process, ''), assembly_process), "
-                "component_product_type = COALESCE("
-                ":component_product_type, component_product_type) "
-                "WHERE reference = :reference "
-                "AND (:expected_lcsc IS NULL OR lcsc = :expected_lcsc)",
-                {
-                    "reference": ref,
-                    "assembly_process": assembly_process,
-                    "component_product_type": component_product_type,
-                    "expected_lcsc": expected_lcsc,
-                },
-            )
-            cur.commit()
-            return result.rowcount > 0
-
-    def get_assembly_enrichment_targets(self, references=None) -> dict:
-        """Get references grouped by LCSC that still need assembly process enrichment."""
-        product_types = ",".join(str(member.value) for member in ComponentProductType)
-        query = (
-            "SELECT reference, lcsc FROM part_info "
-            "WHERE lcsc IS NOT NULL AND lcsc != '' "
-            "AND ("
-            "assembly_process IS NULL OR assembly_process = '' "
-            "OR component_product_type IS NULL "
-            f"OR component_product_type NOT IN ({product_types})"
-            ")"
-        )
-        params = []
-        if references:
-            # The f-string only injects ?-placeholders; the actual reference
-            # values are bound through `params` below, never interpolated.
-            placeholders = ",".join("?" for _ in references)
-            query += f" AND reference IN ({placeholders})"
-            params.extend(references)
-
-        query += " ORDER BY lcsc, reference"
-
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            rows = cur.execute(query, params).fetchall()
-
-        targets = {}
-        for reference, lcsc in rows:
-            if lcsc not in targets:
-                targets[lcsc] = []
-            targets[lcsc].append(reference)
-        return targets
-
-    def set_estimator_metadata(
-        self,
-        ref: str,
-        pad_count: int,
-        has_tht: bool,
-        assembly_flags: str,
-    ):
-        """Persist estimator metadata for one part reference."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "UPDATE part_info SET "
-                "pad_count = :pad_count, has_tht = :has_tht, assembly_flags = :assembly_flags "
-                "WHERE reference = :reference",
-                {
-                    "reference": ref,
-                    "pad_count": pad_count,
-                    "has_tht": int(bool(has_tht)),
-                    "assembly_flags": assembly_flags,
-                },
-            )
-            cur.commit()
-
-    def backfill_estimator_metadata(self, footprint, db_part: dict):
-        """Backfill estimator metadata when missing or stale."""
-        pad_count = get_footprint_pad_count(footprint)
-        has_tht = footprint_has_tht(footprint)
-        assembly_flags = get_assembly_flags(footprint)
-
-        ref = footprint.GetReference()
-        if not db_part:
-            db_part = self.get_part(ref)
-        if not db_part:
-            return
-
-        current_has_tht = db_part.get("has_tht")
-        if current_has_tht is None:
-            has_tht_changed = True
-        else:
-            has_tht_changed = bool(current_has_tht) != bool(has_tht)
-
-        should_update = (
-            db_part.get("pad_count") != pad_count
-            or has_tht_changed
-            or db_part.get("assembly_flags") != assembly_flags
-        )
-        if not should_update:
-            return
-
-        self.set_estimator_metadata(ref, pad_count, has_tht, assembly_flags)
-        self.logger.debug("Updated estimator metadata for %s", ref)
-
-    def update_from_board(self) -> None:
-        """Read all footprints from the board and insert them into the database if they do not exist."""
-        for fp in get_valid_footprints(self.board):
-            board_part = {
-                "reference": fp.GetReference(),
-                "value": fp.GetValue(),
-                "footprint": str(fp.GetFPID().GetLibItemName()),
-                "lcsc": get_lcsc_value(fp),
-                "exclude_from_bom": get_exclude_from_bom(fp),
-                "exclude_from_pos": get_exclude_from_pos(fp),
-            }
-            db_part = self.get_part(board_part["reference"])
-            # if part is not in the database yet, create it
-            if not db_part:
-                self.logger.debug(
-                    "Part %s does not exist in the database and will be created from the board.",
-                    board_part["reference"],
-                )
-                self.create_part(board_part)
-            # if the board part matches the db_part except for the LCSC and the stock value
-            elif [
-                board_part["reference"],
-                board_part["value"],
-                board_part["footprint"],
-                board_part["exclude_from_bom"],
-                board_part["exclude_from_pos"],
-            ] == [
-                db_part["reference"],
-                db_part["value"],
-                db_part["footprint"],
-                bool(db_part["exclude_from_bom"]),
-                bool(db_part["exclude_from_pos"]),
-            ]:
-                # if part in the database, has no lcsc value the board part has a lcsc value, update including lcsc
-                if db_part and not db_part["lcsc"] and board_part["lcsc"]:
-                    self.logger.debug(
-                        "Part %s is already in the database but without lcsc value, so the value supplied from the board will be set.",
-                        board_part["reference"],
-                    )
-                    self.update_part(board_part)
-                # if part in the database, has a lcsc value
-                elif db_part and db_part["lcsc"] and board_part["lcsc"]:
-                    # update lcsc value as well if setting is accordingly
-                    if not self.parent.settings.get("general", {}).get(
-                        "lcsc_priority", True
-                    ):
-                        self.logger.debug(
-                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will be ignored.",
-                            board_part["reference"],
-                        )
-                        board_part["lcsc"] = db_part["lcsc"]
-                    else:
-                        self.logger.debug(
-                            "Part %s is already in the database and has a lcsc value, the value supplied from the board will overwrite that in the database.",
-                            board_part["reference"],
-                        )
-                    self.update_part(board_part)
-            else:
-                # If something changed, we overwrite the part and dump the lcsc value or use the one supplied by the board
-                self.logger.debug(
-                    "Part %s is already in the database but value, footprint, bom or pos values changed in the board file, part will be updated, lcsc overwritten/cleared.",
-                    board_part["reference"],
-                )
-                self.update_part(board_part)
-            self.backfill_estimator_metadata(fp, db_part)
-        self.clean_database()
-
-    def clean_database(self):
-        """Delete all parts from the database that are no longer present on the board."""
-        refs = [fp.GetReference() for fp in get_valid_footprints(self.board)]
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            # The f-string only injects ?-placeholders; the reference text
-            # itself is bound, so quotes in a designator stay literal.
-            placeholders = ",".join("?" for _ in refs)
-            cur.execute(
-                f"DELETE FROM part_info WHERE reference NOT IN ({placeholders})",
-                refs,
-            )
-            cur.commit()
+        return value

@@ -58,6 +58,11 @@ class PartSelectorDialog(wx.Dialog):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.parts = parts
+        self.footprint_uuids = {
+            ref: uuid
+            for ref, uuid in getattr(self.parent, "_displayed_part_uuids", {}).items()
+            if ref in parts
+        }
         lcsc_selection = self.get_existing_selection(parts)
 
         self.search_timer = wx.Timer(self)
@@ -696,7 +701,7 @@ class PartSelectorDialog(wx.Dialog):
                 self.parent._part_selector = None
             self.Destroy()
 
-    def update_for(self, parts):
+    def update_for(self, parts: dict[str, str]) -> None:
         """Re-target this open selector at a new set of footprints.
 
         Called when the user invokes "Select Part" again from the main window
@@ -705,6 +710,11 @@ class PartSelectorDialog(wx.Dialog):
         reflects what the user just clicked.
         """
         self.parts = parts
+        self.footprint_uuids = {
+            ref: uuid
+            for ref, uuid in getattr(self.parent, "_displayed_part_uuids", {}).items()
+            if ref in parts
+        }
         self.keyword.ChangeValue(self.get_existing_selection(parts))
         self.search(None)
 
@@ -881,7 +891,7 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.result_count.SetLabel(result_count_label)
 
-    def select_part(self, *_):
+    def select_part(self, *_: object) -> None:
         """Save the selected part number and close the modal."""
         if self.part_list.GetSelectedItemsCount() > 0:
             item = self.part_list.GetSelection()
@@ -891,7 +901,8 @@ class PartSelectorDialog(wx.Dialog):
                     lcsc=self.part_list_model.get_lcsc(item),
                     type=self.part_list_model.get_type(item),
                     stock=self.part_list_model.get_stock(item),
-                    references=self.parts.keys(),
+                    references=tuple(self.parts),
+                    footprint_uuids=dict(self.footprint_uuids),
                 ),
             )
             self.Close()
