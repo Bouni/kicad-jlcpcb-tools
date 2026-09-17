@@ -56,6 +56,9 @@ def test_part_preferences_fill_only_eligible_blank_parts_before_initial_populati
             ("", "10k"): "C200",
         },
     )
+    # Later schematic updates must not redefine which imported parts are eligible.
+    for fp in footprints:
+        fp.dnp, fp.attributes = not fp.dnp, fp.attributes ^ 12
     # The opening scan must read every store row, even when current UI rows are filtered.
     window.test_rows.clear()
 
@@ -87,7 +90,7 @@ def test_part_preferences_respect_existing_project_assignment(
     window = make_window(
         footprints=[Footprint(lcsc="")], part_preferences={("R_0603", "10k"): "C200"}
     )
-    window.store.set_lcsc("R1", "C300")
+    window.store.update_parts({"R1": {"lcsc": "C300"}})
 
     window.init_store()
 
@@ -95,10 +98,10 @@ def test_part_preferences_respect_existing_project_assignment(
     window.library.get_part_preference.assert_not_called()
 
 
-def test_part_preferences_wait_for_initialized_library_and_apply_once_per_open(
+def test_part_preferences_wait_for_library_and_preserve_clears_across_reopen(
     make_window: Callable[..., Any], mainwindow: Any
 ) -> None:
-    """Clearing remains effective until the next window despite refresh and reinitialization."""
+    """Bootstrap preferences wait for the catalog; intentional clears remain durable."""
     window = make_window(
         footprints=[Footprint(lcsc="")], part_preferences={("R_0603", "10k"): "C200"}
     )
@@ -124,12 +127,12 @@ def test_part_preferences_wait_for_initialized_library_and_apply_once_per_open(
     messages = info_messages(window)
     assert len(messages) == 1
     assert messages[0].startswith("Filled 1 empty LCSC assignment(s)")
-    assert "Parts preferences fill in empty LCSC assignments" in messages[0]
+    assert "Part preferences fill empty LCSC assignments for new parts" in messages[0]
     assert "Settings > Part preferences" in messages[0]
 
     reopened = make_window(board=window.pcbnew.GetBoard())
     reopened.init_store()
-    assert reopened.store.get_part("R1")["lcsc"] == "C200"
+    assert reopened.store.get_part("R1")["lcsc"] == ""
 
 
 def test_manual_part_preference_actions_work_with_automatic_settings_disabled(
@@ -274,9 +277,7 @@ def test_saved_preferences_are_validated_before_application(
         window.apply_selected_part_preferences()
     assert window.store.get_part("R1")["lcsc"] == expected
     assert window.test_rows["R1"]["lcsc"] == expected
-    assert (
-        window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == expected
-    )
+    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == ""
     assert window.library.get_all_part_preferences() == [["R_0603", "10k", saved]]
     if not expected:
         assert "invalid" in caplog.text.lower()

@@ -31,7 +31,7 @@ def _select_row(window: Any) -> None:
 def _state(window: Any, store: Any) -> tuple[Any, ...]:
     """Read durable assignments, displayed cells, and live board fields."""
     return (
-        project_rows(SimpleNamespace(store=store)),
+        project_rows(SimpleNamespace(store=store, pcbnew=window.pcbnew)),
         deepcopy(window.partlist_data_model.data),
         {
             footprint.GetReference(): {
@@ -199,13 +199,13 @@ def test_missing_catalog_explains_assignment_then_retry_survives_reopen(
     else:
         act(action, window, mainwindow, monkeypatch, "C200")
     assert window.store.get_part("R1")["lcsc"] == "C200"
-    assert window.store.get_part("R1")["stock"] == expected_stock
+    assert window.store.get_part("R1")["stock"] is None
     assert window.partlist_data_model.data[0][3] == "C200"
     assert window.partlist_data_model.data[0][5] == expected_stock
-    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
+    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C100"
     reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
     assert reopened.get_part("R1")["lcsc"] == "C200"
-    assert reopened.get_part("R1")["stock"] == expected_stock
+    assert reopened.get_part("R1")["stock"] is None
     assert _warnings(window) == []
 
 
@@ -359,7 +359,7 @@ def test_save_preferences_and_clear_remain_available_without_catalog(
     assert window.library.get_part_preference("R_0603", "10k") == "C100"
     window.remove_lcsc_number()
     assert window.store.get_part("R1")["lcsc"] == ""
-    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == ""
+    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C100"
     assert window.partlist_data_model.data[0][3] == ""
     reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
     assert reopened.get_part("R1")["lcsc"] == ""
@@ -388,5 +388,5 @@ def test_known_lcsc_missing_from_available_catalog_still_assigns(
     assert window.store.get_part("R1")["stock"] is None
     assert window.partlist_data_model.data[0][3] == "C200"
     assert window.partlist_data_model.data[0][5] == ""
-    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
+    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C100"
     assert _warnings(window) == []

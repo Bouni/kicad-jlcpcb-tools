@@ -29,15 +29,22 @@ def workflow(
             main, "PartListDataModel", modules.datamodel.PartListDataModel
         )
         monkeypatch.setattr(main, "TypeCellTooltip", MagicMock())
-        monkeypatch.setattr(main, "set_lcsc_value", database_mainwindow.set_lcsc_value)
         monkeypatch.setattr(main.wx, "PostEvent", MagicMock(), raising=False)
         monkeypatch.setattr(main.wx, "ToolTip", str, raising=False)
         monkeypatch.setattr(main, "Thread", MagicMock())
         window = layout._open_main(monkeypatch, {})
         board = Board([Footprint("R1", lcsc="C100"), Footprint("R2", lcsc="C200")])
+        board.filename = str(tmp_path / "test.kicad_pcb")
         window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+        window._board_uuid = main.board_identity(board)
+        window._board_filename = board.filename
+        window.library = object.__new__(database_mainwindow.Library)
+        window.library.logger = MagicMock()
+        window.library.part_preferences_db_file = str(tmp_path / "mappings.db")
+        window.library.create_lcsc_metadata_table()
+        window.library.get_part_details = MagicMock()
+        window.library.read_correction_data = MagicMock()
         window.store = database_mainwindow.Store(window, str(tmp_path), board)
-        window.library = MagicMock()
         window.library.get_part_details.return_value = {"type": "Basic", "stock": 100}
         window.library.read_correction_data.return_value = SimpleNamespace(
             corrections=(), state=main.CorrectionState.READY, scope="global", db_path=""
@@ -97,9 +104,15 @@ def test_each_result_updates_std_before_batch_completion(
     window.start_assembly_enrichment()
     assert cell(workflow) == cell(workflow, "R2") == "◷"
     workflow.main.wx.PostEvent.reset_mock()
+    window.store.read_all = MagicMock(wraps=window.store.read_all)
+    window.library.merge_lcsc_metadata = MagicMock(
+        wraps=window.library.merge_lcsc_metadata
+    )
     result(
         workflow, "R1", "C100", {"component_product_type": 2, "assembly_process": "SMT"}
     )
+    window.store.read_all.assert_called_once_with()
+    window.library.merge_lcsc_metadata.assert_called_once()
     assert cell(workflow) == "✓"
     assert "Standard Only" in tooltip(workflow)
     assert "SMT" in tooltip(workflow)
@@ -125,7 +138,9 @@ def test_partial_cache_survives_empty_result_and_reopen(
 ) -> None:
     """A process-only fetch preserves classification through SQLite and reopening."""
     window = workflow.window
-    window.store.set_assembly_metadata("R1", "", classification, expected_lcsc="C100")
+    window.library.merge_lcsc_metadata(
+        "C100", {"component_product_type": classification}
+    )
     window.populate_footprint_list()
     assert cell(workflow) == expected
     window.start_assembly_enrichment()
@@ -145,7 +160,9 @@ def test_completed_cache_repopulates_without_retrieval(
 ) -> None:
     """A complete stored classification supplies Std before estimator completion."""
     window = workflow.window
-    window.store.set_assembly_metadata("R1", "THT", 1, expected_lcsc="C100")
+    window.library.merge_lcsc_metadata(
+        "C100", {"assembly_process": "THT", "component_product_type": 1}
+    )
     window.populate_footprint_list()
     assert cell(workflow) == "—"
     assert "Economic Only" in tooltip(workflow)

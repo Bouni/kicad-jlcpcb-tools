@@ -41,6 +41,7 @@ def _make_window(
         generate_excellon=MagicMock(),
         zip_gerber_excellon=MagicMock(),
         prepare_cpl=MagicMock(return_value=()),
+        validate_parts=MagicMock(),
         write_cpl=MagicMock(),
         generate_bom=MagicMock(),
     )

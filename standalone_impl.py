@@ -1,5 +1,9 @@
 """Stubs for standalone usage of the plugin."""
 
+from types import SimpleNamespace
+from typing import Optional
+from uuid import NAMESPACE_URL, uuid5
+
 
 class LIB_ID_Stub:
     """Implementation of pcbnew.LIB_ID."""
@@ -35,10 +39,13 @@ class Field_Stub:
 class Footprint_Stub:
     """Implementation of pcbnew.Footprint."""
 
-    def __init__(self, reference, value, fpid):
+    def __init__(self, reference: str, value: str, fpid: LIB_ID_Stub) -> None:
         self.reference = reference
         self.value = value
         self.fpid = fpid
+        # The single sample board needs reproducible identity across launches.
+        uuid = uuid5(NAMESPACE_URL, "kicad-jlcpcb-tools/standalone/" + reference)
+        self.m_Uuid = SimpleNamespace(AsString=lambda: str(uuid))
 
     def GetReference(self) -> str:
         """Retrieve the reference designator string."""
@@ -96,9 +103,9 @@ class BoardStub:
         """Footprint list."""
         return self.footprints
 
-    def FindFootprintByReference(self, reference):
-        """Get a list of footprints that match a reference."""
-        return Footprint_Stub(reference, "stub", 100)
+    def FindFootprintByReference(self, reference: str) -> Optional[Footprint_Stub]:
+        """Return the same footprint used by the standalone board and Store."""
+        return next((fp for fp in self.footprints if fp.reference == reference), None)
 
     def Drawings(self):
         """Return board drawings.

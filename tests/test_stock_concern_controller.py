@@ -19,7 +19,7 @@ from .wx_harness import load_mainwindow, wx_stubs
 
 
 class Footprint:
-    """Live footprint whose assignment, BOM and DNP state really change."""
+    """Native assembly settings must stay unchanged by plugin actions."""
 
     def __init__(
         self,
@@ -38,11 +38,11 @@ class Footprint:
         return self.attributes
 
     def SetAttributes(self, value: int) -> None:
-        """Persist flags so the subsequent regroup sees the changed BOM."""
-        self.attributes = value
+        """Fail if a plugin edit writes native assembly flags."""
+        raise AssertionError("Plugin edited native assembly flags")
 
     def IsDNP(self) -> bool:
-        """Expose live DNP independently of stale database snapshots."""
+        """Expose the native DNP setting for comparison with plugin choices."""
         return self.dnp
 
     def GetFields(self) -> list[types.SimpleNamespace]:
@@ -52,8 +52,8 @@ class Footprint:
         ]
 
     def SetField(self, _name: str, value: str) -> None:
-        """Keep the live board assignment in sync with successful transactions."""
-        self.lcsc = value
+        """Fail if a plugin edit writes a native LCSC field."""
+        raise AssertionError("Plugin edited native LCSC field")
 
     def GetLayer(self) -> int:
         """Place the fixture on the top side."""
@@ -77,25 +77,36 @@ class Store:
 
     def read_all(self) -> list[dict[str, Any]]:
         """Return fresh snapshots as the production database does."""
-        return [dict(record) for record in self.parts.values()]
+        return [
+            dict(record, footprint_uuid=f"uuid-{reference}", stock=None)
+            for reference, record in self.parts.items()
+            if reference in self.footprints
+        ]
 
     def set_lcsc_assignments(
-        self, assignments: Iterable[tuple[str, str, Optional[int]]]
+        self,
+        assignments: Iterable[tuple[str, str, Optional[int]]],
+        *,
+        expected_uuids: Optional[dict[str, str]] = None,
     ) -> None:
         """Commit every supplied assignment, or reject the entire transaction."""
-        pending = list(assignments)
+        self.update_parts(
+            {reference: {"lcsc": lcsc} for reference, lcsc, _stock in assignments},
+            expected_uuids=expected_uuids,
+        )
+
+    def update_parts(
+        self,
+        changes: dict[str, dict[str, Any]],
+        expected_uuids: Optional[dict[str, str]] = None,
+    ) -> None:
+        """Atomically apply plugin choices after checking selected identities."""
         if self.fail_write:
             raise sqlite3.OperationalError("assignment write failed")
-        for reference, lcsc, stock in pending:
-            self.parts[reference].update(lcsc=lcsc, stock=stock)
-
-    def set_bom(self, reference: str, value: int) -> None:
-        """Persist the flag written by the real BOM toggle event handler."""
-        self.parts[reference]["exclude_from_bom"] = value
-
-    def set_pos(self, reference: str, value: int) -> None:
-        """Persist the placement flag without changing stock demand."""
-        self.parts[reference]["exclude_from_pos"] = value
+        if expected_uuids is not None:
+            assert all(expected_uuids[ref] == f"uuid-{ref}" for ref in changes)
+        for reference, fields in changes.items():
+            self.parts[reference].update(fields)
 
 
 @pytest.fixture
@@ -147,7 +158,10 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             board = types.SimpleNamespace(
                 FindFootprintByReference=window.footprints.get
             )
+            window.store.footprints = window.footprints
             window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
+            window._sync_board_selection = MagicMock()
+            window.right_toolbar = MagicMock()
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
             window.library = MagicMock()
             window.library.state = mainwindow.LibraryState.INITIALIZED
@@ -193,22 +207,22 @@ def workflow() -> Iterator[types.SimpleNamespace]:
         )
 
 
-def test_populate_and_filtered_reopen_use_all_live_bom_demand(
+def test_populate_and_filtered_reopen_use_plugin_bom_demand(
     workflow: types.SimpleNamespace,
 ) -> None:
-    """Hidden POS rows count, while live BOM/DNP exclusions and deletion do not."""
+    """Plugin BOM/DNP choices control demand even when native flags disagree."""
     records = [
         part("R1"),
         part("R2", exclude_from_pos=True),
-        part("R3"),
-        part("R4"),
+        part("R3", exclude_from_bom=True),
+        part("R4", is_dnp=True),
         part("REMOVED"),
     ]
     live = {
-        "R1": Footprint(),
+        "R1": Footprint(bom=True, dnp=True),
         "R2": Footprint(pos=True),
-        "R3": Footprint(bom=True),
-        "R4": Footprint(dnp=True),
+        "R3": Footprint(),
+        "R4": Footprint(),
     }
     window = workflow.make_window(records, {"C1": 95}, live)
     window.hide_pos_parts = True
@@ -243,7 +257,7 @@ def test_assignment_and_removal_update_old_and_new_siblings(
     )
     workflow.drain()
     assert window.store.parts["R2"]["lcsc"] == "C2"
-    assert window.footprints["R2"].lcsc == "C2"
+    assert window.footprints["R2"].lcsc == "C1"
     assert window.partlist_data_model.stock_concern_refs == {"R2", "R3"}
 
     window.footprint_list.GetSelections.return_value = [
@@ -283,10 +297,11 @@ def test_failed_assignment_transaction_preserves_existing_concerns(
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
 
 
-def test_bom_and_pos_toggle_events_recalculate_current_board_demand(
-    workflow: types.SimpleNamespace,
+@pytest.mark.parametrize("toggle", ["toggle_bom", "toggle_dnp"])
+def test_assembly_toggle_events_recalculate_plugin_demand(
+    workflow: types.SimpleNamespace, toggle: str
 ) -> None:
-    """BOM changes count; POS-only changes leave the required stock unchanged."""
+    """BOM/DNP edits affect demand; POS-only edits leave it unchanged."""
     window = workflow.make_window([part("R1"), part("R2")], {"C1": 75})
     window.populate_footprint_list()
     workflow.drain()
@@ -296,10 +311,10 @@ def test_bom_and_pos_toggle_events_recalculate_current_board_demand(
     window.toggle_pos()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
-    window.toggle_bom()
+    getattr(window, toggle)()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == set()
-    window.toggle_bom()
+    getattr(window, toggle)()
     workflow.drain()
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}
 

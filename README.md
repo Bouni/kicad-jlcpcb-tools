@@ -19,7 +19,7 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 - BOM file
 - CPL file
 
-Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
+Search the JLCPCB catalog and assign manufacturing parts to your board's footprints in the plugin database.
 
 ![The main window](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/main.png)
 
@@ -87,20 +87,139 @@ Checkout this screencast, it shows quickly how to use this plugin:
 
 ![KiCAD JLCPCB example](https://raw.githubusercontent.com/Bouni/kicad-jlcpcb-tools/main/images/showcase.gif)
 
+## Data flow and ownership
+
+### History
+
+Historically this plugin had an inconsistent data flow. This is due to the fact that KiCAD, even v10, doesn't permit the plugin to bi-directionally edit schematics at run-time.
+
+Risks to the consistency of your design when using Kicad design files as the source of JLCPCB truth:
+
+- PCB BOM, POS, and DNP attributes are updated each time you click on 'Update from schematic' in the PCB editor. If a custom LCSC field is present in the schematic part this field will also be updated.
+
+- As of Kicad v10 there is no mechanism for the plugin to interact with the schematic at run-time. Previously the plugin could write directly to schematic files via the 'Export to schematic' option. However a workflow that flows data through the schematic has a few conditions that have to be met:
+
+  - The schematic file format doesn't change (a relatively safe assumption) but it's still not a good idea for a plugin to be overwriting or editing a schematic file directly.
+  - The user isn't editing the schematic at the same time as the schematic file is being overwritten (not a safe assumption). Saving an open schematic editor's stale copy can overwrite changes made directly to the file by the plugin.
+  - The 'Export to schematic' feature must be used consistently to keep the plugin and schematic in sync—an unreliable assumption for a manual step.
+
+- The plugin did not always update its internal part mapping of LCSC, BOM, DNP, and POS values from the board file due to the challenges in ensuring that the kicad design, in particular the schematic, could be used to hold the state of these fields when they are altered from the plugin. This means we can potentially have two sources of truth.
+
+This puts the plugin in a tough position. It *wants to be able to use Kicad as the sole source of truth and data* but Kicad doesn't provide a mechanism by which to do that.
+
+If we can't use Kicad as the sole source of truth we've decided to go the other direction and shift away from storing any jlcpcb specific data in board design files. This involved removing parts of this workflow that can result in inconsistent data and cause confusion. In particular we've decided:
+
+- 'Export to schematic' isn't safe enough to be performed automatically.
+
+- So we've removed the 'Export to schematic' button / feature.
+  - If not automatic then the onus is on the user to understand when to use it. We shouldn't put the onus on the user to always do the right thing as it can cause confusion, frustration, and potentially incorrect designs being generated.
+
+- To avoid two conflicting sources of truth we should *only* use the plugin's settings as the source of truth.
+
+- So we've stopped writing LCSC / BOM / DNP / POS updates to the pcb board file.
+  - Without a consistent ability to update schematic if you've ever used the 'Export to schematic' feature the next time you hit 'Update from schematic' the board part fields will be overwritten by the schematic part fields and you'll at minimum risk having incorrect LCSC values in the board file.
+  - If you modified BOM / POS / DNP fields those will be out of sync as well. PCB fields initialize parts without an existing plugin record, but never overwrite saved LCSC, BOM, POS, or DNP choices.
+
+### Future
+
+When a new KiCAD vesion adds support for bi-diretional live schematic editing we'll modify the plugin to use and prefer this path as the single source of truth.
+
+### Present data flow
+
+```mermaid
+---
+config:
+  flowchart:
+    subGraphTitleMargin:
+      top: 10
+      bottom: 0
+---
+flowchart LR
+    subgraph K["<div style='display:flex;align-items:center;justify-content:center;gap:6px;font-size:1.44em'><img src='https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.0/resources/linux/icons/hicolor/scalable/apps/kicad.svg' width='24' height='24' style='max-width:24px;flex-shrink:0' alt=''/>KiCad</div>"]
+        S["<div style='display:flex;align-items:center;justify-content:center;gap:6px;font-size:larger'><img src='https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.0/resources/linux/icons/hicolor/scalable/apps/eeschema.svg' width='24' height='24' style='max-width:24px;flex-shrink:0' alt=''/>Schematic</div>"] -->|"Field updates<br/>overwrite PCB fields"| B["<div style='display:flex;align-items:center;justify-content:center;gap:6px;font-size:larger'><img src='https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.0/resources/linux/icons/hicolor/scalable/apps/pcbnew.svg' width='24' height='24' style='max-width:24px;flex-shrink:0' alt=''/>PCB</div>
+<div style='text-align:left'>Part attributes:<br/>• Part value<br/>• Footprint</div>"]
+    end
+
+   D[("<div style='text-align:center;font-size:larger'>part_info</div>
+<div style='text-align:left'>Part attributes:<br/>• LCSC<br/>• BOM / DNP / POS flags<br/>• Rotation overrides</div>")]
+
+    subgraph J["<div style='font-size:1.44em;'>kicad-jlcpcb-tools</div>"]
+        E["<div style='text-align:center;font-size:larger'>Assembly editor</div>"] <--> D
+        D --> O["<div style='text-align:center;font-size:larger'>Generated board files</div>
+<div style='text-align:left;white-space:nowrap'>• Gerbers<br/>• Drill files<br/>• BOM — bill of materials<br/>• CPL — component placement list</div>"]
+    end
+
+    B -->|"New parts only"| D
+    B -->|"Current design<br/>and geometry"| O
+    classDef default stroke-width:2px
+    linkStyle default stroke-width:2px
+    style J fill:transparent,stroke-width:2px
+    style K fill:transparent,stroke-width:2px
+```
+
+### Future data flow
+
+```mermaid
+---
+config:
+  flowchart:
+    subGraphTitleMargin:
+      top: 10
+      bottom: 0
+---
+flowchart LR
+   subgraph K["<div style='display:flex;align-items:center;justify-content:center;gap:6px;font-size:1.44em'><img src='https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.0/resources/linux/icons/hicolor/scalable/apps/kicad.svg' width='24' height='24' style='max-width:24px;flex-shrink:0' alt=''/>KiCad</div>"]
+        S[("<div style='display:flex;align-items:center;justify-content:center;gap:6px;font-size:larger'><img src='https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.0/resources/linux/icons/hicolor/scalable/apps/eeschema.svg' width='24' height='24' style='max-width:24px;flex-shrink:0' alt=''/>Schematic</div>
+<div style='text-align:left'>Part attributes:</br>• LCSC<br/>• BOM / DNP / POS flags</div>")]
+
+       S -->|"'Update from Schematic'"| B["<div style='display:flex;align-items:center;justify-content:center;gap:6px;font-size:larger'><img src='https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.0/resources/linux/icons/hicolor/scalable/apps/pcbnew.svg' width='24' height='24' style='max-width:24px;flex-shrink:0' alt=''/>PCB</div>
+<div style='text-align:left'>Part attributes:<br/>• Part value<br/>• Footprint</div>"]
+    end
+
+    subgraph J["<div style='font-size:1.44em;'>kicad-jlcpcb-tools</div>"]
+        R["<div style='text-align:center;font-size:larger'>Rotation overrides</div>"] --> O
+        E["<div style='text-align:center;font-size:larger'>Assembly editor</div>"]
+        O["<div style='text-align:center;font-size:larger'>Generated board files</div>
+<div style='text-align:left;white-space:nowrap'>• Gerbers<br/>• Drill files<br/>• BOM — bill of materials<br/>• CPL — component placement list</div>"]
+    end
+
+    E <-->|"Run-time editor API"| S
+    S -->|"Assembly settings"| O
+    B -->|"Current design<br/>and geometry"| O
+    classDef default stroke-width:2px
+    linkStyle default stroke-width:2px
+    style J fill:transparent,stroke-width:2px
+    style K fill:transparent,stroke-width:2px
+```
+
+[KiCad application icons](https://github.com/KiCad/kicad-source-mirror/tree/10.0.0/resources/linux/icons/hicolor/scalable/apps) © KiCad contributors, licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+| Data used for manufacturing | Present owner | Future owner |
+| --- | --- | --- |
+| LCSC part assignment | Plugin - `part_info` table | KiCad Design |
+| Include/exclude from BOM | Plugin - `part_info` table | KiCad Design |
+| Include/exclude from placement files (POS) | Plugin - `part_info` table | KiCad Design |
+| Do not populate (DNP) | Plugin - `part_info` table | KiCad Design |
+| Reference, value, and footprint | KiCad Design | Same |
+| Position, rotation, board side and pads | KiCad Design | Same |
+| JLCPCB Placement and rotation corrections | Plugin - Corrections Manager | Same |
+| JLCPCB assembly classification | Plugin - Supplier, cached in the global plugin database | Same |
+| JLCPCB stock, prices and descriptions | Plugin - Supplier catalog | Same |
+
 ## Keyboard shortcuts
 
 Windows can be closed with ctrl-w/ctrl-q/command-w/command-w (OS dependent) and escape.
 Pressing enter in the keyword text box will start a search.
 
-### Toggle BOM / CPL attributes
+### Toggle BOM / CPL / DNP choices
 
-You can easily toggle the `exclude from BOM` and `exclude from CPL` attributes of one or multiple footprints.
+Toggle `exclude from BOM`, `exclude from CPL`, or `DNP` for selected parts in the plugin. These choices affect generated files and do not modify the PCB's native settings.
 
 ### Select LCSC parts from the JLCPCB parts database
 
 Select one or multiple footprints, click select part. You can select parts with equal value and footprint using the Select alike button.
 In the upcoming modal dialog, search for parts, select the one of your choice and click select part.
-The LCSC number of your selection will then be assigned to the footprints.
+The selected LCSC number is saved immediately in `jlcpcb/project.db`, associated with the board and each footprint's UUID. Keep this database with your project. Moving the whole project preserves assignments; a renamed or copied board path starts a separate set of choices.
 
 ![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
 
@@ -109,9 +228,9 @@ The LCSC number of your selection will then be assigned to the footprints.
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
 
 - **Remember my part preferences** remembers each successful part selection or pasted LCSC assignment. The latest explicit assignment replaces the preference; opening a board does not change preferences.
-- **Parts preferences fill in empty LCSC assignments** fills blank LCSC assignments once each time the plugin window opens. Existing assignments are preserved. DNP parts and parts excluded from BOM or POS are skipped.
+- **Part preferences fill empty LCSC assignments for new parts** fills eligible blanks only when parts are first imported into the plugin database. Existing records are preserved. DNP parts and parts excluded from BOM or POS are skipped.
 
-Clearing an LCSC assignment keeps its part preference, so an eligible blank assignment may fill again on the next opening. Exclude the part or disable automatic filling to keep it blank. The right-click actions **Save part preferences** and **Apply part preferences** remain available even when automation is disabled. Use **Part preferences** to delete, import, or export preferences. Deleting a preference does not remove assignments from your boards.
+Clearing an LCSC assignment keeps its reusable preference, but the part stays blank after reopening. The right-click actions **Save part preferences** and **Apply part preferences** remain available even when automation is disabled. Use **Part preferences** to delete, import, or export preferences. Deleting a preference does not remove existing project assignments.
 
 ### Generate fabrication data
 
@@ -124,7 +243,7 @@ The zipfile is named `GERBER-<projectname>.zip`
 
 Also in the `production_files` folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
 
-Footprints are included into the BOM and CPL files according to their `exclude from BOM` and `exclude from POS` attributes.
+Parts are included in BOM and CPL files according to the plugin's BOM/POS choices; DNP parts are excluded from both. PCB geometry supplies their current positions and orientations.
 
 Optional pre/post generation hook scripts can be configured in settings.
 

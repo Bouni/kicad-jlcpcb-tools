@@ -1,11 +1,21 @@
-"""Helpers for reading and mutating KiCad footprint and board state."""
+"""Helpers for reading KiCad footprint and board state."""
 
 from collections.abc import Iterator
 import re
+import sqlite3
 from typing import Any, Optional
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
+
+
+def footprint_uuid(footprint: Any) -> str:
+    """Read durable KiCad identity without falling back to mutable references."""
+    uuid = getattr(footprint, "m_Uuid", None)
+    value = uuid.AsString() if uuid is not None else ""
+    if not value:
+        raise sqlite3.IntegrityError("The footprint has no persistent UUID.")
+    return value
 
 
 def find_lcsc_assignment_text(fp: Any) -> Optional[tuple[str, str]]:
@@ -39,33 +49,6 @@ def get_lcsc_value(fp):
     return ""
 
 
-def set_lcsc_value(fp: Any, lcsc: str) -> None:
-    """Keep existing assignment aliases consistent, or create a hidden LCSC field."""
-    if not fp:
-        return
-    names = [
-        field.GetName()
-        for field in fp.GetFields()
-        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE)
-        and (
-            field.GetName().lower() == "lcsc"
-            or re.fullmatch(r"C[0-9]+", field.GetText().strip(), re.IGNORECASE)
-        )
-    ]
-    if names:
-        for name in names:
-            fp.SetField(name, lcsc)
-    else:
-        fp.SetField("LCSC", lcsc)
-        if hasattr(fp, "GetFieldByName"):
-            fp.GetFieldByName("LCSC").SetVisible(False)
-        else:
-            for field in fp.GetFields():
-                if field.GetName() == "LCSC":
-                    field.SetVisible(False)
-                    break
-
-
 def get_valid_footprints(board):
     """Get all footprints that have a valid reference."""
     footprints = []
@@ -93,11 +76,6 @@ def get_bit(value, bit):
     return value & (1 << bit)
 
 
-def toggle_bit(value, bit):
-    """Toggle the nth bit of a byte."""
-    return value ^ (1 << bit)
-
-
 def get_exclude_from_pos(footprint):
     """Get the 'exclude from POS' property of a footprint."""
     if not footprint:
@@ -122,23 +100,3 @@ def get_is_dnp(footprint):
     if not callable(is_dnp):
         return False
     return bool(is_dnp())
-
-
-def toggle_exclude_from_pos(footprint):
-    """Toggle the 'exclude from POS' property of a footprint."""
-    if not footprint:
-        return None
-    val = footprint.GetAttributes()
-    val = toggle_bit(val, EXCLUDE_FROM_POS)
-    footprint.SetAttributes(val)
-    return bool(get_bit(val, EXCLUDE_FROM_POS))
-
-
-def toggle_exclude_from_bom(footprint):
-    """Toggle the 'exclude from BOM' property of a footprint."""
-    if not footprint:
-        return None
-    val = footprint.GetAttributes()
-    val = toggle_bit(val, EXCLUDE_FROM_BOM)
-    footprint.SetAttributes(val)
-    return bool(get_bit(val, EXCLUDE_FROM_BOM))

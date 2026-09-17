@@ -114,6 +114,8 @@ def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
     window.store.read_all.return_value = [
         {
             "reference": reference,
+            "footprint_uuid": reference,
+            "is_dnp": False,
             "value": "47u",
             "footprint": "Capacitor_SMD:C_0603",
             "lcsc": "",
@@ -484,7 +486,7 @@ def test_unknown_archive_warnings_keep_healthy_display_and_generation_ready(
     generation, steps = _generation_window(runtime)
     runtime.mainwindow.JLCPCBTools.generate_fabrication_data(generation)
     assert steps[0] == "Validating corrections"
-    generation.fabrication.prepare_cpl.assert_called_once_with(snapshot.corrections)
+    generation.fabrication.prepare_cpl.assert_called_once_with(snapshot.corrections, ())
     generation.fabrication.write_cpl.assert_called_once_with(
         generation.fabrication.prepare_cpl.return_value
     )
@@ -552,6 +554,7 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     window, _steps = _generation_window(runtime)
     fabrication = make_fabrication(runtime.modules, window.library, tmp_path)
     window.fabrication = fabrication
+    window.store.read_all.side_effect = fabrication.parent.store.read_all
     matcher = MagicMock(wraps=fabrication._correction_for_footprint)
     fabrication._correction_for_footprint = matcher
     for method in (
@@ -563,7 +566,7 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     ):
         setattr(fabrication, method, MagicMock(return_value=[]))
 
-    def damage_storage_after_preflight() -> str:
+    def damage_storage_after_preflight(_parts: object) -> str:
         """Simulate an external legacy write after the complete snapshot was read."""
         _write_sql(
             runtime.library.correctionsdb_file,
@@ -618,6 +621,7 @@ def test_generation_prepares_placements_before_any_output_or_board_changes(
     window, steps = _generation_window(runtime)
     fabrication = make_fabrication(runtime.modules, window.library, tmp_path)
     window.fabrication = fabrication
+    window.store.read_all.side_effect = fabrication.parent.store.read_all
     destination = Path(fabrication.get_cpl_csv_path())
     destination.write_bytes(b"previous complete CPL\x00\xff")
     later_steps = (

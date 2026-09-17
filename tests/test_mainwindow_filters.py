@@ -86,6 +86,8 @@ def open_window(
         parts = [
             {
                 "reference": reference,
+                "footprint_uuid": reference,
+                "is_dnp": False,
                 "value": "10k",
                 "footprint": "R_0603",
                 "lcsc": "",
@@ -243,3 +245,26 @@ def test_storage_failure_still_disables_toolbar_until_recovery(
     assert ui.window.right_toolbar.available
     assert all(ui.window.right_toolbar.tools[tool].enabled for tool in FILTERS)
     assert not any(ui.window.right_toolbar.tools[tool].enabled for tool in PART_ACTIONS)
+
+
+def test_dnp_action_is_bound_in_real_window_context_menu(
+    open_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The DB-owned DNP setting has a reachable action in the actual window."""
+    ui = open_window()
+    menu = MagicMock()
+    monkeypatch.setattr(
+        mainwindow.wx, "Menu", MagicMock(return_value=menu), raising=False
+    )
+    monkeypatch.setattr(mainwindow.wx, "MenuItem", MagicMock(), raising=False)
+    ui.window.toggle_dnp = MagicMock()
+
+    ui.window.OnRightDown()
+
+    menu.Append.assert_any_call(
+        mainwindow.ID_TOGGLE_DNP, "Toggle do not populate (DNP)"
+    )
+    menu.Bind.assert_any_call(
+        mainwindow.wx.EVT_MENU, ui.window.toggle_dnp, menu.Append.return_value
+    )
+    assert not hasattr(mainwindow, "ID_EXPORT_TO_SCHEMATIC")

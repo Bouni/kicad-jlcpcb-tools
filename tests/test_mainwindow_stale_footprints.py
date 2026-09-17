@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from itertools import count
 import types
 from typing import Any, Optional
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -66,11 +66,14 @@ def _window(*, footprints: dict[str, object], selections: tuple[int, ...] = ()) 
     window = object.__new__(JLCPCBTools)
     window.pcbnew = _Pcbnew(_Board(footprints))
     window.store = MagicMock()
+    window._displayed_part_uuids = {ref: ref for ref in footprints}
+    window._refresh_footprints_preserving_selection = MagicMock()
     window.test_assignment_batches = []
     window.test_assignments = {}
 
     def set_lcsc_assignments(
         assignments: Iterable[tuple[str, str, Optional[int]]],  # noqa: UP045
+        **_kwargs: Any,
     ) -> None:
         batch = list(assignments)
         window.test_assignment_batches.append(batch)
@@ -99,6 +102,8 @@ def _part(reference):
     """Return the complete store row consumed by populate_footprint_list."""
     return {
         "reference": reference,
+        "footprint_uuid": reference,
+        "is_dnp": False,
         "value": "10k",
         "footprint": "R_0603",
         "lcsc": "",
@@ -119,7 +124,6 @@ def test_populate_footprint_list_skips_stale_row_and_retains_live_row(monkeypatc
     window.hide_pos_parts = False
     window.get_correction = MagicMock(return_value="0°, 0.0/0.0")
     window._get_enrichment_status_label = MagicMock(return_value="")
-    monkeypatch.setattr(mainwindow, "get_is_dnp", lambda _footprint: False)
 
     JLCPCBTools.populate_footprint_list(window)
 
@@ -130,36 +134,19 @@ def test_populate_footprint_list_skips_stale_row_and_retains_live_row(monkeypatc
     assert added_references == ["R2"]
 
 
-def test_assign_parts_skips_stale_refs_and_continues_live_refs() -> None:
-    """Assignment must mutate and enrich only references still on the board."""
-    live_footprint = _LiveFootprint()
-    window = _window(footprints={"R2": live_footprint})
-    event = types.SimpleNamespace(
-        lcsc="C12345",
-        stock="27",
-        type="Basic",
-        references=["R_REMOVED", "R2"],
+def test_assignment_with_deleted_reference_rejects_entire_action() -> None:
+    """A stale selector must not partially apply its intended selection."""
+    window = _window(footprints={"R2": _LiveFootprint()})
+    JLCPCBTools.assign_parts(
+        window,
+        types.SimpleNamespace(
+            references=["R_REMOVED", "R2"], lcsc="C12345", type="Basic", stock=27
+        ),
     )
-
-    JLCPCBTools.assign_parts(window, event)
-
-    observed = {
-        "store_assignments": window.test_assignment_batches,
-        "store_lcsc": window.store.set_lcsc.call_args_list,
-        "store_stock": window.store.set_stock.call_args_list,
-        "model_lcsc": window.partlist_data_model.set_lcsc.call_args_list,
-        "enrichment": window.start_assembly_enrichment.call_args_list,
-    }
-    expected = {
-        "store_assignments": [[("R2", "C12345", 27)]],
-        "store_lcsc": [],
-        "store_stock": [],
-        "model_lcsc": [call("R2", "C12345", "Basic", "27", "params")],
-        "enrichment": [call(["R2"])],
-    }
-    assert observed == expected
-    window.store.set_lcsc_assignments.assert_called_once()
-    assert window.test_assignments == {"R2": ("C12345", 27)}
+    window.store.set_lcsc_assignments.assert_not_called()
+    window.partlist_data_model.set_lcsc.assert_not_called()
+    window.start_assembly_enrichment.assert_not_called()
+    assert "Selected footprints changed" in str(window.logger.warning.call_args)
 
 
 def test_assign_parts_with_only_stale_refs_does_not_start_enrichment() -> None:
@@ -193,7 +180,7 @@ def test_assign_parts_with_only_stale_refs_does_not_start_enrichment() -> None:
 
 
 @pytest.mark.parametrize("handler_name", ["toggle_bom", "toggle_pos", "toggle_bom_pos"])
-def test_toggle_handlers_skip_stale_refs_and_continue_live_refs(
+def test_toggle_handlers_reject_selection_with_deleted_reference(
     monkeypatch, handler_name
 ):
     """BOM/POS actions must not mutate store or model state for deleted rows."""
@@ -206,37 +193,10 @@ def test_toggle_handlers_skip_stale_refs_and_continue_live_refs(
     )
     references = {stale_item: "R_REMOVED", live_item: "R2"}
     window.partlist_data_model.get_reference.side_effect = references.__getitem__
-    monkeypatch.setattr(
-        mainwindow,
-        "toggle_exclude_from_bom",
-        lambda footprint: None if footprint is None else True,
-    )
-    monkeypatch.setattr(
-        mainwindow,
-        "toggle_exclude_from_pos",
-        lambda footprint: None if footprint is None else True,
-    )
+    window.store.read_all.return_value = [_part("R2")]
 
     getattr(JLCPCBTools, handler_name)(window)
 
-    expected = {
-        "store_bom": [],
-        "store_pos": [],
-        "model_bom": [],
-        "model_pos": [],
-        "model_bom_pos": [],
-    }
-    if handler_name in {"toggle_bom", "toggle_bom_pos"}:
-        expected["store_bom"] = [call("R2", 1)]
-    if handler_name in {"toggle_pos", "toggle_bom_pos"}:
-        expected["store_pos"] = [call("R2", 1)]
-    expected[f"model_{handler_name.removeprefix('toggle_')}"] = [call(live_item)]
-
-    observed = {
-        "store_bom": window.store.set_bom.call_args_list,
-        "store_pos": window.store.set_pos.call_args_list,
-        "model_bom": window.partlist_data_model.toggle_bom.call_args_list,
-        "model_pos": window.partlist_data_model.toggle_pos.call_args_list,
-        "model_bom_pos": window.partlist_data_model.toggle_bom_pos.call_args_list,
-    }
-    assert observed == expected
+    window.store.update_parts.assert_not_called()
+    window._refresh_footprints_preserving_selection.assert_not_called()
+    assert "Selected footprints changed" in str(window.logger.warning.call_args)

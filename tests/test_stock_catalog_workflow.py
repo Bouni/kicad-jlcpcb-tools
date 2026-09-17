@@ -392,8 +392,7 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
     monkeypatch: pytest.MonkeyPatch, ready: bool
 ) -> None:
     """The actual constructor and init_data gate lookups until catalog initialization."""
-    from . import test_window_layout as layout_ui
-    from .stock_test_support import stock_modules
+    from . import test_window_layout as layout_ui  # noqa: PLC0415
 
     module = layout_ui.mainwindow
     monkeypatch.setattr(module.JLCPCBTools, "SetTitle", MagicMock(), raising=False)
@@ -506,7 +505,7 @@ def test_assignment_catalog_failure_does_not_commit_incomplete_details(
 
 @pytest.mark.parametrize("stock", [0.1, True, -1, "5+"])
 @pytest.mark.parametrize("action", ["selector", "preferences"])
-def test_assignment_preserves_unparseable_stock_as_unknown_in_storage(
+def test_assignment_keeps_unparseable_catalog_stock_unknown(
     workflow: types.SimpleNamespace,
     catalog_window: Callable[..., Any],
     stock: object,
@@ -526,7 +525,7 @@ def test_assignment_preserves_unparseable_stock_as_unknown_in_storage(
         window._apply_lcsc_assignments({"R1": "C2"})
     workflow.drain()
     assert window.store.parts["R1"]["lcsc"] == "C2"
-    assert window.store.parts["R1"]["stock"] is None
+    assert window.store.read_all()[0]["stock"] is None
     assert raw_stocks(window)["R1"] == stock
     assert window.partlist_data_model.stock_concern_refs == {"R1"}
 
@@ -709,6 +708,8 @@ def test_first_download_source_switch_still_initializes_saved_part_preferences(
         window.SetTitle = MagicMock()
         window.save_settings = MagicMock()
         window._catalog_ready = False
+        # Reproduce first startup, before any footprint record has been imported.
+        Path(window.store.dbfile).unlink()
         window.store = None
         library.state = mainwindow.LibraryState.DOWNLOAD_RUNNING
         if early_store:
@@ -744,9 +745,7 @@ def test_first_download_source_switch_still_initializes_saved_part_preferences(
         )
         window.download_completed(event)
         assert window.store.get_part("R1")["lcsc"] == "C200"
-        assert (
-            window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
-        )
+        assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == ""
         assert window.partlist_data_model.data[0][3] == "C200"
         assert window.partlist_data_model.data[0][5] == 27
         window.start_assembly_enrichment.assert_called_once_with()

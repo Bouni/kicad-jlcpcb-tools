@@ -160,9 +160,11 @@ def test_parts_table_reports_the_correction_used_by_cpl(
         "footprint": footprint,
         "exclude_from_bom": 0,
         "exclude_from_pos": 0,
+        "is_dnp": False,
+        "footprint_uuid": reference,
         "lcsc": "",
     }
-    fabrication.parent.store.get_part = lambda _reference: part
+    fabrication.parent.store.read_all = lambda: [part]
     window = _population_window(runtime)
     window.store.read_all.return_value = [part]
     window.pcbnew = SimpleNamespace(
