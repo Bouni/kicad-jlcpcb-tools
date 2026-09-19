@@ -562,7 +562,7 @@ def test_schematic_file_selection_cancellation_and_native_failure_preserve_outpu
 ) -> None:
     def check(ui: Any) -> None:
         output(ui, "")
-        path = ui.path / "board.kicad_sch"
+        path = ui.path / "custom.kicad_sch"
         path.write_bytes(b"previous schematic")
         exporter = Mock()
         export_module = import_module(

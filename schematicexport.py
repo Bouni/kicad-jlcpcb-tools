@@ -1,6 +1,6 @@
 """Module for exporting LCSC data to schematic."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from functools import cached_property
 import glob
 import logging
@@ -12,6 +12,18 @@ from typing import Any, Optional
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
 from .core.version import is_version7
+from .schematic_safety import (
+    SchematicLockedError,
+    assert_schematics_not_locked,
+    atomic_write_schematic,
+    collect_schematic_hierarchy,
+)
+
+__all__ = [
+    "SchematicExport",
+    "SchematicLockedError",
+    "SchematicVariantExportError",
+]
 
 
 class SchematicVariantExportError(ValueError):
@@ -180,11 +192,16 @@ class SchematicExport:
     def load_schematic(
         self,
         paths: Iterable[str],
+        approved_locks: Collection[str] = (),
         *,
         variant_name: str = "",
-        parts: Optional[Iterable[Mapping[str, Any]]] = None,
+        parts: Optional[Iterable[Mapping[str, Any]]] = None,  # noqa: UP045
     ) -> None:
         """Export one validated Default snapshot using the existing base writer.
+
+        Every sheet under the given schematics is exported once. Nothing is
+        written if a sheet file is missing, or while KiCad has a lock on any
+        sheet other than approved_locks (SchematicLockedError names them all).
 
         Matrix callers supply an explicit Default snapshot. The legacy fallback
         accepts only a Default store view and reads it once for the whole export.
@@ -205,13 +222,25 @@ class SchematicExport:
                     "Default schematic export requires reference, LCSC, and BOM data."
                 )
 
+        # Collect and deduplicate all schematic files across hierarchies
+        all_paths = []
+        seen_paths = set()
+        for p in paths:
+            for hp in collect_schematic_hierarchy(p):
+                norm = os.path.realpath(hp)
+                if norm not in seen_paths:
+                    seen_paths.add(norm)
+                    all_paths.append(hp)
+
+        assert_schematics_not_locked(all_paths, approved_locks)
+
         if is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")
-            for path in paths:
+            for path in all_paths:
                 self._update_schematic7(path, store_parts)
         else:
             self.logger.info("Kicad 8+...")
-            for path in paths:
+            for path in all_paths:
                 self._update_schematic(path, store_parts)
 
     @staticmethod
@@ -251,9 +280,6 @@ class SchematicExport:
         for index, desired in self._bom_updates(lines, store_parts).items():
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
 
-        if os.path.exists(path + "_old"):
-            os.remove(path + "_old")
-        os.rename(path, path + "_old")
         partSection = False
 
         for line in lines:
@@ -298,9 +324,7 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
 
-        with open(path, "w", encoding="utf-8") as f:
-            for line in newlines:
-                f.write(line + "\n")
+        atomic_write_schematic(path, "\n".join(newlines) + "\n", make_backup=True)
         self.logger.info("Added LCSC's to %s (maybe?)", path)
 
     def _update_schematic(
@@ -328,7 +352,6 @@ class SchematicExport:
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
 
         partSection = False
-        files_seen = set()  # keeps sheet files already processed.
 
         for i in range(0, len(lines) - 1):
             inLine = lines[i].rstrip()
@@ -366,14 +389,7 @@ class SchematicExport:
                         if value == part["reference"]:
                             newLcsc = part["lcsc"]
                             break
-                if key == "Sheetfile":
-                    file_name = m.group(2)
-                    if file_name not in files_seen:
-                        files_seen.add(file_name)
-                        dir_name = os.path.dirname(path)
-                        self._update_schematic(
-                            os.path.join(dir_name, file_name), store_parts
-                        )
+
             # if we hit the pin section without finding a LCSC property, add it
             m3 = pinRx.search(inLine)
             if m3 and partSection:
@@ -392,10 +408,5 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
         newlines.append(lines[len(lines) - 1].rstrip())
-        if os.path.exists(path + "_old"):
-            os.remove(path + "_old")
-        os.rename(path, path + "_old")
-        with open(path, "w", encoding="utf-8") as f:
-            for line in newlines:
-                f.write(line + "\n")
+        atomic_write_schematic(path, "\n".join(newlines) + "\n", make_backup=True)
         self.logger.info("Added LCSC's to %s (maybe?)", path)

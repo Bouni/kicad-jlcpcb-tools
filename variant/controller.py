@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 import re
 from typing import Any, Optional
@@ -693,9 +693,12 @@ class VariantMainController:
             except Exception as error:
                 self._error(error)
 
-    def export_to_schematic(self, paths: Sequence[str]) -> None:
+    def export_to_schematic(
+        self, paths: Sequence[str], approved_locks: Collection[str] = ()
+    ) -> None:
         """Report failed or unavailable Default exports at the event boundary."""
-        from ..schematicexport import SchematicExport
+        from ..schematic_safety import SchematicLockedError  # noqa: PLC0415
+        from ..schematicexport import SchematicExport  # noqa: PLC0415
 
         try:
             self.session.require_editable()
@@ -703,9 +706,12 @@ class VariantMainController:
             self.render()
             SchematicExport(self.dialog).load_schematic(
                 paths,
+                approved_locks=approved_locks,
                 variant_name=self.session.output_variant,
                 parts=self.cache.assembly_rows(self.session.snapshot, ""),
             )
+        except SchematicLockedError:
+            raise
         except Exception as error:
             self._error(error)
 
