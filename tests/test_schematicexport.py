@@ -43,6 +43,7 @@ sys.modules["kicadplugin.schematicexport"] = _module
 _spec.loader.exec_module(_module)
 
 SchematicExport = _module.SchematicExport
+SchematicLockedError = sys.modules["kicadplugin.schematic_safety"].SchematicLockedError
 
 
 def _part(reference: str, lcsc: str, excluded: bool) -> dict[str, object]:
@@ -219,6 +220,7 @@ def _load_schematic(
     parts: list[dict[str, object]],
     board_name: str = "board.kicad_pcb",
     pcbnew: Optional[types.SimpleNamespace] = None,  # noqa: UP045
+    ignore_locks: bool = False,
 ) -> None:
     """Load selected schematic paths using the requested KiCad version."""
     store = types.SimpleNamespace(read_all=lambda: parts)
@@ -231,7 +233,7 @@ def _load_schematic(
     exporter = SchematicExport(parent)
     monkeypatch.setattr(_module, "GetBuildVersion", lambda: str(version))
     monkeypatch.setattr(_module, "is_version7", lambda _: version == 7)
-    exporter.load_schematic([str(path) for path in paths])
+    exporter.load_schematic([str(path) for path in paths], ignore_locks=ignore_locks)
 
 
 def _run_export(
@@ -746,4 +748,72 @@ def test_export_still_syncs_unscoped_symbol_when_project_is_ambiguous(
     )
     assert caplog.messages == [
         f"Not updating project-specific BOM states for renamed_board.kicad_pcb; {reason}"
+    ]
+
+
+def _sheet(version: int, file_name: str) -> str:
+    """Return a sheet symbol that uses file_name, in the selected serialization."""
+    if version == 7:
+        return f'  (sheet (at 100 50) (property "Sheetfile" "{file_name}" (at 100 60 0)))\n'
+    return f"""  (sheet
+    (at 100 50)
+    (property "Sheetfile" "{file_name}"
+      (at 100 60 0)
+    )
+  )
+"""
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_nothing_while_the_schematic_is_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """A KiCad lock stops the export unless the caller chose to ignore it."""
+    path = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("RV2",))
+    path.write_text(original, encoding="utf-8")
+    (tmp_path / "~board.kicad_sch.lck").write_text(
+        '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+    )
+    parts = [_part("RV2", "NEW", False)]
+
+    with pytest.raises(SchematicLockedError, match="locked by alice@mac"):
+        _load_schematic(tmp_path, monkeypatch, version, [path], parts)
+    assert path.read_text(encoding="utf-8") == original
+    assert not (tmp_path / "board.kicad_sch_old").exists()
+
+    _load_schematic(tmp_path, monkeypatch, version, [path], parts, ignore_locks=True)
+    result = path.read_text(encoding="utf-8")
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_nothing_when_a_sheet_file_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """A missing sheet stops the export before any sheet is rewritten."""
+    root = tmp_path / "board.kicad_sch"
+    child = tmp_path / "child.kicad_sch"
+    root_text = _schematic(version, "yes", ("RV2",)).replace(
+        "\n)\n",
+        "\n"
+        + _sheet(version, "child.kicad_sch")
+        + _sheet(version, "gone.kicad_sch")
+        + ")\n",
+    )
+    child_text = _schematic(version, "yes", ("RV3",), reference="RV3")
+    root.write_text(root_text, encoding="utf-8")
+    child.write_text(child_text, encoding="utf-8")
+    parts = [_part("RV2", "NEW", False), _part("RV3", "CHILD", False)]
+
+    with pytest.raises(
+        FileNotFoundError, match="'gone.kicad_sch' used in 'board.kicad_sch'"
+    ):
+        _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+
+    assert root.read_text(encoding="utf-8") == root_text
+    assert child.read_text(encoding="utf-8") == child_text
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "board.kicad_sch",
+        "child.kicad_sch",
     ]
