@@ -86,6 +86,7 @@ from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
+from .schematic_safety import SchematicLockedError, resolve_project_schematic
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
@@ -2488,19 +2489,64 @@ class JLCPCBTools(wx.Frame):
         self.populate_footprint_list()
 
     def export_to_schematic(self, *_: object) -> None:
-        """Dialog to select schematics."""
-        with wx.FileDialog(
+        """Export assignments to schematics with auto-detection and lock protection."""
+        root_sch = resolve_project_schematic(self.project_path, self.board_name)
+        if root_sch:
+            paths = [root_sch]
+        else:
+            with wx.FileDialog(
+                self,
+                "Select Schematics",
+                self.project_path,
+                self.schematic_name,
+                "KiCad Schematics (*.kicad_sch)|*.kicad_sch",
+                wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
+            ) as openFileDialog:
+                if openFileDialog.ShowModal() == wx.CANCEL:
+                    return
+                paths = openFileDialog.GetPaths()
+
+        exporter = SchematicExport(self)
+        try:
+            try:
+                exporter.load_schematic(paths)
+            except SchematicLockedError as exc:
+                if not self.confirm_locked_schematic_export(exc):
+                    return
+                exporter.load_schematic(paths, ignore_locks=True)
+        except Exception as exc:
+            self.logger.exception("Schematic export failed")
+            wx.MessageBox(
+                f"Failed to export schematic: {exc}",
+                "Schematic Export Error",
+                style=wx.OK | wx.ICON_ERROR,
+            )
+
+    def confirm_locked_schematic_export(self, error: SchematicLockedError) -> bool:
+        """Ask whether to export to a schematic that KiCad has locked.
+
+        KiCad's lock file cannot show whether its session is still running,
+        so this asks the way KiCad does when it finds one.
+        """
+        dialog = wx.MessageDialog(
             self,
-            "Select Schematics",
-            self.project_path,
-            self.schematic_name,
-            "KiCad Schematics (*.kicad_sch)|*.kicad_sch",
-            wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
-        ) as openFileDialog:
-            if openFileDialog.ShowModal() == wx.CANCEL:
-                return
-            paths = openFileDialog.GetPaths()
-            SchematicExport(self).load_schematic(paths)
+            f"{error}\n\nIf the Schematic Editor has it open, save and close it "
+            "first: its next save would overwrite this export. A lock file left "
+            "over from a crash can be deleted.",
+            "Schematic Locked",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+        )
+        try:
+            dialog.SetYesNoLabels("Export Anyway", "Cancel")
+            result = dialog.ShowModal()
+        finally:
+            dialog.Destroy()
+        self.logger.warning(
+            "%s\nUser chose to %s the schematic export",
+            error,
+            "continue" if result == wx.ID_YES else "stop",
+        )
+        return result == wx.ID_YES
 
     def save_selected_part_preferences(self, *_: object) -> None:
         """Remember the selected LCSC assignments as part preferences."""

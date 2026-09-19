@@ -315,6 +315,10 @@ def mainwindow_stubs(
         "part_preferences": {"PartPreferencesDialog": object},
         "partselector": {"PartSelectorDialog": object},
         "schematicexport": {"SchematicExport": object},
+        "schematic_safety": {
+            "SchematicLockedError": RuntimeError,
+            "resolve_project_schematic": lambda *args: None,
+        },
         "settings": {"SettingsDialog": object},
         "store": {"Store": object},
         "why_standard_dialog": {"WhyStandardDialog": object},
