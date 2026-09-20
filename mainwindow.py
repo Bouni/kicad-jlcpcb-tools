@@ -89,6 +89,7 @@ from .store import Store
 from .stock_concern import stock_concern_references
 from .stock_display import parse_stock
 from .type_cell_tooltip import TypeCellTooltip
+from .value_normalize import canonicalize, quantity_for_reference
 from .why_standard_dialog import WhyStandardDialog
 from .window_layout import get_column_widths, restore_column_widths
 
@@ -2180,11 +2181,13 @@ class JLCPCBTools(wx.Frame):
             ref = self.partlist_data_model.get_reference(item)
             value = self.partlist_data_model.get_value(item)
             footprint = self.partlist_data_model.get_footprint(item)
-            if ref.startswith("R"):
-                """ Auto remove alphabet unit if applicable """
-                if value.endswith("R") or value.endswith("r") or value.endswith("o"):
-                    value = value[:-1]
-                value += "Ω"
+            # Prefill the search with the spelling the catalog uses, so a board
+            # value of 0.1uF, 4k7 or 100p finds 100nF, 4.7kΩ and 100pF.  The
+            # reference designator says which quantity the value measures; when
+            # it says nothing useful the value is passed through untouched.
+            canonical = canonicalize(value, quantity_for_reference(ref))
+            if canonical is not None:
+                value = canonical
             if simplified_footprint := simplify_footprint_name(footprint):
                 value += f" {simplified_footprint}"
             selection[ref] = value
