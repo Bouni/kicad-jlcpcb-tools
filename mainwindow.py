@@ -380,7 +380,7 @@ class JLCPCBTools(wx.Frame):
                 "bom-pos.png",
                 self.scale_factor,
             ),
-            "Toggle exclud from BOM and POS attribute",
+            "Toggle exclude from BOM and POS attribute",
         )
 
         self.toggle_bom_button = self.right_toolbar.AddTool(
@@ -1565,7 +1565,7 @@ class JLCPCBTools(wx.Frame):
         wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
 
     def display_message(self, e):
-        """Dispaly a message with the data from the event."""
+        """Display a message with the data from the event."""
         styles = {
             "info": wx.ICON_INFORMATION,
             "warning": wx.ICON_WARNING,
@@ -2633,7 +2633,7 @@ class JLCPCBTools(wx.Frame):
 
 
 class LogBoxHandler(logging.StreamHandler):
-    """Logging class for the logging textbox at th ebottom of the mainwindow."""
+    """Logging class for the logging textbox at the bottom of the mainwindow."""
 
     def __init__(self, event_destination):
         logging.StreamHandler.__init__(self)
