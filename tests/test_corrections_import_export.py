@@ -947,7 +947,7 @@ def test_manager_constructor_populates_existing_sqlite_corrections(
     """Stored corrections remain selectable through the real constructor's controls."""
     library = make_library(modules.library, tmp_path, [("R1", 90, 0, 0)])
     dialog = manager(modules, library, monkeypatch)
-    assert dialog.corrections_list.rows == [["R1", "90", "0.0", "0.0", ""]]
+    assert dialog.corrections_list.rows == [["R1", "90", "0.0", "0.0", "", "Footprint"]]
     assert (
         modules.wx.dataview.DataViewListCtrl.call_args.kwargs["style"]
         == modules.wx.dataview.DV_SINGLE
@@ -958,6 +958,7 @@ def test_manager_constructor_populates_existing_sqlite_corrections(
         "Offset X",
         "Offset Y",
         "Status",
+        "Kind",
     ]
     assert dialog.global_corrections.GetValue() is True
     select(dialog, 0)
@@ -1005,7 +1006,9 @@ def test_manager_ignores_legacy_csv_on_open_refresh_and_reopen(
         dialog = manager(modules, library, monkeypatch)
         dialog.populate_corrections_list()
         assert raw_rows(library) == before
-        assert dialog.corrections_list.rows == [["R1", "180", "1.0", "2.0", ""]]
+        assert dialog.corrections_list.rows == [
+            ["R1", "180", "1.0", "2.0", "", "Footprint"]
+        ]
         assert dialog.global_corrections.GetValue() is (not local)
         assert path.read_bytes() == contents
         assert backup.exists() is with_backup
@@ -1068,8 +1071,8 @@ def test_explicit_legacy_csv_import_uses_selected_scope_and_survives_reopen(
     modules.wx.PostEvent.reset_mock()
     reopened = manager(modules, fresh_library(library), monkeypatch)
     assert reopened.corrections_list.rows == [
-        ["R1", "90", "0.0", "0.0", ""],
-        ["R2", "-90", "0.0", "0.0", ""],
+        ["R1", "90", "0.0", "0.0", "", "Footprint"],
+        ["R2", "-90", "0.0", "0.0", "", "Footprint"],
     ]
     assert path.read_bytes() == contents
     assert backup.read_bytes() == b"existing archive"
