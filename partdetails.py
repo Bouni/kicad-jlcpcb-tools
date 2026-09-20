@@ -6,7 +6,7 @@ from contextlib import suppress
 import logging
 from pathlib import Path
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import Any
 import webbrowser
 
 import wx  # pylint: disable=import-error
@@ -15,9 +15,6 @@ import wx.dataview  # pylint: disable=import-error
 from .events import MessageEvent
 from .helpers import HighResWxSize, loadBitmapScaled
 from .lcsc_api import LCSC_API
-
-if TYPE_CHECKING:
-    from .mainwindow import JLCPCBTools
 
 
 class PartDetailsDialog(wx.Dialog):
@@ -208,8 +205,8 @@ class PartDetailsDialog(wx.Dialog):
 
     def savepdf(self, *_):
         """Download a datasheet from The LCSC API."""
-        if self.pdfurl is not None:
-            filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
+        if self.pdfurl:
+            filename = self.pdfurl.rsplit("/", maxsplit=1)[-1]
             self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
             self.datasheet_path.mkdir(parents=True, exist_ok=True)
             result = self.lcsc_api.download_datasheet(
@@ -223,17 +220,16 @@ class PartDetailsDialog(wx.Dialog):
             style = "error"
             resultMsg = "Undefined URL for datasheet download"
         target = self.parent
+        candidate = self.parent
         depth = 0
-        while (
-            target
-            and not hasattr(target, "display_message")
-            and hasattr(target, "parent")
-            and depth < 20
-        ):
-            target = target.parent
+        while candidate and depth < 20:
+            if hasattr(candidate, "display_message"):
+                target = candidate
+                break
+            candidate = getattr(candidate, "parent", None)
             depth += 1
         wx.PostEvent(
-            target or self.parent,
+            target,
             MessageEvent(
                 title=title,
                 text=resultMsg,

@@ -234,4 +234,55 @@ def test_partdetails_savepdf_terminates_on_cyclic_parent_references(
     dialog.savepdf()
 
     assert len(posted_events) == 1
+    assert posted_events[0][0] is parent_b
+    assert posted_events[0][1].title == "Error"
+
+
+def test_partdetails_savepdf_handles_empty_string_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty string pdfurl must post an error without raising IndexError."""
+    posted_events: list[tuple[Any, Any]] = []
+
+    def mock_post_event(target, event):
+        posted_events.append((target, event))
+
+    monkeypatch.setattr(partdetails.wx, "PostEvent", mock_post_event)
+
+    main_frame = SimpleNamespace(display_message=Mock())
+    dialog = object.__new__(PartDetailsDialog)
+    dialog.parent = main_frame
+    dialog.pdfurl = ""
+    dialog.logger = Mock()
+
+    dialog.savepdf()
+
+    assert len(posted_events) == 1
+    assert posted_events[0][0] is main_frame
+    assert posted_events[0][1].title == "Error"
+    assert posted_events[0][1].text == "Undefined URL for datasheet download"
+
+
+def test_partdetails_savepdf_falls_back_to_parent_when_no_ancestor_has_display_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If no ancestor implements display_message, fall back safely to self.parent."""
+    posted_events: list[tuple[Any, Any]] = []
+
+    def mock_post_event(target, event):
+        posted_events.append((target, event))
+
+    monkeypatch.setattr(partdetails.wx, "PostEvent", mock_post_event)
+
+    grandparent = SimpleNamespace()
+    parent = SimpleNamespace(parent=grandparent)
+    dialog = object.__new__(PartDetailsDialog)
+    dialog.parent = parent
+    dialog.pdfurl = None
+    dialog.logger = Mock()
+
+    dialog.savepdf()
+
+    assert len(posted_events) == 1
+    assert posted_events[0][0] is parent
     assert posted_events[0][1].title == "Error"
