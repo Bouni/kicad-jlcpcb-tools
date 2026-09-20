@@ -17,6 +17,7 @@ from typing import Any, NamedTuple, Optional, Union
 import requests  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
+from .bom_estimation.pricing import price_sort_collation
 from .correction_data import (
     Correction,
     CorrectionDataError,
@@ -461,13 +462,31 @@ class Library:
                 query += " AND "
             query += " AND ".join(query_chunks)
 
-        query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+        quantity = max(1, int(parameters.get("quantity") or 1))
+        if self.order_by == "Price":
+            collation = (
+                "pricesort_desc"
+                if str(self.order_dir).upper() == "DESC"
+                else "pricesort_asc"
+            )
+            query += f' ORDER BY "{self.order_by}" COLLATE {collation} ASC'
+        else:
+            query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
         query += " LIMIT 1000"
 
         self.logger.debug("query '%s'", query)
 
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.create_collation("naturalsort", natural_sort_collation)
+            con.create_collation("pricesort", price_sort_collation)
+            con.create_collation(
+                "pricesort_asc",
+                lambda a, b: price_sort_collation(a, b, True, quantity=quantity),
+            )
+            con.create_collation(
+                "pricesort_desc",
+                lambda a, b: price_sort_collation(a, b, False, quantity=quantity),
+            )
             with con as cur:
                 return cur.execute(query).fetchall()
 

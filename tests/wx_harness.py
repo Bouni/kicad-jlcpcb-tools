@@ -23,6 +23,13 @@ import types
 from typing import Any, Optional
 from unittest.mock import MagicMock
 
+from bom_estimation.pricing import (
+    get_unit_price,
+    parse_price,
+    price_sort_collation,
+    price_sort_key,
+)
+
 ROOT = Path(__file__).parent.parent
 
 _MISSING = object()
@@ -264,6 +271,12 @@ def mainwindow_stubs(
         },
         "bom_estimation.help_text": {
             "show_bom_estimator_help": lambda *_args, **_kwargs: None
+        },
+        "bom_estimation.pricing": {
+            "price_sort_collation": price_sort_collation,
+            "price_sort_key": price_sort_key,
+            "parse_price": parse_price,
+            "get_unit_price": get_unit_price,
         },
         "bom_widget": {"BomEstimatorController": object, "BomEstimatorWidget": object},
         "corrections": {"CorrectionManagerDialog": object},
