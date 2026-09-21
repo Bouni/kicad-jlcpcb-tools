@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
+from .bom_estimation.pricing import get_unit_price
 from .datamodel import PartSelectorDataModel
 from .dataview_highlight import HighlightedTextRenderer
 from .derive_params import params_for_part  # pylint: disable=import-error
@@ -823,6 +824,7 @@ class PartSelectorDialog(wx.Dialog):
             "extended": self.extended_checkbox.GetValue(),
             "preferred": self.preferred_checkbox.GetValue(),
             "stock": self.assert_stock_checkbox.GetValue(),
+            "quantity": len(self.parts),
         }
         start = time.time()
         result = self.parent.library.search(parameters)
@@ -852,23 +854,7 @@ class PartSelectorDialog(wx.Dialog):
 
     def get_price(self, quantity, prices) -> float:
         """Find the price for the number of selected parts according to the price ranges."""
-        price_ranges = prices.split(",")
-        if not price_ranges[0]:
-            return -1.0
-        min_quantity = int(price_ranges[0].split("-")[0])
-        if quantity <= min_quantity:
-            range, price = price_ranges[0].split(":")
-            return float(price)
-        for p in price_ranges:
-            range, price = p.split(":")
-            lower, upper = range.split("-")
-            if not upper:  # upper bound of price ranges
-                return float(price)
-            lower = int(lower)
-            upper = int(upper)
-            if lower <= quantity < upper:
-                return float(price)
-        return -1.0
+        return get_unit_price(quantity, prices)
 
     def populate_part_list(self, parts: Any, search_duration: float) -> None:
         """Populate the list with the result of the search."""

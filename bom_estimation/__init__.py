@@ -14,6 +14,9 @@ from .pricing import (
     get_assembly_flags,
     get_unit_price,
     is_tht_part,
+    parse_price,
+    price_sort_collation,
+    price_sort_key,
 )
 from .view import (
     BomEstimateResult,
@@ -37,6 +40,9 @@ __all__ = [
     "get_bom_estimator_help_text",
     "get_unit_price",
     "is_tht_part",
+    "parse_price",
+    "price_sort_collation",
+    "price_sort_key",
     "get_assembly_flags",
     "calculate_bom_estimate",
     "calculate_part_bom_cost",

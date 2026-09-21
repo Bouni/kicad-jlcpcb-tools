@@ -13,6 +13,7 @@ from .bom_estimation.assembly_mode import (
     ComponentProductType,
     classify_component_product_type,
 )
+from .bom_estimation.pricing import price_sort_key
 from .dataview_highlight import (
     decode_highlighted_value,
     encode_highlighted_value,
@@ -41,10 +42,16 @@ class _AssemblyMetadata:
 class _StockDataModel(dv.PyDataViewModel):
     """Share stock presentation and exact sorting between both native views."""
 
-    def __init__(self, stock_column: int, simplify_stock: bool = True) -> None:
+    def __init__(
+        self,
+        stock_column: int,
+        simplify_stock: bool = True,
+        price_column: Optional[int] = None,
+    ) -> None:
         super().__init__()
         self.data: list[list[Any]] = []
         self.stock_column = stock_column
+        self.price_column = price_column
         self.simplify_stock = bool(simplify_stock)
 
     def set_simplify_stock(self, enabled: bool) -> None:
@@ -82,13 +89,18 @@ class _StockDataModel(dv.PyDataViewModel):
         return self.GetValue(item, column)
 
     def Compare(self, item1: Any, item2: Any, column: int, ascending: bool) -> int:
-        """Sort exact stock independently of its label and other text naturally."""
+        """Sort exact stock and price independently of labels, and other text naturally."""
         if column == self.stock_column:
             key1 = stock_sort_key(self.ItemToObject(item1)[column])
             key2 = stock_sort_key(self.ItemToObject(item2)[column])
-        else:
-            key1 = self.natural_sort_key(self._comparison_value(item1, column))
-            key2 = self.natural_sort_key(self._comparison_value(item2, column))
+            order = (key1 > key2) - (key1 < key2)
+            return order if ascending else -order
+        if self.price_column is not None and column == self.price_column:
+            key1 = price_sort_key(self.ItemToObject(item1)[column], ascending)
+            key2 = price_sort_key(self.ItemToObject(item2)[column], ascending)
+            return (key1 > key2) - (key1 < key2)
+        key1 = self.natural_sort_key(self._comparison_value(item1, column))
+        key2 = self.natural_sort_key(self._comparison_value(item2, column))
         order = (key1 > key2) - (key1 < key2)
         return order if ascending else -order
 
@@ -120,7 +132,11 @@ class PartListDataModel(_StockDataModel):
     }
 
     def __init__(self, scale_factor: float, simplify_stock: bool = True) -> None:
-        super().__init__(self.columns["STOCK_COL"], simplify_stock)
+        super().__init__(
+            self.columns["STOCK_COL"],
+            simplify_stock,
+            price_column=self.columns["PRICE_COL"],
+        )
         self.standard_only_refs: set[str] = set()
         self._assembly_metadata: dict[str, _AssemblyMetadata] = {}
         self.stock_concern_refs: set[str] = set()
@@ -573,7 +589,11 @@ class PartSelectorDataModel(_StockDataModel):
 
     def __init__(self, simplify_stock: bool = True) -> None:
         self.columns = dict(COLUMN_INDEX)
-        super().__init__(self.columns["stock"], simplify_stock)
+        super().__init__(
+            self.columns["stock"],
+            simplify_stock,
+            price_column=self.columns["price"],
+        )
 
         self.logger = logging.getLogger(__name__)
 

@@ -10,6 +10,8 @@ from collections.abc import Callable, Iterable, Mapping
 import contextlib
 from dataclasses import dataclass, field
 import json
+import re
+from typing import Optional
 
 from .assembly_mode import ComponentProductType, classify_component_product_type
 
@@ -163,6 +165,61 @@ def get_unit_price(quantity: int, prices: str) -> float:
             return unit_price
 
     return -1.0
+
+
+def parse_price(value: object, quantity: int = 1) -> Optional[float]:  # noqa: UP045
+    """Extract numeric price from price display string, tier band, or numeric value."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if float(value) >= 0 else None
+    text = str(value).strip()
+    if not text:
+        return None
+
+    dollar_match = re.search(r"\$\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)", text)
+    if dollar_match:
+        try:
+            return float(dollar_match.group(1).replace(",", ""))
+        except ValueError:
+            pass
+
+    unit_price = get_unit_price(quantity, text)
+    if unit_price >= 0:
+        return unit_price
+
+    try:
+        val = float(text.replace(",", ""))
+        if val >= 0:
+            return val
+    except ValueError:
+        pass
+
+    return None
+
+
+def price_sort_key(
+    value: object, ascending: bool = True, quantity: int = 1
+) -> tuple[int, float, str]:
+    """Sort key for prices, sorting valid prices numerically and errors/blanks at the end."""
+    price = parse_price(value, quantity=quantity)
+    if price is not None:
+        return (0, price if ascending else -price, "")
+    text = "" if value is None else str(value).strip()
+    return (1, 0.0, text.casefold())
+
+
+def price_sort_collation(
+    a: str, b: str, ascending: bool = True, quantity: int = 1
+) -> int:
+    """Collation for use in sqlite when ordering by Price."""
+    if a == b:
+        return 0
+    ka = price_sort_key(a, ascending, quantity=quantity)
+    kb = price_sort_key(b, ascending, quantity=quantity)
+    if ka == kb:
+        return (a > b) - (a < b)
+    return (ka > kb) - (ka < kb)
 
 
 def is_tht_part(part: Mapping[str, object]) -> bool:
