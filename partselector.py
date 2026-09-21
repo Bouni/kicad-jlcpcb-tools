@@ -98,7 +98,7 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Keywords",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
             style=wx.ALIGN_RIGHT,
         )
         self.keyword = wx.TextCtrl(
@@ -106,7 +106,7 @@ class PartSelectorDialog(wx.Dialog):
             wx.ID_ANY,
             lcsc_selection,
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(800, 24)),
+            HighResWxSize(parent.window, wx.Size(800, -1)),
             wx.TE_PROCESS_ENTER,
         )
         self.keyword.SetHint("e.g. 10k 0603")
@@ -135,14 +135,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Manufacturer",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.manufacturer = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             wx.TE_PROCESS_ENTER,
         )
         self.manufacturer.SetHint("e.g. Vishay")
@@ -151,14 +151,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Package",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.package = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             wx.TE_PROCESS_ENTER,
         )
         self.package.SetHint("e.g. 0603")
@@ -167,14 +167,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Category",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.category = wx.ComboBox(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             choices=parent.library.categories if parent.is_catalog_available() else [],
             style=wx.CB_READONLY,
         )
@@ -184,14 +184,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Part number",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.part_no = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             wx.TE_PROCESS_ENTER,
         )
         self.part_no.SetHint("e.g. DS2411")
@@ -200,14 +200,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Solder joints",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.solder_joints = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             wx.TE_PROCESS_ENTER,
         )
         self.solder_joints.SetHint("e.g. 2")
@@ -216,14 +216,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Subcategory",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.subcategory = wx.ComboBox(
             self,
             wx.ID_ANY,
             "",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             style=wx.CB_READONLY,
         )
         self.subcategory.SetHint("e.g. Variable Resistors")
@@ -232,14 +232,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Include basic parts",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.basic_checkbox = wx.CheckBox(
             self,
             wx.ID_ANY,
             "Basic",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             0,
             name="basic",
         )
@@ -247,14 +247,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Include preferred parts",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.preferred_checkbox = wx.CheckBox(
             self,
             wx.ID_ANY,
             "Preferred",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             0,
             name="preferred",
         )
@@ -262,14 +262,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Include extended parts",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.extended_checkbox = wx.CheckBox(
             self,
             wx.ID_ANY,
             "Extended",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             0,
             name="extended",
         )
@@ -277,14 +277,14 @@ class PartSelectorDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Only show parts in stock",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.assert_stock_checkbox = wx.CheckBox(
             self,
             wx.ID_ANY,
             "in Stock",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
             0,
             name="stock",
         )

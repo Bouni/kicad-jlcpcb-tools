@@ -73,14 +73,14 @@ class CorrectionManagerDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Regex",
-            size=HighResWxSize(parent.window, wx.Size(150, 15)),
+            size=HighResWxSize(parent.window, wx.Size(150, -1)),
         )
         self.regex = wx.TextCtrl(
             self,
             wx.ID_ANY,
             lcsc_part or footprint,
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 24)),
+            HighResWxSize(parent.window, wx.Size(200, -1)),
         )
         self.lcsc_mode = wx.CheckBox(self, wx.ID_ANY, "LCSC part, matched exactly")
         self.lcsc_mode.SetValue(bool(lcsc_part))
@@ -109,14 +109,14 @@ class CorrectionManagerDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Rotation",
-            size=HighResWxSize(parent.window, wx.Size(100, 15)),
+            size=HighResWxSize(parent.window, wx.Size(100, -1)),
         )
         self.rotation = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "0",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(150, 24)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
         )
 
         sizer_rotation = wx.BoxSizer(wx.VERTICAL)
@@ -132,14 +132,14 @@ class CorrectionManagerDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Offset X",
-            size=HighResWxSize(parent.window, wx.Size(100, 15)),
+            size=HighResWxSize(parent.window, wx.Size(100, -1)),
         )
         self.offset_x = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "0.00",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(150, 24)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
         )
 
         sizer_offset_x = wx.BoxSizer(wx.VERTICAL)
@@ -155,14 +155,14 @@ class CorrectionManagerDialog(wx.Dialog):
             self,
             wx.ID_ANY,
             "Offset Y",
-            size=HighResWxSize(parent.window, wx.Size(100, 15)),
+            size=HighResWxSize(parent.window, wx.Size(100, -1)),
         )
         self.offset_y = wx.TextCtrl(
             self,
             wx.ID_ANY,
             "0.00",
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(150, 24)),
+            HighResWxSize(parent.window, wx.Size(150, -1)),
         )
 
         sizer_offset_y = wx.BoxSizer(wx.VERTICAL)

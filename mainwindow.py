@@ -477,6 +477,47 @@ class JLCPCBTools(wx.Frame):
         self.right_toolbar.ToggleTool(ID_SELECT_ALIKE, self.auto_select_alike)
 
         self.right_toolbar.Realize()
+        # Ensure the vertical toolbar is wide enough to avoid clipping tool
+        # labels on Linux GTK / HiDPI without taking arbitrary extra space.
+        toolbar_min_width = HighResWxSize(self.window, wx.Size(170, -1)).GetWidth()
+        if hasattr(self.right_toolbar, "GetTextExtent"):
+            with suppress(Exception):
+                tool_labels = (
+                    "Assign LCSC number",
+                    "Remove LCSC number",
+                    "Auto-select alike",
+                    "Toggle BOM & POS",
+                    "Export to schematic",
+                )
+                text_widths = []
+                for label in tool_labels:
+                    extent = self.right_toolbar.GetTextExtent(label)
+                    width = None
+                    if hasattr(extent, "GetWidth") and callable(extent.GetWidth):
+                        with suppress(Exception):
+                            w = extent.GetWidth()
+                            if isinstance(w, (int, float)):
+                                width = w
+                    if (
+                        width is None
+                        and hasattr(extent, "x")
+                        and isinstance(extent.x, (int, float))
+                    ):
+                        width = extent.x
+                    if width is None and isinstance(extent, (tuple, list)) and extent:
+                        w = extent[0]
+                        if isinstance(w, (int, float)):
+                            width = w
+                    if isinstance(width, (int, float)) and width > 0:
+                        text_widths.append(width)
+                if text_widths:
+                    max_text_width = max(text_widths)
+                    padding = HighResWxSize(self.window, wx.Size(24, -1)).GetWidth()
+                    if max_text_width > 0:
+                        toolbar_min_width = max(
+                            toolbar_min_width, int(max_text_width + padding)
+                        )
+        self.right_toolbar.SetMinSize(wx.Size(toolbar_min_width, -1))
 
         # ---------------------------------------------------------------------
         # ----------------------- Footprint List ------------------------------
@@ -599,7 +640,7 @@ class JLCPCBTools(wx.Frame):
 
         self.footprint_list.Bind(dv.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown)
 
-        table_sizer.Add(self.right_toolbar, 1, wx.EXPAND, 5)
+        table_sizer.Add(self.right_toolbar, 0, wx.EXPAND, 5)
         # ---------------------------------------------------------------------
         # --------------------- Bottom Logbox and Gauge -----------------------
         # ---------------------------------------------------------------------
