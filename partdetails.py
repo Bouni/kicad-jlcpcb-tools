@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 import logging
 from pathlib import Path
 import threading
-from typing import TYPE_CHECKING
+from typing import Any
 import webbrowser
 
 import wx  # pylint: disable=import-error
@@ -15,28 +16,25 @@ from .events import MessageEvent
 from .helpers import HighResWxSize, loadBitmapScaled
 from .lcsc_api import LCSC_API
 
-if TYPE_CHECKING:
-    from .mainwindow import JLCPCBTools
-
 
 class PartDetailsDialog(wx.Dialog):
     """The part details dialog class."""
 
-    def __init__(self, parent: JLCPCBTools, part: str) -> None:
+    def __init__(self, parent: Any, part: str) -> None:
+        self.logger = logging.getLogger(__name__)
+        self.parent = parent
+        self.part = part
+        self._init_context(parent)
         wx.Dialog.__init__(
             self,
             parent,
             id=wx.ID_ANY,
             title="JLCPCB Part Details",
             pos=wx.DefaultPosition,
-            size=HighResWxSize(parent.window, wx.Size(1000, 800)),
+            size=HighResWxSize(self.window, wx.Size(1000, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
 
-        self.logger = logging.getLogger(__name__)
-        self.parent = parent
-        self.part = part
-        self.datasheet_path = Path(self.parent.project_path) / "datasheets"
         self.lcsc_api = LCSC_API()
         self.pdfurl = ""
         self.pageurl = ""
@@ -74,13 +72,13 @@ class PartDetailsDialog(wx.Dialog):
         self.property = self.data_list.AppendTextColumn(
             "Property",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(self.parent.scale_factor * 200),
+            width=int(self.scale_factor * 200),
             align=wx.ALIGN_LEFT,
         )
         self.value = self.data_list.AppendTextColumn(
             "Value",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
-            width=int(self.parent.scale_factor * 300),
+            width=int(self.scale_factor * 300),
             align=wx.ALIGN_LEFT,
         )
 
@@ -90,9 +88,9 @@ class PartDetailsDialog(wx.Dialog):
         self.image = wx.StaticBitmap(
             self,
             wx.ID_ANY,
-            loadBitmapScaled("placeholder.png", self.parent.scale_factor, static=True),
+            loadBitmapScaled("placeholder.png", self.scale_factor, static=True),
             wx.DefaultPosition,
-            HighResWxSize(parent.window, wx.Size(200, 200)),
+            HighResWxSize(self.window, wx.Size(200, 200)),
             0,
         )
         self.savepdf_button = wx.Button(
@@ -129,7 +127,7 @@ class PartDetailsDialog(wx.Dialog):
         self.savepdf_button.SetBitmap(
             loadBitmapScaled(
                 "mdi-cloud-download-outline.png",
-                self.parent.scale_factor,
+                self.scale_factor,
             )
         )
         self.savepdf_button.SetBitmapMargins((2, 0))
@@ -137,7 +135,7 @@ class PartDetailsDialog(wx.Dialog):
         self.openpdf_button.SetBitmap(
             loadBitmapScaled(
                 "mdi-file-document-outline.png",
-                self.parent.scale_factor,
+                self.scale_factor,
             )
         )
         self.openpdf_button.SetBitmapMargins((2, 0))
@@ -145,7 +143,7 @@ class PartDetailsDialog(wx.Dialog):
         self.openpage_button.SetBitmap(
             loadBitmapScaled(
                 "mdi-earth.png",
-                self.parent.scale_factor,
+                self.scale_factor,
             )
         )
         self.openpage_button.SetBitmapMargins((2, 0))
@@ -184,18 +182,31 @@ class PartDetailsDialog(wx.Dialog):
             daemon=True,
         ).start()
 
+    def _init_context(self, parent: Any) -> None:
+        """Initialize display and context attributes from parent or ancestors."""
+        self.window = getattr(parent, "window", parent)
+        self.scale_factor = getattr(parent, "scale_factor", 1.0)
+        project_path = getattr(parent, "project_path", None)
+        if not project_path and hasattr(parent, "parent"):
+            project_path = getattr(parent.parent, "project_path", "")
+        self.project_path = project_path or ""
+        self.datasheet_path = Path(self.project_path) / "datasheets"
+
     def quit_dialog(self, *_: object) -> None:
         """Close the dialog (via EVT_CLOSE → _on_close → Destroy)."""
         self.Close()
 
     def _on_close(self, _event: wx.CloseEvent) -> None:
         """Destroy on close so a modeless wx.Dialog doesn't merely hide."""
+        if self.parent and hasattr(self.parent, "Raise"):
+            with suppress(Exception):
+                self.parent.Raise()
         self.Destroy()
 
     def savepdf(self, *_):
         """Download a datasheet from The LCSC API."""
-        if self.pdfurl is not None:
-            filename = self.pdfurl.rsplit("/", maxsplit=1)[1]
+        if self.pdfurl:
+            filename = self.pdfurl.rsplit("/", maxsplit=1)[-1]
             self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
             self.datasheet_path.mkdir(parents=True, exist_ok=True)
             result = self.lcsc_api.download_datasheet(
@@ -208,8 +219,17 @@ class PartDetailsDialog(wx.Dialog):
             title = "Error"
             style = "error"
             resultMsg = "Undefined URL for datasheet download"
+        target = self.parent
+        candidate = self.parent
+        depth = 0
+        while candidate and depth < 20:
+            if hasattr(candidate, "display_message"):
+                target = candidate
+                break
+            candidate = getattr(candidate, "parent", None)
+            depth += 1
         wx.PostEvent(
-            self.parent,
+            target,
             MessageEvent(
                 title=title,
                 text=resultMsg,
@@ -337,7 +357,7 @@ class PartDetailsDialog(wx.Dialog):
 
         if image_bytes is not None:
             image = wx.Image(image_bytes)
-            size = int(200 * self.parent.scale_factor)
+            size = int(200 * self.scale_factor)
             image = image.Scale(size, size, wx.IMAGE_QUALITY_HIGH)
             self.image.SetBitmap(wx.Bitmap(image))
 

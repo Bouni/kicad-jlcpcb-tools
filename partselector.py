@@ -53,18 +53,20 @@ class PartSelectorDialog(wx.Dialog):
         assignment_context: object = None,
         assignment_label: Optional[str] = None,
     ) -> None:
+        self.logger = logging.getLogger(__name__)
+        self.parent = parent
+        self._init_context(parent)
+
         wx.Dialog.__init__(
             self,
             parent,
             id=wx.ID_ANY,
             title=assignment_label or "JLCPCB Library",
             pos=wx.DefaultPosition,
-            size=HighResWxSize(parent.window, wx.Size(1400, 800)),
+            size=HighResWxSize(self.window, wx.Size(1400, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
 
-        self.logger = logging.getLogger(__name__)
-        self.parent = parent
         self.parts = dict(parts)
         self.assignment_context = assignment_context
         self.assignment_label = assignment_label
@@ -603,6 +605,12 @@ class PartSelectorDialog(wx.Dialog):
         # initiate the initial search now that the window has been constructed
         self.search(None)
 
+    def _init_context(self, parent: Any) -> None:
+        """Initialize display and context attributes from parent window."""
+        self.window = getattr(parent, "window", parent)
+        self.scale_factor = getattr(parent, "scale_factor", 1.0)
+        self.project_path = getattr(parent, "project_path", "")
+
     def _restore_size(self, size: object) -> list[int]:
         """Restore bounded normal geometry without passing untrusted sizes to wx."""
         default = [1400, 800]
@@ -919,7 +927,7 @@ class PartSelectorDialog(wx.Dialog):
         """Fetch part details from LCSC and show them in a modeless dialog."""
         if self.part_list.GetSelectedItemsCount() > 0:
             item = self.part_list.GetSelection()
-            dialog = PartDetailsDialog(self.parent, self.part_list_model.get_lcsc(item))
+            dialog = PartDetailsDialog(self, self.part_list_model.get_lcsc(item))
             dialog.Show()
 
     def help(self, *_):
