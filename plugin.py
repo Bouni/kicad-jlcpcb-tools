@@ -36,6 +36,10 @@ class JLCPCBPlugin(ActionPlugin):
 
         from .mainwindow import JLCPCBTools  # noqa: PLC0415
 
-        dialog = JLCPCBTools(None)
+        try:
+            dialog = JLCPCBTools(None)
+        except Exception as exc:
+            wx.MessageBox(str(exc), "JLCPCB Tools", wx.OK | wx.ICON_ERROR)
+            return
         dialog.Center()
         dialog.Show()

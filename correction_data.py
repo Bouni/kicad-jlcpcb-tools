@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from io import StringIO
 import math
 import re
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from .lcsc import normalize_lcsc
 
@@ -217,6 +217,50 @@ def match_correction(
         if correction is not None:
             return CorrectionMatch(correction, source)
     return None
+
+
+def resolve_shared_corrections(
+    snapshot: Any,
+    corrections: Sequence[AnyCorrection],
+    variant_name: str = "",
+) -> dict[str, Optional[CorrectionMatch]]:  # noqa: UP045
+    """Resolve placement rules for the parts ordered by one output variant.
+
+    Exact LCSC rules use the output variant's effective assignment. Otherwise,
+    reference and base Value rules keep their existing precedence over package
+    rules. Named-variant Value overrides cannot alter these shared pattern
+    corrections. Inputs and stored rules remain untouched.
+    """
+    variants = {variant.name for variant in snapshot.variants}
+    if "" not in variants:
+        raise ValueError("Default variant is unavailable for shared corrections")
+    if variant_name not in variants:
+        raise ValueError(f"Output variant is unavailable: {variant_name!r}")
+    output_parts = {}
+    for part in snapshot.for_variant(variant_name):
+        if part.component_id in output_parts:
+            raise ValueError(
+                f"Duplicate output component for corrections: {part.component_id}"
+            )
+        output_parts[part.component_id] = part
+    resolved: dict[str, Optional[CorrectionMatch]] = {}  # noqa: UP045
+    for part in snapshot.for_variant(""):
+        if part.component_id in resolved:
+            raise ValueError(
+                f"Duplicate Default component for shared corrections: {part.component_id}"
+            )
+        if part.component_id not in output_parts:
+            raise ValueError(
+                f"Output component is unavailable for corrections: {part.component_id}"
+            )
+        resolved[part.component_id] = match_correction(
+            corrections,
+            part.reference,
+            part.value,
+            part.footprint.rsplit(":", 1)[-1],
+            output_parts[part.component_id].lcsc,
+        )
+    return resolved
 
 
 @dataclass(frozen=True)

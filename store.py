@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 import sqlite3
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from .bom_estimation.assembly_mode import ComponentProductType
 from .footprint_helpers import (
@@ -15,11 +15,7 @@ from .footprint_helpers import (
     get_lcsc_value,
     get_valid_footprints,
 )
-from .footprint_metadata import (
-    footprint_has_tht,
-    get_assembly_flags,
-    get_footprint_pad_count,
-)
+from .footprint_metadata import get_assembly_flags, get_footprint_pad_metadata
 from .helpers import dict_factory, natural_sort_collation
 
 
@@ -360,10 +356,9 @@ class Store:
             )
             cur.commit()
 
-    def backfill_estimator_metadata(self, footprint, db_part: dict):
+    def backfill_estimator_metadata(self, footprint: Any, db_part: dict) -> None:
         """Backfill estimator metadata when missing or stale."""
-        pad_count = get_footprint_pad_count(footprint)
-        has_tht = footprint_has_tht(footprint)
+        pad_count, has_tht = get_footprint_pad_metadata(footprint)
         assembly_flags = get_assembly_flags(footprint)
 
         ref = footprint.GetReference()

@@ -324,41 +324,22 @@ class TestJlcApi:
         with pytest.raises(RuntimeError, match="Cannot fetch component list"):
             JlcApi.componentList("token123", {})
 
+    @pytest.mark.parametrize(
+        "code, message",
+        [(563, "Error"), (429, "Too Many Requests"), (404, "Not Found")],
+    )
     @mock.patch("common.jlcapi.requests.post")
-    def test_component_list_api_error_no_data(self, mock_post):
-        """JlcApi.componentList returns empty dict for certain error codes."""
-        response_data = {"code": 563, "message": "Error"}
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = response_data
-        mock_post.return_value = mock_response
-
-        result = JlcApi.componentList("token123", {})
-        assert result == {}
-
-    @mock.patch("common.jlcapi.requests.post")
-    def test_component_list_api_error_rate_limit(self, mock_post):
-        """JlcApi.componentList returns empty dict for rate limit error (429)."""
-        response_data = {"code": 429, "message": "Too Many Requests"}
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = response_data
-        mock_post.return_value = mock_response
-
-        result = JlcApi.componentList("token123", {})
-        assert result == {}
-
-    @mock.patch("common.jlcapi.requests.post")
-    def test_component_list_api_error_not_found(self, mock_post):
-        """JlcApi.componentList returns empty dict for 404 error."""
-        response_data = {"code": 404, "message": "Not Found"}
-        mock_response = mock.Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = response_data
-        mock_post.return_value = mock_response
-
-        result = JlcApi.componentList("token123", {})
-        assert result == {}
+    def test_component_list_handled_api_errors(
+        self,
+        mock_post: mock.Mock,
+        code: int,
+        message: str,
+    ) -> None:
+        """Recognized API errors return an empty result instead of raising."""
+        response = mock_post.return_value
+        response.status_code = 200
+        response.json.return_value = {"code": code, "message": message}
+        assert JlcApi.componentList("token123", {}) == {}
 
     @mock.patch("common.jlcapi.requests.post")
     def test_component_list_other_error_raises(self, mock_post):

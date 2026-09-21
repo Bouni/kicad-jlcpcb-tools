@@ -14,6 +14,18 @@ from .wx_harness import load, package_stubs, wx_stubs
 _PACKAGE = "_store_legacy_csv_tests"
 
 
+class _SmdPad:
+    """Expose the native pad properties used by the real metadata helper."""
+
+    def GetAttribute(self) -> int:
+        """Return KiCad's PAD_ATTRIB_SMD value."""
+        return 1
+
+    def HasHole(self) -> bool:
+        """Ordinary surface-mount pads have no drilled hole."""
+        return False
+
+
 class _Footprint:
     """Retain the board fields read by the real footprint and metadata helpers."""
 
@@ -46,9 +58,9 @@ class _Footprint:
         """Return the current BOM and position-file exclusion bits."""
         return self.attributes
 
-    def Pads(self) -> list[object]:
+    def Pads(self) -> list[_SmdPad]:
         """Provide two ordinary surface-mount solder pads."""
-        return [object(), object()]
+        return [_SmdPad(), _SmdPad()]
 
 
 class _Board:

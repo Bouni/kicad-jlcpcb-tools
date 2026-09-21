@@ -1,16 +1,21 @@
 """Module for exporting LCSC data to schematic."""
 
+from collections.abc import Iterable, Mapping
 from functools import cached_property
 import glob
 import logging
 import os
 import os.path
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
 from .core.version import is_version7
+
+
+class SchematicVariantExportError(ValueError):
+    """Reject named-variant data before the base schematic writer touches files."""
 
 
 class SchematicExport:
@@ -24,7 +29,7 @@ class SchematicExport:
     _PROJECT_RX = re.compile(r'\(project\s+"([^"]*)"')
     _UUID_RX = re.compile(r'\(uuid\s+"?([^"\s)]*)"?\)')
 
-    def __init__(self, parent):
+    def __init__(self, parent: Any) -> None:
         self.logger = logging.getLogger(__name__)
         self.parent = parent
 
@@ -67,7 +72,7 @@ class SchematicExport:
         return None
 
     def _resolved_bom(
-        self, refs: set[str], store_parts: list[dict[str, object]]
+        self, refs: set[str], store_parts: tuple[dict[str, Any], ...]
     ) -> Optional[bool]:  # noqa: UP045
         """Return a shared exclude-from-BOM state, or None when it is unsafe."""
         matched = {
@@ -95,7 +100,7 @@ class SchematicExport:
     def _bom_updates(
         self,
         lines: list[str],
-        store_parts: list[dict[str, object]],
+        store_parts: tuple[dict[str, Any], ...],
     ) -> dict[int, str]:
         """Return in_bom line updates that are safe for every symbol instance."""
         symbols = []
@@ -172,18 +177,58 @@ class SchematicExport:
                 updates[symbol["bom_line"]] = "no" if bom else "yes"
         return updates
 
-    def load_schematic(self, paths: list[str]) -> None:
-        """Load schematic file."""
+    def load_schematic(
+        self,
+        paths: Iterable[str],
+        *,
+        variant_name: str = "",
+        parts: Optional[Iterable[Mapping[str, Any]]] = None,
+    ) -> None:
+        """Export one validated Default snapshot using the existing base writer.
+
+        Matrix callers supply an explicit Default snapshot. The legacy fallback
+        accepts only a Default store view and reads it once for the whole export.
+        Neither the focused matrix cell nor the native editor selection changes
+        the meaning of this source.
+        """
+        self._require_default(variant_name)
+        if parts is None:
+            store = self.parent.store
+            self._require_default(getattr(store, "variant_name", ""))
+            parts = store.read_all()
+        store_parts = tuple(dict(part) for part in parts)
+        for part in store_parts:
+            self._require_default(part.get("variant_name", ""))
+            # Check required source keys before any format branch opens a file.
+            if not {"reference", "lcsc", "exclude_from_bom"}.issubset(part):
+                raise ValueError(
+                    "Default schematic export requires reference, LCSC, and BOM data."
+                )
+
         if is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")
             for path in paths:
-                self._update_schematic7(path)
+                self._update_schematic7(path, store_parts)
         else:
             self.logger.info("Kicad 8+...")
             for path in paths:
-                self._update_schematic(path)
+                self._update_schematic(path, store_parts)
 
-    def _update_schematic7(self, path: str) -> None:
+    @staticmethod
+    def _require_default(variant_name: str) -> None:
+        """Require the canonical empty Default name, never a display label."""
+        if not isinstance(variant_name, str):
+            raise TypeError("Schematic export requires a canonical variant name.")
+        if variant_name:
+            raise SchematicVariantExportError(
+                "Schematic export supports Default only. "
+                f"Variant {variant_name!r} assignments cannot be written into "
+                "base schematic fields."
+            )
+
+    def _update_schematic7(
+        self, path: str, store_parts: tuple[dict[str, Any], ...]
+    ) -> None:
         """Only works with KiCad V7 files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
@@ -192,8 +237,6 @@ class SchematicExport:
             '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
         )
         pinRx = re.compile('\\(pin\\s\\"(.*)\\"\\s\\(')
-
-        store_parts = self.parent.store.read_all()
 
         lastLoc = ""
         lastLcsc = ""
@@ -260,7 +303,9 @@ class SchematicExport:
                 f.write(line + "\n")
         self.logger.info("Added LCSC's to %s (maybe?)", path)
 
-    def _update_schematic(self, path: str) -> None:
+    def _update_schematic(
+        self, path: str, store_parts: tuple[dict[str, Any], ...]
+    ) -> None:
         """Only works with KiCad V8+ files."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
@@ -268,8 +313,6 @@ class SchematicExport:
         propRx = re.compile('\\(property\\s\\"(.*)\\"\\s"(.*)\\"')
         atRx = re.compile("\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)")
         pinRx = re.compile('\\(pin\\s\\"(.*)\\"')
-
-        store_parts = self.parent.store.read_all()
 
         lastLoc = ""
         lastLcsc = ""
@@ -328,7 +371,9 @@ class SchematicExport:
                     if file_name not in files_seen:
                         files_seen.add(file_name)
                         dir_name = os.path.dirname(path)
-                        self._update_schematic(os.path.join(dir_name, file_name))
+                        self._update_schematic(
+                            os.path.join(dir_name, file_name), store_parts
+                        )
             # if we hit the pin section without finding a LCSC property, add it
             m3 = pinRx.search(inLine)
             if m3 and partSection:

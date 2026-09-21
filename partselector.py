@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
@@ -44,12 +44,19 @@ def _format_duration(seconds: float) -> str:
 class PartSelectorDialog(wx.Dialog):
     """The part selector window."""
 
-    def __init__(self, parent: JLCPCBTools, parts: dict[str, str]) -> None:
+    def __init__(
+        self,
+        parent: JLCPCBTools,
+        parts: dict[str, str],
+        *,
+        assignment_context: object = None,
+        assignment_label: Optional[str] = None,
+    ) -> None:
         wx.Dialog.__init__(
             self,
             parent,
             id=wx.ID_ANY,
-            title="JLCPCB Library",
+            title=assignment_label or "JLCPCB Library",
             pos=wx.DefaultPosition,
             size=HighResWxSize(parent.window, wx.Size(1400, 800)),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
@@ -57,8 +64,10 @@ class PartSelectorDialog(wx.Dialog):
 
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.parts = parts
-        lcsc_selection = self.get_existing_selection(parts)
+        self.parts = dict(parts)
+        self.assignment_context = assignment_context
+        self.assignment_label = assignment_label
+        lcsc_selection = self.get_existing_selection(self.parts)
 
         self.search_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.search)
@@ -551,6 +560,12 @@ class PartSelectorDialog(wx.Dialog):
         tool_sizer = wx.BoxSizer(wx.VERTICAL)
         tool_sizer.Add(self.select_part_button, 0, wx.ALL, 5)
         tool_sizer.Add(self.part_details_button, 0, wx.ALL, 5)
+        self.cancel_button = wx.Button(self, wx.ID_CANCEL, "Cancel")
+        # Escape synthesizes a button event on the dialog, not on the button.
+        self.Bind(wx.EVT_BUTTON, self.quit_dialog, id=wx.ID_CANCEL)
+        self.SetEscapeId(wx.ID_CANCEL)
+        tool_sizer.AddStretchSpacer()
+        tool_sizer.Add(self.cancel_button, 0, wx.ALL | wx.EXPAND, 5)
         table_sizer.Add(tool_sizer, 3, wx.EXPAND, 5)
 
         # ---------------------------------------------------------------------
@@ -674,13 +689,14 @@ class PartSelectorDialog(wx.Dialog):
             return ""
         return list(s)[0]
 
-    def quit_dialog(self, *_):
+    def quit_dialog(self, *_: object) -> None:
         """Close this window (via EVT_CLOSE → _on_close → Destroy)."""
         self.Close()
 
     def _on_close(self, _event: wx.CloseEvent) -> None:
         """Destroy on close and clear the parent's singleton ref."""
         try:
+            self.search_timer.Stop()
             if getattr(self, "_layout_ready", False):
                 settings = self.parent.settings.setdefault("partselector", {})
                 settings["column_widths"] = get_column_widths(
@@ -696,7 +712,13 @@ class PartSelectorDialog(wx.Dialog):
                 self.parent._part_selector = None
             self.Destroy()
 
-    def update_for(self, parts):
+    def update_for(
+        self,
+        parts: dict[str, str],
+        *,
+        assignment_context: object = None,
+        assignment_label: Optional[str] = None,
+    ) -> None:
         """Re-target this open selector at a new set of footprints.
 
         Called when the user invokes "Select Part" again from the main window
@@ -704,8 +726,18 @@ class PartSelectorDialog(wx.Dialog):
         the initial search keyword, and re-run the search so the visible list
         reflects what the user just clicked.
         """
-        self.parts = parts
-        self.keyword.ChangeValue(self.get_existing_selection(parts))
+        # Searches run synchronously. Clear the old result selection before
+        # replacing its target, including when the following search fails.
+        self.search_timer.Stop()
+        self.part_list.UnselectAll()
+        self.part_list_model.RemoveAll()
+        self.enable_toolbar_buttons(False)
+        self.parts = dict(parts)
+        self.assignment_context = assignment_context
+        if assignment_label is not None or self.assignment_label is not None:
+            self.SetTitle(assignment_label or "JLCPCB Library")
+        self.assignment_label = assignment_label
+        self.keyword.ChangeValue(self.get_existing_selection(self.parts))
         self.search(None)
 
     def OnSortPartList(self, e):
@@ -881,8 +913,8 @@ class PartSelectorDialog(wx.Dialog):
         )
         self.result_count.SetLabel(result_count_label)
 
-    def select_part(self, *_):
-        """Save the selected part number and close the modal."""
+    def select_part(self, *_events: object) -> None:
+        """Post the catalog choice with this session's captured target."""
         if self.part_list.GetSelectedItemsCount() > 0:
             item = self.part_list.GetSelection()
             wx.PostEvent(
@@ -891,7 +923,8 @@ class PartSelectorDialog(wx.Dialog):
                     lcsc=self.part_list_model.get_lcsc(item),
                     type=self.part_list_model.get_type(item),
                     stock=self.part_list_model.get_stock(item),
-                    references=self.parts.keys(),
+                    references=tuple(self.parts),
+                    assignment_context=self.assignment_context,
                 ),
             )
             self.Close()

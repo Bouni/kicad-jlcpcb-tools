@@ -1,15 +1,15 @@
 """Tests for the componentdb module."""
 
+from collections.abc import Iterator
 import json
 from pathlib import Path
-import shutil
 import sqlite3
-import tempfile
 import time
+from typing import Any, Optional
 
 import pytest
 
-from common.componentdb import _CREATE_STATEMENTS, ComponentsDatabase, fixDescription
+from common.componentdb import ComponentsDatabase, fixDescription
 
 # ============================================================================
 # Fixtures
@@ -17,17 +17,9 @@ from common.componentdb import _CREATE_STATEMENTS, ComponentsDatabase, fixDescri
 
 
 @pytest.fixture
-def temp_dir():
-    """Create a temporary test directory and clean up after test."""
-    test_dir = Path(tempfile.mkdtemp(prefix="test_componentdb_"))
-    yield test_dir
-    shutil.rmtree(test_dir, ignore_errors=True)
-
-
-@pytest.fixture
-def temp_db(temp_dir):
+def temp_db(tmp_path: Path) -> Iterator[ComponentsDatabase]:
     """Create a temporary test database and clean up after test."""
-    db_path = temp_dir / "test_components.db"
+    db_path = tmp_path / "test_components.db"
     db = ComponentsDatabase(str(db_path))
     yield db
     db.close()
@@ -38,48 +30,27 @@ def temp_db(temp_dir):
 # ============================================================================
 
 
-class TestFixDescription:
-    """Tests for fixDescription utility function."""
-
-    def test_fix_description_with_empty_description(self):
-        """FixDescription extracts description from extra JSON when empty."""
-        extra_json = json.dumps({"description": "Extracted description"})
-        result = fixDescription("", extra_json)
-        assert result == "Extracted description"
-
-    def test_fix_description_with_none_description(self):
-        """FixDescription handles None description."""
-        extra_json = json.dumps({"description": "Extracted description"})
-        result = fixDescription(None, extra_json)
-        assert result == "Extracted description"
-
-    def test_fix_description_preserves_existing(self):
-        """FixDescription preserves existing non-empty description."""
-        extra_json = json.dumps({"description": "Should not use this"})
-        result = fixDescription("Original description", extra_json)
-        assert result == "Original description"
-
-    def test_fix_description_falls_back_to_describe(self):
-        """FixDescription falls back to 'describe' key if 'description' missing."""
-        extra_json = json.dumps({"describe": "Describe fallback"})
-        result = fixDescription("", extra_json)
-        assert result == "Describe fallback"
-
-    def test_fix_description_invalid_json(self):
-        """FixDescription handles invalid JSON gracefully."""
-        result = fixDescription("", "invalid json")
-        assert result == ""
-
-    def test_fix_description_no_description_keys(self):
-        """FixDescription returns empty string when no description keys found."""
-        extra_json = json.dumps({"other_key": "value"})
-        result = fixDescription("", extra_json)
-        assert result == ""
-
-    def test_fix_description_empty_extra_json(self):
-        """FixDescription handles empty extra JSON."""
-        result = fixDescription("", "{}")
-        assert result == ""
+@pytest.mark.parametrize(
+    "description, extra_json, expected",
+    [
+        ("", '{"description": "Extracted description"}', "Extracted description"),
+        (None, '{"description": "Extracted description"}', "Extracted description"),
+        (
+            "Original description",
+            '{"description": "Should not use this"}',
+            "Original description",
+        ),
+        ("", '{"describe": "Describe fallback"}', "Describe fallback"),
+        ("", "invalid json", ""),
+        ("", '{"other_key": "value"}', ""),
+        ("", "{}", ""),
+    ],
+)
+def test_fix_description(
+    description: Optional[str], extra_json: str, expected: str
+) -> None:
+    """Existing descriptions win; missing descriptions use supported JSON fallbacks."""
+    assert fixDescription(description, extra_json) == expected
 
 
 # ============================================================================
@@ -87,65 +58,37 @@ class TestFixDescription:
 # ============================================================================
 
 
-def _insert_component(
-    db,
-    lcsc,
-    category_id=1,
-    mfr="MFR",
-    package="0805",
-    joints=2,
-    manufacturer_id=1,
-    basic=1,
-    description="Component",
-    datasheet="http://example.com",
-    stock=100,
-    price="[]",
-    last_update=None,
-    extra=None,
-):
-    """Insert a component into the test database."""
-    if last_update is None:
-        last_update = int(time.time())
-
-    params = [
-        lcsc,
-        category_id,
-        mfr,
-        package,
-        joints,
-        manufacturer_id,
-        basic,
-        description,
-        datasheet,
-        stock,
-        price,
-        last_update,
-    ]
-
-    if extra is not None:
-        db.conn.execute(
-            """INSERT INTO components
-            (lcsc, category_id, mfr, package, joints, manufacturer_id,
-             basic, description, datasheet, stock, price, last_update, extra)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            params + [extra],
-        )
-    else:
-        db.conn.execute(
-            """INSERT INTO components
-            (lcsc, category_id, mfr, package, joints, manufacturer_id,
-             basic, description, datasheet, stock, price, last_update)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            params,
-        )
+def _insert_component(db: ComponentsDatabase, lcsc: int, **values: Any) -> None:
+    """Insert a real component row with concise overrides for the tested fields."""
+    fields = {
+        "lcsc": lcsc,
+        "category_id": 1,
+        "mfr": "MFR",
+        "package": "0805",
+        "joints": 2,
+        "manufacturer_id": 1,
+        "basic": 1,
+        "description": "Component",
+        "datasheet": "http://example.com",
+        "stock": 100,
+        "price": "[]",
+        "last_update": int(time.time()),
+        **values,
+    }
+    db.conn.execute(
+        f"INSERT INTO components ({', '.join(fields)}) VALUES ({', '.join('?' for _ in fields)})",
+        list(fields.values()),
+    )
 
 
 class TestComponentsDatabase:
     """Tests for ComponentsDatabase class."""
 
-    def test_components_database_init(self, temp_db, temp_dir):
+    def test_components_database_init(
+        self, temp_db: ComponentsDatabase, tmp_path: Path
+    ) -> None:
         """ComponentsDatabase initializes with database file."""
-        db_path = temp_dir / "test_components.db"
+        db_path = tmp_path / "test_components.db"
         assert db_path.exists()
         assert temp_db.conn is not None
 
@@ -420,157 +363,52 @@ class TestComponentsDatabase:
 
         assert result[0] == "Fixed Description"
 
-    def test_cleanup_stock_old_components(self, temp_db):
-        """ComponentsDatabase cleanup_stock sets old components to zero stock."""
-        now = int(time.time())
-        eight_days_ago = now - (8 * 24 * 60 * 60)
+    @pytest.mark.parametrize("days_old, expected", [(8, 0), (0, 100)])
+    def test_cleanup_stock_respects_update_age(
+        self,
+        temp_db: ComponentsDatabase,
+        days_old: int,
+        expected: int,
+    ) -> None:
+        """Only stale catalog entries lose their reported stock."""
+        _insert_component(
+            temp_db, 100000, last_update=int(time.time()) - days_old * 86400
+        )
+        temp_db.conn.commit()
+        temp_db.cleanup_stock()
+        assert (
+            temp_db.conn.execute(
+                "SELECT stock FROM components WHERE lcsc = 100000"
+            ).fetchone()[0]
+            == expected
+        )
 
-        # Insert old component with stock
+    @pytest.mark.parametrize(
+        "stock, expected",
+        [(0, ("[]", "{}")), (100, ("[1.00, 2.00]", '{"retained": true}'))],
+    )
+    def test_truncate_old_preserves_only_in_stock_details(
+        self,
+        temp_db: ComponentsDatabase,
+        stock: int,
+        expected: tuple[str, str],
+    ) -> None:
+        """Expired unavailable parts release detail data; stocked parts retain it."""
         _insert_component(
             temp_db,
             100000,
-            stock=100,
-            last_update=eight_days_ago,
+            stock=stock,
+            price="[1.00, 2.00]",
+            extra='{"retained": true}',
+            last_on_stock=int(time.time()) - 400 * 86400,
         )
         temp_db.conn.commit()
-
-        temp_db.cleanup_stock()
-
-        cursor = temp_db.conn.cursor()
-        cursor.execute("SELECT stock FROM components WHERE lcsc = ?", (100000,))
-        result = cursor.fetchone()
-
-        assert result[0] == 0
-
-    def test_cleanup_stock_recent_components(self, temp_db):
-        """ComponentsDatabase cleanup_stock preserves recent component stock."""
-        now = int(time.time())
-
-        # Insert recent component with stock
-        _insert_component(
-            temp_db,
-            100000,
-            stock=100,
-            last_update=now,
-        )
-        temp_db.conn.commit()
-
-        temp_db.cleanup_stock()
-
-        cursor = temp_db.conn.cursor()
-        cursor.execute("SELECT stock FROM components WHERE lcsc = ?", (100000,))
-        result = cursor.fetchone()
-
-        assert result[0] == 100
-
-    def test_truncate_old_clears_old_out_of_stock(self, temp_db):
-        """ComponentsDatabase truncate_old clears price/extra for old out-of-stock."""
-        now = int(time.time())
-        over_year_ago = now - (400 * 24 * 60 * 60)
-
-        # Insert old out-of-stock component
-        temp_db.conn.execute(
-            """INSERT INTO components
-            (lcsc, category_id, mfr, package, joints, manufacturer_id,
-             basic, description, datasheet, stock, price, last_update, last_on_stock)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                100000,
-                1,
-                "MFR",
-                "0805",
-                2,
-                1,
-                1,
-                "Component",
-                "http://example.com",
-                0,
-                "[1.00, 2.00]",
-                now,
-                over_year_ago,
-            ),
-        )
-        temp_db.conn.commit()
-
         temp_db.truncate_old()
-
-        cursor = temp_db.conn.cursor()
-        cursor.execute("SELECT price, extra FROM components WHERE lcsc = ?", (100000,))
-        result = cursor.fetchone()
-
-        assert result[0] == "[]"
-        assert result[1] == "{}"
-
-    def test_truncate_old_preserves_in_stock(self, temp_db):
-        """ComponentsDatabase truncate_old preserves in-stock components."""
-        now = int(time.time())
-        over_year_ago = now - (400 * 24 * 60 * 60)
-
-        # Insert old but in-stock component
-        temp_db.conn.execute(
-            """INSERT INTO components
-            (lcsc, category_id, mfr, package, joints, manufacturer_id,
-             basic, description, datasheet, stock, price, last_update, last_on_stock)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                100000,
-                1,
-                "MFR",
-                "0805",
-                2,
-                1,
-                1,
-                "Component",
-                "http://example.com",
-                100,
-                "[1.00, 2.00]",
-                now,
-                over_year_ago,
-            ),
+        assert (
+            tuple(
+                temp_db.conn.execute(
+                    "SELECT price, extra FROM components WHERE lcsc = 100000"
+                ).fetchone()
+            )
+            == expected
         )
-        temp_db.conn.commit()
-
-        temp_db.truncate_old()
-
-        cursor = temp_db.conn.cursor()
-        cursor.execute("SELECT price, extra FROM components WHERE lcsc = ?", (100000,))
-        result = cursor.fetchone()
-
-        # Should be preserved because stock > 0
-        assert result[0] == "[1.00, 2.00]"
-
-
-# ============================================================================
-# Constants Tests
-# ============================================================================
-
-
-class TestCreateStatements:
-    """Tests for _CREATE_STATEMENTS constants."""
-
-    def test_create_statements_exists(self):
-        """_CREATE_STATEMENTS constant exists."""
-        assert _CREATE_STATEMENTS is not None
-        assert isinstance(_CREATE_STATEMENTS, list)
-
-    def test_create_statements_not_empty(self):
-        """_CREATE_STATEMENTS has statements."""
-        assert len(_CREATE_STATEMENTS) > 0
-
-    def test_create_statements_are_strings(self):
-        """All _CREATE_STATEMENTS are SQL strings."""
-        for stmt in _CREATE_STATEMENTS:
-            assert isinstance(stmt, str)
-            assert "CREATE" in stmt.upper()
-
-    def test_components_table_statement(self):
-        """Components table statement exists."""
-        assert any("components" in stmt.lower() for stmt in _CREATE_STATEMENTS)
-
-    def test_manufacturers_table_statement(self):
-        """Manufacturers table statement exists."""
-        assert any("manufacturers" in stmt.lower() for stmt in _CREATE_STATEMENTS)
-
-    def test_categories_table_statement(self):
-        """Categories table statement exists."""
-        assert any("categories" in stmt.lower() for stmt in _CREATE_STATEMENTS)

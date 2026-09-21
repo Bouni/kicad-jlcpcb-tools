@@ -175,8 +175,7 @@ class PartPreferencesDialog(wx.Dialog):
         self.populate_part_preferences_list()
 
     def quit_dialog(self, *_: object) -> None:
-        """Close this dialog."""
-        self.Destroy()
+        """End the modal session; its caller owns destruction after return."""
         self.EndModal(0)
 
     def enable_toolbar_buttons(self, state: bool) -> None:
