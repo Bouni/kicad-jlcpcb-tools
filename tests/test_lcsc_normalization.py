@@ -13,6 +13,7 @@ _lcsc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_lcsc)
 
 normalize_lcsc = _lcsc.normalize_lcsc
+is_lcsc_part = _lcsc.is_lcsc_part
 
 
 class TestNormalizeLcsc:
@@ -33,3 +34,32 @@ class TestNormalizeLcsc:
     def test_distinct_parts_stay_distinct(self):
         """Normalization does not merge different part numbers."""
         assert normalize_lcsc("C1234") != normalize_lcsc("C12345")
+
+
+class TestIsLcscPart:
+    """is_lcsc_part validates whether a normalized string is an LCSC part number."""
+
+    @pytest.mark.parametrize(
+        "value", ["C12345", "c12345", " C12345 ", "\tc12345\n", "C1"]
+    )
+    def test_valid_part_numbers_accepted(self, value):
+        """Standard C-prefix followed by ASCII digits is recognized."""
+        assert is_lcsc_part(value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",
+            None,
+            0,
+            "C",
+            "12345",
+            "CC12345",
+            "C１２３",  # Fullwidth decimal digits
+            "C¹²³",  # Superscript digits
+            "C 12345",  # Internal whitespace
+        ],
+    )
+    def test_invalid_values_and_unicode_digits_rejected(self, value):
+        """Non-part strings and non-ASCII digits are rejected."""
+        assert is_lcsc_part(value) is False
