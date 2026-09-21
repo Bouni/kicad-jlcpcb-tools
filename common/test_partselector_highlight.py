@@ -100,8 +100,8 @@ def test_simplify_footprint_name_extracts_metric_size():
     assert simplify_footprint_name("Resistor_SMD:R_0603_1608Metric") == "0603"
 
 
-def test_simplify_footprint_name_falls_back_to_last_token():
-    """Non-metric footprint names fall back to a readable final token."""
+def test_simplify_footprint_name_reads_the_package_designator():
+    """Non-metric footprint names resolve to the package the catalog lists."""
     assert simplify_footprint_name("Package_TO_SOT_SMD:SOT-23") == "SOT-23"
 
 
@@ -131,21 +131,25 @@ def test_expand_value_for_capacitor_without_suffix_adds_f_variants():
 
 def test_expand_footprint_adds_known_aliases():
     """Footprint aliases include known compatible package naming alternatives."""
-    assert "SO-8" in expand_footprint("U1", "Package_SO:SIOC-8")
+    assert "SO-8" in expand_footprint("U1", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
     assert "TO-236" in expand_footprint("Q1", "Package_TO_SOT_SMD:SOT-23")
 
 
 def test_expand_footprint_adds_reverse_aliases_generated_from_forward_map():
-    """Reverse aliases are auto-generated from the canonical alias map."""
-    assert "SIOC-8" in expand_footprint("U2", "Package_SO:SO-8")
-    assert "SOT-23" in expand_footprint("Q2", "Package_TO_SOT_SMD:TO-236")
+    """Reverse aliases are auto-generated from the canonical alias map.
+
+    Only the SO-8 direction is asserted: no installed KiCad library names a
+    footprint TO-236, so the reverse of that entry cannot fire on a real board.
+    """
+    assert "SOIC-8" in expand_footprint("U2", "Package_SO:SO-8_3.9x4.9mm_P1.27mm")
+    assert "SOIC-8" in expand_footprint("U3", "Package_SO:Diodes_SO-8EP")
 
 
-def test_expand_footprint_maps_capacitor_electrolytic_diameter():
-    """Capacitor electrolytic footprints emit an SMD diameter term for matching."""
-    assert "SMD,D6.3" in expand_footprint("C5", "Capacitor_SMD:CP_Elec_6.3x7.7")
+def test_expand_footprint_maps_electrolytic_diameter():
+    """Electrolytic footprints emit the SMD diameter term the catalog writes.
 
-
-def test_expand_footprint_diameter_mapping_is_capacitor_only():
-    """Electrolytic diameter mapping is only applied for capacitor references."""
-    assert "SMD,D6.3" not in expand_footprint("U5", "Capacitor_SMD:CP_Elec_6.3x7.7")
+    The reference designator no longer gates this: the footprint itself says the
+    part is an electrolytic can, whatever the schematic called it.
+    """
+    assert "SMD,D6.3x" in expand_footprint("C5", "Capacitor_SMD:CP_Elec_6.3x7.7")
+    assert "SMD,D6.3x" in expand_footprint("U5", "Capacitor_SMD:CP_Elec_6.3x7.7")

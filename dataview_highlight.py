@@ -18,8 +18,83 @@ _HIGHLIGHT_FG_SELECTED = (255, 215, 64)
 _MIN_HIGHLIGHT_TERM_LENGTH = 2
 _HIGHLIGHT_VALUE_SEPARATOR = "\x1f"
 
+# Package families the catalog actually uses, as
+#
+#     SELECT upper(<leading letters>), sum(count) FROM parts GROUP BY Package
+#
+# reports them over a 717,025-part snapshot, keeping every family carrying at
+# least 200 parts.  Mounting styles the catalog puts in the same column -- SMD,
+# Plugin, Push-Pull, Case, ITO -- are deliberately absent: they describe how a
+# part attaches rather than which package it is, and they match right across
+# the catalog.  This is vocabulary, not a list of supported footprints; a
+# family here still has to appear in the footprint name to be used.
+_PACKAGE_FAMILIES = frozenset(
+    """
+    ABS BGA BOLT CDIP DDPAK DFN DIP DO DPAK DSBGA DSO DT ESOP FBGA GBU HC HTQFP
+    HTSSOP HVQFN LFCSP LFPAK LGA LL LQFP MELF MINIMELF MSOP NFBGA PDFN PDIP PLCC
+    POWERDI POWERPAK QFN QSOP SC SIP SMA SMAF SMAG SMB SMBF SMC SMCG SO SOD SOIC
+    SON SOP SOT SSOP TDFN TDSON TFBGA TO TOLL TQFN TQFP TSOP TSOT TSSOP UDFN
+    UFBGA UFQFPN UQFN VFQFPN VQFN VSON VSSOP WDFN WLCSP WQFN WSON
+    """.split()
+)
+
+_FAMILY_ALTERNATION = "|".join(sorted(_PACKAGE_FAMILIES, key=len, reverse=True))
+
+# A whole segment that is a family, an optional lettered subtype, then size and
+# pin-count groups: SOIC-8, SOT-23-5, QFN-24-1EP, HC49, SOD-323F, DFN-S-8-1EP.
+# Anchored at both ends, and bare letters may only follow a number or a dash, so
+# a segment that merely begins with a family word cannot match: Small is not an
+# SMA, and Fastron's SMCC series is not an SMC.
+#
+# The subtype is matched so the segment is recognised, then dropped: the catalog
+# writes DFN-8 and LFCSP-24, never DFN-S-8 or LFCSP-VQ-24.  It only counts as a
+# subtype when a dashed number follows, or the letters and the digits beside
+# them would be read as a package that was never there: D_MELF-RM10 is a MELF
+# diode, not a MELF10, and Texas_VQFN-RNR0011A-11 is not a VQFN0011.
+#
+# Only the first group may omit its dash, as HC49 does.  Making the separator
+# mandatory after that leaves a run of digits exactly one way to divide, which
+# matters because this runs once per row: with the dash optional throughout, a
+# 24-digit segment that fails the anchor took a second to reject.
+_PACKAGE_SEGMENT_RE = re.compile(
+    r"^(?P<family>" + _FAMILY_ALTERNATION + r")"
+    r"(?:-[A-Za-z]{1,3}(?=-\d))?(?P<groups>(?:\d+[A-Za-z]*)?(?:-\d+[A-Za-z]*)*)$",
+    re.IGNORECASE,
+)
+
+# One size or pin-count group within that tail: -23, -5, -1EP, 323F.
+_DESIGNATOR_GROUP_RE = re.compile(r"(-?)(\d+)([A-Za-z]*)")
+
+# Chip sizes: R_0603_1608Metric, C_01005_0402Metric.  The imperial code is what
+# the catalog writes, and it always carries its metric companion, so the pair
+# is what identifies it -- four digits elsewhere in a name are a dimension.
+_CHIP_SIZE_RE = re.compile(r"_(\d{4,5})_\d+Metric", re.IGNORECASE)
+
+# SMD electrolytics: KiCad names them by diameter and height, CP_Elec_6.3x5.9,
+# and the catalog by diameter and length, SMD,D6.3xL5.9mm.  Only the diameter
+# is worth matching: boards routinely take a 7.7mm-tall can for a 5.9mm
+# footprint, so pinning the height finds a fraction of the real candidates.
+# The trailing x anchors the diameter, keeping D6.3 off D6.35.
+_ELECTROLYTIC_RE = re.compile(r"^CP_Elec_(\d+(?:\.\d+)?)x\d", re.IGNORECASE)
+
+# Tantalum case codes: CP_EIA-3528-21_Kemet-B, which the catalog writes
+# CASE-B-3528-21(mm).  As with the electrolytics above, only the land size is
+# worth matching -- the trailing number is KiCad's height, and pinning it finds
+# a sliver or nothing: 7343-40 reaches 2 rows where 7343- reaches 692, and
+# 3528-15 reaches none where 3528- reaches 811.  The dash is kept because the
+# bare size is also a chip package: 1608- is 377 rows, 1608 is 3,724.
+_EIA_CASE_RE = re.compile(r"^CP_EIA-(\d+)-\d", re.IGNORECASE)
+
+# Below three characters Library.search falls back to a LIKE over the
+# description, where a package designator is prose rather than a package: "SC"
+# matches every part whose description happens to contain it.
+_MIN_TOKEN_LENGTH = 3
+
+# SIOC-8 was a transposition of SOIC-8: no KiCad footprint and no catalog part
+# spells it, so this entry never fired.  These are highlight terms only -- the
+# search ANDs its keywords, so no alias here can express "SOIC-8 or SO-8".
 _FOOTPRINT_ALIAS_FORWARD = {
-    "SIOC-8": "SO-8",
+    "SOIC-8": "SO-8",
     "SOT-23": "TO-236",
 }
 _FOOTPRINT_ALIAS_MAP = dict(_FOOTPRINT_ALIAS_FORWARD)
@@ -153,28 +228,85 @@ def expand_value(reference: str, value: str) -> list[str]:
     return deduped
 
 
+def _base_designator(segment: str) -> str:
+    """Return the package a whole footprint-name segment names, or "" if none.
+
+    The designator is the family and its numbers: SOT-23-5 keeps its pin count,
+    because the catalog spells that and it reaches 7,302 rows where SOT-23
+    reaches 31,568.  KiCad's letter suffixes are dropped, because the catalog
+    does not use them -- it writes SOD-323 for SOD-323F and has no SOIC-8-1EP
+    at all.
+    """
+    match = _PACKAGE_SEGMENT_RE.match(segment)
+    if match is None:
+        return ""
+    designator = match.group("family")
+    for position, (dash, digits, letters) in enumerate(
+        _DESIGNATOR_GROUP_RE.findall(match.group("groups"))
+    ):
+        if position and letters:
+            # A later group carrying letters qualifies the package rather than
+            # sizing it: the EP of QFN-24-1EP counts exposed pads.
+            break
+        designator += dash + digits
+        if letters:
+            # Letters on the size itself are KiCad's: SOD-323F is the catalog's
+            # SOD-323, which also reaches the SOD-323F and SOD-323FL rows.
+            break
+    return designator
+
+
 def simplify_footprint_name(footprint: str) -> str:
-    """Extract a short package token such as `0603` from a KiCad footprint name."""
+    """Return the catalog's package for a footprint name, or "" if it has none.
+
+    ``Package_SO:SOIC-8_3.9x4.9mm_P1.27mm`` gives ``SOIC-8``,
+    ``Resistor_SMD:R_0603_1608Metric`` gives ``0603``, and
+    ``Connector_JST:JST_PH_B3B-PH-K_1x03_P2.00mm_Vertical`` gives ``""``.
+
+    Returning nothing is a real answer, not a failure.  Most KiCad footprints
+    are connectors, mounting holes and test points, which the catalog either
+    does not stock or names in a way no rule can reach from the footprint; for
+    those the value alone is the better search.  The part selector ANDs this
+    token with the value, so a token the catalog never writes returns nothing
+    at all rather than merely returning too much.
+    """
     if not footprint:
         return ""
+    name = str(footprint).split(":")[-1]
 
-    match = re.search(r"_([0-9]{4})_\d+Metric\b", footprint)
-    if match:
-        return match.group(1)
+    chip = _CHIP_SIZE_RE.search(name)
+    if chip:
+        return chip.group(1)
+    electrolytic = _ELECTROLYTIC_RE.match(name)
+    if electrolytic:
+        return f"SMD,D{electrolytic.group(1)}x"
+    eia = _EIA_CASE_RE.match(name)
+    if eia:
+        return f"{eia.group(1)}-"
 
-    footprint_name = str(footprint).split(":")[-1]
-    return (
-        footprint_name.rsplit("_", maxsplit=1)[-1]
-        if "_" in footprint_name
-        else footprint_name
-    )
+    segments = name.split("_")
+    for index, segment in enumerate(segments):
+        designator = _base_designator(segment)
+        if len(designator) < _MIN_TOKEN_LENGTH:
+            continue
+        if not any(c.isdigit() for c in designator) and len(segments[index + 1 :]) > 1:
+            # A family carrying no size of its own needs the rest of the name
+            # to vouch for it.  One trailing segment is a variant of that
+            # package -- D_SMA_Handsoldering, R_MELF_MMB-0207, D_SMB_Modified.
+            # More than one means the family word is describing something else:
+            # SW_DIP_SPSTx01_Slide_9.78x4.72mm is a DIP switch, which the
+            # catalog lists under Plugin,P=2.54mm, and
+            # SMA_Amphenol_132134-10_Vertical is an RF connector.
+            continue
+        return designator
+    return ""
 
 
 def expand_footprint(reference: str, footprint: str) -> list[str]:
     """Return footprint variants used for highlight matching.
 
-    Includes simplified package tokens, selected alias mappings, and optional
-    designator-specific mappings.
+    The package designator the catalog would name, plus the alias spellings
+    known to be equivalent to it.
     """
     raw = "" if footprint is None else str(footprint).strip()
     if not raw:
@@ -192,16 +324,6 @@ def expand_footprint(reference: str, footprint: str) -> list[str]:
     for source, target in _FOOTPRINT_ALIAS_MAP.items():
         if source in upper_name:
             variants.append(target)
-
-    # Capacitor-specific mapping: CP_Elec_6.3x7.7 -> SMD,D6.3
-    ref = "" if reference is None else str(reference).strip()
-    if ref.upper().startswith("C"):
-        match = re.search(
-            r"CP_ELEC_([0-9]+(?:\.[0-9]+)?)X[0-9]+(?:\.[0-9]+)?",
-            upper_name,
-        )
-        if match:
-            variants.append(f"SMD,D{match.group(1)}")
 
     deduped = []
     for variant in variants:
