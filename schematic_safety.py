@@ -126,12 +126,20 @@ def assert_schematics_not_locked(
     """
     approved_set = {os.path.realpath(p) for p in approved}
     locks = []
+    checked: set[str] = set()
     for path in schematic_paths:
         if path in approved or os.path.realpath(path) in approved_set:
             continue
-        lock_info = check_schematic_lock(path)
-        if lock_info is not None:
-            locks.append((path, lock_info))
+        # KiCad names the lock after the path it opened, so a schematic reached
+        # through a symlink may be locked beside the link or beside its target.
+        for candidate in dict.fromkeys((path, os.path.realpath(path))):
+            lock_path = get_schematic_lock_path(candidate)
+            if lock_path in checked:
+                continue
+            checked.add(lock_path)
+            lock_info = check_schematic_lock(candidate)
+            if lock_info is not None:
+                locks.append((candidate, lock_info))
     if locks:
         raise SchematicLockedError(locks)
 
@@ -234,14 +242,19 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
     """Recursively collect all schematic files in a project hierarchy.
 
     Sheet file paths are resolved against the directory of the schematic
-    that references them, as KiCad does.
+    that references them, as KiCad does. Symlinks are kept rather than
+    resolved: KiCad names its lock file after the path it opened and looks
+    for sub-sheets beside it, so a schematic opened through a link is locked
+    beside the link, and its sub-sheets live beside the link.
 
     Args:
         root_sch_path: Absolute path to the root .kicad_sch file.
 
     Returns:
-        List of absolute paths to all discovered schematic files,
-        ordered depth-first starting with the root.
+        List of absolute, normalized paths to all discovered schematic
+        files as they are reached, ordered depth-first starting with the
+        root. Two paths may name one file; callers that write deduplicate
+        by os.path.realpath.
 
     Raises:
         FileNotFoundError: If a referenced sheet file does not exist, so an
@@ -253,16 +266,20 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
     visited: set[str] = set()
 
     def _traverse(current_path: str) -> None:
-        norm = os.path.realpath(current_path)
-        if norm in visited:
+        opened = os.path.normpath(os.path.abspath(current_path))
+        base_dir = os.path.dirname(opened)
+        # Two names for one file in one directory share a lock file and
+        # resolve their sub-sheets alike, so the walk stops at the second
+        # name; this also ends a loop through a directory link.
+        key = os.path.join(os.path.realpath(base_dir), os.path.basename(opened))
+        if key in visited:
             return
-        visited.add(norm)
-        discovered.append(norm)
+        visited.add(key)
+        discovered.append(opened)
 
-        with open(norm, encoding="utf-8", errors="replace") as f:
+        with open(opened, encoding="utf-8", errors="replace") as f:
             content = f.read()
 
-        base_dir = os.path.dirname(norm)
         for name in _sheet_file_names(content):
             sheet_subpath = name.strip()
             if not sheet_subpath:
@@ -271,7 +288,7 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
             if not os.path.isfile(child_path):
                 raise FileNotFoundError(
                     f"Sheet file '{sheet_subpath}' used in "
-                    f"'{os.path.basename(norm)}' does not exist: {child_path}"
+                    f"'{os.path.basename(opened)}' does not exist: {child_path}"
                 )
             _traverse(child_path)
 
@@ -350,17 +367,19 @@ def atomic_write_schematic(
     """Atomically write content to a schematic file, safely creating a backup.
 
     Args:
-        path: Path to the target schematic file.
+        path: Path to the target schematic file. A symlink is followed, as
+            KiCad follows it when it saves: the file it points to is
+            replaced and the link is kept.
         content: The text content to write.
         make_backup: If True and target exists, copies existing target to
-            `<path>_old` first. The target is not replaced unless that
-            backup is complete.
+            `<path>_old` first, beside the file itself rather than a link
+            to it. The target is not replaced unless that backup is complete.
 
     Raises:
         OSError: If backing up, writing or replacing fails.
 
     """
-    abs_path = os.path.abspath(path)
+    abs_path = os.path.realpath(path)
 
     # 1. Back up the existing file; an earlier backup stays until this one is whole
     if make_backup and os.path.exists(abs_path):

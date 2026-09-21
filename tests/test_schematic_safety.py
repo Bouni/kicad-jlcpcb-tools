@@ -227,9 +227,9 @@ def test_collect_schematic_hierarchy(tmp_path: Path) -> None:
 
     hierarchy = collect_schematic_hierarchy(str(root))
     assert hierarchy == [
-        str(root.resolve()),
-        str(sub1.resolve()),
-        str(sub2.resolve()),
+        str(root),
+        str(sub1),
+        str(sub2),
     ]
 
 
@@ -391,7 +391,7 @@ def test_collect_schematic_hierarchy_cyclic(tmp_path: Path) -> None:
     )
 
     hierarchy = collect_schematic_hierarchy(str(root))
-    assert hierarchy == [str(root.resolve()), str(sub.resolve())]
+    assert hierarchy == [str(root), str(sub.resolve())]
 
 
 def test_collect_schematic_hierarchy_missing_file(tmp_path: Path) -> None:
@@ -425,8 +425,8 @@ def test_collect_schematic_hierarchy_ignores_symbol_sheetfile_fields(
     sub.write_text("(kicad_sch)\n", encoding="utf-8")
 
     assert collect_schematic_hierarchy(str(root)) == [
-        str(root.resolve()),
-        str(sub.resolve()),
+        str(root),
+        str(sub),
     ]
 
 
@@ -443,8 +443,8 @@ def test_collect_schematic_hierarchy_reads_the_older_sheet_file_name(
     sub.write_text("(kicad_sch)\n", encoding="utf-8")
 
     assert collect_schematic_hierarchy(str(root)) == [
-        str(root.resolve()),
-        str(sub.resolve()),
+        str(root),
+        str(sub),
     ]
 
 
@@ -465,9 +465,9 @@ def test_collect_schematic_hierarchy_nested_folders(tmp_path: Path) -> None:
     regulator.write_text("(kicad_sch)\n", encoding="utf-8")
 
     assert collect_schematic_hierarchy(str(root)) == [
-        str(root.resolve()),
-        str(power.resolve()),
-        str(regulator.resolve()),
+        str(root),
+        str(power),
+        str(regulator),
     ]
 
 
@@ -494,3 +494,96 @@ def test_atomic_write_schematic_new_file_permissions(
 
     assert sch.read_text(encoding="utf-8") == "new file\n"
     assert stat.S_IMODE(sch.stat().st_mode) == 0o640
+
+
+def _symlinked_schematic(
+    tmp_path: Path, content: str = "(kicad_sch)\n"
+) -> tuple[Path, Path]:
+    """Create `shared/real.kicad_sch` and the link `project/board.kicad_sch` to it."""
+    target = tmp_path / "shared" / "real.kicad_sch"
+    alias = tmp_path / "project" / "board.kicad_sch"
+    target.parent.mkdir()
+    alias.parent.mkdir()
+    target.write_text(content, encoding="utf-8")
+    alias.symlink_to(target)
+    return target, alias
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_lock_beside_a_symlinked_schematic_is_found(tmp_path: Path) -> None:
+    """KiCad names its lock after the path it opened, which may be a link."""
+    _target, alias = _symlinked_schematic(tmp_path)
+    _lock(alias, "alice")
+
+    with pytest.raises(
+        SchematicLockedError, match="'board.kicad_sch' is locked"
+    ) as raised:
+        assert_schematics_not_locked([str(alias)])
+    assert [path for path, _info in raised.value.locks] == [str(alias)]
+
+    assert_schematics_not_locked([str(alias)], approved=[str(alias)])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_lock_beside_the_target_of_a_symlinked_schematic_is_found(
+    tmp_path: Path,
+) -> None:
+    """A session that opened the target has locked the file the link would write."""
+    target, alias = _symlinked_schematic(tmp_path)
+    _lock(target, "bob")
+
+    with pytest.raises(
+        SchematicLockedError, match="'real.kicad_sch' is locked by bob"
+    ) as raised:
+        assert_schematics_not_locked([str(alias)])
+    reported = [path for path, _info in raised.value.locks]
+    assert reported == [str(target.resolve())]
+
+    assert_schematics_not_locked([str(alias)], approved=reported)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_collect_schematic_hierarchy_keeps_the_opened_path(tmp_path: Path) -> None:
+    """Sub-sheets resolve beside the sheet as opened, through a link, as in KiCad."""
+    _target, alias = _symlinked_schematic(
+        tmp_path,
+        '(kicad_sch\n  (sheet (property "Sheetfile" "child.kicad_sch"))\n)\n',
+    )
+    child = alias.parent / "child.kicad_sch"
+    child.write_text("(kicad_sch)\n", encoding="utf-8")
+
+    assert collect_schematic_hierarchy(str(alias)) == [str(alias), str(child)]
+
+    # A child beside the link's target is not the child KiCad would load.
+    child.rename(tmp_path / "shared" / "child.kicad_sch")
+    with pytest.raises(FileNotFoundError, match="Sheet file 'child.kicad_sch'"):
+        collect_schematic_hierarchy(str(alias))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_collect_schematic_hierarchy_ends_a_directory_link_loop(
+    tmp_path: Path,
+) -> None:
+    """A sheet reached again through a directory link is the same sheet."""
+    root = tmp_path / "root.kicad_sch"
+    (tmp_path / "loop").symlink_to(tmp_path, target_is_directory=True)
+    root.write_text(
+        '(kicad_sch\n  (sheet (property "Sheetfile" "loop/root.kicad_sch"))\n)\n',
+        encoding="utf-8",
+    )
+
+    assert collect_schematic_hierarchy(str(root)) == [str(root)]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_atomic_write_schematic_writes_the_target_of_a_link(tmp_path: Path) -> None:
+    """Like KiCad, the export writes through a link; the backup sits by the target."""
+    target, alias = _symlinked_schematic(tmp_path, "original content\n")
+
+    atomic_write_schematic(str(alias), "new content\n", make_backup=True)
+
+    assert alias.is_symlink()
+    assert target.read_text(encoding="utf-8") == "new content\n"
+    backup = target.parent / "real.kicad_sch_old"
+    assert backup.read_text(encoding="utf-8") == "original content\n"
+    assert sorted(p.name for p in alias.parent.iterdir()) == ["board.kicad_sch"]

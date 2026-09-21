@@ -222,17 +222,19 @@ class SchematicExport:
                     "Default schematic export requires reference, LCSC, and BOM data."
                 )
 
-        # Collect and deduplicate all schematic files across hierarchies
+        # Every name a sheet is reached by is checked for a lock, because
+        # KiCad locks the path it opened; each file is then written once.
+        encountered = list(
+            dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
+        )
+        assert_schematics_not_locked(encountered, approved_locks)
         all_paths = []
         seen_paths = set()
-        for p in paths:
-            for hp in collect_schematic_hierarchy(p):
-                norm = os.path.realpath(hp)
-                if norm not in seen_paths:
-                    seen_paths.add(norm)
-                    all_paths.append(hp)
-
-        assert_schematics_not_locked(all_paths, approved_locks)
+        for hp in encountered:
+            norm = os.path.realpath(hp)
+            if norm not in seen_paths:
+                seen_paths.add(norm)
+                all_paths.append(hp)
 
         if is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")

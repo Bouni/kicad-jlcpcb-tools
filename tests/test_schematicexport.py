@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 import importlib.util
 import logging
+import os
 from pathlib import Path
 import re
 import types
@@ -911,3 +912,69 @@ def test_export_writes_nothing_past_an_unapproved_lock(
     assert re.findall(
         r'\(property\s+"LCSC"\s+"([^"]*)"', child.read_text(encoding="utf-8")
     ) == ["CHILD"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_finds_the_lock_beside_a_symlinked_schematic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """KiCad locks the path it opened, which may be a link to the file it writes."""
+    target = tmp_path / "shared" / "real.kicad_sch"
+    target.parent.mkdir()
+    alias = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("RV2",))
+    target.write_text(original, encoding="utf-8")
+    alias.symlink_to(target)
+    (tmp_path / "~board.kicad_sch.lck").write_text(
+        '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+    )
+    parts = [_part("RV2", "NEW", False)]
+
+    with pytest.raises(
+        SchematicLockedError, match="'board.kicad_sch' is locked by alice@mac"
+    ) as raised:
+        _load_schematic(tmp_path, monkeypatch, version, [alias], parts)
+    assert target.read_text(encoding="utf-8") == original
+
+    approved = [locked for locked, _info in raised.value.locks]
+    _load_schematic(
+        tmp_path, monkeypatch, version, [alias], parts, approved_locks=approved
+    )
+    assert alias.is_symlink()
+    result = target.read_text(encoding="utf-8")
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
+    backup = target.parent / "real.kicad_sch_old"
+    assert backup.read_text(encoding="utf-8") == original
+    assert not (tmp_path / "board.kicad_sch_old").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_checks_every_name_of_a_shared_schematic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """A lock beside any name of a schematic stops the export; it is written once."""
+    target = tmp_path / "real.kicad_sch"
+    alias = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("RV2",))
+    target.write_text(original, encoding="utf-8")
+    alias.symlink_to(target)
+    (tmp_path / "~board.kicad_sch.lck").write_text(
+        '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+    )
+    parts = [_part("RV2", "NEW", False)]
+
+    with pytest.raises(SchematicLockedError, match="'board.kicad_sch'") as raised:
+        _load_schematic(tmp_path, monkeypatch, version, [target, alias], parts)
+    assert target.read_text(encoding="utf-8") == original
+
+    approved = [locked for locked, _info in raised.value.locks]
+    _load_schematic(
+        tmp_path, monkeypatch, version, [target, alias], parts, approved_locks=approved
+    )
+    result = target.read_text(encoding="utf-8")
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
+    # Written once: the backup holds the original, not an already exported copy.
+    backup = tmp_path / "real.kicad_sch_old"
+    assert backup.read_text(encoding="utf-8") == original
