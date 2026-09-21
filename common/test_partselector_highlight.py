@@ -105,6 +105,11 @@ def test_simplify_footprint_name_reads_the_package_designator():
     assert simplify_footprint_name("Package_TO_SOT_SMD:SOT-23") == "SOT-23"
 
 
+def test_expand_footprint_highlights_a_bare_chip_size():
+    """A KiCad 4 chip footprint still lends its size to the parameter highlight."""
+    assert "0603" in expand_footprint("R1", "Resistor_SMD:R_0603")
+
+
 def test_expand_value_for_resistor_adds_ohm_symbol_variants():
     """Resistor values expand with Ω-compatible alternatives for matching."""
     assert expand_value("R1", "390R") == ["390R", "390Ω"]
