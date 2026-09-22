@@ -54,28 +54,36 @@ Clone this repo into your KiCad `scripting/plugins` folder.
 
 Alternatively, navigate to the folder in your terminal:
 
-**Windows**
+**Windows (Command Prompt)**
 
-```sh
-cd %USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\  # <version> can be 7.0, 8.0, 9.0, or X.YY depending on the version you use
+```cmd
+cd "%USERPROFILE%\Documents\KiCad\<version>\scripting\plugins"
+git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
+```
+
+**Windows (PowerShell)**
+
+```powershell
+cd "$HOME\Documents\KiCad\<version>\scripting\plugins"
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
 **Linux**
 
 ```sh
-cd ~/.local/share/kicad/<version>/scripting/plugins  # <version> can be 7.0, 8.0, 9.0, or X.YY depending on the version you use
+cd ~/.local/share/kicad/<version>/scripting/plugins
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
 **macOS**
 
 ```sh
-cd ~/Documents/KiCad/<version>/scripting/plugins  # <version> can be 7.0, 8.0, 9.0, or X.YY depending on the version you use
+cd ~/Documents/KiCad/<version>/scripting/plugins
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
-You may need to create the `scripting/plugins` folder if it does not exist.
+> [!NOTE]
+> `<version>` can be `7.0`, `8.0`, `9.0`, or `X.YY` depending on the version you use. You may need to create the `scripting/plugins` folder if it does not exist.
 
 After cloning, choose **Tools → External Plugins → Refresh Plugins** in the *PCB Editor* (or restart KiCad) to load the plugin.
 
@@ -333,7 +341,7 @@ The <i><b>{working directory}</b></i> should be your plugins directory, ie:
 |Windows | %USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\ |
 
 > [!NOTE]  
-> <version> can be 7.0, 8.0, or X.YY depending on the version you use
+> <version> can be 7.0, 8.0, 9.0, or X.YY depending on the version you use
 
 #### Plugin folder name
 
