@@ -572,6 +572,9 @@ def test_schematic_autosave_native_failure_keeps_window_open_then_retries(
         export_module = import_module(
             type(ui.controller).__module__.rsplit(".", 2)[0] + ".schematicexport"
         )
+        exporter.return_value.load_schematic.return_value = export_module.ExportOutcome(
+            saved=("component-1",), retirement_eligible=True
+        )
         with (
             patch.object(export_module, "SchematicExport", exporter),
             patch.object(
@@ -602,8 +605,9 @@ def test_schematic_autosave_native_failure_keeps_window_open_then_retries(
             exporter.assert_called_once_with(ui.dialog)
             args = exporter.return_value.load_schematic.call_args
             assert args.args == ([str(path)],)
-            assert args.kwargs["variant_name"] == ""
-            assert {part["variant_name"] for part in args.kwargs["parts"]} == {""}
+            # The exporter captures the live Default board itself; the caller
+            # must not substitute cached variant rows or a previous snapshot.
+            assert args.kwargs == {"approved_locks": (), "variant_name": ""}
             assert ui.controller.session.output_variant == "B"
             assert ui.controller.closed and not ui.controller.timer.IsRunning()
             assert not ui.messages
