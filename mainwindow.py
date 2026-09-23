@@ -1631,6 +1631,8 @@ class JLCPCBTools(wx.Frame):
 
     def show_assembly_mode_details(self, *_: Any) -> None:
         """Open or raise the modeless assembly-mode details dialog."""
+        if getattr(self, "_closing", False):
+            return
         controller = getattr(self, "_variant_controller", None)
         parts = None
         if controller is not None:
@@ -1641,6 +1643,14 @@ class JLCPCBTools(wx.Frame):
                 if self._why_standard_dialog is not None:
                     self._why_standard_dialog.Close()
                 controller._error(error)
+                return
+        else:
+            try:
+                parts = self.read_assembly_parts()
+            except (BoardContextChanged, sqlite3.Error, OSError) as error:
+                if self._why_standard_dialog is not None:
+                    self._why_standard_dialog.Close()
+                self._set_project_storage_error(error)
                 return
         if self.bom_estimator_decision is None:
             self.recompute_bom_estimate()
@@ -1655,20 +1665,25 @@ class JLCPCBTools(wx.Frame):
 
     def recompute_bom_estimate(self) -> None:
         """Recompute and display estimated BOM+assembly cost."""
+        if getattr(self, "_closing", False):
+            return
         if controller := getattr(self, "_variant_controller", None):
             if not controller.session.generating:
                 controller.recompute()
             return
-        board_count = self._normalize_board_count(self.bom_estimator_board_count)
-        self.bom_estimator_decision = self.bom_estimator_controller.recompute(
-            board_count
-        )
-        if self._why_standard_dialog is not None:
-            parts = self.read_assembly_parts()
-            self._why_standard_dialog.update_content(
-                self.bom_estimator_decision,
-                parts,
+        try:
+            board_count = self._normalize_board_count(self.bom_estimator_board_count)
+            self.bom_estimator_decision = self.bom_estimator_controller.recompute(
+                board_count
             )
+            if self._why_standard_dialog is not None:
+                parts = self.read_assembly_parts()
+                self._why_standard_dialog.update_content(
+                    self.bom_estimator_decision,
+                    parts,
+                )
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
 
     def on_bom_data_changed(self, _e):
         """Coalesce a burst of BomDataChangedEvent posts into one recompute.
@@ -1687,11 +1702,15 @@ class JLCPCBTools(wx.Frame):
     def _run_coalesced_bom_recompute(self) -> None:
         """Drain the coalesced recompute latch and run a single estimate."""
         self._bom_recompute_scheduled = False
+        if getattr(self, "_closing", False):
+            return
         self.recompute_stock_concerns()
         self.recompute_bom_estimate()
 
     def recompute_stock_concerns(self) -> None:
         """Refresh Stock attributes from all live BOM parts, before view filtering."""
+        if getattr(self, "_closing", False):
+            return
         if getattr(self, "_variant_controller", None):
             # The matrix computes availability from each variant's own population.
             return
@@ -1724,6 +1743,9 @@ class JLCPCBTools(wx.Frame):
                     getattr(self, "bom_estimator_board_count", 5)
                 ),
             )
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
         except (sqlite3.Error, OSError) as error:
             self.logger.warning("Unable to update stock concerns: %s", error)
             refs = set()
@@ -1747,12 +1769,17 @@ class JLCPCBTools(wx.Frame):
         self, references: Optional[Iterable[str]] = None
     ) -> None:
         """Start background enrichment for missing assembly process metadata."""
+        if getattr(self, "_closing", False):
+            return
         if controller := getattr(self, "_variant_controller", None):
             return controller.start_enrichment()
         if self.store is None:
             return
         try:
             targets = self.store.get_assembly_enrichment_targets(references)
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
         except sqlite3.Error as error:
             self.logger.warning("Unable to start assembly enrichment: %s", error)
             return
@@ -2018,9 +2045,18 @@ class JLCPCBTools(wx.Frame):
             self.hide_pos_button.SetLabel("Hide excluded POS")
         self.populate_footprint_list()
 
-    def OnFootprintSelected(self, *_):
+    def OnFootprintSelected(self, *_: object) -> None:
         """Enable the toolbar buttons when a selection was made."""
-        if self.select_alike_in_progress:
+        if (
+            self.select_alike_in_progress
+            or getattr(self, "_closing", False)
+            or getattr(self, "_project_storage_unavailable", False)
+        ):
+            return
+        try:
+            board = self._get_current_board()
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
             return
 
         self.enable_part_specific_toolbar_buttons(
@@ -2039,7 +2075,7 @@ class JLCPCBTools(wx.Frame):
         if self.footprint_list.GetSelectedItemsCount() > 0:
             for item in self.footprint_list.GetSelections():
                 ref = self.partlist_data_model.get_reference(item)
-                fp = self._get_current_board().FindFootprintByReference(ref)
+                fp = board.FindFootprintByReference(ref)
                 if fp:
                     fp.SetSelected()
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
