@@ -30,6 +30,12 @@ class SchematicVariantExportError(ValueError):
     """Reject named-variant data before the base schematic writer touches files."""
 
 
+def _file_identity(path: str) -> tuple[int, int]:
+    """Return the device and inode that `path` currently refers to."""
+    file_stat = os.stat(path)
+    return (file_stat.st_dev, file_stat.st_ino)
+
+
 class SchematicExport:
     """A class to export Schematic files."""
 
@@ -228,26 +234,24 @@ class SchematicExport:
             dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
         )
         assert_schematics_not_locked(encountered, approved_locks)
-        # One file may have several names: a symlink, a hard link, or another
-        # spelling on a case-insensitive filesystem. Writing it twice would
-        # replace the backup of the original with the first export's output.
-        all_paths = []
-        seen_files: set[tuple[int, int]] = set()
-        for hp in encountered:
-            file_stat = os.stat(hp)
-            identity = (file_stat.st_dev, file_stat.st_ino)
-            if identity not in seen_files:
-                seen_files.add(identity)
-                all_paths.append(hp)
 
         if is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")
-            for path in all_paths:
-                self._update_schematic7(path, store_parts)
+            update = self._update_schematic7
         else:
             self.logger.info("Kicad 8+...")
-            for path in all_paths:
-                self._update_schematic(path, store_parts)
+            update = self._update_schematic
+        # A name that already refers to a file this export wrote, through a
+        # symlink or as another spelling of one directory entry, is not
+        # written again, or its backup would hold the first export's output.
+        # Writing replaces a directory entry, so a hard link to an exported
+        # file still refers to the original and is written under its own name.
+        written: set[tuple[int, int]] = set()
+        for path in encountered:
+            if _file_identity(path) in written:
+                continue
+            update(path, store_parts)
+            written.add(_file_identity(path))
 
     @staticmethod
     def _require_default(variant_name: str) -> None:

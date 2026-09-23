@@ -1023,33 +1023,73 @@ def test_export_reports_a_lock_that_appears_beside_the_other_name(
     assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
 
 
-@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
-def test_export_writes_a_hard_linked_sheet_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
-) -> None:
-    """A sheet reached under two names is written once, so its backup is the original."""
+def _two_named_child(
+    tmp_path: Path, version: int, first: str, second: str
+) -> tuple[Path, str]:
+    """Write a root using a child sheet under two names; return the child and its text."""
     root = tmp_path / "board.kicad_sch"
-    child = tmp_path / "child.kicad_sch"
-    twin = tmp_path / "twin.kicad_sch"
     root.write_text(
         _schematic(version, "yes", ("RV2",)).replace(
             "\n)\n",
-            "\n"
-            + _sheet(version, "child.kicad_sch")
-            + _sheet(version, "twin.kicad_sch")
-            + ")\n",
+            "\n" + _sheet(version, first) + _sheet(version, second) + ")\n",
         ),
         encoding="utf-8",
     )
+    child = tmp_path / first
     child_text = _schematic(version, "yes", ("RV3",), reference="RV3")
     child.write_text(child_text, encoding="utf-8")
+    return child, child_text
+
+
+def _lcsc_values(path: Path) -> list[str]:
+    return re.findall(
+        r'\(property\s+"LCSC"\s+"([^"]*)"', path.read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_every_hard_linked_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """Replacing one name of a hard-linked sheet leaves the other; both get the export."""
+    child, child_text = _two_named_child(
+        tmp_path, version, "child.kicad_sch", "twin.kicad_sch"
+    )
+    twin = tmp_path / "twin.kicad_sch"
     os.link(child, twin)
     parts = [_part("RV2", "NEW", False), _part("RV3", "CHILD", False)]
 
-    _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+    _load_schematic(
+        tmp_path, monkeypatch, version, [tmp_path / "board.kicad_sch"], parts
+    )
 
-    assert re.findall(
-        r'\(property\s+"LCSC"\s+"([^"]*)"', child.read_text(encoding="utf-8")
-    ) == ["CHILD"]
+    assert _lcsc_values(child) == ["CHILD"]
+    assert _lcsc_values(twin) == ["CHILD"]
+    for backup in (tmp_path / "child.kicad_sch_old", tmp_path / "twin.kicad_sch_old"):
+        assert backup.read_text(encoding="utf-8") == child_text
+
+
+def _case_insensitive(tmp_path: Path) -> bool:
+    (tmp_path / "CaseProbe").touch()
+    return (tmp_path / "caseprobe").exists()
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_a_case_aliased_sheet_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """Two spellings of one directory entry are one write, so the backup is the original."""
+    if not _case_insensitive(tmp_path):
+        pytest.skip("needs a case-insensitive filesystem")
+    child, child_text = _two_named_child(
+        tmp_path, version, "child.kicad_sch", "Child.kicad_sch"
+    )
+    parts = [_part("RV2", "NEW", False), _part("RV3", "CHILD", False)]
+
+    _load_schematic(
+        tmp_path, monkeypatch, version, [tmp_path / "board.kicad_sch"], parts
+    )
+
+    assert _lcsc_values(child) == ["CHILD"]
     assert (tmp_path / "child.kicad_sch_old").read_text(encoding="utf-8") == child_text
-    assert not (tmp_path / "twin.kicad_sch_old").exists()
+
