@@ -17,10 +17,10 @@ from ..bom_estimation.assembly_mode import (
 from ..bom_estimation.view import BomEstimateResult, evaluate_bom_estimate
 from ..correction_data import resolve_shared_corrections
 from ..corrections import CorrectionManagerDialog
-from ..dataview_highlight import simplify_footprint_name
 from ..derive_params import params_for_part
 from ..enrichment.worker import AssemblyMetadataLookup
 from ..partselector import PartSelectorDialog
+from ..search_prefill import prefill_search
 from .matrix_model import EDITABLE_FIELDS, CatalogMetadata, CorrectionState, MatrixModel
 from .matrix_view import MatrixTarget, VariantMatrixView, coordinates_for
 from .native import BoardVariantSnapshot, VariantEdit, VariantNativeAdapter
@@ -510,17 +510,12 @@ class VariantMainController:
                 self.session.snapshot.get(target.component_id, target.variant_name)
                 for target in targets
             ]
-            selection = {}
-            for part in parts:
-                value = part.value
-                if part.reference.startswith("R"):
-                    if value.endswith(("R", "r", "o")):
-                        value = value[:-1]
-                    value += "Ω"
-                footprint = simplify_footprint_name(part.footprint.rsplit(":", 1)[-1])
-                selection[part.reference] = (
-                    f"{value} {footprint}" if footprint else value
+            selection = {
+                part.reference: prefill_search(
+                    part.reference, part.value, part.footprint
                 )
+                for part in parts
+            }
             label = f"Assign {', '.join(selection)} — Variant {self.variant_label(targets[0].variant_name)}"
             selector = self.dialog._part_selector
             if selector is None:

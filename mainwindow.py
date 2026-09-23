@@ -36,7 +36,6 @@ from .datamodel import PartListDataModel
 from .dataview_highlight import (
     HighlightedTextRenderer,
     decode_highlighted_value,
-    simplify_footprint_name,
 )
 from .derive_params import params_for_part
 from .enrichment.worker import AssemblyMetadataLookup
@@ -84,12 +83,12 @@ from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
+from .search_prefill import prefill_search
 from .settings import SettingsDialog
 from .store import Store
 from .stock_concern import stock_concern_references
 from .stock_display import parse_stock
 from .type_cell_tooltip import TypeCellTooltip
-from .value_normalize import canonicalize, quantity_for_reference
 from .why_standard_dialog import WhyStandardDialog
 from .window_layout import get_column_widths, restore_column_widths
 
@@ -2179,18 +2178,11 @@ class JLCPCBTools(wx.Frame):
         selection = {}
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
-            value = self.partlist_data_model.get_value(item)
-            footprint = self.partlist_data_model.get_footprint(item)
-            # Prefill the search with the spelling the catalog uses, so a board
-            # value of 0.1uF, 4k7 or 100p finds 100nF, 4.7kΩ and 100pF.  The
-            # reference designator says which quantity the value measures; when
-            # it says nothing useful the value is passed through untouched.
-            canonical = canonicalize(value, quantity_for_reference(ref))
-            if canonical is not None:
-                value = canonical
-            if simplified_footprint := simplify_footprint_name(footprint):
-                value += f" {simplified_footprint}"
-            selection[ref] = value
+            selection[ref] = prefill_search(
+                ref,
+                self.partlist_data_model.get_value(item),
+                self.partlist_data_model.get_footprint(item),
+            )
         if self._part_selector is not None:
             # Already open — re-target it at the new selection rather than
             # spawning a second window.
