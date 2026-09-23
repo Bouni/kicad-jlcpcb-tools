@@ -74,25 +74,28 @@ def test_add_correction_by_lcsc_warns_once_for_unassigned_parts(
     assert "No LCSC number" in str(runtime.wx.MessageBox.call_args)
 
 
-def _window_with_part(runtime: SimpleNamespace, lcsc: str) -> tuple[Any, dict]:
-    """Bind the real handlers to one part whose store row follows assignments."""
-    part = {
-        "reference": "U1",
-        "value": "Device",
-        "footprint": "SOT-23-3",
-        "lcsc": lcsc,
-        "exclude_from_bom": 0,
-        "exclude_from_pos": 0,
-    }
+def _window_with_part(runtime: SimpleNamespace, lcsc: str) -> tuple[Any, Footprint]:
+    """Bind real handlers to one native footprint and derive its store row on read."""
     window = _population_window(runtime)
-    board = Board([Footprint("U1", value="Device", footprint="SOT-23-3", lcsc=lcsc)])
+    footprint = Footprint("U1", value="Device", footprint="SOT-23-3", lcsc=lcsc)
+    board = Board([footprint])
+    board.filename = window.pcbnew.GetBoard().GetFileName()
     window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+    window._board_identity = runtime.mainwindow.board_identity(board)
     # The refreshed cell, not the remembered preference, is what is under test.
     window.settings = {"part_preferences": {"remember_lcsc_assignments": False}}
-    window.store.get_part = lambda _reference: part
-    window.store.set_lcsc_assignments = lambda assignments: [
-        part.__setitem__("lcsc", number) for _reference, number, _stock in assignments
-    ]
+
+    def get_part(_reference: str) -> dict[str, Any]:
+        return {
+            "reference": footprint.GetReference(),
+            "value": footprint.GetValue(),
+            "footprint": footprint.GetFPID().GetLibItemName(),
+            "lcsc": footprint.field.GetText(),
+            "exclude_from_bom": 0,
+            "exclude_from_pos": 0,
+        }
+
+    window.store.get_part = get_part
     window.library.get_part_details = lambda _lcsc: {"type": "Basic", "stock": 1}
     window.start_assembly_enrichment = MagicMock()
     window.recompute_bom_estimate = MagicMock()
@@ -101,7 +104,7 @@ def _window_with_part(runtime: SimpleNamespace, lcsc: str) -> tuple[Any, dict]:
     window.partlist_data_model.get_reference.return_value = "U1"
     window.partlist_data_model.get_footprint.return_value = "SOT-23-3"
     window.partlist_data_model.get_value.return_value = "Device"
-    return window, part
+    return window, footprint
 
 
 def _seed_rules(runtime: SimpleNamespace) -> None:
@@ -125,7 +128,7 @@ def test_assigning_a_part_refreshes_its_correction_cell(
         SimpleNamespace(lcsc="C12345", references=["U1"], type="Basic", stock=1)
     )
 
-    assert part["lcsc"] == "C12345"
+    assert part.field.GetText() == "C12345"
     window.partlist_data_model.set_correction.assert_called_once_with("U1", PART_RULE)
     window.partlist_data_model.AddEntry.assert_not_called()
 
@@ -139,7 +142,7 @@ def test_removing_a_part_number_refreshes_its_correction_cell(
 
     window.remove_lcsc_number()
 
-    assert part["lcsc"] == ""
+    assert part.field.GetText() == ""
     window.partlist_data_model.set_correction.assert_called_once_with("U1", FAMILY_RULE)
 
 
@@ -166,7 +169,7 @@ def test_pasting_a_part_number_refreshes_its_correction_cell(
 
     window.paste_part_lcsc()
 
-    assert part["lcsc"] == "C12345"
+    assert part.field.GetText() == "C12345"
     window.partlist_data_model.set_correction.assert_called_once_with("U1", PART_RULE)
 
 
@@ -180,7 +183,7 @@ def test_an_applied_part_preference_refreshes_its_correction_cell(
 
     window.apply_selected_part_preferences()
 
-    assert part["lcsc"] == "C12345"
+    assert part.field.GetText() == "C12345"
     window.partlist_data_model.set_correction.assert_called_once_with("U1", PART_RULE)
 
 
