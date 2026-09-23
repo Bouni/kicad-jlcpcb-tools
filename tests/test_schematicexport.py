@@ -1021,3 +1021,35 @@ def test_export_reports_a_lock_that_appears_beside_the_other_name(
     )
     result = target.read_text(encoding="utf-8")
     assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_a_hard_linked_sheet_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """A sheet reached under two names is written once, so its backup is the original."""
+    root = tmp_path / "board.kicad_sch"
+    child = tmp_path / "child.kicad_sch"
+    twin = tmp_path / "twin.kicad_sch"
+    root.write_text(
+        _schematic(version, "yes", ("RV2",)).replace(
+            "\n)\n",
+            "\n"
+            + _sheet(version, "child.kicad_sch")
+            + _sheet(version, "twin.kicad_sch")
+            + ")\n",
+        ),
+        encoding="utf-8",
+    )
+    child_text = _schematic(version, "yes", ("RV3",), reference="RV3")
+    child.write_text(child_text, encoding="utf-8")
+    os.link(child, twin)
+    parts = [_part("RV2", "NEW", False), _part("RV3", "CHILD", False)]
+
+    _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+
+    assert re.findall(
+        r'\(property\s+"LCSC"\s+"([^"]*)"', child.read_text(encoding="utf-8")
+    ) == ["CHILD"]
+    assert (tmp_path / "child.kicad_sch_old").read_text(encoding="utf-8") == child_text
+    assert not (tmp_path / "twin.kicad_sch_old").exists()

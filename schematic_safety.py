@@ -265,7 +265,7 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
         List of absolute, normalized paths to all discovered schematic
         files as they are reached, ordered depth-first starting with the
         root. Two paths may name one file; callers that write deduplicate
-        by os.path.realpath.
+        by file identity.
 
     Raises:
         FileNotFoundError: If a referenced sheet file does not exist, so an

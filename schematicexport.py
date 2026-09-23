@@ -228,12 +228,16 @@ class SchematicExport:
             dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
         )
         assert_schematics_not_locked(encountered, approved_locks)
+        # One file may have several names: a symlink, a hard link, or another
+        # spelling on a case-insensitive filesystem. Writing it twice would
+        # replace the backup of the original with the first export's output.
         all_paths = []
-        seen_paths = set()
+        seen_files: set[tuple[int, int]] = set()
         for hp in encountered:
-            norm = os.path.realpath(hp)
-            if norm not in seen_paths:
-                seen_paths.add(norm)
+            file_stat = os.stat(hp)
+            identity = (file_stat.st_dev, file_stat.st_ino)
+            if identity not in seen_files:
+                seen_files.add(identity)
                 all_paths.append(hp)
 
         if is_version7(GetBuildVersion()):
