@@ -1242,3 +1242,32 @@ def test_export_writes_nothing_when_a_sheet_is_read_only(
         _load_schematic(tmp_path, monkeypatch, version, [root], parts)
     assert root.read_text(encoding="utf-8") == root_text
     assert not list(tmp_path.rglob("*_old"))
+
+
+def test_file_identity_is_unknown_without_an_inode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero inode, as some Windows filesystems report, identifies nothing."""
+    monkeypatch.setattr(
+        _module.os, "stat", lambda _path: types.SimpleNamespace(st_dev=1, st_ino=0)
+    )
+    assert _module._file_identity("anything.kicad_sch") is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_every_name_when_files_have_no_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """Without file identity no name is skipped: a repeated write beats a lost one."""
+    target = tmp_path / "real.kicad_sch"
+    alias = tmp_path / "board.kicad_sch"
+    target.write_text(_schematic(version, "yes", ("RV2",)), encoding="utf-8")
+    alias.symlink_to(target)
+    monkeypatch.setattr(_module, "_file_identity", lambda _path: None)
+    parts = [_part("RV2", "NEW", False)]
+
+    _load_schematic(tmp_path, monkeypatch, version, [target, alias], parts)
+
+    assert _lcsc_values(target) == ["NEW"]
+    assert _lcsc_values(tmp_path / "real.kicad_sch_old") == ["NEW"]
