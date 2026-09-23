@@ -13,6 +13,7 @@ import pytest
 from schematic_safety import (
     SchematicLockedError,
     assert_schematics_not_locked,
+    assert_schematics_writable,
     atomic_write_schematic,
     check_schematic_lock,
     collect_schematic_hierarchy,
@@ -648,3 +649,59 @@ def test_collect_schematic_hierarchy_keeps_each_directory_alias_context(
         str(tmp_path / "b" / "block" / "sub.kicad_sch"),
         str(tmp_path / "b" / "child.kicad_sch"),
     ]
+
+
+def test_collect_schematic_hierarchy_rejects_a_sheet_that_is_not_utf8(
+    tmp_path: Path,
+) -> None:
+    """A sheet KiCad could not have written is refused before anything is written."""
+    root = tmp_path / "root.kicad_sch"
+    root.write_text(
+        '(kicad_sch\n  (sheet (property "Sheetfile" "child.kicad_sch"))\n)\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "child.kicad_sch").write_bytes(b"(kicad_sch \xb5)\n")
+
+    with pytest.raises(ValueError, match="Sheet file 'child.kicad_sch' is not UTF-8"):
+        collect_schematic_hierarchy(str(root))
+
+
+def test_collect_schematic_hierarchy_rejects_a_sheet_that_is_not_a_schematic(
+    tmp_path: Path,
+) -> None:
+    """An empty or foreign file where a sheet should be stops the walk."""
+    root = tmp_path / "root.kicad_sch"
+    root.write_text(
+        '(kicad_sch\n  (sheet (property "Sheetfile" "child.kicad_sch"))\n)\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "child.kicad_sch").write_text("", encoding="utf-8")
+
+    with pytest.raises(
+        ValueError, match="Sheet file 'child.kicad_sch' is not a KiCad schematic"
+    ):
+        collect_schematic_hierarchy(str(root))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_read_only_schematics_are_refused_before_any_write(tmp_path: Path) -> None:
+    """Like KiCad, the export refuses a schematic it could not save."""
+    sch = tmp_path / "test.kicad_sch"
+    sch.write_text("(kicad_sch)\n", encoding="utf-8")
+    assert_schematics_writable([str(sch)])
+
+    sch.chmod(0o444)
+    with pytest.raises(PermissionError, match="'test.kicad_sch' is read-only"):
+        assert_schematics_writable([str(sch)])
+    sch.chmod(0o644)
+
+    folder = tmp_path / "locked"
+    folder.mkdir()
+    inner = folder / "inner.kicad_sch"
+    inner.write_text("(kicad_sch)\n", encoding="utf-8")
+    folder.chmod(0o555)
+    try:
+        with pytest.raises(PermissionError, match="folder of 'inner.kicad_sch'"):
+            assert_schematics_writable([str(inner)])
+    finally:
+        folder.chmod(0o755)

@@ -215,6 +215,46 @@ def resolve_project_schematics(
     return roots
 
 
+def project_schematic_path(
+    project_path: Optional[str],
+    board_filename: Optional[str],
+) -> Optional[str]:
+    """Return the path of the schematic KiCad opens with the board's project.
+
+    The project manager always opens `<project>.kicad_sch`, and eeschema
+    locks that file, whether or not it is listed as a top-level sheet and
+    whether or not it exists yet. Its lock therefore has to be checked
+    before any sheet of the project is written.
+    """
+    if not project_path or not board_filename:
+        return None
+    project_name = os.path.splitext(os.path.basename(board_filename))[0]
+    return os.path.normpath(os.path.join(project_path, f"{project_name}.kicad_sch"))
+
+
+def assert_schematics_writable(schematic_paths: list[str]) -> None:
+    """Refuse, as KiCad does, to write a schematic that cannot be saved.
+
+    KiCad will not save a read-only schematic, so exporting to one would
+    leave a file KiCad cannot update. The file itself must be writable and
+    so must its folder, where the new contents and the backup are written.
+
+    Raises:
+        PermissionError: Naming the first schematic that cannot be written.
+
+    """
+    for path in schematic_paths:
+        name = os.path.basename(path)
+        target = os.path.realpath(path)
+        if os.path.exists(target) and not os.access(target, os.W_OK):
+            raise PermissionError(f"Schematic file '{name}' is read-only: {target}")
+        folder = os.path.dirname(target)
+        if not os.access(folder, os.W_OK):
+            raise PermissionError(
+                f"The folder of '{name}' does not allow writing: {folder}"
+            )
+
+
 def _sheet_file_names(content: str) -> list[str]:
     """Return the file names of the hierarchical sheets placed in a schematic.
 
@@ -271,6 +311,7 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
     Raises:
         FileNotFoundError: If a referenced sheet file does not exist, so an
             export can stop before it writes any sheet.
+        ValueError: If a sheet is not UTF-8 text or not a KiCad schematic.
         OSError: If a schematic in the hierarchy cannot be read.
 
     """
@@ -290,8 +331,21 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
         visited.add(opened)
         discovered.append(opened)
 
-        with open(opened, encoding="utf-8", errors="replace") as f:
-            content = f.read()
+        # KiCad writes UTF-8 and cannot load anything else; refusing such a
+        # file here keeps the export from writing any sheet before failing.
+        try:
+            with open(opened, encoding="utf-8") as f:
+                content = f.read()
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"Sheet file '{os.path.basename(opened)}' is not UTF-8 text: "
+                f"{exc.reason} at byte {exc.start}"
+            ) from exc
+        if not content.lstrip("\ufeff \t\r\n").startswith("(kicad_sch"):
+            raise ValueError(
+                f"Sheet file '{os.path.basename(opened)}' is not a KiCad schematic: "
+                f"{opened}"
+            )
 
         ancestors.add(real)
         for name in _sheet_file_names(content):

@@ -15,8 +15,10 @@ from .core.version import is_version7
 from .schematic_safety import (
     SchematicLockedError,
     assert_schematics_not_locked,
+    assert_schematics_writable,
     atomic_write_schematic,
     collect_schematic_hierarchy,
+    project_schematic_path,
 )
 
 __all__ = [
@@ -206,8 +208,10 @@ class SchematicExport:
         """Export one validated Default snapshot using the existing base writer.
 
         Every sheet under the given schematics is exported once. Nothing is
-        written if a sheet file is missing, or while KiCad has a lock on any
-        sheet other than approved_locks (SchematicLockedError names them all).
+        written if a sheet file is missing, unreadable or read-only, or
+        while KiCad has a lock on any sheet, or on the project's own
+        schematic, other than approved_locks (SchematicLockedError names
+        them all).
 
         Matrix callers supply an explicit Default snapshot. The legacy fallback
         accepts only a Default store view and reads it once for the whole export.
@@ -233,7 +237,17 @@ class SchematicExport:
         encountered = list(
             dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
         )
-        assert_schematics_not_locked(encountered, approved_locks)
+        # KiCad locks the project's own schematic whenever the project is
+        # open, even when that file is not one of the sheets written here.
+        project_schematic = project_schematic_path(
+            getattr(self.parent, "project_path", None),
+            getattr(self.parent, "board_name", None),
+        )
+        lock_paths = list(encountered)
+        if project_schematic and project_schematic not in lock_paths:
+            lock_paths.append(project_schematic)
+        assert_schematics_not_locked(lock_paths, approved_locks)
+        assert_schematics_writable(encountered)
 
         if is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")

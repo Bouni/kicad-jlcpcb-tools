@@ -1163,3 +1163,82 @@ def test_export_follows_each_directory_alias_to_its_own_children(
     assert _lcsc_values(root) == ["OLD"]
     assert _lcsc_values(first) == ["OLD"]
     assert not list(tmp_path.rglob("*_old"))
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_checks_the_lock_of_the_project_schematic_that_is_not_a_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """KiCad always opens and locks <project>.kicad_sch, even when it is no root."""
+    from schematic_safety import resolve_project_schematics
+
+    board = tmp_path / "board.kicad_sch"
+    board_text = _schematic(version, "yes", ("RV2",))
+    board.write_text(board_text, encoding="utf-8")
+    power = tmp_path / "power.kicad_sch"
+    power.write_text(
+        _schematic(version, "yes", ("RV3",), reference="RV3"), encoding="utf-8"
+    )
+    (tmp_path / "board.kicad_pro").write_text(
+        '{"schematic": {"top_level_sheets": [{"filename": "power.kicad_sch"}]}}',
+        encoding="utf-8",
+    )
+    (tmp_path / "~board.kicad_sch.lck").write_text(
+        '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+    )
+    parts = [_part("RV3", "POWER", False)]
+    roots = resolve_project_schematics(str(tmp_path), "board.kicad_pcb")
+    assert roots == [str(power)]
+
+    with pytest.raises(
+        SchematicLockedError, match="'board.kicad_sch' is locked by alice@mac"
+    ) as raised:
+        _load_schematic(tmp_path, monkeypatch, version, [power], parts)
+    assert _lcsc_values(power) == ["OLD"]
+
+    approved = [locked for locked, _info in raised.value.locks]
+    _load_schematic(
+        tmp_path, monkeypatch, version, [power], parts, approved_locks=approved
+    )
+    assert _lcsc_values(power) == ["POWER"]
+    assert board.read_text(encoding="utf-8") == board_text
+    assert not (tmp_path / "board.kicad_sch_old").exists()
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_nothing_when_a_sheet_is_not_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """A sheet that cannot be read stops the export before any sheet is written."""
+    child, _child_text = _two_named_child(
+        tmp_path, version, "child.kicad_sch", "child.kicad_sch"
+    )
+    root = tmp_path / "board.kicad_sch"
+    root_text = root.read_text(encoding="utf-8")
+    child.write_bytes(b"(kicad_sch \xb5)\n")
+    parts = [_part("RV2", "NEW", False), _part("RV3", "CHILD", False)]
+
+    with pytest.raises(ValueError, match="Sheet file 'child.kicad_sch' is not UTF-8"):
+        _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+    assert root.read_text(encoding="utf-8") == root_text
+    assert not list(tmp_path.rglob("*_old"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_writes_nothing_when_a_sheet_is_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """A read-only sheet, which KiCad would refuse to save, stops the export first."""
+    child, _child_text = _two_named_child(
+        tmp_path, version, "child.kicad_sch", "child.kicad_sch"
+    )
+    root = tmp_path / "board.kicad_sch"
+    root_text = root.read_text(encoding="utf-8")
+    child.chmod(0o444)
+    parts = [_part("RV2", "NEW", False), _part("RV3", "CHILD", False)]
+
+    with pytest.raises(PermissionError, match="'child.kicad_sch' is read-only"):
+        _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+    assert root.read_text(encoding="utf-8") == root_text
+    assert not list(tmp_path.rglob("*_old"))
