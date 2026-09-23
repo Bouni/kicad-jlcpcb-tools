@@ -36,7 +36,6 @@ from .datamodel import PartListDataModel
 from .dataview_highlight import (
     HighlightedTextRenderer,
     decode_highlighted_value,
-    simplify_footprint_name,
 )
 from .derive_params import params_for_part
 from .enrichment.worker import AssemblyMetadataLookup
@@ -84,6 +83,7 @@ from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
+from .search_prefill import prefill_search
 from .settings import SettingsDialog
 from .store import Store
 from .stock_concern import stock_concern_references
@@ -2178,16 +2178,11 @@ class JLCPCBTools(wx.Frame):
         selection = {}
         for item in self.footprint_list.GetSelections():
             ref = self.partlist_data_model.get_reference(item)
-            value = self.partlist_data_model.get_value(item)
-            footprint = self.partlist_data_model.get_footprint(item)
-            if ref.startswith("R"):
-                """ Auto remove alphabet unit if applicable """
-                if value.endswith("R") or value.endswith("r") or value.endswith("o"):
-                    value = value[:-1]
-                value += "Ω"
-            if simplified_footprint := simplify_footprint_name(footprint):
-                value += f" {simplified_footprint}"
-            selection[ref] = value
+            selection[ref] = prefill_search(
+                ref,
+                self.partlist_data_model.get_value(item),
+                self.partlist_data_model.get_footprint(item),
+            )
         if self._part_selector is not None:
             # Already open — re-target it at the new selection rather than
             # spawning a second window.

@@ -19,6 +19,7 @@ import types
 import pytest
 
 from common.partsdb import _CREATE_STATEMENTS
+from value_normalize import canonicalize, quantity_for_reference
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PACKAGE = "_issue_578_library_search_tests"
@@ -145,3 +146,50 @@ def test_two_digit_ohm_search_control(search_library, keyword):
 def test_short_ohm_search_respects_filters(search_library, filters, expected):
     """Short keywords must still combine correctly with scoped MATCH filters."""
     assert _search_ids(search_library, "0Ω", **filters) == expected
+
+
+@pytest.mark.parametrize(
+    ("reference", "board_value", "expected"),
+    [
+        # Issue #786: the board says 0.1uF, the catalog says 100nF.
+        pytest.param("C1", "0.1uF", {"C578100"}, id="issue-786-fractional"),
+        pytest.param("C1", "0.1uf", {"C578100"}, id="issue-786-lowercase"),
+        pytest.param("C1", "0.1µF", {"C578100"}, id="micro-sign"),
+        pytest.param("C1", "100n", {"C578100"}, id="bare-prefix"),
+        pytest.param("C1", "0.1u", {"C578100"}, id="bare-fractional"),
+        pytest.param("R1", "10", {"C25077"}, id="bare-resistance"),
+        pytest.param("R1", "10R", {"C25077"}, id="r-spelling"),
+        pytest.param("R1", "0.01k", {"C25077"}, id="fractional-resistance"),
+        pytest.param("R1", "10ohm", {"C25077"}, id="ohm-spelling"),
+    ],
+)
+def test_canonicalized_board_value_finds_the_part(
+    search_library, reference, board_value, expected
+):
+    """The spelling the part selector prefills must match the real catalog.
+
+    This is the whole path issue #786 reported: a value field the search cannot
+    match. canonicalize() rewrites it, and the rewritten term is what the user
+    sees in the box and what Library.search actually runs.
+    """
+    quantity = quantity_for_reference(reference)
+    keyword = canonicalize(board_value, quantity)
+    assert keyword is not None, f"{board_value} on {reference} was not canonicalized"
+    assert _search_ids(search_library, keyword) == expected
+
+
+@pytest.mark.parametrize(
+    ("reference", "board_value"),
+    [
+        pytest.param("D1", "1N4148", id="diode-part-number"),
+        pytest.param("LD1", "1N34", id="laser-diode-not-inductor"),
+        pytest.param("CB1", "10A", id="breaker-not-capacitor"),
+        pytest.param("RL1", "NO/NC", id="relay-not-resistor"),
+        pytest.param("U1", "LM358", id="ic"),
+        pytest.param("C1", "X7R", id="dielectric-code"),
+        pytest.param("R1", "0603", id="package-in-value-field"),
+    ],
+)
+def test_values_the_prefill_must_not_rewrite(reference, board_value):
+    """Anything that is not a passive value reaches the search box untouched."""
+    assert canonicalize(board_value, quantity_for_reference(reference)) is None
