@@ -46,30 +46,46 @@ From there you can install the plugin via the GUI.
 
 ### Git
 
-Simply clone this repo into your `scripting/plugins` folder.
+Clone this repo into your KiCad `scripting/plugins` folder.
 
-**Windows**
+> [!TIP]
+> You can open the plugins directory directly from KiCad to avoid locating the path manually:
+> In the *PCB Editor*, choose **Tools → External Plugins → Open Plugin Directory** (or **Reveal Plugin Folder in Finder** on macOS), or open **Preferences → PCB Editor → Action Plugins** and click the folder icon. From that directory, open a terminal and run `git clone https://github.com/Bouni/kicad-jlcpcb-tools.git`.
 
-```sh
-cd C:\users\<username>\Documents\kicad\<version>\scripting\plugins\  # <username> is your username, <version> can be 7.0, 8.0, or X.YY depending on the version you use
+Alternatively, navigate to the folder in your terminal:
+
+**Windows (Command Prompt)**
+
+```cmd
+cd "%USERPROFILE%\Documents\KiCad\<version>\scripting\plugins"
+git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
+```
+
+**Windows (PowerShell)**
+
+```powershell
+cd "$HOME\Documents\KiCad\<version>\scripting\plugins"
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
 **Linux**
 
 ```sh
-cd /home/<username>/.local/share/kicad/<version>/scripting/plugins  # <version> can be 7.0, 8.0, or X.YY depending on the version you use
+cd ~/.local/share/kicad/<version>/scripting/plugins
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
-**MacOS**
+**macOS**
 
 ```sh
-cd ~/Library/Preferences/kicad/scripting/plugins
+cd ~/Documents/KiCad/<version>/scripting/plugins
 git clone https://github.com/Bouni/kicad-jlcpcb-tools.git
 ```
 
-You may need to create the `scripting/plugins` folder if it does not exist.
+> [!NOTE]
+> `<version>` can be `7.0`, `8.0`, `9.0`, or `X.YY` depending on the version you use. You may need to create the `scripting/plugins` folder if it does not exist.
+
+After cloning, choose **Tools → External Plugins → Refresh Plugins** in the *PCB Editor* (or restart KiCad) to load the plugin.
 
 ### Flatpak :warning:
 
@@ -325,7 +341,7 @@ The <i><b>{working directory}</b></i> should be your plugins directory, ie:
 |Windows | %USERPROFILE%\Documents\KiCad\<version>\scripting\plugins\ |
 
 > [!NOTE]  
-> <version> can be 7.0, 8.0, or X.YY depending on the version you use
+> <version> can be 7.0, 8.0, 9.0, or X.YY depending on the version you use
 
 #### Plugin folder name
 
