@@ -1,7 +1,6 @@
 """Keep exported schematic assignments consistent with native board aliases."""
 
 from collections.abc import Iterator, Sequence
-import json
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -9,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from .schematic_export_test_support import snapshot_from_parts
 from .wx_harness import load_siblings, module
 
 
@@ -31,6 +31,9 @@ def source(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNam
             assignments=loaded["part_assignments"],
             store=store,
             path=tmp_path / "board.kicad_sch",
+            snapshot=lambda parts: snapshot_from_parts(
+                loaded["schematicexport"].capture_board, parts
+            ),
         )
 
 
@@ -95,7 +98,9 @@ def _export(
         _document(_symbol(source.version, "R1", fields, aliases_first=aliases_first)),
         encoding="utf-8",
     )
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", lcsc)])
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", lcsc)])
+    )
     return source.path.read_text(encoding="utf-8")
 
 
@@ -158,7 +163,9 @@ def test_existing_canonical_alias_is_reused_once(
     first = _export(source, [("LCSC", original)])
     assert _fields(first) == [("Reference", "R1"), ("LCSC", "C200")]
 
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", "")])
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", "")])
+    )
     cleared = source.path.read_text(encoding="utf-8")
     assert _fields(cleared) == [("Reference", "R1"), ("LCSC", "")]
 
@@ -175,7 +182,9 @@ def test_missing_alias_only_inserts_a_nonempty_assignment(
         assert "hide" in first
     assert sorted(_fields(first)) == sorted(expected)
 
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", lcsc)])
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", lcsc)])
+    )
     assert source.path.read_text(encoding="utf-8") == first
 
 
@@ -187,7 +196,9 @@ def test_missing_source_does_not_clear_or_reuse_the_previous_symbol_assignment(
     unmatched = _symbol(source.version, "R2", [("JLCPCB Part Number", "C300")])
     source.path.write_text(_document(first + unmatched), encoding="utf-8")
 
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", "")])
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", "")])
+    )
 
     written = source.path.read_text(encoding="utf-8")
     assert unmatched in written
@@ -235,7 +246,9 @@ def test_export_preserves_library_and_nested_native_variant_fields(
     )
     source.store.variant_name = "Alternative"
 
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", "C200")])
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", "C200")])
+    )
 
     written = source.path.read_text(encoding="utf-8")
     assert library in written
@@ -259,7 +272,9 @@ def test_selected_child_schematic_uses_the_same_alias_policy(
     )
     source.path.write_text("parent remains untouched\n", encoding="utf-8")
 
-    source.exporter.load_schematic([str(child)], parts=[_part("R1", "C200")])
+    source.exporter.load_schematic(
+        [str(child)], snapshot=source.snapshot([_part("R1", "C200")])
+    )
 
     assert _fields(child.read_text(encoding="utf-8")) == [
         ("Reference", "R1"),
@@ -295,7 +310,9 @@ def test_pinless_symbol_does_not_share_an_assignment_with_its_neighbor(
     unmatched = _symbol(source.version, "R2", [("JLCPCB Part Number", "C300")])
     source.path.write_text(_document(first + unmatched), encoding="utf-8")
 
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", "C200")])
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", "C200")])
+    )
 
     written = source.path.read_text(encoding="utf-8")
     assert unmatched in written
@@ -328,30 +345,28 @@ def test_malformed_schematic_preserves_original_and_existing_backup(
     backup.write_bytes(b"previous export backup\n")
 
     with pytest.raises(ValueError):
-        source.exporter.load_schematic([str(source.path)], parts=[_part("R1", "C200")])
+        source.exporter.load_schematic(
+            [str(source.path)], snapshot=source.snapshot([_part("R1", "C200")])
+        )
 
     assert source.path.read_text(encoding="utf-8") == original
     assert backup.read_bytes() == b"previous export backup\n"
 
 
 @pytest.mark.parametrize("existing", [False, True], ids=["new-field", "existing-alias"])
-def test_arbitrary_source_text_is_escaped_without_changing_schematic_syntax(
+def test_invalid_source_text_preserves_existing_schematic_assignments(
     source: SimpleNamespace, existing: bool
 ) -> None:
-    """Text accepted by the export API remains one value through write and reopen."""
+    """Invalid native values cannot be exported as new assignments or clears."""
     fields = [("JLCPCB Part Number", "C100")] if existing else []
     value = ' c200 "quoted" \\ path\n(part) '
-    expected = 'C200 "QUOTED" \\ PATH\n(PART)'
 
     first = _export(source, fields, lcsc=value)
 
-    encoded = re.findall(
-        r'\(property\s+"(?:LCSC|JLCPCB Part Number)"\s+("(?:\\.|[^"\\])*")', first
+    assert _fields(first) == [("Reference", "R1"), *fields]
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", value)])
     )
-    assert len(encoded) == 1
-    assert json.loads(encoded[0]) == expected
-    assert "\n" not in encoded[0]
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", value)])
     assert source.path.read_text(encoding="utf-8") == first
 
 
@@ -409,7 +424,9 @@ def test_native_comments_do_not_change_symbol_or_quote_boundaries(
     )
     source.path.write_text(original, encoding="utf-8")
 
-    source.exporter.load_schematic([str(source.path)], parts=[_part("R1", "C200")])
+    source.exporter.load_schematic(
+        [str(source.path)], snapshot=source.snapshot([_part("R1", "C200")])
+    )
 
     written = source.path.read_text(encoding="utf-8")
     assert comment in written

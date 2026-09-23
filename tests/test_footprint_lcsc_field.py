@@ -130,21 +130,21 @@ class TestReadingTheField:
         footprint = FakeFootprint(FakeField("LCSC Part #", text))
         assert get_lcsc_value(footprint) == ""
 
-    def test_disagreeing_normalized_aliases_remain_unassigned(self) -> None:
-        """Conflicting user/plugin fields cannot select different parts by mode."""
+    def test_ordinary_reading_retains_first_valid_alias_precedence(self) -> None:
+        """Alias writing must not introduce variant conflict policy into the store."""
         footprint = FakeFootprint(
             FakeField("LCSC Part #", "C12345 "),
             FakeField("LCSC", "C99999"),
         )
-        assert get_lcsc_value(footprint) == ""
+        assert get_lcsc_value(footprint) == "C12345"
 
     @pytest.mark.parametrize(
         "fields,expected",
         [
-            ({"LCSC": "", "JLCPCB": "C100"}, ""),
-            ({"LCSC": "  ", "JLCPCB": "C100"}, ""),
-            ({"LCSC": "C100", "JLCPCB": "C200"}, ""),
-            ({"LCSC": "C100", "JLCPCB": "invalid"}, ""),
+            ({"LCSC": "", "JLCPCB": "C100"}, "C100"),
+            ({"LCSC": "  ", "JLCPCB": "C100"}, "C100"),
+            ({"LCSC": "C100", "JLCPCB": "C200"}, "C100"),
+            ({"LCSC": "C100", "JLCPCB": "invalid"}, "C100"),
             ({"JLCPCB Customer ID": "C100"}, ""),
             ({"JLCPCB Rotation": "C100"}, ""),
             ({"LCSC": " c100 ", "JLCPCB Part #": "C100"}, "C100"),
@@ -152,10 +152,10 @@ class TestReadingTheField:
         ],
     )
     @pytest.mark.parametrize("legacy", [False, True])
-    def test_default_assignment_semantics_are_independent_of_api_generation(
+    def test_ordinary_assignment_precedence_is_independent_of_api_generation(
         self, fields: dict[str, str], expected: str, legacy: bool
     ) -> None:
-        """Ordinary boards follow Default's blank/conflict/metadata interpretation."""
+        """Ordinary reads retain the first valid assignment and exclude metadata."""
         footprint = (
             LegacyFootprint(fields)
             if legacy
@@ -164,6 +164,20 @@ class TestReadingTheField:
             )
         )
         assert get_lcsc_value(footprint) == expected
+
+    @pytest.mark.parametrize("alias", ["LCSC PartNr", "JLCPCB Part Nr", "JLC_Part_Nr"])
+    def test_part_nr_is_a_recognized_existing_assignment(self, alias: str) -> None:
+        """PartNr names retain recognition when assignment aliases are shared."""
+        footprint = FakeFootprint(FakeField(alias, " c12345 "))
+        assert get_lcsc_value(footprint) == "C12345"
+        assert find_lcsc_assignment_text(footprint) == (alias, " c12345 ")
+
+        set_lcsc_value(footprint, "C999")
+        assert [(field.name, field.text) for field in footprint.fields] == [
+            (alias, "C999")
+        ]
+        set_lcsc_value(footprint, "")
+        assert [(field.name, field.text) for field in footprint.fields] == [(alias, "")]
 
     def test_legacy_properties_are_normalised_too(self):
         """The KiCad <= 7 properties path gets the same treatment."""

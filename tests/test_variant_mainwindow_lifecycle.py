@@ -609,7 +609,11 @@ def test_schematic_file_selection_cancellation_and_native_failure_preserve_outpu
             args = exporter.return_value.load_schematic.call_args
             assert args.args == ([str(path)],)
             assert args.kwargs["variant_name"] == ""
-            assert {part["variant_name"] for part in args.kwargs["parts"]} == {""}
+            snapshot = args.kwargs["snapshot"]
+            assert snapshot.assignments == {"R1": "C1"}
+            assert snapshot.bom_parts == (
+                {"reference": "R1", "exclude_from_bom": False},
+            )
             assert ui.controller.session.output_variant == ""
 
     window_ui.run(check)
