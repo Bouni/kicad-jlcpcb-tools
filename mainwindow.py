@@ -79,7 +79,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
-from .lcsc import extract_lcsc
+from .lcsc import extract_lcsc, normalize_lcsc
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
@@ -865,7 +865,7 @@ class JLCPCBTools(wx.Frame):
         self, lcsc: str, *, strict: bool = False
     ) -> dict[str, Any]:
         """Reuse raw catalog records, distinguishing confirmed misses from failures."""
-        key = str(lcsc or "").strip().upper()
+        key = normalize_lcsc(lcsc)
         if not key or not self.is_catalog_available():
             return {}
         if not hasattr(self, "_catalog_details"):
@@ -1283,7 +1283,7 @@ class JLCPCBTools(wx.Frame):
                 remember_part_preferences=True,
             )
             if assigned:
-                key = str(e.lcsc).strip().upper()
+                key = normalize_lcsc(e.lcsc)
                 self._catalog_details[key] = deepcopy(details)
                 self.partlist_data_model.set_catalog_details(
                     key,

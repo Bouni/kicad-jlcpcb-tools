@@ -292,7 +292,7 @@ def resolve_assignment(
     explicit = tuple(a for a in aliases if a.name in overrides) if variant_name else ()
     active = explicit or aliases
     first = active[0]
-    normalized = tuple(a.text.strip().upper() for a in active)
+    normalized = tuple(normalize_lcsc(a.text) for a in active)
     occupied = {text for text in normalized if text}
     if len(occupied) > 1 or (first.text == "" and occupied):
         status, lcsc = "conflict", ""

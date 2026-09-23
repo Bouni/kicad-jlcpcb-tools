@@ -21,6 +21,7 @@ from .dataview_highlight import (
     expand_value,
 )
 from .helpers import apply_side_cell_style, loadIconScaled
+from .lcsc import normalize_lcsc
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
 from .stock_display import format_stock, stock_sort_key
 
@@ -173,7 +174,7 @@ class PartListDataModel(_StockDataModel):
         """Return metadata only while its LCSC still matches the row assignment."""
         if not row:
             return _AssemblyMetadata()
-        lcsc = str(row[self.columns["LCSC_COL"]] or "").strip().upper()
+        lcsc = normalize_lcsc(row[self.columns["LCSC_COL"]])
         reference = str(row[self.columns["REF_COL"]] or "")
         metadata = self._assembly_metadata.get(reference)
         if metadata is not None and metadata.lcsc == lcsc:
@@ -187,8 +188,8 @@ class PartListDataModel(_StockDataModel):
         if (index := self.find_index(reference)) is None:
             return
         row = self.data[index]
-        lcsc = str(row[self.columns["LCSC_COL"]] or "").strip().upper()
-        if "lcsc" in part and str(part["lcsc"] or "").strip().upper() != lcsc:
+        lcsc = normalize_lcsc(row[self.columns["LCSC_COL"]])
+        if "lcsc" in part and normalize_lcsc(part["lcsc"]) != lcsc:
             return
         metadata = (
             _AssemblyMetadata(
@@ -503,11 +504,11 @@ class PartListDataModel(_StockDataModel):
         self, lcsc: str, part_type: str, stock: object, params: str
     ) -> None:
         """Refresh catalog-owned fields without resetting board or estimator state."""
-        target = lcsc.strip().upper()
+        target = normalize_lcsc(lcsc)
         if not target:
             return
         for row in self.data:
-            if str(row[self.columns["LCSC_COL"]] or "").strip().upper() != target:
+            if normalize_lcsc(row[self.columns["LCSC_COL"]]) != target:
                 continue
             row[self.columns["TYPE_COL"]] = part_type
             row[self.columns["STOCK_COL"]] = stock

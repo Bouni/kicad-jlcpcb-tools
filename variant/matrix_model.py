@@ -284,7 +284,9 @@ class MatrixModel:
         self._metadata = {}
         for key, metadata in (enrichment or {}).items():
             state = snapshot.get(*key)
-            if not state.lcsc or metadata.lcsc.upper() != state.lcsc.upper():
+            if not state.lcsc or normalize_lcsc(metadata.lcsc) != normalize_lcsc(
+                state.lcsc
+            ):
                 metadata = CatalogMetadata(
                     status="pending" if state.lcsc else "missing", lcsc=state.lcsc
                 )
@@ -296,7 +298,7 @@ class MatrixModel:
         self._stock_counts: dict[tuple[str, str], int] = {}
         for state in snapshot.components:
             if state.bom is True and state.pop is True and state.lcsc:
-                key = (state.variant_name, state.lcsc.upper())
+                key = (state.variant_name, normalize_lcsc(state.lcsc))
                 self._stock_counts[key] = self._stock_counts.get(key, 0) + 1
         self._price_comparisons: dict[str, dict[str, PriceComparison]] = {}
         self._corrections = dict(corrections or {})
@@ -334,7 +336,7 @@ class MatrixModel:
             return None
         return (
             state.value,
-            state.lcsc.upper(),
+            normalize_lcsc(state.lcsc),
             state.bom,
             state.pos,
             state.pop,
@@ -572,7 +574,9 @@ class MatrixModel:
         """Include hidden same-LCSC rows; reject stale or invalid stock quantities."""
         physical, spec = self.rows[row], self.columns[column]
         state = self.snapshot.get(physical.component_id, spec.variant)
-        per_board = self._stock_counts.get((spec.variant, state.lcsc.upper()), 0)
+        per_board = self._stock_counts.get(
+            (spec.variant, normalize_lcsc(state.lcsc)), 0
+        )
         required = self.board_count * per_board
         available = self._metadata_for(physical.component_id, spec.variant).stock
         return StockCheck(
