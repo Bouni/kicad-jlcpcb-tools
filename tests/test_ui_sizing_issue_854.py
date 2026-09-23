@@ -471,7 +471,7 @@ def test_mainwindow_right_toolbar_adapts_to_large_text_extent(
     """right_toolbar SetMinSize expands if label text extent requires > 170px."""
     # Simulate a wide font/GTK theme where the longest label is 180px
     extents = {
-        "Export to schematic": (180, 16),
+        "Toggle BOM & POS": (180, 16),
         "Assign LCSC number": (150, 16),
     }
     _window, toolbar = _create_mainwindow_test_env(
@@ -505,7 +505,7 @@ def test_mainwindow_right_toolbar_adapts_to_wx_size_object(
 ) -> None:
     """right_toolbar SetMinSize accepts real wx.Size objects (not tuples)."""
     extents = {
-        "Export to schematic": _NativeWxSizeStub(190, 16),
+        "Toggle BOM & POS": _NativeWxSizeStub(190, 16),
         "Assign LCSC number": _NativeWxSizeStub(150, 16),
     }
     _window, toolbar = _create_mainwindow_test_env(
