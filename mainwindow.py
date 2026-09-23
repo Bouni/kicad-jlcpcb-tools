@@ -1479,6 +1479,11 @@ class JLCPCBTools(wx.Frame):
 
         preferences = []
         for reference, footprint in footprints.items():
+            try:
+                current_part = self.store.get_part(reference)
+            except BoardContextChanged as error:
+                self._set_project_storage_error(error)
+                return []
             lcsc = assignments[reference]
             part, params = catalog[lcsc]
             stock = part.get("stock")
@@ -1489,6 +1494,14 @@ class JLCPCBTools(wx.Frame):
                 stock if stock is not None else "",
                 params,
             )
+            # Assigning clears the row's old facts. A cached code needs no
+            # supplier callback, so publish its current facts immediately.
+            if current_part is not None:
+                self.partlist_data_model.set_assembly_metadata(
+                    reference,
+                    current_part,
+                    pending=current_part["lcsc"] in self.assembly_lookup.pending,
+                )
             preferences.append(
                 (str(footprint.GetFPID().GetLibItemName()), footprint.GetValue(), lcsc)
             )

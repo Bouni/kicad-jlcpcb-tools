@@ -208,6 +208,11 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             window._get_enrichment_status_label = MagicMock(return_value="")
             window.start_assembly_enrichment = MagicMock()
             window.logger = MagicMock()
+            window.assembly_lookup = mainwindow.AssemblyMetadataLookup(
+                window._apply_assembly_metadata,
+                window._refresh_bom_after_enrichment_update,
+                window.logger.warning,
+            )
             window.recompute_bom_estimate = MagicMock()
             window.footprint_list = MagicMock()
             window.footprint_list.GetSelections.return_value = []
