@@ -13,6 +13,7 @@ import pytest
 
 from . import part_preferences_test_support as support
 from .part_preferences_test_support import (
+    Board,
     Footprint,
     act,
     info_messages,
@@ -43,6 +44,33 @@ def test_native_refresh_failure_still_publishes_successful_assignment(
     mainwindow.wx.PostEvent.assert_called_once()
     assert window._project_storage_unavailable is False
     assert "native redraw failed" in str(window.logger.warning.call_args_list)
+
+
+def test_board_replacement_after_assignment_disables_stale_feedback(
+    make_window: Callable[..., Any],
+) -> None:
+    """A native redraw switching boards cannot publish the old board's cached facts."""
+    window = make_window()
+    window.store.cache_lcsc_metadata("C200", "SMT", 2)
+    original = window.pcbnew.GetBoard()
+    replacement = Board([Footprint("R1", lcsc="C300")])
+    replacement.filename = original.filename
+
+    def replace_board() -> None:
+        window.pcbnew.GetBoard = lambda: replacement
+
+    window.pcbnew.Refresh = replace_board
+
+    window.assign_parts(
+        SimpleNamespace(references=["R1"], lcsc="C200", type="Basic", stock=27)
+    )
+
+    assert original.footprints["R1"].field.text == "C200"
+    assert replacement.footprints["R1"].field.text == "C300"
+    assert window.store is None and window._project_storage_unavailable
+    assert window.test_rows == {}
+    window.footprint_list.Enable.assert_called_with(False)
+    window.start_assembly_enrichment.assert_not_called()
 
 
 @pytest.mark.parametrize("lcsc", ["C200", ""])
