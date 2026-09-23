@@ -693,6 +693,7 @@ class VariantMainController:
     ) -> None:
         """Report failed or unavailable Default exports at the event boundary."""
         from ..schematic_safety import SchematicLockedError  # noqa: PLC0415
+        from ..schematic_snapshot import capture_native  # noqa: PLC0415
         from ..schematicexport import SchematicExport  # noqa: PLC0415
 
         try:
@@ -703,7 +704,7 @@ class VariantMainController:
                 paths,
                 approved_locks=approved_locks,
                 variant_name=self.session.output_variant,
-                parts=self.cache.assembly_rows(self.session.snapshot, ""),
+                snapshot=capture_native(self.session.snapshot),
             )
         except SchematicLockedError:
             raise

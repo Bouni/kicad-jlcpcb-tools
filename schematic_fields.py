@@ -1,11 +1,11 @@
 """Update placed-symbol assignment fields without rewriting other schematic data."""
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 import re
-from typing import Any
+from typing import Optional
 
-from .lcsc import normalize_lcsc
 from .part_assignments import is_assignment_alias
 
 _QUOTED = r'"(?:\\[^\r\n]|[^"\\\r\n])*"'
@@ -13,7 +13,6 @@ _SPACE = " \t\r\n\0"
 _TOKEN = re.compile(
     rf'(?P<comment>^[ \t\0]*\#[^\r\n]*)|{_QUOTED}|[()]|[^ \t\r\n\0()"]+', re.MULTILINE
 )
-_PROPERTY = re.compile(rf"\(property[ \t\r\n\0]+({_QUOTED})[ \t\r\n\0]+({_QUOTED})")
 _ESCAPES = {
     "a": "\a",
     "b": "\b",
@@ -67,6 +66,15 @@ class _Form:
     end: int
 
 
+@dataclass(frozen=True)
+class _Atom:
+    """A decoded argument together with its original token bounds."""
+
+    text: str
+    start: int
+    end: int
+
+
 def _forms(text: str, start: int, end: int) -> Iterator[_Form]:
     """Yield direct forms, ignoring parentheses inside escaped quoted strings."""
     depth = 0
@@ -103,6 +111,69 @@ def _children(text: str, form: _Form) -> Iterator[_Form]:
     return _forms(text, form.start + 1, form.end - 1)
 
 
+def _arguments(text: str, form: _Form) -> list[_Atom]:
+    """Read leading arguments through the same comment-aware token grammar."""
+    arguments = []
+    head = True
+    for token in _TOKEN.finditer(text, form.start + 1, form.end - 1):
+        if token.group("comment") is not None:
+            continue
+        if head:
+            head = False
+            continue
+        value = token.group()
+        if value in {"(", ")"}:
+            break
+        arguments.append(
+            _Atom(
+                _unquote(value) if value.startswith('"') else value,
+                token.start(),
+                token.end(),
+            )
+        )
+    return arguments
+
+
+def _instance_references(
+    text: str,
+    children: list[_Form],
+    reference: str,
+    project_name: Optional[Callable[[], Optional[str]]],  # noqa: UP045
+) -> set[str]:
+    """Resolve direct instance paths without falling back from scoped data."""
+    instances = [form for form in children if form.name == "instances"]
+    if not instances:
+        return {reference} if reference else set()
+
+    projects: dict[str, set[str]] = {}
+    incomplete: set[str] = set()
+    for instance in instances:
+        for project in _children(text, instance):
+            if project.name != "project" or not (args := _arguments(text, project)):
+                continue
+            name = args[0].text
+            refs = projects.setdefault(name, set())
+            for path in _children(text, project):
+                if path.name != "path":
+                    continue
+                path_refs = set()
+                for child in _children(text, path):
+                    if child.name == "reference" and (args := _arguments(text, child)):
+                        path_refs.add(args[0].text)
+                if not path_refs or "" in path_refs:
+                    incomplete.add(name)
+                refs.update(path_refs)
+    if set(projects) == {""}:
+        active_project = ""
+    elif not projects or project_name is None:
+        return set()
+    else:
+        active_project = project_name()
+    if active_project is None or active_project in incomplete:
+        return set()
+    return projects.get(active_project, set())
+
+
 def _new_field(text: str, reference: _Form, value: str, version7: bool) -> str:
     """Place a hidden canonical field beside the Reference when no alias exists."""
     prefix = text[text.rfind("\n", 0, reference.start) + 1 : reference.start]
@@ -128,17 +199,23 @@ def _new_field(text: str, reference: _Form, value: str, version7: bool) -> str:
 
 
 def update_assignment_fields(
-    text: str, parts: Iterable[Mapping[str, Any]], *, version7: bool
+    text: str,
+    assignments: Mapping[str, Optional[str]],
+    *,
+    version7: bool,
+    project_name: Optional[Callable[[], Optional[str]]] = None,  # noqa: UP045
+    warnings: Optional[list[str]] = None,  # noqa: UP045
 ) -> str:
-    """Synchronize every base assignment alias using the board's field policy.
+    """Synchronize aliases only when authoritative PCB instances agree.
 
-    A matching source row with an empty value clears existing aliases. A symbol
-    absent from the source is untouched. Existing field names, formatting, library
-    symbols, and named-variant overrides are retained; only base value spans change.
+    The caller validates source assignments: a C-number is an assignment, an
+    empty string proves a clear, and None is unsafe. Every relevant instance must
+    be present and agree. Missing or unsafe mappings preserve all aliases. Only
+    direct placed-symbol base fields change; metadata and variants retain their
+    original text. Project identity is requested only for named instance groups.
     """
-    assignments: dict[str, str] = {}
-    for part in parts:
-        assignments.setdefault(part["reference"], normalize_lcsc(part["lcsc"]))
+    if project_name is not None:
+        project_name = lru_cache(maxsize=1)(project_name)
 
     edits: list[tuple[int, int, str]] = []
     for root in _forms(text, 0, len(text)):
@@ -151,34 +228,45 @@ def update_assignment_fields(
             if not any(form.name == "lib_id" for form in children):
                 continue
             properties = [
-                (form, match, _unquote(match.group(1)))
+                (form, args[0].text, args[1])
                 for form in children
-                if form.name == "property"
-                and (match := _PROPERTY.match(text, form.start, form.end))
+                if form.name == "property" and len(args := _arguments(text, form)) >= 2
             ]
             reference = next(
                 (
-                    (form, match)
-                    for form, match, name in properties
+                    (form, value.text)
+                    for form, name, value in properties
                     if name == "Reference"
                 ),
                 None,
             )
             if reference is None:
                 continue
-            reference_form, reference_match = reference
-            ref = _unquote(reference_match.group(2))
-            if ref not in assignments:
+            reference_form, ref = reference
+            refs = _instance_references(text, children, ref, project_name)
+            reason = ""
+            if not refs:
+                reason = "instance references do not resolve for the active project"
+            elif refs.isdisjoint(assignments):
                 continue
-            value = assignments[ref]
+            elif any(assignments.get(name) is None for name in refs):
+                reason = "PCB assignments are missing or unsafe"
+            elif len({assignments[name] for name in refs}) != 1:
+                reason = "instance assignments disagree"
+            if reason:
+                if warnings is not None:
+                    warnings.append(
+                        f"Not updating schematic assignment for {', '.join(sorted(refs)) or ref}; {reason}."
+                    )
+                continue
+            value = assignments[next(iter(refs))]
+            assert value is not None
             aliases = [
-                match for _form, match, name in properties if is_assignment_alias(name)
+                value for _form, name, value in properties if is_assignment_alias(name)
             ]
             if aliases:
                 encoded = _quote(value)
-                edits.extend(
-                    (match.start(2), match.end(2), encoded) for match in aliases
-                )
+                edits.extend((alias.start, alias.end, encoded) for alias in aliases)
             elif value:
                 edits.append(
                     (
