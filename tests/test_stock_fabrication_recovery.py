@@ -1,6 +1,6 @@
 """Exercise catalog recovery through real generation preflight before stopping at DRC."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -146,11 +146,14 @@ def generation_window(
         real_init(generator, parent, board)
 
     def prepare(
-        generator: Any, corrections: Optional[tuple[Any, ...]] = None
+        generator: Any,
+        corrections: Optional[tuple[Any, ...]] = None,
+        parts: Optional[Iterable[dict[str, Any]]] = None,
     ) -> tuple[tuple[Any, ...], ...]:
-        """Observe actual placement rows without replacing their calculation."""
-        rows = real_prepare(generator, corrections)
-        placements.append(rows)
+        """Observe snapshot capture once without counting reuse of frozen rows."""
+        rows = real_prepare(generator, corrections, parts)
+        if parts is not None:
+            placements.append(rows)
         return rows
 
     def consistency(generator: Any) -> str:
@@ -217,7 +220,7 @@ def generation_window(
                 board=board,
                 fabrication_initialized=False,
             )
-            # The shared fixture seeds persisted assignments; startup must reopen them.
+            # The shared fixture seeds native assignments; startup must reread them.
             window.store = None
             del window.populate_footprint_list
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)

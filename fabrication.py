@@ -1,6 +1,6 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 import csv
 from dataclasses import dataclass
@@ -63,10 +63,18 @@ _BOM_DESIGNATOR_MAX_LEN = 1920  # 2048 - 128 padding for remaining CSV fields
 
 @dataclass(frozen=True)
 class OutputAssemblySnapshot:
-    """Keep BOM and CPL on one explicit output variant throughout generation."""
+    """Keep BOM and CPL on one native assembly state throughout generation."""
 
     bom_rows: tuple[tuple[Any, ...], ...]
     cpl_rows: tuple[tuple[Any, ...], ...]
+
+
+@dataclass(frozen=True)
+class _OrdinaryGeneration:
+    """Retain ordinary assembly rows together with their native source check."""
+
+    output: OutputAssemblySnapshot
+    validate_source: Callable[[], None]
 
 
 @dataclass
@@ -146,6 +154,7 @@ class Fabrication:
         self.corrections: tuple[AnyCorrection, ...] = ()
         self.variant_name = ""
         self._generation: Optional[_Generation] = None  # noqa: UP045
+        self._ordinary_generation: Optional[_OrdinaryGeneration] = None  # noqa: UP045
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
 
@@ -162,7 +171,72 @@ class Fabrication:
     def output_snapshot(self) -> Optional[OutputAssemblySnapshot]:  # noqa: UP045
         """Expose only the frozen rows of the current generation."""
         operation = getattr(self, "_generation", None)
+        if operation is None:
+            operation = getattr(self, "_ordinary_generation", None)
         return operation.output if operation is not None else None
+
+    def _validate_ordinary_board(self) -> None:
+        """Ask the owning window to reject replaced or unavailable editor boards."""
+        get_board = getattr(self.parent, "_get_current_board", None)
+        if callable(get_board):
+            get_board()
+
+    @staticmethod
+    def _ordinary_mapping(
+        parts: Iterable[dict[str, Any]],
+    ) -> tuple[tuple[Any, ...], ...]:
+        """Compare assembly decisions without supplier cache or table sort state."""
+        keys = (
+            "reference",
+            "value",
+            "footprint",
+            "lcsc",
+            "exclude_from_bom",
+            "exclude_from_pos",
+            "is_dnp",
+        )
+        return tuple(sorted(tuple(part[key] for key in keys) for part in parts))
+
+    def begin_ordinary_generation(
+        self, corrections: tuple[AnyCorrection, ...]
+    ) -> OutputAssemblySnapshot:
+        """Freeze ordinary BOM, placements and checks from one native mapping read."""
+        if self.output_snapshot is not None:
+            raise RuntimeError("A fabrication generation is already in progress")
+        self._require_output_snapshot()
+        self._check_corrections(corrections)
+        self._validate_ordinary_board()
+        filename = self.board.GetFileName()
+        parts = tuple(dict(part) for part in self.parent.store.read_all())
+        if len({part["reference"] for part in parts}) != len(parts):
+            raise ValueError(
+                "Board has duplicate component references; repair them before generating"
+            )
+        source = self._ordinary_mapping(parts)
+        geometry = self._physical_geometry_snapshot()
+
+        def validate_source() -> None:
+            """Reject changed board mappings or physical placement before output."""
+            self._validate_ordinary_board()
+            if (
+                self.board.GetFileName() != filename
+                or self._ordinary_mapping(self.parent.store.read_all()) != source
+                or self._physical_geometry_snapshot() != geometry
+            ):
+                raise RuntimeError(
+                    "Board assembly data or placement changed during generation; generate again"
+                )
+
+        output = OutputAssemblySnapshot(
+            self.prepare_bom(parts), self.prepare_cpl(corrections, parts)
+        )
+        validate_source()
+        self._ordinary_generation = _OrdinaryGeneration(output, validate_source)
+        return output
+
+    def end_ordinary_generation(self) -> None:
+        """Release ordinary source rows after success, cancellation or failure."""
+        self._ordinary_generation = None
 
     def _artifact_name(
         self,
@@ -256,7 +330,7 @@ class Fabrication:
         The caller owns the native snapshot and its validation callback. Matrix
         selection and cache contents are deliberately absent from this API.
         """
-        if self._generation is not None:
+        if self.output_snapshot is not None:
             raise RuntimeError("A fabrication generation is already in progress")
         if variant_name not in {variant.name for variant in assembly_snapshot.variants}:
             raise ValueError(f"Output variant is unavailable: {variant_name!r}")
@@ -350,7 +424,10 @@ class Fabrication:
 
     def validate_generation(self) -> None:
         """Reject native or physical changes before consuming a captured operation."""
-        operation = self._generation
+        ordinary = getattr(self, "_ordinary_generation", None)
+        if ordinary is not None:
+            ordinary.validate_source()
+        operation = getattr(self, "_generation", None)
         if operation is not None:
             operation.validate_source()
             if self._physical_geometry_snapshot() != operation.geometry:
@@ -490,10 +567,10 @@ class Fabrication:
     def _get_plot_board(self) -> Any:
         """Plot a serialized copy in the explicit variant without switching the editor."""
         self._require_output_snapshot()
+        self.validate_generation()
         operation = getattr(self, "_generation", None)
         if operation is None:
             return self.board
-        self.validate_generation()
         if operation.plot_board is None:
             temporary_path = Path(operation.directory.name) / "plot-source.kicad_pcb"
             source_digest = self._serialize_board(temporary_path)
@@ -551,10 +628,8 @@ class Fabrication:
     ) -> Optional[CorrectionMatch]:  # noqa: UP045
         """Select the same part, reference, value or package rule as the parts table.
 
-        The part number is the store's, which is what the BOM orders and the
-        parts list shows. The footprint's own LCSC field is not consulted: it
-        only seeds the store when the board is read, and a field the store has
-        since moved past would rotate one part while the BOM ordered another.
+        The supplied part number belongs to the same board-derived mapping as
+        the BOM, including when a complete export has frozen that mapping.
         """
         return match_correction(
             self.corrections,
@@ -839,6 +914,7 @@ class Fabrication:
     def prepare_cpl(
         self,
         corrections: Optional[tuple[AnyCorrection, ...]] = None,  # noqa: UP045
+        parts: Optional[Iterable[dict[str, Any]]] = None,  # noqa: UP045
     ) -> tuple[tuple[Any, ...], ...]:
         """Capture placement rows from one complete immutable correction set.
 
@@ -848,6 +924,7 @@ class Fabrication:
         """
         self._require_output_snapshot()
         if self.output_snapshot is not None:
+            self.validate_generation()
             return self.output_snapshot.cpl_rows
         if corrections is None:
             snapshot = self.parent.library.read_correction_data()
@@ -865,6 +942,9 @@ class Fabrication:
             "lcsc_bom_cpl", True
         )
         rows = []
+        captured = (
+            {part["reference"]: part for part in parts} if parts is not None else None
+        )
         footprints = sorted(self.board.Footprints(), key=lambda x: x.GetReference())
         for fp in footprints:
             if get_is_dnp(fp):
@@ -873,8 +953,12 @@ class Fabrication:
                     fp.GetReference(),
                 )
                 continue
-            part = self.parent.store.get_part(fp.GetReference())
-            if not part or part["exclude_from_pos"] == 1:
+            part = (
+                captured.get(fp.GetReference())
+                if captured is not None
+                else self.parent.store.get_part(fp.GetReference())
+            )
+            if not part or part["exclude_from_pos"] == 1 or part.get("is_dnp", False):
                 continue
             if not add_without_lcsc and not part["lcsc"]:
                 continue
@@ -931,8 +1015,9 @@ class Fabrication:
             )
 
     def write_cpl(self, rows: tuple[tuple[Any, ...], ...]) -> None:
-        """Write prepared placements without rereading the board or corrections."""
+        """Validate captured source before writing its prepared placements."""
         self._require_output_snapshot()
+        self.validate_generation()
         cpl_path = self.get_staged_artifact_paths()["cpl_csv"]
         with open(cpl_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
@@ -946,17 +1031,26 @@ class Fabrication:
         """Prepare every BOM row before opening the output file."""
         self.write_bom(self.prepare_bom())
 
-    def prepare_bom(self) -> tuple[tuple[Any, ...], ...]:
+    def prepare_bom(
+        self,
+        parts: Optional[Iterable[dict[str, Any]]] = None,  # noqa: UP045
+    ) -> tuple[tuple[Any, ...], ...]:
         """Resolve current BOM groups before an output file can be truncated."""
         self._require_output_snapshot()
         if self.output_snapshot is not None:
+            self.validate_generation()
             return self.output_snapshot.bom_rows
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
         footprints = {fp.GetReference(): fp for fp in self.board.Footprints()}
         rows = []
-        for part in self.parent.store.read_bom_parts():
+        groups = (
+            self.parent.store.read_bom_parts(parts)
+            if parts is not None
+            else self.parent.store.read_bom_parts()
+        )
+        for part in groups:
             if not add_without_lcsc and not part["lcsc"]:
                 self.logger.info(
                     "Component group %s has no assigned LCSC: removing from BOM",
@@ -986,8 +1080,9 @@ class Fabrication:
         return tuple(rows)
 
     def write_bom(self, rows: tuple[tuple[Any, ...], ...]) -> None:
-        """Write prepared BOM rows without rereading the board or store."""
+        """Validate captured source before writing its prepared BOM rows."""
         self._require_output_snapshot()
+        self.validate_generation()
         bom_path = self.get_staged_artifact_paths()["bom_csv"]
         with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
@@ -1001,6 +1096,7 @@ class Fabrication:
         Returns an empty sting if all parts are ok, otherwise a otherwise a overview of parts that share a LCSC number but have different values.
         """
         lcsc_numbers: dict[str, dict[str, list[str]]] = {}
+        self.validate_generation()
         if self.output_snapshot is None:
             parts = self.parent.store.read_bom_parts()
         else:
