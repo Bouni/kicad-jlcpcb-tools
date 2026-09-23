@@ -25,6 +25,7 @@ def mainwindow_module() -> tuple[Any, Any]:
             FileDialog=MagicMock(),
             MessageBox=MagicMock(),
             GenericMessageDialog=MagicMock(),
+            MessageDialog=MagicMock(),
         ),
     )
     return module, module.wx
@@ -50,11 +51,24 @@ def _export(
     roots = [root, *extra_roots] if board_schematic else []
     monkeypatch.setattr(
         mainwindow,
-        "resolve_project_schematics",
-        MagicMock(return_value=roots, side_effect=resolution_error),
+        "discover_project_schematics",
+        MagicMock(
+            return_value=SimpleNamespace(
+                paths=tuple(roots),
+                status="present" if roots else "absent",
+                diagnostics=(),
+                source_state=(),
+            ),
+            side_effect=resolution_error,
+        ),
     )
     exporter = MagicMock()
-    exporter.load_schematic.side_effect = list(load_results)
+    exporter.load_schematic.side_effect = [
+        SimpleNamespace(retirement_eligible=True, diagnostics=())
+        if result is None
+        else result
+        for result in load_results
+    ]
     monkeypatch.setattr(mainwindow, "SchematicExport", MagicMock(return_value=exporter))
     monkeypatch.setattr(mainwindow, "SchematicLockedError", SchematicLockedError)
     backup_schematics = MagicMock(side_effect=backup)
@@ -66,6 +80,7 @@ def _export(
         schematic_name="board.kicad_sch",
         logger=MagicMock(),
         backup_schematics=backup_schematics,
+        store=SimpleNamespace(dbfile=str(tmp_path / "jlcpcb" / "project.db")),
     )
     if controller is not None:
         window._variant_controller = controller
@@ -82,6 +97,15 @@ def _export(
                 window, interactive=interactive, approved_locks=approved_locks
             )
         )
+    )
+    window._report_schematic_save = lambda diagnostics, **kwargs: (
+        mainwindow.JLCPCBTools._report_schematic_save(window, diagnostics, **kwargs)
+    )
+    window._finalize_legacy_assignments = lambda outcome, **kwargs: (
+        mainwindow.JLCPCBTools._finalize_legacy_assignments(window, outcome, **kwargs)
+    )
+    window._legacy_migration_state = lambda: (
+        mainwindow.JLCPCBTools._legacy_migration_state(window)
     )
     window.save_result = mainwindow.JLCPCBTools.export_to_schematic(
         window, interactive=interactive
@@ -146,6 +170,35 @@ def test_every_top_level_schematic_is_exported(
     ]
 
 
+@pytest.mark.parametrize("variant", [False, True])
+def test_authenticated_project_without_root_uuid_still_shares_component_context(
+    mainwindow_module: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    variant: bool,
+) -> None:
+    """Authenticated multi-root membership does not require project UUID overrides."""
+    mainwindow, _wx = mainwindow_module
+    monkeypatch.setattr(
+        mainwindow, "authenticated_project_name", lambda *_args: "board"
+    )
+    controller = MagicMock() if variant else None
+    if controller is not None:
+        controller.export_to_schematic.return_value = SimpleNamespace(
+            retirement_eligible=True, diagnostics=()
+        )
+    _window, exporter = _export(
+        mainwindow_module,
+        monkeypatch,
+        tmp_path,
+        extra_roots=(str(tmp_path / "power.kicad_sch"),),
+        controller=controller,
+    )
+    active = controller if controller is not None else exporter
+    method = active.export_to_schematic if variant else active.load_schematic
+    assert method.call_args.kwargs["shared_project"] is True
+
+
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize("closed_board", [False, True])
 def test_without_a_project_schematic_no_picker_or_export_is_opened(
@@ -169,7 +222,7 @@ def test_without_a_project_schematic_no_picker_or_export_is_opened(
     exporter.load_schematic.assert_not_called()
     wx.FileDialog.assert_not_called()
     wx.GenericMessageDialog.assert_not_called()
-    assert window.save_result is None
+    assert window.save_result is True
 
 
 def test_locked_schematic_is_left_alone_when_the_user_cancels(
@@ -488,15 +541,23 @@ def test_roots_come_from_the_loaded_project_for_a_renamed_board(
     )
     asked: list[tuple] = []
 
-    def resolve(project_path: str, board: str, project_name: str) -> list[str]:
+    def resolve(project_path: str, board: str, project_name: str) -> Any:
         asked.append((project_path, board, project_name))
-        return [str(tmp_path / "power.kicad_sch")]
+        return SimpleNamespace(
+            paths=(str(tmp_path / "power.kicad_sch"),),
+            status="present",
+            diagnostics=(),
+            source_state=(),
+        )
 
-    monkeypatch.setattr(mainwindow, "resolve_project_schematics", resolve)
+    monkeypatch.setattr(mainwindow, "discover_project_schematics", resolve)
     monkeypatch.setattr(
         mainwindow, "authenticated_project_name", authenticated_project_name
     )
     exporter = MagicMock()
+    exporter.load_schematic.return_value = SimpleNamespace(
+        retirement_eligible=True, diagnostics=()
+    )
     monkeypatch.setattr(mainwindow, "SchematicExport", MagicMock(return_value=exporter))
     monkeypatch.setattr(
         mainwindow, "backup_schematics", MagicMock(side_effect=FileExistsError())
@@ -507,6 +568,16 @@ def test_roots_come_from_the_loaded_project_for_a_renamed_board(
         schematic_name="board.kicad_sch",
         logger=MagicMock(),
         pcbnew=pcbnew,
+        store=SimpleNamespace(dbfile=str(tmp_path / "jlcpcb" / "project.db")),
+    )
+    window._finalize_legacy_assignments = lambda outcome, **kwargs: (
+        mainwindow.JLCPCBTools._finalize_legacy_assignments(window, outcome, **kwargs)
+    )
+    window._legacy_migration_state = lambda: (
+        mainwindow.JLCPCBTools._legacy_migration_state(window)
+    )
+    window._report_schematic_save = lambda diagnostics, **kwargs: (
+        mainwindow.JLCPCBTools._report_schematic_save(window, diagnostics, **kwargs)
     )
     window._backup_schematics_before_first_write = (
         lambda *, interactive, approved_locks=(): (
@@ -515,10 +586,12 @@ def test_roots_come_from_the_loaded_project_for_a_renamed_board(
             )
         )
     )
-    mainwindow.JLCPCBTools.export_to_schematic(window)
+    assert mainwindow.JLCPCBTools.export_to_schematic(window) is True
 
     assert asked == [(str(tmp_path), "board.kicad_pcb", "realproject")]
-    exporter.load_schematic.assert_called_once_with([str(tmp_path / "power.kicad_sch")])
+    exporter.load_schematic.assert_called_once_with(
+        [str(tmp_path / "power.kicad_sch")], shared_project=True
+    )
 
 
 def test_first_export_creates_the_fixed_name_pre_write_backup(
@@ -647,3 +720,110 @@ def test_forced_backup_failure_skips_write_without_prompt(
     exporter.load_schematic.assert_not_called()
     wx.GenericMessageDialog.assert_not_called()
     assert "Schematic pre-write backup failed" in _logged_warning(window.logger)
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+def test_partial_close_persists_every_diagnostic_before_window_disappears(
+    mainwindow_module: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    interactive: bool,
+) -> None:
+    """The full preservation report survives both ordinary and forced successful close."""
+    _mainwindow, wx = mainwindow_module
+    diagnostics = (
+        "R1 [uuid-1]: conflicting assignment preserved",
+        "R2 [uuid-2]: link unresolved",
+    )
+    outcome = SimpleNamespace(retirement_eligible=False, diagnostics=diagnostics)
+
+    window, _exporter = _export(
+        mainwindow_module,
+        monkeypatch,
+        tmp_path,
+        load_results=(outcome,),
+        interactive=interactive,
+    )
+
+    assert window.save_result is True
+    report = tmp_path / "jlcpcb" / "schematic-save-report.txt"
+    assert all(message in report.read_text(encoding="utf-8") for message in diagnostics)
+    assert wx.GenericMessageDialog.call_count == int(interactive)
+    if interactive:
+        assert str(report) in wx.GenericMessageDialog.call_args.args[1]
+        assert (
+            wx.GenericMessageDialog.call_args.args[2]
+            == "Schematic assignments preserved"
+        )
+        wx.GenericMessageDialog.return_value.ShowModal.assert_called_once()
+        wx.GenericMessageDialog.return_value.Destroy.assert_called_once()
+
+
+def test_complete_close_removes_stale_partial_report_without_prompt(
+    mainwindow_module: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A previous warning cannot look current after every assignment is safely saved."""
+    report = tmp_path / "jlcpcb" / "schematic-save-report.txt"
+    report.parent.mkdir()
+    report.write_text("old unresolved R1", encoding="utf-8")
+
+    window, _exporter = _export(mainwindow_module, monkeypatch, tmp_path)
+
+    assert window.save_result is True and not report.exists()
+    mainwindow_module[1].GenericMessageDialog.assert_not_called()
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+def test_report_write_failure_does_not_turn_completed_save_into_failure(
+    mainwindow_module: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    interactive: bool,
+) -> None:
+    """Show the full report synchronously when persistence fails and a UI is available."""
+    (tmp_path / "jlcpcb").write_text("blocks directory creation", encoding="utf-8")
+    diagnostics = ("R1 [uuid-1]: unresolved", "R2 [uuid-2]: conflicting aliases")
+    outcome = SimpleNamespace(retirement_eligible=False, diagnostics=diagnostics)
+
+    window, _exporter = _export(
+        mainwindow_module,
+        monkeypatch,
+        tmp_path,
+        load_results=(outcome,),
+        interactive=interactive,
+    )
+
+    assert window.save_result is True
+    wx = mainwindow_module[1]
+    assert wx.GenericMessageDialog.call_count == int(interactive)
+    if interactive:
+        message = wx.GenericMessageDialog.call_args.args[1]
+        assert "could not be saved" in message
+        assert all(diagnostic in message for diagnostic in diagnostics)
+
+
+@pytest.mark.parametrize("note", ["information", "advisory"])
+def test_routine_and_nonblocking_preservation_notes_do_not_create_close_warning(
+    mainwindow_module: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    note: str,
+) -> None:
+    """Routine no-ops and Update PCB notes leave normal close free of modal warnings."""
+    outcome = SimpleNamespace(
+        retirement_eligible=True,
+        diagnostics=(),
+        information=("PCB-only hardware preserved",) if note == "information" else (),
+        advisory=("R1: run Update PCB to copy its schematic assignment",)
+        if note == "advisory"
+        else (),
+    )
+    window, _exporter = _export(
+        mainwindow_module, monkeypatch, tmp_path, load_results=(outcome,)
+    )
+
+    assert window.save_result is True
+    assert not (tmp_path / "jlcpcb" / "schematic-save-report.txt").exists()
+    mainwindow_module[1].GenericMessageDialog.assert_not_called()

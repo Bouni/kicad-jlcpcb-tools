@@ -106,7 +106,10 @@ def open_window(
             )
             if references is None or reference in references
         ]
-        window.store = SimpleNamespace(read_all=lambda: parts)
+        window.store = SimpleNamespace(
+            read_all=lambda: parts,
+            dbfile=str(tmp_path / "jlcpcb" / "project.db"),
+        )
         window.library.read_correction_data = lambda: SimpleNamespace(corrections=())
         footprints = {part["reference"]: MagicMock() for part in parts}
         for footprint in footprints.values():
