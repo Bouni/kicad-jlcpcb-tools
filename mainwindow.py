@@ -2499,9 +2499,20 @@ class JLCPCBTools(wx.Frame):
             )
             if controller := getattr(self, "_variant_controller", None):
                 controller.begin_generation(corrections)
-            placements = self.run_generation_step(
-                "Preparing placement data", self.fabrication.prepare_cpl, corrections
-            )
+                placements = self.run_generation_step(
+                    "Preparing placement data",
+                    self.fabrication.prepare_cpl,
+                    corrections,
+                )
+            else:
+                self._get_current_board()
+                self._ordinary_generating = True
+                output = self.run_generation_step(
+                    "Preparing placement data",
+                    self.fabrication.begin_ordinary_generation,
+                    corrections,
+                )
+                placements = output.cpl_rows
             layer_selection = self.layer_selection.GetSelection()
             number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
             layer_count = int(number.group(0)) if number else None
@@ -2606,6 +2617,8 @@ class JLCPCBTools(wx.Frame):
             if not self.run_generate_hook("pre", pre_hook_env, allow_continue=True):
                 return
 
+            self.fabrication.validate_generation()
+
             self.run_generation_step(
                 "Plotting Gerbers",
                 self.fabrication.generate_geber,
@@ -2645,6 +2658,7 @@ class JLCPCBTools(wx.Frame):
                 ):
                     publication.enter_context(self.fabrication.generation_publication())
             else:
+                self.fabrication.validate_generation()
                 generation_count = self.store.increment_generation_count()
             post_hook_env = self.build_generate_hook_env(
                 stage="post",
@@ -2674,11 +2688,13 @@ class JLCPCBTools(wx.Frame):
             if controller := getattr(self, "_variant_controller", None):
                 controller.end_generation()
             else:
+                self.fabrication.end_ordinary_generation()
+                self._ordinary_generating = False
                 self.generate_button.Enable(True)
 
-    def save_board_for_drc(self):
+    def save_board_for_drc(self) -> None:
         """Save the current board so DRC checks operate on latest board state."""
-        board = self.pcbnew.GetBoard()
+        board = self._get_current_board()
         board_filename = board.GetFileName()
         if not board_filename:
             raise RuntimeError("Board must be saved before running DRC checks")
