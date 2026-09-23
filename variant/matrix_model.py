@@ -9,12 +9,12 @@ import math
 import re
 from typing import Any, Optional, Union
 
+from ..lcsc import is_lcsc_part, normalize_lcsc
 from .native import BoardVariantSnapshot, ComponentVariantState, VariantEdit
 
 EDITABLE_FIELDS = ("value", "lcsc", "bom", "pos", "pop")
 FLAG_FIELDS = ("bom", "pos", "pop")
 SHARED_COLUMN_COUNT = 5
-_LCSC = re.compile(r"C[0-9]+", re.IGNORECASE)
 _UNKNOWN_ASSIGNMENTS = {"invalid", "conflict", "unknown", "error", "unavailable"}
 _BAD_CELL_STATUSES = {
     "pending",
@@ -220,12 +220,11 @@ def _parse_external_text(field: str, value: str) -> Union[str, bool]:
             return tokens[value.strip().casefold()]
         raise ClipboardError(f"{field.upper()} requires true/false or 1/0")
     if field == "lcsc":
-        value = value.strip()
-        if value and not _LCSC.fullmatch(value):
+        if value.strip() and not is_lcsc_part(value):
             raise ClipboardError(
                 "LCSC requires a C-prefixed part number or an explicit empty value"
             )
-        return value.upper()
+        return normalize_lcsc(value)
     return value
 
 

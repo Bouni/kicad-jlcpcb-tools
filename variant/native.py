@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Any, Optional, Union
 
 from ..footprint_metadata import get_footprint_pad_metadata
+from ..lcsc import is_lcsc_part, normalize_lcsc
 
 FieldValue = Union[str, bool]
 EDITABLE_FIELDS = frozenset(("value", "lcsc", "bom", "pos", "pop"))
@@ -297,7 +298,7 @@ def resolve_assignment(
         status, lcsc = "conflict", ""
     elif first.text == "":
         status, lcsc = "empty", ""
-    elif re.fullmatch(r"C[0-9]+", normalized[0]):
+    elif is_lcsc_part(normalized[0]):
         status, lcsc = "valid", normalized[0]
     else:
         status, lcsc = "invalid", ""
@@ -515,11 +516,7 @@ class VariantNativeAdapter:
                 raise NativeVariantError(f"{key} requires text")
             elif "\x00" in value:
                 raise NativeVariantError(f"{key} cannot contain a NUL character")
-            elif (
-                key == "lcsc"
-                and value
-                and not re.fullmatch(r"C[0-9]+", value, re.IGNORECASE)
-            ):
+            elif key == "lcsc" and value and not is_lcsc_part(value):
                 raise NativeVariantError("LCSC must be empty or a C followed by digits")
         base = _record(fp, "")
         assert base is not None  # Only named records may be absent.
@@ -544,7 +541,7 @@ class VariantNativeAdapter:
                 if key == "lcsc" and not names:
                     names.add("LCSC")
                 for name in names:
-                    fields[name] = value.upper() if key == "lcsc" else value
+                    fields[name] = normalize_lcsc(value) if key == "lcsc" else value
         after = (
             _Record(tuple(sorted(fields.items())), attributes)
             if before is not None or changes
@@ -647,7 +644,7 @@ class VariantNativeAdapter:
                     )
                 for key, expected in expected_fields.items():
                     if key == "lcsc":
-                        expected = str(expected).upper()
+                        expected = normalize_lcsc(expected)
                     if getattr(state, key) != expected:
                         raise NativeVariantError(
                             f"{state.reference}/{state.variant_name or 'base'}: "
