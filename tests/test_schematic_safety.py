@@ -613,3 +613,38 @@ def test_approving_one_lock_does_not_approve_the_other_name(
     assert [Path(path).name for path in newly] == [second.name]
 
     assert_schematics_not_locked([str(alias)], approved=approved + newly)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_collect_schematic_hierarchy_keeps_each_directory_alias_context(
+    tmp_path: Path,
+) -> None:
+    """A sheet under two directory links resolves ../child beside each link."""
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "sub.kicad_sch").write_text(
+        '(kicad_sch\n  (sheet (property "Sheetfile" "../child.kicad_sch"))\n)\n',
+        encoding="utf-8",
+    )
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "block").symlink_to(shared, target_is_directory=True)
+        (tmp_path / name / "child.kicad_sch").write_text(
+            "(kicad_sch)\n", encoding="utf-8"
+        )
+    root = tmp_path / "root.kicad_sch"
+    root.write_text(
+        "(kicad_sch\n"
+        '  (sheet (property "Sheetfile" "a/block/sub.kicad_sch"))\n'
+        '  (sheet (property "Sheetfile" "b/block/sub.kicad_sch"))\n'
+        ")\n",
+        encoding="utf-8",
+    )
+
+    assert collect_schematic_hierarchy(str(root)) == [
+        str(root),
+        str(tmp_path / "a" / "block" / "sub.kicad_sch"),
+        str(tmp_path / "a" / "child.kicad_sch"),
+        str(tmp_path / "b" / "block" / "sub.kicad_sch"),
+        str(tmp_path / "b" / "child.kicad_sch"),
+    ]

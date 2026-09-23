@@ -256,7 +256,9 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
     that references them, as KiCad does. Symlinks are kept rather than
     resolved: KiCad names its lock file after the path it opened and looks
     for sub-sheets beside it, so a schematic opened through a link is locked
-    beside the link, and its sub-sheets live beside the link.
+    beside the link, and its sub-sheets live beside the link. One file
+    reached under two paths is walked under each, since a sub-sheet named
+    with `..` can lead somewhere else from each of them.
 
     Args:
         root_sch_path: Absolute path to the root .kicad_sch file.
@@ -264,8 +266,7 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
     Returns:
         List of absolute, normalized paths to all discovered schematic
         files as they are reached, ordered depth-first starting with the
-        root. Two paths may name one file; callers that write deduplicate
-        by file identity.
+        root. Two paths may name one file.
 
     Raises:
         FileNotFoundError: If a referenced sheet file does not exist, so an
@@ -275,22 +276,24 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
     """
     discovered: list[str] = []
     visited: set[str] = set()
+    # A sheet reached again under the same real file and real directory
+    # while it is still being walked is taken as a loop, through a sheet
+    # that uses an ancestor or through a directory link to a parent.
+    ancestors: set[tuple[str, str]] = set()
 
     def _traverse(current_path: str) -> None:
         opened = os.path.normpath(os.path.abspath(current_path))
         base_dir = os.path.dirname(opened)
-        # Two names for one file in one directory share a lock file and
-        # resolve their sub-sheets alike, so the walk stops at the second
-        # name; this also ends a loop through a directory link.
-        key = os.path.join(os.path.realpath(base_dir), os.path.basename(opened))
-        if key in visited:
+        real = (os.path.realpath(base_dir), os.path.realpath(opened))
+        if opened in visited or real in ancestors:
             return
-        visited.add(key)
+        visited.add(opened)
         discovered.append(opened)
 
         with open(opened, encoding="utf-8", errors="replace") as f:
             content = f.read()
 
+        ancestors.add(real)
         for name in _sheet_file_names(content):
             sheet_subpath = name.strip()
             if not sheet_subpath:
@@ -302,6 +305,7 @@ def collect_schematic_hierarchy(root_sch_path: str) -> list[str]:
                     f"'{os.path.basename(opened)}' does not exist: {child_path}"
                 )
             _traverse(child_path)
+        ancestors.discard(real)
 
     _traverse(root_sch_path)
     return discovered

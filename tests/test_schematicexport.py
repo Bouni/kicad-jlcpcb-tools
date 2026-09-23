@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import re
 import types
-from typing import Optional
+from typing import Any, Optional
 
 import pytest
 
@@ -1093,3 +1093,73 @@ def test_export_writes_a_case_aliased_sheet_once(
     assert _lcsc_values(child) == ["CHILD"]
     assert (tmp_path / "child.kicad_sch_old").read_text(encoding="utf-8") == child_text
 
+
+def _directory_aliases(tmp_path: Path, version: int) -> tuple[Path, Path, str]:
+    """Reach shared/sub.kicad_sch as a/block/sub and b/block/sub; sub uses ../child."""
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "sub.kicad_sch").write_text(
+        _schematic(version, "yes", ("RV3",), reference="RV3").replace(
+            "\n)\n", "\n" + _sheet(version, "../child.kicad_sch") + ")\n"
+        ),
+        encoding="utf-8",
+    )
+    child_text = _schematic(version, "yes", ("RV4",), reference="RV4")
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "block").symlink_to(shared, target_is_directory=True)
+        (tmp_path / name / "child.kicad_sch").write_text(child_text, encoding="utf-8")
+    (tmp_path / "board.kicad_sch").write_text(
+        _schematic(version, "yes", ("RV2",)).replace(
+            "\n)\n",
+            "\n"
+            + _sheet(version, "a/block/sub.kicad_sch")
+            + _sheet(version, "b/block/sub.kicad_sch")
+            + ")\n",
+        ),
+        encoding="utf-8",
+    )
+    return (
+        tmp_path / "a" / "child.kicad_sch",
+        tmp_path / "b" / "child.kicad_sch",
+        child_text,
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize("second_child", ["present", "missing", "locked"])
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_follows_each_directory_alias_to_its_own_children(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int, second_child: str
+) -> None:
+    """One sheet under two directory links has two ../child files, each checked."""
+    first, second, child_text = _directory_aliases(tmp_path, version)
+    parts = [
+        _part("RV2", "NEW", False),
+        _part("RV3", "SUB", False),
+        _part("RV4", "CHILD", False),
+    ]
+    root = tmp_path / "board.kicad_sch"
+
+    if second_child == "present":
+        _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+        assert _lcsc_values(tmp_path / "shared" / "sub.kicad_sch") == ["SUB"]
+        assert _lcsc_values(first) == ["CHILD"]
+        assert _lcsc_values(second) == ["CHILD"]
+        return
+
+    if second_child == "missing":
+        second.unlink()
+        expected: Any = pytest.raises(
+            FileNotFoundError, match="Sheet file '../child.kicad_sch'"
+        )
+    else:
+        (second.parent / "~child.kicad_sch.lck").write_text(
+            '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+        )
+        expected = pytest.raises(SchematicLockedError, match="locked by alice@mac")
+    with expected:
+        _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+    assert _lcsc_values(root) == ["OLD"]
+    assert _lcsc_values(first) == ["OLD"]
+    assert not list(tmp_path.rglob("*_old"))
