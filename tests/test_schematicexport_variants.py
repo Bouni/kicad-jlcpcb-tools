@@ -209,3 +209,26 @@ def test_base_bom_observes_all_instances_and_preserves_variant_fields(
         "no",
     ]
     assert overrides in written
+
+
+@pytest.mark.parametrize("captured", [False, True])
+def test_export_rejects_replaced_board_before_native_read_or_file_write(
+    source: SimpleNamespace, captured: bool
+) -> None:
+    """Closing a board while the file dialog is open cannot export its stale data."""
+
+    def changed_board() -> None:
+        """Model the owning window's stale native board guard."""
+        raise RuntimeError("Board context changed; reopen the plugin")
+
+    source.exporter.parent._get_current_board = changed_board
+    with pytest.raises(RuntimeError, match="Board context changed"):
+        source.exporter.load_schematic(
+            [str(path) for path in source.paths],
+            parts=[_part("R1")] if captured else None,
+        )
+
+    assert source.store.read_count == 0
+    for path in source.paths:
+        assert path.read_text(encoding="utf-8") == source.original
+        assert not path.with_name(path.name + "_old").exists()

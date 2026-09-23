@@ -46,6 +46,30 @@ def _assert_output(ui: Any, variant: str, index: Optional[int]) -> None:
     assert ui.dialog.generate_button.IsEnabled() is available
 
 
+def test_modeless_variant_edits_use_the_native_action_boundary(window_ui: Any) -> None:
+    """A variant edit occurs within the same native transaction as ordinary edits."""
+
+    def check(ui: Any) -> None:
+        target = focus(ui, "A", "lcsc")
+        assert not ui.pcbnew.IsActionRunning()
+        apply = ui.controller.session.apply
+        running = []
+
+        def record_transaction(edits: Any) -> None:
+            running.append(ui.pcbnew.IsActionRunning())
+            apply(edits)
+
+        with patch.object(ui.controller.session, "apply", record_transaction):
+            ui.controller._on_edit(target, "C999")
+        assert running == [True]
+        assert _state(ui, "A").lcsc == "C999"
+        assert _state(ui, "B").lcsc == "C1"
+        assert not ui.pcbnew.IsActionRunning()
+        assert ui.messages == []
+
+    window_ui.run(check)
+
+
 def test_output_header_is_independent_of_selection_editing_and_refresh(
     window_ui: Any,
 ) -> None:

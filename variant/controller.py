@@ -479,8 +479,13 @@ class VariantMainController:
         )
 
     def _apply(self, edits: Sequence[Any]) -> None:
+        """Apply captured edits within the editor's native action transaction."""
         try:
-            self.session.apply(edits)
+            callback = getattr(self.dialog, "_board_action", None)
+            if callback is None:
+                self.session.apply(edits)
+            else:
+                callback(lambda: self.session.apply(edits))
         except Exception:
             # Native compensation can successfully reread newer external state.
             # Publish that recovered view before accepting another grid action.
