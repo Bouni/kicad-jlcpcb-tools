@@ -62,6 +62,7 @@ def _export(
         board_name="board.kicad_pcb",
         schematic_name="board.kicad_sch",
         logger=MagicMock(),
+        store=SimpleNamespace(dbfile=str(tmp_path / "jlcpcb" / "project.db")),
     )
     if controller is not None:
         window._variant_controller = controller

@@ -24,6 +24,7 @@ from wx import adv  # pylint: disable=import-error
 
 from .board_context import BoardContextChanged, board_identity
 from .board_part_edits import BoardEditRecoveryError, apply_board_part_edits
+from .legacy_part_storage import retire_legacy_part_info
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
@@ -2878,6 +2879,7 @@ class JLCPCBTools(wx.Frame):
         Projects without a matching schematic need no write or file picker.
         Forced shutdown never opens a dialog or approves a schematic lock.
         """
+        schematic_saved = False
         try:
 
             def check_board() -> None:
@@ -2922,22 +2924,45 @@ class JLCPCBTools(wx.Frame):
                 if decision is not True:
                     return decision
                 export(approved_locks=[path for path, _info in exc.locks])
+            # Both Store implementations now read native board fields. Retire
+            # their old shared assignment table only after every sheet is saved.
+            schematic_saved = True
+            check_board()
+            retire_legacy_part_info(self.store.dbfile)
             return True
         except Exception as exc:
-            self.logger.exception("Automatic schematic save failed")
+            if schematic_saved:
+                self.logger.exception(
+                    "Legacy assignment cleanup failed after schematic save"
+                )
+                title = "Legacy assignment cleanup failed"
+                message = (
+                    "The schematics were saved, but the old part assignment table "
+                    f"could not be removed:\n\n{exc}\n\n"
+                    "Keep this window open to correct the problem and retry, or "
+                    "close and retry cleanup after the next successful save."
+                )
+                close_label = "Close"
+            else:
+                self.logger.exception("Automatic schematic save failed")
+                title = "Schematic save failed"
+                message = (
+                    f"Could not save the schematic:\n\n{exc}\n\n"
+                    "Keep this window open to correct the problem and try again, "
+                    "or close without saving the remaining changes."
+                )
+                close_label = "Close without saving"
             if not interactive:
                 return False
             # Use wx's modal lifecycle so forced close can end the prompt on macOS.
             dialog = wx.GenericMessageDialog(
                 self,
-                f"Could not save the schematic:\n\n{exc}\n\n"
-                "Keep this window open to correct the problem and try again, "
-                "or close without saving the remaining changes.",
-                "Schematic save failed",
+                message,
+                title,
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_ERROR | wx.CENTER,
             )
             try:
-                dialog.SetYesNoLabels("Close without saving", "Keep open")
+                dialog.SetYesNoLabels(close_label, "Keep open")
                 result = dialog.ShowModal()
             finally:
                 dialog.Destroy()

@@ -26,8 +26,9 @@ from .variant.generation_counter import generation_count_transaction
 class Store:
     """Adapt live board fields, with supplier facts cached by LCSC for this session.
 
-    Legacy assignment tables and CSVs are neither read nor modified. Project
-    SQLite storage is used only when the generation counter is requested.
+    Legacy assignment tables and CSVs are never read. The window retires the
+    old table only after successful schematic auto-save. This adapter uses
+    project SQLite storage only when the generation counter is requested.
     """
 
     GENERATION_COUNT_KEY = "generation_count"

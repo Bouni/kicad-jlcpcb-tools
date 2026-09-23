@@ -210,11 +210,26 @@ all recognized assignment fields together. Other prefixed fields, such as
 `JLCPCB Rotation` or `LCSC custom code`, remain metadata; move part numbers from
 such fields into a recognized assignment field.
 
-Older project databases may still contain a `part_info` table, and older projects
-may have a legacy assignment CSV. These are left untouched and ignored; their
-assignments are not imported automatically. If an assignment existed only in
-that older storage, assign it to the board before relying on it for assembly
-output. The former schematic/database priority setting no longer applies.
+Previously, ordinary boards used database or CSV assignments while boards with
+named variants read native fields. Editing or clearing Default, then removing
+the last named variant, could therefore restore an obsolete database assignment.
+Both modes now read and edit the board; the former schematic/database priority
+setting no longer applies.
+
+Older database and CSV assignments are not imported automatically. If an
+assignment existed only in that older storage, assign it to the board before
+relying on it for assembly output. After all associated schematics are saved
+successfully on close, the obsolete `part_info` table is removed from
+`jlcpcb/project.db`. Cancellation, skipped saves, and failed or partial saves
+retain the table. Invalid or conflicting native assignment fields block saving;
+correct those fields before retrying. Intentional clears are saved as blanks.
+
+Cleanup preserves generation counters, corrections, other tables, and legacy
+CSV files. The old database is shared by boards in the same directory, so a
+successful save of any board retires that shared obsolete table. A cleanup
+failure reports that the schematics were saved and offers a retry; the table is
+retained until cleanup succeeds. Opening or refreshing a board does not create
+the table or remove it.
 
 Supplier descriptions and other part details are cached in memory by LCSC
 number and fetched again as needed. Stock and pricing come from the currently
