@@ -66,9 +66,20 @@ _PACKAGE_SEGMENT_RE = re.compile(
 _DESIGNATOR_GROUP_RE = re.compile(r"(-?)(\d+)([A-Za-z]*)")
 
 # Chip sizes: R_0603_1608Metric, C_01005_0402Metric.  The imperial code is what
-# the catalog writes, and it always carries its metric companion, so the pair
-# is what identifies it -- four digits elsewhere in a name are a dimension.
+# the catalog writes, and KiCad's library always pairs it with its metric
+# companion, so the pair is what identifies it -- four digits elsewhere in a
+# name are a dimension or a part number, as in BatteryHolder_Keystone_1060.
 _CHIP_SIZE_RE = re.compile(r"_(\d{4,5})_\d+Metric", re.IGNORECASE)
+
+# The same code on its own, as KiCad 4 libraries spelled it -- R_0603,
+# C_0603_HandSoldering -- and as boards built from them still do, since an
+# upgrade keeps the footprint ids it finds.  The code must be a whole segment
+# introduced by one of the classes the library pairs with a chip size, and
+# nothing else: any other word ahead of four digits (BatteryHolder, Crystal,
+# Jack) is naming something else, and a wrong token here empties the search.
+_BARE_CHIP_SIZE_RE = re.compile(
+    r"^(?:R|C|L|D|LED|Fuse)_(\d{4,5})(?:_|$)", re.IGNORECASE
+)
 
 # SMD electrolytics: KiCad names them by diameter and height, CP_Elec_6.3x5.9,
 # and the catalog by diameter and length, SMD,D6.3xL5.9mm.  Only the diameter
@@ -274,7 +285,7 @@ def simplify_footprint_name(footprint: str) -> str:
         return ""
     name = str(footprint).split(":")[-1]
 
-    chip = _CHIP_SIZE_RE.search(name)
+    chip = _CHIP_SIZE_RE.search(name) or _BARE_CHIP_SIZE_RE.match(name)
     if chip:
         return chip.group(1)
     electrolytic = _ELECTROLYTIC_RE.match(name)

@@ -55,6 +55,62 @@ def test_chip_sizes_use_the_imperial_code(footprint, expected):
 @pytest.mark.parametrize(
     ("footprint", "expected"),
     [
+        # KiCad 4 libraries wrote the code without its metric companion, and a
+        # board built from them keeps those footprint ids after every upgrade.
+        pytest.param("Resistors_SMD:R_0603", "0603", id="kicad4-resistor"),
+        pytest.param(
+            "Capacitors_SMD:C_0603_HandSoldering",
+            "0603",
+            id="kicad4-hand-solder-variant",
+        ),
+        pytest.param("LEDs:LED_0805", "0805", id="kicad4-led"),
+        pytest.param("Fuse:Fuse_1206", "1206", id="four-letter-class"),
+        pytest.param("Resistor_SMD:R_01005", "01005", id="five-digit"),
+    ],
+)
+def test_bare_chip_sizes_are_read_after_a_class_prefix(footprint, expected):
+    """The code alone is still the code when a class letter introduces it."""
+    assert simplify_footprint_name(footprint) == expected
+
+
+@pytest.mark.parametrize(
+    ("footprint", "reason"),
+    [
+        pytest.param(
+            "Battery:BatteryHolder_Keystone_1060_1x2032",
+            "1060 is a Keystone part number, and BatteryHolder is a word",
+            id="part-number",
+        ),
+        pytest.param(
+            "Crystal:Crystal_SMD_0603-2Pin_6.0x3.5mm",
+            "the size is not a whole segment, and Crystal is a word",
+            id="crystal-size",
+        ),
+        pytest.param(
+            "Connector_Audio:Jack_3.5mm_Lumberg_1503_02_Horizontal",
+            "1503 is a Lumberg series, not the second segment",
+            id="series-number",
+        ),
+        pytest.param(
+            "util-Dipole1090:Dipole_1090_Arms",
+            "1090 is a frequency, and Dipole is a word",
+            id="long-class-word",
+        ),
+        pytest.param(
+            "Connector_Audio:Jack_1503_02",
+            "Jack is short enough to be mistaken for a class, and is not one",
+            id="short-word-not-a-class",
+        ),
+    ],
+)
+def test_four_digits_that_are_not_a_chip_code_stay_unread(footprint, reason):
+    """Digits qualify as a chip code only as a whole segment after class letters."""
+    assert simplify_footprint_name(footprint) == "", reason
+
+
+@pytest.mark.parametrize(
+    ("footprint", "expected"),
+    [
         pytest.param("Package_TO_SOT_SMD:SOT-23", "SOT-23", id="first-segment"),
         pytest.param("Diode_SMD:D_SOD-123", "SOD-123", id="after-class-prefix"),
         pytest.param(
