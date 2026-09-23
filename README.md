@@ -173,6 +173,25 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
 
+### Part assignment field names
+
+PCB assignments and schematic export recognize the same field names: `LCSC`,
+`JLC`, or `JLCPCB`, optionally followed by `Part`, `Part Number`, `Part Num`,
+`Part No`, `PN`, `Number`, `Code`, or `ID`. Case, spaces, and punctuation are
+ignored. Other prefixed fields, including `JLCPCB Rotation` and `LCSC custom code`,
+are metadata; move part numbers from those fields into a recognized field.
+
+Assigning or exporting a part updates every existing assignment alias together,
+preserving its name. A hidden `LCSC` field is created for a nonempty assignment
+when no alias exists.
+Exporting an explicitly cleared assignment clears all existing aliases, while
+symbols absent from the exported PCB data remain unchanged. Schematic export
+updates Default assignments and preserves named-variant overrides.
+
+![KiCad Symbol Properties showing an LCSC field with the example value C25804](images/schematic-lcsc-field.png)
+
+*KiCad Symbol Properties with sample part data.*
+
 ### Part preferences
 
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
