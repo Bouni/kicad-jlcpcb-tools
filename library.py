@@ -1373,8 +1373,17 @@ class Library:
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
-            cur.execute(query, {"number": number})
-            return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
+            wanted = normalize_lcsc(number)
+            # Quoted as a phrase so the number is looked up, not parsed: bare,
+            # a blank, "C123-4" or "N/A" is FTS5 query syntax and raises,
+            # where a phrase that matches nothing simply finds nothing.
+            phrase = '"' + wanted.replace('"', '""') + '"'
+            cur.execute(query, {"number": phrase})
+            # The FTS5 match is not exact, so the row still has to be confirmed;
+            # compare canonically or a differently spelled number finds nothing.
+            return next(
+                (n for n in cur.fetchall() if normalize_lcsc(n["lcsc"]) == wanted), {}
+            )
 
     def is_download_running(self) -> bool:
         """Report the live worker claim independently of catalog readiness."""
