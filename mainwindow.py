@@ -2675,24 +2675,20 @@ class JLCPCBTools(wx.Frame):
                 paths = openFileDialog.GetPaths()
 
         controller = getattr(self, "_variant_controller", None)
-        exporter = SchematicExport(self)
+
+        def export(**approval: object) -> None:
+            if controller is not None:
+                controller.export_to_schematic(paths, **approval)
+            else:
+                SchematicExport(self).load_schematic(paths, **approval)
+
         try:
             try:
-                if controller is not None:
-                    controller.export_to_schematic(paths)
-                else:
-                    exporter.load_schematic(paths)
+                export()
             except SchematicLockedError as exc:
                 if not self.confirm_locked_schematic_export(exc):
                     return
-                if controller is not None:
-                    controller.export_to_schematic(
-                        paths, approved_locks=[path for path, _info in exc.locks]
-                    )
-                else:
-                    exporter.load_schematic(
-                        paths, approved_locks=[path for path, _info in exc.locks]
-                    )
+                export(approved_locks=[path for path, _info in exc.locks])
         except Exception as exc:
             self.logger.exception("Schematic export failed")
             wx.MessageBox(

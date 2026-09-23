@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -36,6 +37,7 @@ def _export(
     board_schematic: bool = True,
     load_results: tuple = (None,),
     extra_roots: tuple = (),
+    controller: Optional[MagicMock] = None,  # noqa: UP045
 ) -> tuple[SimpleNamespace, MagicMock]:
     """Run export_to_schematic on a minimal window and return it and the exporter."""
     mainwindow, _wx = mainwindow_module
@@ -55,6 +57,8 @@ def _export(
         schematic_name="board.kicad_sch",
         logger=MagicMock(),
     )
+    if controller is not None:
+        window._variant_controller = controller
     window.confirm_locked_schematic_export = lambda error: (
         mainwindow.JLCPCBTools.confirm_locked_schematic_export(window, error)
     )
@@ -274,3 +278,26 @@ def test_lock_found_after_the_prompt_is_reported_not_written_past(
     assert message == f"Failed to export schematic: {later}"
     assert title == "Schematic Export Error"
     window.logger.exception.assert_called_once_with("Schematic export failed")
+
+
+def test_variant_boards_export_through_the_controller_with_the_lock_prompt(
+    mainwindow_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With design variants, the controller exports and the lock prompt still applies."""
+    mainwindow, wx = mainwindow_module
+    _lock_dialog(wx, wx.ID_YES)
+    root = str(tmp_path / "board.kicad_sch")
+    controller = MagicMock()
+    controller.export_to_schematic.side_effect = [_locked(tmp_path), None]
+
+    _window, exporter = _export(
+        mainwindow_module, monkeypatch, tmp_path, controller=controller
+    )
+
+    assert controller.export_to_schematic.call_args_list == [
+        call([root]),
+        call([root], approved_locks=[root]),
+    ]
+    mainwindow.SchematicExport.assert_not_called()
+    exporter.load_schematic.assert_not_called()
+    wx.MessageBox.assert_not_called()
