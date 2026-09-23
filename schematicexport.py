@@ -11,6 +11,7 @@ from typing import Any, Optional
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
 from .core.version import is_version7
+from .schematic_fields import update_assignment_fields
 from .schematic_safety import (
     SchematicLockedError,
     assert_schematics_not_locked,
@@ -296,153 +297,27 @@ class SchematicExport:
     def _render_schematic7(
         self, path: str, store_parts: tuple[dict[str, Any], ...]
     ) -> str:
-        """Return a KiCad V7 schematic's text with its LCSC and BOM fields updated."""
+        """Render base assignment aliases and BOM state in KiCad 7 schematics."""
         self.logger.info("Reading %s...", path)
-        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
-        # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile(
-            '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
-        )
-        pinRx = re.compile('\\(pin\\s\\"(.*)\\"\\s\\(')
-
-        lastLoc = ""
-        lastLcsc = ""
-        newLcsc = ""
-        lastRef = ""
-
-        lines = []
-        newlines = []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-
+        with open(path, encoding="utf-8") as source:
+            updated = update_assignment_fields(
+                source.read(), store_parts, version7=True
+            )
+        lines = updated.splitlines(keepends=True)
         for index, desired in self._bom_updates(lines, store_parts).items():
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-
-        partSection = False
-
-        for line in lines:
-            inLine = line.rstrip()
-            outLine = inLine
-            if "(symbol (lib_id" in inLine:  # skip library section
-                partSection = True
-            m = propRx.search(inLine)
-            if m and partSection:
-                key = m.group(1)
-                value = m.group(2)
-
-                # found a LCSC property, so update it if needed
-                if key == "LCSC":
-                    lastLcsc = value
-                    if newLcsc not in (lastLcsc, ""):
-                        self.logger.info("Updating %s on %s", newLcsc, lastRef)
-                        outLine = outLine.replace(
-                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
-                        )
-                        lastLcsc = newLcsc
-
-                if key == "Reference":
-                    lastLoc = m.group(3)
-                    lastRef = value
-                    for part in store_parts:
-                        if value == part["reference"]:
-                            newLcsc = part["lcsc"]
-                            break
-            # if we hit the pin section without finding a LCSC property, add it
-            m = pinRx.search(inLine)
-            if m:
-                if lastLcsc == "" and newLcsc != "" and lastLoc != "":
-                    self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'    (property "LCSC" "{newLcsc}" (at {lastLoc} 0)'
-                    newlines.append(newTxt)
-                    newlines.append("      (effects (font (size 1.27 1.27)) hide)")
-                    newlines.append("    )")
-                lastLoc = ""
-                lastLcsc = ""
-                newLcsc = ""
-                lastRef = ""
-            newlines.append(outLine)
-
-        return "\n".join(newlines) + "\n"
+        return "".join(lines)
 
     def _render_schematic(
         self, path: str, store_parts: tuple[dict[str, Any], ...]
     ) -> str:
-        """Return a KiCad V8+ schematic's text with its LCSC and BOM fields updated."""
+        """Render base assignment aliases and BOM state in KiCad 8+ schematics."""
         self.logger.info("Reading %s...", path)
-        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
-        # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile('\\(property\\s\\"(.*)\\"\\s"(.*)\\"')
-        atRx = re.compile("\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)")
-        pinRx = re.compile('\\(pin\\s\\"(.*)\\"')
-
-        lastLoc = ""
-        lastLcsc = ""
-        newLcsc = ""
-        lastRef = ""
-
-        lines = []
-        newlines = []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-
+        with open(path, encoding="utf-8") as source:
+            updated = update_assignment_fields(
+                source.read(), store_parts, version7=False
+            )
+        lines = updated.splitlines(keepends=True)
         for index, desired in self._bom_updates(lines, store_parts).items():
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-
-        partSection = False
-
-        for i in range(0, len(lines) - 1):
-            inLine = lines[i].rstrip()
-            inLine2 = lines[i + 1].rstrip()
-            outLine = inLine
-
-            if "(symbol" in inLine and "(lib_id" in inLine2:  # skip library section
-                partSection = True
-
-            # self.logger.info("line %d", i)
-            m = propRx.search(inLine)
-            m2 = atRx.search(inLine2)
-            if m and m2 and partSection:
-                key = m.group(1)
-                # self.logger.info("key %s", key)
-                # found a LCSC property, so update it if needed
-                if key in {"LCSC", "LCSC_PN", "JLC_PN"}:
-                    value = m.group(2)
-                    lastLcsc = value
-                    if newLcsc not in (lastLcsc, ""):
-                        self.logger.info(
-                            "Updating %s on %s in %s", newLcsc, lastRef, path
-                        )
-                        outLine = outLine.replace(
-                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
-                        )
-                        lastLcsc = newLcsc
-
-                if key == "Reference":
-                    lastLoc = m2.group(1)
-                    value = m.group(2)
-                    # self.logger.info("value %s", value)
-                    lastRef = value
-                    for part in store_parts:
-                        if value == part["reference"]:
-                            newLcsc = part["lcsc"]
-                            break
-
-            # if we hit the pin section without finding a LCSC property, add it
-            m3 = pinRx.search(inLine)
-            if m3 and partSection:
-                if lastLcsc == "" and newLcsc != "" and lastLoc != "":
-                    self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'\t\t(property "LCSC" "{newLcsc}"\n\t\t\t(at {lastLoc} 0)'
-                    newlines.append(newTxt)
-                    newlines.append(
-                        "\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\n\t\t\t\t)\n\t\t\t\t(hide yes)"
-                    )
-                    newlines.append("\t\t\t)")
-                    newlines.append("\t\t)")
-                lastLoc = ""
-                lastLcsc = ""
-                newLcsc = ""
-                lastRef = ""
-            newlines.append(outLine)
-        newlines.append(lines[len(lines) - 1].rstrip())
-        return "\n".join(newlines) + "\n"
+        return "".join(lines)
