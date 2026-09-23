@@ -219,12 +219,15 @@ class SchematicExport:
         a sheet that cannot be replaced still leaves the sheets before it
         exported.
 
-        Matrix callers supply an explicit Default snapshot. The legacy fallback
+        Matrix callers supply an explicit Default snapshot. The ordinary fallback
         accepts only a Default store view and reads it once for the whole export.
         Neither the focused matrix cell nor the native editor selection changes
         the meaning of this source.
         """
         self._require_default(variant_name)
+        get_board = getattr(self.parent, "_get_current_board", None)
+        if callable(get_board):
+            get_board()
         if parts is None:
             store = self.parent.store
             self._require_default(getattr(store, "variant_name", ""))

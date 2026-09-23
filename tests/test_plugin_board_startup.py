@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from .native_window_support import focus, window_ui
+from .native_window_support import focus, plugin_action_host, window_ui
 from .native_wx_support import run_native
 
 __all__ = ["window_ui"]
@@ -45,8 +45,15 @@ def test_plugin_reports_startup_error_without_showing_partial_window(
 ) -> None:
     constructor = Mock(side_effect=error)
     monkeypatch.setattr(window_ui.mainwindow, "JLCPCBTools", constructor)
-    window_ui.plugin.JLCPCBPlugin().Run()
-    constructor.assert_called_once_with(None)
+
+    def check(host: Any, wx: Any) -> None:
+        with plugin_action_host(window_ui, host) as invoke:
+            invoke()
+
+    run_native(check)
+    assert constructor.call_count == 1
+    assert constructor.call_args.args == (None,)
+    assert callable(constructor.call_args.kwargs["board_action"])
     assert window_ui.messages == [str(error)]
 
 
@@ -55,7 +62,7 @@ def test_plugin_reports_startup_error_without_showing_partial_window(
 def test_existing_project_database_cannot_abort_plugin_action(
     window_ui: Any, variants: bool, database_state: str
 ) -> None:
-    """Native variants ignore old storage; ordinary startup exposes storage failure."""
+    """Both modes derive mappings from the board despite unusable legacy storage."""
     ui = window_ui
     if not variants:
         ui.board.names.clear()
@@ -82,8 +89,9 @@ def test_existing_project_database_cannot_abort_plugin_action(
             assert ui.dialog.generate_button.IsEnabled()
         else:
             assert ui.dialog._variant_controller is None
-            assert ui.dialog._project_storage_unavailable is (before is not None)
-        if before is None and variants:
+            assert not ui.dialog._project_storage_unavailable
+            assert ui.dialog.store.get_part("R1")["lcsc"] == "C1"
+        if before is None:
             assert not database.exists()
         elif before is not None:
             assert database.read_bytes() == before

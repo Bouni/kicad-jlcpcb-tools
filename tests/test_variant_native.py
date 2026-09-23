@@ -169,6 +169,146 @@ def test_reset_nonexistent_override_does_not_create_record_or_mark_modified(
     assert not board.parts[0].variants
 
 
+def test_preflight_repeated_default_values_and_absent_reset_are_read_only(
+    native: Any,
+) -> None:
+    board, adapter = native
+    before = adapter.snapshot()
+    updates = (
+        VariantEdit(
+            before.target("component-1", ""),
+            (("lcsc", "C1"), ("value", "10k"), ("bom", True)),
+        ),
+        VariantEdit(before.target("component-1", "A"), use_base=("lcsc", "value")),
+    )
+    assert adapter.edits_needed(updates) is False
+    assert adapter.edits_needed(()) is False
+    assert adapter.snapshot() == before
+    assert not board.modified
+    assert not board.parts[0].variants
+
+
+@pytest.mark.parametrize(
+    "changes", [(("lcsc", "C1"),), (("value", "10k"),), (("bom", True),)]
+)
+def test_preflight_same_effective_value_creates_explicit_named_record(
+    native: Any, changes: tuple[tuple[str, Any], ...]
+) -> None:
+    board, adapter = native
+    before = adapter.snapshot()
+    updates = (VariantEdit(before.target("component-1", "A"), changes),)
+    assert adapter.edits_needed(updates) is True
+    assert not board.modified
+    assert not board.parts[0].variants
+    after = adapter.apply_edits(updates)
+    assert board.parts[0].GetVariant("A") is not None
+    repeat = (VariantEdit(after.target("component-1", "A"), changes),)
+    assert adapter.edits_needed(repeat) is False
+
+
+def test_preflight_raw_alias_normalization_is_a_real_change(native: Any) -> None:
+    board, adapter = native
+    fp = board.parts[0]
+    fp.fields.update(LCSC=" c1 ", JLCPCB="C1")
+    before = adapter.snapshot()
+    assert before.get("component-1", "").lcsc == "C1"
+    updates = (VariantEdit(before.target("component-1", ""), (("lcsc", "C1"),)),)
+    assert adapter.edits_needed(updates) is True
+    assert fp.fields["LCSC"] == " c1 "
+    assert not board.modified
+    after = adapter.apply_edits(updates)
+    assert fp.fields["LCSC"] == fp.fields["JLCPCB"] == "C1"
+    assert (
+        adapter.edits_needed(
+            (VariantEdit(after.target("component-1", ""), (("lcsc", "C1"),)),)
+        )
+        is False
+    )
+
+
+def test_preflight_explicit_clear_of_missing_assignment_is_a_real_change(
+    native: Any,
+) -> None:
+    board, adapter = native
+    fp = board.parts[0]
+    del fp.fields["LCSC"]
+    before = adapter.snapshot()
+    updates = (VariantEdit(before.target("component-1", ""), (("lcsc", ""),)),)
+    assert adapter.edits_needed(updates) is True
+    assert "LCSC" not in fp.fields
+    assert not board.modified
+    after = adapter.apply_edits(updates)
+    assert after.get("component-1", "").assignment.status == "empty"
+    assert fp.fields["LCSC"] == ""
+    assert (
+        adapter.edits_needed(
+            (VariantEdit(after.target("component-1", ""), (("lcsc", ""),)),)
+        )
+        is False
+    )
+
+
+def test_preflight_removing_equal_named_override_restores_inheritance(
+    native: Any,
+) -> None:
+    board, adapter = native
+    fp = board.parts[0]
+    fp.AddVariant("A").SetFieldValue("LCSC", "C1")
+    before = adapter.snapshot()
+    updates = (VariantEdit(before.target("component-1", "A"), use_base=("lcsc",)),)
+    assert adapter.edits_needed(updates) is True
+    assert fp.GetVariant("A").HasFieldValue("LCSC")
+    after = adapter.apply_edits(updates)
+    assert after.get("component-1", "A").assignment.inherited
+    assert (
+        adapter.edits_needed(
+            (VariantEdit(after.target("component-1", "A"), use_base=("lcsc",)),)
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("first_changes", [(("lcsc", "C1"),), (("lcsc", "C2"),)])
+@pytest.mark.parametrize("invalid", ["duplicate", "invalid_flag", "stale"])
+def test_preflight_validates_every_edit_even_after_finding_a_change(
+    native: Any, first_changes: tuple[tuple[str, Any], ...], invalid: str
+) -> None:
+    board, adapter = native
+    before = adapter.snapshot()
+    first = VariantEdit(before.target("component-1", ""), first_changes)
+    if invalid == "duplicate":
+        second = first
+    elif invalid == "invalid_flag":
+        second = VariantEdit(before.target("component-1", "A"), (("bom", "yes"),))
+    else:
+        second = VariantEdit(before.target("component-1", "A"), (("lcsc", "C2"),))
+        board.parts[0].AddVariant("A").SetFieldValue("Value", "22k")
+    captured = adapter.snapshot()
+    with pytest.raises(NativeVariantError):
+        adapter.edits_needed((first, second))
+    assert adapter.snapshot() == captured
+    assert not board.modified
+
+
+def test_apply_revalidates_source_after_successful_preflight(native: Any) -> None:
+    board, adapter = native
+    before = adapter.snapshot()
+    updates = (VariantEdit(before.target("component-1", ""), (("lcsc", "C2"),)),)
+    assert adapter.edits_needed(updates) is True
+    board.parts[0].fields["LCSC"] = "C3"
+    with pytest.raises(StaleVariantTarget):
+        adapter.apply_edits(updates)
+    assert board.parts[0].fields["LCSC"] == "C3"
+    assert not board.modified
+
+
+def test_preflight_rejects_unreliable_adapter_even_for_empty_batch(native: Any) -> None:
+    _, adapter = native
+    adapter.unreliable = True
+    with pytest.raises(NativeVariantError, match="rollback failed"):
+        adapter.edits_needed(())
+
+
 def test_estimator_ignores_nonplated_pads(native: Any) -> None:
     board, adapter = native
     pads = [

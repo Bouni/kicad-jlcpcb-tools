@@ -526,8 +526,10 @@ class VariantNativeAdapter:
             write.before if restore else write.after
         )
 
-    def apply_edits(self, edits: Sequence[VariantEdit]) -> BoardVariantSnapshot:
-        """Validate the whole batch, write native state first, then verify it."""
+    def _prepare_edits(
+        self, edits: Sequence[VariantEdit]
+    ) -> tuple[dict[str, Any], list[_Write]]:
+        """Validate every captured target and retain only raw native changes."""
         if self.unreliable:
             raise NativeVariantError(
                 "An earlier native rollback failed; reopen and inspect the board"
@@ -548,6 +550,18 @@ class VariantNativeAdapter:
             write = self._prepare(edit, before, footprints[edit.target.component_id])
             if write.before != write.after:
                 prepared.append(write)
+        return footprints, prepared
+
+    def edits_needed(self, edits: Sequence[VariantEdit]) -> bool:
+        """Check for real changes before entering KiCad's undo/dirty wrapper."""
+        _, prepared = self._prepare_edits(edits)
+        return bool(prepared)
+
+    def apply_edits(self, edits: Sequence[VariantEdit]) -> BoardVariantSnapshot:
+        """Validate the whole batch, write native state first, then verify it."""
+        # Reprepare inside the host transaction; a read-only preflight cannot
+        # authorize writes against a source that changed before the transaction.
+        footprints, prepared = self._prepare_edits(edits)
         applied: list[_Write] = []
         try:
             for write in prepared:

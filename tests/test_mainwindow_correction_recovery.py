@@ -129,7 +129,12 @@ def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
         for reference in ("C1", "C2")
     ]
     footprint = SimpleNamespace(GetLayer=lambda: 0)
-    board = SimpleNamespace(FindFootprintByReference=lambda _reference: footprint)
+    board = SimpleNamespace(
+        FindFootprintByReference=lambda _reference: footprint,
+        GetFileName=lambda: str(
+            Path(runtime.library.parent.project_path) / "board.kicad_pcb"
+        ),
+    )
     window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
     window.hide_bom_parts = False
     window.hide_pos_parts = False
