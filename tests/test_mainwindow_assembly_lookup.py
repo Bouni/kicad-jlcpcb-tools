@@ -23,6 +23,10 @@ def assert_assembly_feedback(
     model = frame.partlist_data_model
     item = model.ObjectToItem(model.data[model.find_index(reference)])
     assert model.GetValue(item, model.columns["STANDARD_ONLY_COL"]) == glyph
+    status = (
+        "Pending" if pending else "Done" if glyph in ("✓", "—") else "Class missing"
+    )
+    assert model.GetValue(item, model.columns["ENRICH_COL"]) == status
     help_text = model.get_assembly_tooltip(item)
     assert ("Retrieving assembly information." in help_text) is pending
     assert f"Assembly process: {process or 'unavailable'}" in help_text
@@ -61,9 +65,14 @@ def test_overlapping_lookups_classify_current_assignments(
         frame.assign_parts(
             SimpleNamespace(references=[ref], lcsc=code, type="Basic", stock=100)
         )
-        assert len(ui.pending_threads) == (1 if code == "C1" else 2)
-        ui.run_worker()
-        pump(ui.wx)
+        assert len(ui.pending_threads) == (
+            0 if assignment == "completed" else 1 if code == "C1" else 2
+        )
+        if assignment == "completed":
+            assert_assembly_feedback(frame, "R2", "—", pending=False, process="THT")
+        else:
+            ui.run_worker()
+            pump(ui.wx)
         if assignment == "reassigned":
             assert frame.store.get_part("R1")["component_product_type"] is None
         elif assignment == "disjoint":
@@ -94,11 +103,105 @@ def test_overlapping_lookups_classify_current_assignments(
             for call in ui.supplier.fetch_iter.call_args_list
             for code in call.args[0]
         ]
-        assert sorted(queried) == (
-            ["C1", "C1"]
-            if assignment == "completed"
-            else sorted(set(expected.values()) | {"C1"})
+        assert sorted(queried) == sorted(set(expected.values()) | {"C1"})
+
+    ui.run(check)
+
+
+@pytest.mark.parametrize(
+    "action", ["reselect", "clear_then_reassign", "paste", "preference"]
+)
+def test_cached_assignment_immediately_restores_assembly_feedback(
+    window_ui: Any, action: str
+) -> None:
+    """All assignment handlers reuse complete session metadata without another lookup."""
+    ui = window_ui
+    ui.board.names.clear()
+    ui.board.current = ""
+    second = _SelectableFootprint(ui.board, "component-2", "R2")
+    second.SetField("LCSC", "")
+    ui.board.parts.append(second)
+    ui.supplier.fetch_iter.return_value = iter(
+        [("C1", {"assembly_process": "SMT", "component_product_type": 2})]
+    )
+
+    def check(ui: Any) -> None:
+        frame = ui.dialog
+        ui.run_worker()
+        pump(ui.wx)
+        assert_assembly_feedback(frame, "R1", "✓", pending=False, process="SMT")
+        reference = "R2" if action in ("paste", "preference") else "R1"
+        model = frame.partlist_data_model
+        item = model.ObjectToItem(model.data[model.find_index(reference)])
+        frame.footprint_list.Select(item)
+        if action == "clear_then_reassign":
+            frame.remove_lcsc_number()
+            assert frame.store.get_part(reference)["lcsc"] == ""
+            assert model.GetValue(item, model.columns["STANDARD_ONLY_COL"]) == ""
+            assert model.GetValue(item, model.columns["ENRICH_COL"]) == ""
+            assert model.get_assembly_tooltip(item) == "No assigned LCSC part."
+        if action in ("reselect", "clear_then_reassign"):
+            frame.assign_parts(
+                SimpleNamespace(
+                    references=[reference], lcsc="C1", type="Basic", stock=100
+                )
+            )
+        elif action == "paste":
+            assert ui.wx.TheClipboard.Open()
+            try:
+                assert ui.wx.TheClipboard.SetData(ui.wx.TextDataObject("C1"))
+            finally:
+                ui.wx.TheClipboard.Close()
+            frame.paste_part_lcsc()
+        else:
+            part = frame.store.get_part(reference)
+            frame.library.create_part_preferences_table()
+            frame.library.save_part_preferences(
+                [(part["footprint"], part["value"], "C1")]
+            )
+            frame.apply_selected_part_preferences()
+        assert frame.store.get_part(reference)["lcsc"] == "C1"
+        assert_assembly_feedback(frame, reference, "✓", pending=False, process="SMT")
+        assert not ui.pending_threads
+        assert not frame.assembly_lookup.pending
+        ui.supplier.fetch_iter.assert_called_once_with(("C1",))
+
+    ui.run(check)
+
+
+@pytest.mark.parametrize("known", ["assembly_process", "component_product_type"])
+def test_assignment_preserves_partial_cached_metadata_while_retrying(
+    window_ui: Any, known: str
+) -> None:
+    """Missing metadata is retried without hiding the supplier facts already known."""
+    ui = window_ui
+    ui.board.names.clear()
+    ui.board.current = ""
+    metadata = {"assembly_process": "THT", "component_product_type": 2}
+    ui.supplier.fetch_iter.side_effect = [
+        iter([("C1", {known: metadata[known]})]),
+        iter([("C1", metadata)]),
+    ]
+
+    def check(ui: Any) -> None:
+        frame = ui.dialog
+        ui.run_worker()
+        pump(ui.wx)
+        process = "THT" if known == "assembly_process" else ""
+        assert_assembly_feedback(
+            frame, "R1", "?" if process else "✓", pending=False, process=process
         )
+        frame.assign_parts(
+            SimpleNamespace(references=["R1"], lcsc="C1", type="Basic", stock=100)
+        )
+        assert len(ui.pending_threads) == 1
+        assert_assembly_feedback(
+            frame, "R1", "◷" if process else "✓", pending=True, process=process
+        )
+        ui.run_worker()
+        pump(ui.wx)
+        assert_assembly_feedback(frame, "R1", "✓", pending=False, process="THT")
+        assert ui.supplier.fetch_iter.call_count == 2
 
     ui.run(check)
 
@@ -154,13 +257,14 @@ def test_completion_storage_failure_disables_stale_rows_and_refreshes_summary(
 def test_storage_recovery_restarts_lookup_and_rejects_old_delivery(
     window_ui: Any, storage_failed: bool
 ) -> None:
-    """Replacing failed storage invalidates old callbacks; fresh results survive reopen."""
+    """Each storage lifetime rejects old callbacks and fetches its own supplier facts."""
     ui = window_ui
     ui.board.names.clear()
     ui.board.current = ""
     ui.supplier.fetch_iter.side_effect = [
         iter([("C1", {"assembly_process": "THT", "component_product_type": 1})]),
         iter([("C1", {"assembly_process": "SMT", "component_product_type": 2})]),
+        iter([("C1", {"assembly_process": "THT", "component_product_type": 1})]),
     ]
 
     def recover(ui: Any) -> None:
@@ -183,9 +287,15 @@ def test_storage_recovery_restarts_lookup_and_rejects_old_delivery(
         assert_assembly_feedback(frame, "R1", "✓", pending=False, process="SMT")
 
     def reopen(ui: Any) -> None:
-        assert ui.dialog.store.get_part("R1")["component_product_type"] == 2
+        assert ui.dialog.store.get_part("R1")["component_product_type"] is None
+        assert len(ui.pending_threads) == 1
+        assert_assembly_feedback(ui.dialog, "R1", "◷", pending=True)
+        ui.run_worker()
+        pump(ui.wx)
+        assert ui.dialog.store.get_part("R1")["component_product_type"] == 1
         assert ui.pending_threads == []
-        assert_assembly_feedback(ui.dialog, "R1", "✓", pending=False, process="SMT")
+        assert_assembly_feedback(ui.dialog, "R1", "—", pending=False, process="THT")
+        assert ui.supplier.fetch_iter.call_count == 3
 
     ui.run(recover, reopen)
 
