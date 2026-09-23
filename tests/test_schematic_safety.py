@@ -587,3 +587,29 @@ def test_atomic_write_schematic_writes_the_target_of_a_link(tmp_path: Path) -> N
     backup = target.parent / "real.kicad_sch_old"
     assert backup.read_text(encoding="utf-8") == "original content\n"
     assert sorted(p.name for p in alias.parent.iterdir()) == ["board.kicad_sch"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize("first_beside", ["link", "target"])
+def test_approving_one_lock_does_not_approve_the_other_name(
+    tmp_path: Path, first_beside: str
+) -> None:
+    """A lock appearing beside the other name after the prompt is still reported."""
+    target, alias = _symlinked_schematic(tmp_path)
+    first, second = (alias, target) if first_beside == "link" else (target, alias)
+    _lock(first, "alice")
+
+    with pytest.raises(SchematicLockedError) as raised:
+        assert_schematics_not_locked([str(alias)])
+    approved = [path for path, _info in raised.value.locks]
+    assert [Path(path).name for path in approved] == [first.name]
+
+    _lock(second, "bob")
+    with pytest.raises(
+        SchematicLockedError, match=f"'{second.name}' is locked by bob"
+    ) as raised:
+        assert_schematics_not_locked([str(alias)], approved=approved)
+    newly = [path for path, _info in raised.value.locks]
+    assert [Path(path).name for path in newly] == [second.name]
+
+    assert_schematics_not_locked([str(alias)], approved=approved + newly)

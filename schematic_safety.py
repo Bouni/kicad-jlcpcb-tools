@@ -109,6 +109,17 @@ def check_schematic_lock(
         return {"raw": "active_lock", "error": str(exc)}
 
 
+def _lock_location(schematic_path: str) -> str:
+    """Return the lockfile path of a schematic with its directory resolved.
+
+    Two names for one directory hold one lock file; two names for one
+    schematic in different directories, such as a symlink and its target,
+    hold two.
+    """
+    directory, name = os.path.split(get_schematic_lock_path(schematic_path))
+    return os.path.join(os.path.realpath(directory), name)
+
+
 def assert_schematics_not_locked(
     schematic_paths: list[str],
     approved: Collection[str] = (),
@@ -117,26 +128,26 @@ def assert_schematics_not_locked(
 
     Args:
         schematic_paths: Schematics that are about to be written.
-        approved: Schematics whose locks the user has already chosen to
-            write past; any other lock is still reported.
+        approved: Paths reported by an earlier SchematicLockedError whose
+            locks the user has chosen to write past. Each approves the lock
+            file beside that path only: a lock beside another name of the
+            same schematic, or one taken since, is still reported.
 
     Raises:
         SchematicLockedError: Naming every schematic with an unapproved lock.
 
     """
-    approved_set = {os.path.realpath(p) for p in approved}
+    approved_locks = {_lock_location(p) for p in approved}
     locks = []
     checked: set[str] = set()
     for path in schematic_paths:
-        if path in approved or os.path.realpath(path) in approved_set:
-            continue
         # KiCad names the lock after the path it opened, so a schematic reached
         # through a symlink may be locked beside the link or beside its target.
         for candidate in dict.fromkeys((path, os.path.realpath(path))):
-            lock_path = get_schematic_lock_path(candidate)
-            if lock_path in checked:
+            location = _lock_location(candidate)
+            if location in checked or location in approved_locks:
                 continue
-            checked.add(lock_path)
+            checked.add(location)
             lock_info = check_schematic_lock(candidate)
             if lock_info is not None:
                 locks.append((candidate, lock_info))

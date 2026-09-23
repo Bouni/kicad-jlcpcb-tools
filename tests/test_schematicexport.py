@@ -978,3 +978,46 @@ def test_export_checks_every_name_of_a_shared_schematic(
     # Written once: the backup holds the original, not an already exported copy.
     backup = tmp_path / "real.kicad_sch_old"
     assert backup.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize("first_beside", ["link", "target"])
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_reports_a_lock_that_appears_beside_the_other_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int, first_beside: str
+) -> None:
+    """Approving the lock the user saw does not approve one taken since, elsewhere."""
+    target = tmp_path / "shared" / "real.kicad_sch"
+    target.parent.mkdir()
+    alias = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("RV2",))
+    target.write_text(original, encoding="utf-8")
+    alias.symlink_to(target)
+    first, second = (alias, target) if first_beside == "link" else (target, alias)
+    parts = [_part("RV2", "NEW", False)]
+
+    (first.parent / f"~{first.name}.lck").write_text(
+        '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+    )
+    with pytest.raises(SchematicLockedError) as raised:
+        _load_schematic(tmp_path, monkeypatch, version, [alias], parts)
+    approved = [locked for locked, _info in raised.value.locks]
+
+    (second.parent / f"~{second.name}.lck").write_text(
+        '{"hostname":"mac","username":"bob"}', encoding="utf-8"
+    )
+    with pytest.raises(
+        SchematicLockedError, match=f"'{second.name}' is locked by bob"
+    ) as raised:
+        _load_schematic(
+            tmp_path, monkeypatch, version, [alias], parts, approved_locks=approved
+        )
+    assert target.read_text(encoding="utf-8") == original
+    assert not list(tmp_path.rglob("*_old"))
+
+    approved += [locked for locked, _info in raised.value.locks]
+    _load_schematic(
+        tmp_path, monkeypatch, version, [alias], parts, approved_locks=approved
+    )
+    result = target.read_text(encoding="utf-8")
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
