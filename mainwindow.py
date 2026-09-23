@@ -29,6 +29,22 @@ from .board_part_edits import (
     apply_board_part_edits,
     board_part_edits_needed,
 )
+from .legacy_part_storage import retire_legacy_part_info
+from .part_assignments import safe_assignment_value
+from .saved_pcb_assignments import read_saved_pcb_assignments
+from .legacy_board_coverage import (
+    collect_saved_board_coverage,
+    verify_saved_board_sources,
+)
+from .legacy_part_migration import (
+    LegacyMigrationPlan,
+    MigrationFootprint,
+    MigrationLink,
+    plan_legacy_migration,
+)
+from .schematic_links import SchematicIndex
+from .schematic_snapshot import capture_board
+from .schematic_discovery import discover_project_schematics
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
@@ -85,7 +101,6 @@ from .kicad_drc import DRCViolationCounter
 from .lcsc import extract_lcsc, normalize_lcsc
 from .lcsc_entry_dialog import LcscEntryDialog
 from .library import CorrectionState, Library, LibraryState
-from .lcsc import normalize_lcsc
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
@@ -93,7 +108,6 @@ from .schematic_safety import (
     SchematicLockedError,
     authenticated_project_name,
     backup_schematics,
-    resolve_project_schematics,
 )
 from .schematicexport import SchematicExport
 from .search_prefill import prefill_search
@@ -114,6 +128,7 @@ SCHEMATIC_PRE_WRITE_BACKUP_ZIP = "schematics-before-plugin-attributes.zip"
 
 if TYPE_CHECKING:
     from .library import CorrectionSnapshot
+    from .schematicexport import ExportOutcome
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -1207,6 +1222,10 @@ class JLCPCBTools(wx.Frame):
         if controller := getattr(self, "_variant_controller", None):
             try:
                 controller.session._check_board()
+                self.store = controller.cache
+                self._migrate_legacy_assignments()
+                if getattr(self, "_board_unreliable", False):
+                    return
                 controller.refresh()
                 if not controller.session.reliable:
                     raise ValueError(
@@ -1236,6 +1255,9 @@ class JLCPCBTools(wx.Frame):
             self.assembly_lookup.invalidate()
             self.store = store_type(self, self.project_path, board)
             self._set_project_storage_error(None)
+            self._migrate_legacy_assignments()
+            if getattr(self, "_board_unreliable", False):
+                return
             self._maybe_show_schematic_storage_notice(project_db_preexisted)
             if store_type is not Store:
                 from .variant.controller import VariantMainController
@@ -1246,6 +1268,184 @@ class JLCPCBTools(wx.Frame):
             self._initialize_catalog_parts()
         except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
+
+    @staticmethod
+    def _migration_footprints(
+        board: Any,
+    ) -> tuple[tuple[MigrationFootprint, ...], Any, dict[str, Any]]:
+        """Capture detached recovery values from a live or independently loaded PCB."""
+        snapshot = capture_board(board)
+        footprints = {
+            str(footprint.m_Uuid.AsString()): footprint
+            for footprint in board.GetFootprints()
+        }
+        parts = tuple(
+            MigrationFootprint(
+                part.component_id,
+                part.reference,
+                str(footprints[part.component_id].GetValue()),
+                str(footprints[part.component_id].GetFPID().GetLibItemName()),
+                not part.exclude_from_bom,
+                not get_exclude_from_pos(footprints[part.component_id]),
+                part.assignment,
+                part.lcsc,
+            )
+            for part in snapshot.parts
+        )
+        return parts, snapshot, footprints
+
+    def _legacy_migration_state(
+        self,
+    ) -> tuple[LegacyMigrationPlan, tuple[object, ...], dict[str, Any]]:
+        """Read current recovery coverage without changing native or stored values."""
+        dbfile = self.store.dbfile
+        initial = plan_legacy_migration(dbfile, (), lambda _component_id: None)
+        if not initial.active_table:
+            return initial, (), {}
+        if not initial.rows or all(row.status == "ignored" for row in initial.rows):
+            return initial, ((),), {}
+        board = self._get_current_board()
+        parts, snapshot, footprints = self._migration_footprints(board)
+        project_name = authenticated_project_name(self.pcbnew, self.project_path)
+        discovery = discover_project_schematics(
+            self.project_path,
+            getattr(self, "board_name", os.path.basename(board.GetFileName())),
+            project_name,
+        )
+        if discovery.status == "unresolved":
+            raise ValueError("; ".join(discovery.diagnostics))
+        root_uuids = dict(getattr(discovery, "root_uuids", ()))
+        index_options = {"shared_project": bool(project_name) or bool(root_uuids)}
+        if root_uuids:
+            index_options["root_uuids"] = root_uuids
+        index = SchematicIndex.from_paths(discovery.paths, **index_options)
+        links = {}
+        for part in snapshot.parts:
+            if discovery.status == "absent":
+                links[part.component_id] = MigrationLink("no_schematic")
+            elif part.schematic_path in {"", "/"}:
+                links[part.component_id] = MigrationLink("pcb_only")
+            else:
+                component = index.resolve_component(part.schematic_path)
+                if not component.resolved:
+                    links[part.component_id] = MigrationLink(
+                        "unresolved", reason="; ".join(component.issues)
+                    )
+                    continue
+                links[part.component_id] = MigrationLink(
+                    "linked",
+                    members=tuple(
+                        (member.target.assignment, member.target.lcsc)
+                        for member in component.members
+                    ),
+                    target_ids=tuple(
+                        sorted({member.target.key for member in component.members})
+                    ),
+                    covered_occurrences=tuple(
+                        sorted(
+                            {
+                                (*member.target.key, member.path)
+                                for member in component.members
+                            }
+                        )
+                    ),
+                    expected_occurrences=tuple(
+                        sorted(
+                            {
+                                (*member.target.key, path)
+                                for member in component.members
+                                for path in member.target.instance_paths
+                            }
+                        )
+                    ),
+                )
+        plan = plan_legacy_migration(
+            dbfile,
+            parts,
+            lambda key: links[key],
+            imported_assignments=getattr(self, "_legacy_imported_assignments", {}),
+        )
+        native_links = tuple(
+            (part.component_id, part.schematic_path) for part in snapshot.parts
+        )
+        # Recheck actual members, their provenance, discovery state and PCB links
+        # when entering the native action, not just the displayed references.
+        linked_targets = tuple(sorted(links.items()))
+        return (
+            plan,
+            (
+                parts,
+                native_links,
+                linked_targets,
+                discovery.source_state,
+                tuple(sorted(index.texts.items())),
+            ),
+            footprints,
+        )
+
+    def _migrate_legacy_assignments(self) -> None:
+        """Recover absent Default fields once, before preferences or initial display."""
+        if getattr(self, "_legacy_migration_completed", False):
+            return
+        self._legacy_migration_failed = False
+        self._legacy_migration_block_preferences = False
+        try:
+            plan, state, _footprints = self._legacy_migration_state()
+            self._legacy_migration_blocked_ids = set(plan.blocked_component_ids)
+            for row in plan.unresolved:
+                self.logger.warning(
+                    "Legacy assignment retained for %s [%s]: %s",
+                    row.reference,
+                    ", ".join(row.component_ids),
+                    row.reason,
+                )
+            if plan.assignments:
+
+                def apply() -> None:
+                    current_plan, current_state, current_footprints = (
+                        self._legacy_migration_state()
+                    )
+                    if current_plan != plan or current_state != state:
+                        raise RuntimeError(
+                            "Legacy recovery sources changed; retry initialization."
+                        )
+                    apply_board_part_edits(
+                        [
+                            (current_footprints[key], {"lcsc": code})
+                            for key, code in plan.assignments
+                        ]
+                    )
+
+                if not self._apply_board_change(
+                    apply,
+                    "recover legacy assignments",
+                    needs_change=lambda: board_part_edits_needed(
+                        [
+                            (_footprints[key], {"lcsc": code})
+                            for key, code in plan.assignments
+                        ]
+                    ),
+                ):
+                    self._legacy_migration_failed = True
+                    self._legacy_migration_blocked_ids.update(
+                        key for key, _code in plan.assignments
+                    )
+                    return
+                imported = dict(getattr(self, "_legacy_imported_assignments", {}))
+                imported.update(plan.assignments)
+                self._legacy_imported_assignments = imported
+                self.logger.info(
+                    "Recovered %d legacy assignment(s) into the native board. Save the PCB in KiCad to retain them.",
+                    len(plan.assignments),
+                )
+            self._legacy_migration_completed = True
+        except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
+            self._legacy_migration_failed = True
+            self._legacy_migration_block_preferences = True
+            self.logger.warning(
+                "Unable to recover legacy assignments; recovery data retained: %s",
+                error,
+            )
 
     def _maybe_show_schematic_storage_notice(self, project_db_preexisted: bool) -> None:
         """Explain once that closing writes fabrication attributes into schematics."""
@@ -1673,7 +1873,9 @@ class JLCPCBTools(wx.Frame):
 
     def _fill_empty_lcsc_assignments_from_part_preferences(self) -> None:
         """Fill truly empty eligible native fields once per plugin opening."""
-        if getattr(self, "_variant_controller", None):
+        if getattr(self, "_variant_controller", None) or getattr(
+            self, "_legacy_migration_block_preferences", False
+        ):
             return
         board = self._get_current_board()
         part_preferences = {}
@@ -1685,6 +1887,11 @@ class JLCPCBTools(wx.Frame):
                 footprint = board.FindFootprintByReference(part["reference"])
                 if (
                     footprint is None
+                    or (
+                        getattr(self, "_legacy_migration_blocked_ids", ())
+                        and str(footprint.m_Uuid.AsString())
+                        in self._legacy_migration_blocked_ids
+                    )
                     or get_exclude_from_bom(footprint)
                     or get_exclude_from_pos(footprint)
                     or get_is_dnp(footprint)
@@ -3012,12 +3219,94 @@ class JLCPCBTools(wx.Frame):
             )
         self.populate_footprint_list()
 
+    def _finalize_legacy_assignments(
+        self, outcome: Optional[ExportOutcome], *, schematic_saved: bool
+    ) -> list[str]:
+        """Archive only recovery data proven durable in schematics or saved PCBs."""
+        diagnostics = list(outcome.diagnostics) if outcome is not None else []
+        eligible = not schematic_saved or (
+            outcome is not None and outcome.retirement_eligible
+        )
+        if getattr(self, "_legacy_migration_failed", False):
+            eligible = False
+            diagnostics.append(
+                "Legacy recovery remains incomplete; its recovery data was retained."
+            )
+        try:
+            plan, state, _footprints = self._legacy_migration_state()
+        except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
+            diagnostics.append(f"Unable to verify legacy recovery coverage: {error}")
+            return diagnostics
+        if not plan.active_table:
+            return diagnostics
+        if not plan.retirement_eligible or plan.assignments:
+            eligible = False
+            for row in (
+                *plan.unresolved,
+                *(row for row in plan.rows if row.status == "planned"),
+            ):
+                diagnostics.append(
+                    f"Legacy assignment retained for {row.reference} "
+                    f"[{', '.join(row.component_ids)}]: {row.reason}"
+                )
+        board = self._get_current_board()
+        # The schematic may have been replaced after the exporter returned. Only
+        # still-present, unambiguous values can substitute for a saved PCB.
+        saved_ids = frozenset(outcome.saved) if outcome is not None else frozenset()
+        links = dict(state[2]) if len(state) > 2 else {}
+        durable_schematic_ids = frozenset(
+            part.component_id
+            for part in state[0]
+            if part.component_id in saved_ids
+            and (value := safe_assignment_value(part.assignment, part.lcsc)) is not None
+            and (link := links.get(part.component_id)) is not None
+            and link.status == "linked"
+            and link.members
+            and all(
+                safe_assignment_value(assignment, lcsc) == value
+                for assignment, lcsc in link.members
+            )
+        )
+        coverage = collect_saved_board_coverage(
+            board.GetFileName(),
+            state[0],
+            plan.rows,
+            load_board=read_saved_pcb_assignments,
+            schematic_saved_ids=durable_schematic_ids,
+        )
+        diagnostics.extend(coverage.diagnostics)
+        for message in getattr(coverage, "advisories", ()):
+            self.logger.info("%s", message)
+        eligible = eligible and coverage.eligible
+        if eligible:
+
+            def sources_unchanged() -> bool:
+                self._get_current_board()
+                current_plan, current_state, _current_footprints = (
+                    self._legacy_migration_state()
+                )
+                return (
+                    current_plan.active_digest == plan.active_digest
+                    and current_state == state
+                    and verify_saved_board_sources(coverage)
+                )
+
+            retire_legacy_part_info(
+                self.store.dbfile,
+                expected_digest=plan.active_digest,
+                source_check=sources_unchanged,
+            )
+        return diagnostics
+
     def export_to_schematic(self, *, interactive: bool = True) -> Optional[bool]:
-        """Save on close: True means saved, False keep open, None close unsaved.
+        """Finalize on close: True completed, False keep open, None close unsaved.
 
         Projects without a matching schematic need no write or file picker.
         Forced shutdown never opens a dialog or approves a schematic lock.
         """
+        schematic_saved = False
+        native_finalization = False
+        outcome: Optional[ExportOutcome] = None
         try:
 
             def check_board() -> None:
@@ -3032,21 +3321,34 @@ class JLCPCBTools(wx.Frame):
                         "Reopen JLCPCB Tools before saving its schematic."
                     )
 
-            paths = resolve_project_schematics(
+            project_name = authenticated_project_name(
+                getattr(self, "pcbnew", None), self.project_path
+            )
+            discovery = discover_project_schematics(
                 self.project_path,
                 self.board_name,
-                authenticated_project_name(
-                    getattr(self, "pcbnew", None), self.project_path
-                ),
+                project_name,
             )
+            if discovery.status == "unresolved":
+                raise ValueError("; ".join(discovery.diagnostics))
+            paths = list(discovery.paths)
+            schema_context = {}
+            if project_name:
+                schema_context["shared_project"] = True
+            if getattr(discovery, "root_uuids", ()):
+                schema_context = {
+                    "root_uuids": dict(discovery.root_uuids),
+                    "shared_project": True,
+                }
+            native_finalization = not paths
             if not paths:
                 self.logger.info(
-                    "No project schematic found; automatic schematic save skipped"
+                    "No project schematic found; finalizing native assignment recovery"
                 )
-                return None
             controller = getattr(self, "_variant_controller", None)
 
             def export(**approval: object) -> Optional[bool]:
+                nonlocal outcome
                 check_board()
                 locks = approval.get("approved_locks", ())
                 if not isinstance(locks, (list, tuple, set)):
@@ -3058,39 +3360,149 @@ class JLCPCBTools(wx.Frame):
                 if decision is not True:
                     return decision
                 if controller is not None:
-                    controller.export_to_schematic(paths, **approval)
+                    outcome = controller.export_to_schematic(
+                        paths, **approval, **schema_context
+                    )
                 else:
-                    SchematicExport(self).load_schematic(paths, **approval)
+                    outcome = SchematicExport(self).load_schematic(
+                        paths, **approval, **schema_context
+                    )
                 return True
 
             try:
-                return export()
+                decision = export() if paths else True
             except SchematicLockedError as exc:
                 if not interactive:
                     raise
                 decision = self.confirm_locked_schematic_export(exc)
                 if decision is not True:
                     return decision
-                return export(approved_locks=[path for path, _info in exc.locks])
+                decision = export(approved_locks=[path for path, _info in exc.locks])
+            if decision is not True:
+                return decision
+            schematic_saved = bool(paths)
+            if paths:
+                check_board()
+            diagnostics = self._finalize_legacy_assignments(
+                outcome, schematic_saved=schematic_saved
+            )
+            self._report_schematic_save(
+                diagnostics,
+                interactive=interactive,
+                schematic_saved=schematic_saved,
+            )
+            return True
         except Exception as exc:
-            self.logger.exception("Automatic schematic save failed")
+            if native_finalization:
+                self.logger.exception("Legacy assignment recovery finalization failed")
+                title = "Legacy assignment recovery incomplete"
+                message = (
+                    f"Could not finalize legacy assignment recovery:\n\n{exc}\n\n"
+                    "Recovery data was retained. Save the PCB in KiCad to persist "
+                    "native changes, then reopen JLCPCB Tools to retry."
+                )
+                close_label = "Close"
+            elif schematic_saved:
+                self.logger.exception(
+                    "Legacy assignment cleanup failed after schematic save"
+                )
+                title = "Legacy assignment cleanup failed"
+                message = (
+                    "The schematics were saved, but the old part assignment table "
+                    f"could not be archived:\n\n{exc}\n\n"
+                    "Keep this window open to correct the problem and retry, or "
+                    "close and retry cleanup after the next successful save."
+                )
+                close_label = "Close"
+            else:
+                self.logger.exception("Automatic schematic save failed")
+                title = "Schematic save failed"
+                message = (
+                    f"Could not save the schematic:\n\n{exc}\n\n"
+                    "Keep this window open to correct the problem and try again, "
+                    "or close without saving the remaining changes."
+                )
+                close_label = "Close without saving"
             if not interactive:
                 return False
             # Use wx's modal lifecycle so forced close can end the prompt on macOS.
             dialog = wx.GenericMessageDialog(
                 self,
-                f"Could not save the schematic:\n\n{exc}\n\n"
-                "Keep this window open to correct the problem and try again, "
-                "or close without saving the remaining changes.",
-                "Schematic save failed",
+                message,
+                title,
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_ERROR | wx.CENTER,
             )
             try:
-                dialog.SetYesNoLabels("Close without saving", "Keep open")
+                dialog.SetYesNoLabels(close_label, "Keep open")
                 result = dialog.ShowModal()
             finally:
                 dialog.Destroy()
             return None if result == wx.ID_YES else False
+
+    def _report_schematic_save(
+        self,
+        diagnostics: Sequence[str],
+        *,
+        interactive: bool,
+        schematic_saved: bool = True,
+    ) -> None:
+        """Keep the complete preservation report available after this window closes."""
+        path = Path(self.project_path) / "jlcpcb" / "schematic-save-report.txt"
+        messages = tuple(dict.fromkeys(diagnostics))
+        if not messages:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                self.logger.warning(
+                    "Unable to remove the old schematic save report: %s", error
+                )
+            return
+        for message in messages:
+            self.logger.warning("%s", message)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            result_text = (
+                "Safe schematic changes were saved."
+                if schematic_saved
+                else "Recovered native assignments remain in KiCad. Save the PCB to retain them."
+            )
+            path.write_text(
+                "Assignment recovery and save report\n\n"
+                + result_text
+                + " The following assignments or recovery data need review:\n\n"
+                + "\n".join(messages)
+                + "\n",
+                encoding="utf-8",
+            )
+            notice = (
+                result_text
+                + " Some assignments or legacy recovery data need review.\n\n"
+                f"The complete report is saved in:\n{path}"
+            )
+        except OSError as error:
+            self.logger.warning(
+                "Unable to save the schematic assignment report: %s", error
+            )
+            notice = (
+                (
+                    "Safe schematic changes were saved"
+                    if schematic_saved
+                    else "Native assignment recovery was checked"
+                )
+                + f", but the preservation report could not be saved: {error}\n\n"
+                + "\n".join(messages)
+            )
+        if interactive:
+            dialog = wx.GenericMessageDialog(
+                self,
+                notice,
+                "Schematic assignments preserved",
+                wx.OK | wx.ICON_WARNING | wx.CENTER,
+            )
+            try:
+                dialog.ShowModal()
+            finally:
+                dialog.Destroy()
 
     def confirm_locked_schematic_export(
         self, error: SchematicLockedError

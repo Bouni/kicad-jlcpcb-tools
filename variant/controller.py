@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 import re
 from typing import TYPE_CHECKING, Any, Optional
@@ -692,7 +692,12 @@ class VariantMainController:
                 self._error(error)
 
     def export_to_schematic(
-        self, paths: Sequence[str], approved_locks: Collection[str] = ()
+        self,
+        paths: Sequence[str],
+        approved_locks: Collection[str] = (),
+        *,
+        root_uuids: Optional[Mapping[str, str]] = None,
+        shared_project: bool = False,
     ) -> ExportOutcome:
         """Save current Default fields and return preservation coverage to close."""
         from ..schematicexport import SchematicExport  # noqa: PLC0415
@@ -701,8 +706,16 @@ class VariantMainController:
             self.session.require_editable()
             self.session.refresh()
             self.render()
+            context = {}
+            if root_uuids is not None:
+                context["root_uuids"] = root_uuids
+            if shared_project:
+                context["shared_project"] = True
             return SchematicExport(self.dialog).load_schematic(
-                paths, approved_locks=approved_locks, variant_name=""
+                paths,
+                approved_locks=approved_locks,
+                variant_name="",
+                **context,
             )
         finally:
             self._update_enabled()

@@ -189,3 +189,78 @@ def test_native_forced_close_respects_lock_without_prompting(window_ui: Any) -> 
             lock.unlink()
 
     window_ui.run(check)
+
+
+@pytest.mark.parametrize("variants", [False, True])
+@pytest.mark.parametrize(
+    "state", ["missing_missing", "missing_empty", "missing_code", "pcb_only"]
+)
+def test_routine_preservation_closes_without_warning_or_report(
+    window_ui: Any, variants: bool, state: str
+) -> None:
+    """Normal absent assignments and unlinked hardware do not create modal noise."""
+    if not variants:
+        window_ui.board.names.clear()
+        window_ui.board.current = ""
+    path = associated_schematic(window_ui)
+    part = window_ui.board.parts[0]
+    if state == "pcb_only":
+        part.schematic_path = ""
+    else:
+        part.fields.pop("LCSC")
+    text = path.read_text(encoding="utf-8")
+    if state == "missing_missing":
+        text = text.replace(
+            '    (property "LCSC" "C100"\n      (at 0 1 0)\n    )\n', ""
+        )
+    elif state == "missing_empty":
+        text = text.replace('(property "LCSC" "C100"', '(property "LCSC" ""')
+    path.write_text(text, encoding="utf-8")
+    report = window_ui.path / "jlcpcb" / "schematic-save-report.txt"
+
+    def check(ui: Any) -> None:
+        with patch.object(ui.wx.GenericMessageDialog, "ShowModal") as show:
+            assert ui.dialog.Close() is True
+            show.assert_not_called()
+        assert path.read_text(encoding="utf-8") == text
+        assert not report.exists()
+        assert not ui.messages
+
+    window_ui.run(check, check)
+
+
+@pytest.mark.parametrize("variants", [False, True])
+def test_native_forced_close_unwinds_interactive_preservation_report(
+    window_ui: Any,
+    variants: bool,
+) -> None:
+    """Shutdown ends the preservation warning while its parent remains alive."""
+    if not variants:
+        window_ui.board.names.clear()
+        window_ui.board.current = ""
+    path = associated_schematic(window_ui)
+    window_ui.board.parts[0].SetField("LCSC", "invalid")
+    report = window_ui.path / "jlcpcb" / "schematic-save-report.txt"
+
+    def check(ui: Any) -> None:
+        frame = ui.dialog
+
+        def force(dialog: Any) -> None:
+            assert dialog.GetCaption() == "Schematic assignments preserved"
+            assert dialog.IsModal() and frame._saving_on_close
+            assert "R1 [component-1]" in report.read_text(encoding="utf-8")
+            assert frame.Close(force=True) is True
+            assert not dialog.IsModal()
+            assert frame and not frame._closing
+            if variants:
+                assert not ui.controller.closed
+
+        with modal_handler(ui, ui.wx.GenericMessageDialog, force) as dialogs:
+            assert frame.Close() is True
+        assert len(dialogs) == 1 and frame._closing
+        if variants:
+            assert ui.controller.closed and not ui.controller.timer.IsRunning()
+        assert '(property "LCSC" "C100"' in path.read_text(encoding="utf-8")
+        assert "R1 [component-1]" in report.read_text(encoding="utf-8")
+
+    window_ui.run(check)
