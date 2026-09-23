@@ -4,8 +4,8 @@ from collections.abc import Iterator
 import re
 from typing import Any, Optional
 
-from .lcsc import normalize_lcsc
-from .part_assignments import is_assignment_alias, resolve_assignment
+from .lcsc import is_lcsc_part, normalize_lcsc
+from .part_assignments import is_assignment_alias
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
@@ -32,8 +32,11 @@ def find_lcsc_assignment_text(fp: Any) -> Optional[tuple[str, str]]:
 
 
 def get_lcsc_value(fp: Any) -> str:
-    """Read the same normalized, unambiguous assignment as variant Default."""
-    return resolve_assignment(dict(_iter_assignment_fields(fp)), {}, "")[1]
+    """Retain ordinary mode's first-valid assignment precedence."""
+    for name, text in _iter_assignment_fields(fp):
+        if is_assignment_alias(name) and is_lcsc_part(text):
+            return normalize_lcsc(text)
+    return ""
 
 
 def set_lcsc_value(fp: Any, lcsc: str) -> None:

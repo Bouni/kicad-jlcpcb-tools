@@ -27,7 +27,7 @@ def is_assignment_alias(name: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]", "", name.casefold())
     return bool(
         re.fullmatch(
-            r"(?:lcsc|jlcpcb|jlc)(?:part(?:number|num|no)?|pn|number|code|id)?",
+            r"(?:lcsc|jlcpcb|jlc)(?:part(?:number|num|no|nr)?|pn|number|code|id)?",
             normalized,
         )
     )
@@ -53,7 +53,7 @@ def resolve_assignment(
     Multiple occupied aliases with different values are a conflict, never a
     first-match catalog lookup. A present canonical empty field is intentional.
     Supported names are LCSC, JLC, or JLCPCB with an optional Part, Part Number,
-    Part Num, Part No, PN, Number, Code, or ID suffix, ignoring punctuation,
+    Part Num, Part No, Part Nr, PN, Number, Code, or ID suffix, ignoring punctuation,
     whitespace, and case. Other prefixed metadata is never an assignment.
     """
     names = sorted(assignment_names(fields, overrides), key=_alias_order)
