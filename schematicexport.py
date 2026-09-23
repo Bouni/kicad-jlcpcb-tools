@@ -2,6 +2,7 @@
 
 from collections.abc import Collection, Iterable, Mapping
 from functools import cached_property
+from io import StringIO
 import logging
 import os
 import os.path
@@ -21,6 +22,7 @@ from .schematic_safety import (
     matching_project_names,
     project_schematic_path,
 )
+from .schematic_snapshot import DefaultSchematicSnapshot, capture_board
 
 __all__ = [
     "SchematicExport",
@@ -96,7 +98,7 @@ class SchematicExport:
         return None
 
     def _resolved_bom(
-        self, refs: set[str], store_parts: tuple[dict[str, Any], ...]
+        self, refs: set[str], store_parts: tuple[Mapping[str, Any], ...]
     ) -> Optional[bool]:  # noqa: UP045
         """Return a shared exclude-from-BOM state, or None when it is unsafe."""
         matched = {
@@ -124,7 +126,7 @@ class SchematicExport:
     def _bom_updates(
         self,
         lines: list[str],
-        store_parts: tuple[dict[str, Any], ...],
+        store_parts: tuple[Mapping[str, Any], ...],
     ) -> dict[int, str]:
         """Return in_bom line updates that are safe for every symbol instance."""
         symbols = []
@@ -207,9 +209,9 @@ class SchematicExport:
         approved_locks: Collection[str] = (),
         *,
         variant_name: str = "",
-        parts: Optional[Iterable[Mapping[str, Any]]] = None,  # noqa: UP045
+        snapshot: Optional[DefaultSchematicSnapshot] = None,
     ) -> None:
-        """Export one validated Default snapshot using the existing base writer.
+        """Export one captured Default board state without consulting cached mappings.
 
         Every sheet under the given schematics is exported once. Nothing is
         written if a sheet file is missing, unreadable or read-only, or
@@ -219,68 +221,69 @@ class SchematicExport:
         a sheet that cannot be processed stops the export before any write;
         a sheet that cannot be replaced still leaves the sheets before it
         exported.
-
-        Matrix callers supply an explicit Default snapshot. The legacy fallback
-        accepts only a Default store view and reads it once for the whole export.
-        Neither the focused matrix cell nor the native editor selection changes
-        the meaning of this source.
         """
         self._require_default(variant_name)
-        if parts is None:
-            store = self.parent.store
-            self._require_default(getattr(store, "variant_name", ""))
-            parts = store.read_all()
-        store_parts = tuple(dict(part) for part in parts)
-        for part in store_parts:
-            self._require_default(part.get("variant_name", ""))
-            # Check required source keys before any format branch opens a file.
-            if not {"reference", "lcsc", "exclude_from_bom"}.issubset(part):
-                raise ValueError(
-                    "Default schematic export requires reference, LCSC, and BOM data."
+        if snapshot is None:
+            snapshot = capture_board(self.parent.pcbnew.GetBoard())
+        if not isinstance(snapshot, DefaultSchematicSnapshot):
+            raise TypeError("Schematic export requires a captured Default snapshot.")
+
+        warnings = list(snapshot.warnings)
+        version7 = is_version7(GetBuildVersion())
+        try:
+            # Every name a sheet is reached by is checked for a lock, because
+            # KiCad locks the path it opened; each file is then written once.
+            encountered = list(
+                dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
+            )
+            # KiCad locks the project's own schematic whenever the project is
+            # open, even when that file is not one of the sheets written here.
+            project_schematic = project_schematic_path(
+                getattr(self.parent, "project_path", None),
+                getattr(self.parent, "board_name", None),
+                self._project_name,
+            )
+            lock_paths = list(encountered)
+            if project_schematic and project_schematic not in lock_paths:
+                lock_paths.append(project_schematic)
+            assert_schematics_not_locked(lock_paths, approved_locks)
+            assert_schematics_writable(encountered)
+
+            rendered = [
+                (
+                    path,
+                    "".join(
+                        self._prepare_schematic(
+                            path, snapshot, version7=version7, warnings=warnings
+                        )
+                    ),
                 )
+                for path in encountered
+            ]
 
-        # Every name a sheet is reached by is checked for a lock, because
-        # KiCad locks the path it opened; each file is then written once.
-        encountered = list(
-            dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
-        )
-        # KiCad locks the project's own schematic whenever the project is
-        # open, even when that file is not one of the sheets written here.
-        project_schematic = project_schematic_path(
-            getattr(self.parent, "project_path", None),
-            getattr(self.parent, "board_name", None),
-            self._project_name,
-        )
-        lock_paths = list(encountered)
-        if project_schematic and project_schematic not in lock_paths:
-            lock_paths.append(project_schematic)
-        assert_schematics_not_locked(lock_paths, approved_locks)
-        assert_schematics_writable(encountered)
-
-        if is_version7(GetBuildVersion()):
-            self.logger.info("Kicad 7...")
-            render = self._render_schematic7
-        else:
-            self.logger.info("Kicad 8+...")
-            render = self._render_schematic
-        rendered = [(path, render(path, store_parts)) for path in encountered]
-
-        # A name that already refers to a file this export wrote, through a
-        # symlink or as another spelling of one directory entry, is not
-        # written again, or its backup would hold the first export's output.
-        # Writing replaces a directory entry, so a hard link to an exported
-        # file still refers to the original and is written under its own name.
-        written: set[tuple[int, int]] = set()
-        for path, content in rendered:
-            identity = _file_identity(path)
-            if identity is not None and identity in written:
-                self.logger.info("%s is another name for a sheet already written", path)
-                continue
-            atomic_write_schematic(path, content)
-            self.logger.info("Added LCSC's to %s (maybe?)", path)
-            identity = _file_identity(path)
-            if identity is not None:
-                written.add(identity)
+            # A name that already refers to a file this export wrote, through a
+            # symlink or as another spelling of one directory entry, is not
+            # written again, or its backup would hold the first export's output.
+            # Writing replaces a directory entry, so a hard link to an exported
+            # file still refers to the original and is written under its own name.
+            written: set[tuple[int, int]] = set()
+            for path, content in rendered:
+                identity = _file_identity(path)
+                if identity is not None and identity in written:
+                    self.logger.info("%s is another name for a sheet already written", path)
+                    continue
+                atomic_write_schematic(path, content)
+                self.logger.info("Updated part assignments in %s", path)
+                identity = _file_identity(path)
+                if identity is not None:
+                    written.add(identity)
+        finally:
+            if warnings:
+                self.logger.warning(
+                    "Preserved unresolved schematic assignments: %s. "
+                    "Resolve the affected Default part fields and export again.",
+                    "; ".join(dict.fromkeys(warnings)),
+                )
 
     @staticmethod
     def _require_default(variant_name: str) -> None:
@@ -294,30 +297,25 @@ class SchematicExport:
                 "base schematic fields."
             )
 
-    def _render_schematic7(
-        self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> str:
-        """Render base assignment aliases and BOM state in KiCad 7 schematics."""
+    def _prepare_schematic(
+        self,
+        path: str,
+        snapshot: DefaultSchematicSnapshot,
+        *,
+        version7: bool,
+        warnings: list[str],
+    ) -> list[str]:
+        """Render assignment and BOM changes using physical file-line boundaries."""
         self.logger.info("Reading %s...", path)
         with open(path, encoding="utf-8") as source:
             updated = update_assignment_fields(
-                source.read(), store_parts, version7=True
+                source.read(),
+                snapshot.assignments,
+                version7=version7,
+                project_name=lambda: self._project_name,
+                warnings=warnings,
             )
-        lines = updated.splitlines(keepends=True)
-        for index, desired in self._bom_updates(lines, store_parts).items():
+        lines = StringIO(updated).readlines()
+        for index, desired in self._bom_updates(lines, snapshot.bom_parts).items():
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-        return "".join(lines)
-
-    def _render_schematic(
-        self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> str:
-        """Render base assignment aliases and BOM state in KiCad 8+ schematics."""
-        self.logger.info("Reading %s...", path)
-        with open(path, encoding="utf-8") as source:
-            updated = update_assignment_fields(
-                source.read(), store_parts, version7=False
-            )
-        lines = updated.splitlines(keepends=True)
-        for index, desired in self._bom_updates(lines, store_parts).items():
-            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-        return "".join(lines)
+        return lines
