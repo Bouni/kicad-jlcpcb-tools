@@ -197,8 +197,14 @@ def test_base_bom_observes_all_instances_and_preserves_variant_fields(
     source.store.variant_name = "A"
     parts = [_part("R1", exclude_from_bom=True)]
     if secondary != "missing":
-        parts.append(_part("R2", lcsc="C456", exclude_from_bom=secondary == "excluded"))
+        parts.append(_part("R2", lcsc="C123", exclude_from_bom=secondary == "excluded"))
 
+    if secondary == "missing":
+        with pytest.raises(ValueError, match="assignments are missing"):
+            source.exporter.load_schematic([str(path)], variant_name="", parts=parts)
+        assert path.read_text(encoding="utf-8") == base
+        assert not path.with_name(path.name + "_old").exists()
+        return
     source.exporter.load_schematic([str(path)], variant_name="", parts=parts)
 
     written = path.read_text(encoding="utf-8")
