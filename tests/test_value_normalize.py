@@ -257,7 +257,7 @@ def test_the_catalog_spells_small_resistances_in_milliohms():
 
 
 def test_milli_is_the_bottom_of_the_resistance_ladder():
-    """Nothing is spelled in microhms, so sub-milliohm parts stay in milliohms.
+    """Nothing is spelled in microohms, so sub-milliohm parts stay in milliohms.
 
     The catalog has no uΩ/µΩ description at all, and writes 337 parts as 0.xmΩ
     -- 141 of them 0.5mΩ.  Scaling those down would invent a spelling.

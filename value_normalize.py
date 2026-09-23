@@ -45,14 +45,14 @@ class Quantity:
 # keyed by the exact character, which is what keeps a 0.5mΩ shunt off the mega
 # rung.  Milliohms are a real catalog spelling -- current-sense resistors are
 # written 100mΩ far more often than 0.1Ω -- so resistance carries a milli rung,
-# and nothing below it: no description spells a resistance in microhms, and the
+# and nothing below it: no description spells a resistance in microohms, and the
 # parts under a milliohm are written 0.5mΩ rather than 500uΩ.
 RESISTANCE = Quantity(
     name="resistance",
     rungs=("M", "k", "", "m"),
     symbol="Ω",
     top_rung="M",
-    # Nothing is spelled in microhms; parts under a milliohm are written 0.5mΩ.
+    # Nothing is spelled in microohms; parts under a milliohm are written 0.5mΩ.
     bottom_rung="m",
     units=frozenset({"ω", "r", "o", "ohm", "ohms"}),
     prefixes={"M": "M", "k": "k", "K": "k", "m": "m"},
