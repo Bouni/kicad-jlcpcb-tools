@@ -138,7 +138,10 @@ def wx_stubs(
     *, submodules: Iterable[str] = ("dataview", "adv"), **symbols: Any
 ) -> dict[str, types.ModuleType]:
     """Return ``{name: module}`` for a fake ``wx`` and the requested submodules."""
-    wx = FakeWxModule("wx", **{"NOT_FOUND": -1, **symbols})
+    wx = FakeWxModule(
+        "wx",
+        **{"NOT_FOUND": -1, "MessageDialog": MagicMock(), **symbols},
+    )
     wx.__path__ = []
     stubs = {"wx": wx}
     for submodule in submodules:
@@ -332,6 +335,7 @@ def mainwindow_stubs(
         "schematic_safety": {
             "SchematicLockedError": RuntimeError,
             "authenticated_project_name": lambda *args: None,
+            "backup_schematics": lambda *args, **kwargs: None,
             "resolve_project_schematics": lambda *args: [],
         },
         "settings": {"SettingsDialog": object},

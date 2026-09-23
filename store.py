@@ -23,6 +23,7 @@ class Store:
     """A storage class to get data from a sqlite database and write it back."""
 
     GENERATION_COUNT_KEY = "generation_count"
+    SCHEMATIC_STORAGE_NOTICE_ACKED_KEY = "schematic_storage_notice_acked"
     PART_INFO_ESTIMATOR_COLUMNS = {
         "pad_count": "INTEGER",
         "has_tht": "NUMERIC",
@@ -152,6 +153,28 @@ class Store:
             cur.commit()
 
         return next_count
+
+    def is_schematic_storage_notice_acked(self) -> bool:
+        """Return whether this project already acknowledged schematic storage."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            row = cur.execute(
+                "SELECT value FROM metadata WHERE key = :key",
+                {"key": self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY},
+            ).fetchone()
+        return bool(row and str(row[0]) == "1")
+
+    def set_schematic_storage_notice_acked(self) -> None:
+        """Record that the schematic-storage notice was shown for this project."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            cur.execute(
+                "INSERT INTO metadata (key, value) VALUES (:key, :value) "
+                "ON CONFLICT(key) DO UPDATE SET value = :value",
+                {
+                    "key": self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY,
+                    "value": "1",
+                },
+            )
+            cur.commit()
 
     def read_all(self) -> dict:
         """Read all parts from the database."""

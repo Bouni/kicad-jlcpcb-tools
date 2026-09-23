@@ -44,6 +44,7 @@ class VariantStore:
     """
 
     GENERATION_COUNT_KEY = "generation_count"
+    SCHEMATIC_STORAGE_NOTICE_ACKED_KEY = "schematic_storage_notice_acked"
     OUTPUT_VARIANT_KEY = "output_variant"
     DISPLAY_PREFERENCES_KEY = "display_preferences"
 
@@ -111,6 +112,40 @@ class VariantStore:
             with contextlib.suppress(ValueError, TypeError):
                 return max(0, int(row[0]))
         return 0
+
+    def is_schematic_storage_notice_acked(self) -> bool:
+        """Return whether this project already acknowledged schematic storage."""
+        with self._read_database() as connection:
+            if (
+                connection is None
+                or not connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'"
+                ).fetchone()
+            ):
+                return False
+            row = connection.execute(
+                "SELECT value FROM metadata WHERE key = ?",
+                (self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY,),
+            ).fetchone()
+        return bool(row and str(row[0]) == "1")
+
+    def set_schematic_storage_notice_acked(self) -> None:
+        """Record that the schematic-storage notice was shown for this project."""
+        self.ensure_current_board()
+        Path(self.datadir).mkdir(parents=True, exist_ok=True)
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS metadata ("
+                "key TEXT NOT NULL PRIMARY KEY,"
+                "value TEXT NOT NULL"
+                ")"
+            )
+            connection.execute(
+                "INSERT INTO metadata (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY, "1"),
+            )
+            connection.commit()
 
     def increment_generation_count(self) -> int:
         """Increment the existing counter using only main's metadata schema/key."""
