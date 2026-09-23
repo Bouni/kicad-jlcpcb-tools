@@ -26,8 +26,9 @@ from .variant.generation_counter import generation_count_transaction
 class Store:
     """Adapt live board fields, with supplier facts cached by LCSC for this session.
 
-    Legacy assignment tables and CSVs are neither read nor modified. Project
-    SQLite storage is used only when the generation counter is requested.
+    This adapter does not read legacy assignments. The window performs guarded
+    startup recovery and archival separately. This adapter uses project SQLite
+    storage only for the generation counter and notice metadata.
     """
 
     GENERATION_COUNT_KEY = "generation_count"
@@ -157,26 +158,37 @@ class Store:
         return [groups[key] for key in sorted(groups)] + unassigned
 
     def is_schematic_storage_notice_acked(self) -> bool:
-        """Return whether this project already acknowledged schematic storage."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            row = cur.execute(
-                "SELECT value FROM metadata WHERE key = :key",
-                {"key": self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY},
+        """Read the notice acknowledgment without creating or upgrading storage."""
+        path = Path(self.dbfile)
+        if not path.is_file():
+            return False
+        with contextlib.closing(
+            sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            if not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'"
+            ).fetchone():
+                return False
+            row = connection.execute(
+                "SELECT value FROM metadata WHERE key = ?",
+                (self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY,),
             ).fetchone()
         return bool(row and str(row[0]) == "1")
 
     def set_schematic_storage_notice_acked(self) -> None:
-        """Record that the schematic-storage notice was shown for this project."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            cur.execute(
-                "INSERT INTO metadata (key, value) VALUES (:key, :value) "
-                "ON CONFLICT(key) DO UPDATE SET value = :value",
-                {
-                    "key": self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY,
-                    "value": "1",
-                },
+        """Persist notice acknowledgment using only the project metadata table."""
+        Path(self.datadir).mkdir(parents=True, exist_ok=True)
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as connection, connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS metadata ("
+                "key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL)"
             )
-            cur.commit()
+            connection.execute(
+                "INSERT INTO metadata (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (self.SCHEMATIC_STORAGE_NOTICE_ACKED_KEY, "1"),
+            )
 
     def cache_lcsc_metadata(
         self,

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from .native_window_support import focus, plugin_action_host, window_ui
+from .native_window_support import focus, modal_handler, plugin_action_host, window_ui
 from .native_wx_support import run_native
 
 __all__ = ["window_ui"]
@@ -94,6 +94,27 @@ def test_existing_project_database_cannot_abort_plugin_action(
         if before is None:
             assert not database.exists()
         elif before is not None:
+            assert database.read_bytes() == before
+        report = ui.path / "jlcpcb" / "schematic-save-report.txt"
+        if database_state == "missing":
+            with patch.object(ui.wx.GenericMessageDialog, "ShowModal") as show:
+                assert ui.dialog.Close() is True
+                show.assert_not_called()
+            assert not database.exists() and not report.exists()
+        else:
+
+            def acknowledge(dialog: Any) -> None:
+                assert dialog.GetCaption() == "Schematic assignments preserved"
+                assert str(report) in dialog.GetMessage()
+                assert "Legacy recovery remains incomplete" in report.read_text(
+                    encoding="utf-8"
+                )
+                assert database.read_bytes() == before
+                dialog.EndModal(ui.wx.ID_OK)
+
+            with modal_handler(ui, ui.wx.GenericMessageDialog, acknowledge) as dialogs:
+                assert ui.dialog.Close() is True
+            assert len(dialogs) == 1
             assert database.read_bytes() == before
 
     try:

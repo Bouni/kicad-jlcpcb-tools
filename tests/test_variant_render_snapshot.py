@@ -6,7 +6,7 @@ import sqlite3
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
 
@@ -14,6 +14,7 @@ from .native_window_support import (
     _SelectableFootprint,
     choose_output as _output,
     focus,
+    modal_handler,
     window_ui,
 )
 from .native_wx_support import pump, wait_until
@@ -72,19 +73,23 @@ def test_initial_preparation_failure_keeps_correction_unknown_until_refresh(
 
 
 @pytest.mark.parametrize("database_state", ["absent", "legacy", "invalid"])
-def test_native_workflow_never_opens_project_database(
+def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
     window_ui: Any, database_state: str
 ) -> None:
-    """With global corrections, native edits and supplier delivery preserve old project storage."""
+    """Startup and close verify recovery; edits and supplier delivery leave storage untouched."""
     path = window_ui.path / "jlcpcb" / "project.db"
     if database_state != "absent":
         path.parent.mkdir()
         if database_state == "legacy":
             with sqlite3.connect(path) as connection:
                 connection.execute(
-                    "CREATE TABLE part_info(reference TEXT PRIMARY KEY, lcsc TEXT)"
+                    "CREATE TABLE part_info(reference TEXT PRIMARY KEY, value TEXT, "
+                    "footprint TEXT, lcsc TEXT, stock NUMERIC, exclude_from_bom NUMERIC, "
+                    "exclude_from_pos NUMERIC, assembly_process TEXT)"
                 )
-                connection.execute("INSERT INTO part_info VALUES('R1','C999')")
+                connection.execute(
+                    "INSERT INTO part_info VALUES('R1','10k','R0603','C999',53,0,0,'SMT')"
+                )
             connection.close()
         else:
             path.write_bytes(b"unavailable development database")
@@ -93,13 +98,21 @@ def test_native_workflow_never_opens_project_database(
     csv = path.with_name("part_assignments.csv")
     csv.write_bytes(b"R1,C888\n")
     original_connect = sqlite3.connect
+    project_reads: list[str] = []
+    startup_read_counts: list[int] = []
+    close_read_counts: list[int] = []
 
     def connect(database: Any, *args: Any, **kwargs: Any) -> sqlite3.Connection:
         name = str(database)
-        actual = unquote(urlsplit(name).path) if name.startswith("file:") else name
-        assert Path(actual).resolve() != path.resolve(), (
-            "Variant workflow opened project SQLite"
-        )
+        uri = urlsplit(name)
+        actual = unquote(uri.path) if name.startswith("file:") else name
+        if Path(actual).resolve() == path.resolve():
+            assert name.startswith("file:") and kwargs.get("uri") is True
+            assert parse_qs(uri.query).get("mode") == ["ro"], (
+                "Variant workflow attempted a writable project SQLite connection"
+            )
+            assert path.is_file(), "Variant workflow attempted to create project SQLite"
+            project_reads.append(name)
         return original_connect(database, *args, **kwargs)
 
     footprint = window_ui.board.parts[0]
@@ -110,8 +123,25 @@ def test_native_workflow_never_opens_project_database(
         for code in codes
     )
 
+    def close(ui: Any) -> None:
+        """Verify the final recovery read and acknowledge only a genuine DB failure."""
+        before_close = len(project_reads)
+
+        def acknowledge(dialog: Any) -> None:
+            assert database_state == "invalid"
+            assert "recovery" in dialog.GetMessage().lower()
+            dialog.EndModal(ui.wx.ID_OK)
+
+        with modal_handler(ui, ui.wx.GenericMessageDialog, acknowledge) as dialogs:
+            assert ui.dialog.Close() is True
+        assert len(dialogs) == (1 if database_state == "invalid" else 0)
+        assert (len(project_reads) > before_close) is (database_state != "absent")
+        close_read_counts.append(len(project_reads))
+
     def check(ui: Any) -> None:
         c = ui.controller
+        startup_read_counts.append(len(project_reads))
+        assert bool(project_reads) is (database_state != "absent")
         corrections = Path(ui.catalog.correctionsdb_file)
         correction_bytes = corrections.read_bytes()
         assert Path(ui.cache.dbfile) == path
@@ -139,18 +169,26 @@ def test_native_workflow_never_opens_project_database(
         assert c.session.generating
         c.end_generation()
         assert ui.dialog.generate_button.IsEnabled() and not ui.messages
+        assert len(project_reads) == startup_read_counts[-1]
+        close(ui)
 
     def reopened(ui: Any) -> None:
         c = ui.controller
+        previous_reads = close_read_counts[-1]
+        startup_read_counts.append(len(project_reads))
+        assert (len(project_reads) > previous_reads) is (database_state != "absent")
         assert c.session.snapshot.get("component-1", "").lcsc == "C100"
         part = c.session.snapshot.get("component-1", "A")
         assert part.lcsc == "" and not part.bom and not part.pop
         assert ui.cache.get_missing_metadata(c.session.snapshot) == {"C100"}
         _complete(ui)
         assert not ui.messages
+        assert len(project_reads) == startup_read_counts[-1]
+        close(ui)
 
     with patch.object(sqlite3, "connect", connect):
         window_ui.run(check, reopened)
+    assert len(project_reads) == close_read_counts[-1]
     assert (path.read_bytes() if path.exists() else None) == before
     assert csv.read_bytes() == b"R1,C888\n"
 
