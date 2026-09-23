@@ -63,6 +63,135 @@ def _part(reference: str, lcsc: str, excluded: bool) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("version", [7, 8])
+@pytest.mark.parametrize("second", [None, "C200"])
+def test_shared_symbol_requires_complete_agreeing_assignments_before_any_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: int,
+    second: Optional[str],
+) -> None:
+    """An incomplete or conflicting repeated symbol cannot count as saved."""
+    paths = [tmp_path / "first.kicad_sch", tmp_path / "shared.kicad_sch"]
+    originals = [
+        _schematic(version, "yes", ("R1",), reference="R1"),
+        _schematic(version, "yes", ("R1", "R2"), reference="R1"),
+    ]
+    for path, original in zip(paths, originals):
+        path.write_text(original, encoding="utf-8")
+    rows = [_part("R1", "C100", False)]
+    if second is not None:
+        rows.append(_part("R2", second, False))
+
+    with pytest.raises(ValueError, match="R1.*R2"):
+        _load_schematic(tmp_path, monkeypatch, version, paths, rows)
+
+    for path, original in zip(paths, originals):
+        assert path.read_text(encoding="utf-8") == original
+        assert not path.with_name(path.name + "_old").exists()
+
+
+@pytest.mark.parametrize("version", [7, 8])
+def test_pinless_symbol_receives_new_assignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """Mechanical symbols without pins still persist their PCB assignment."""
+    path = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("H1",), reference="H1")
+    old_property = (
+        '    (property "LCSC" "OLD" (at 0 0 0))\n'
+        if version == 7
+        else '    (property "LCSC" "OLD"\n      (at 0 0 0)\n    )\n'
+    )
+    original = original.replace(old_property, "").replace(
+        '    (pin "1" (uuid "pin-uuid"))\n', ""
+    )
+    path.write_text(original, encoding="utf-8")
+
+    _load_schematic(
+        tmp_path, monkeypatch, version, [path], [_part("H1", "C100", False)]
+    )
+
+    assert '(property "LCSC" "C100"' in path.read_text(encoding="utf-8")
+    assert path.with_name(path.name + "_old").read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("version", [7, 8])
+def test_duplicate_source_references_fail_before_schematic_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """Ordinary mode rejects the same ambiguous inventory as variant mode."""
+    path = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("R1",), reference="R1")
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Duplicate.*R1"):
+        _load_schematic(
+            tmp_path,
+            monkeypatch,
+            version,
+            [path],
+            [_part("R1", "C100", False), _part("R1", "C200", False)],
+        )
+
+    assert path.read_text(encoding="utf-8") == original
+    assert not path.with_name(path.name + "_old").exists()
+
+
+@pytest.mark.parametrize("version", [7, 8])
+def test_assignment_before_reference_with_escaped_text_is_updated_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """Property ordering and quoted parentheses cannot hide an assignment."""
+    original = _schematic(version, "yes", ("R1",), reference="R1")
+    reference = (
+        '    (property "Reference" "R1" (at 0 0 0))\n'
+        if version == 7
+        else '    (property "Reference" "R1"\n      (at 0 0 0)\n    )\n'
+    )
+    assignment = (
+        '    (property "LCSC" "OLD" (at 0 0 0))\n'
+        if version == 7
+        else '    (property "LCSC" "OLD"\n      (at 0 0 0)\n    )\n'
+    )
+    original = original.replace(reference + assignment, assignment + reference)
+    original = original.replace(
+        '"LCSC" "OLD"', r'"JLCPCB Part Number" "old \"(value)\""'
+    )
+    path = tmp_path / "board.kicad_sch"
+    path.write_text(original, encoding="utf-8")
+
+    _load_schematic(
+        tmp_path, monkeypatch, version, [path], [_part("R1", "C200", False)]
+    )
+
+    expected = original.replace(r'"old \"(value)\""', '"C200"')
+    assert path.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize("version", [7, 8])
+@pytest.mark.parametrize(
+    "invalid", ["", "(other)", '(kicad_sch (property "unterminated))']
+)
+def test_invalid_sheet_prevents_writes_to_every_prepared_sheet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int, invalid: str
+) -> None:
+    """Unreadable document structure cannot count as a successful automatic save."""
+    paths = [tmp_path / "first.kicad_sch", tmp_path / "invalid.kicad_sch"]
+    originals = [_schematic(version, "yes", ("R1",), reference="R1"), invalid]
+    for path, original in zip(paths, originals):
+        path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        _load_schematic(
+            tmp_path, monkeypatch, version, paths, [_part("R1", "C200", False)]
+        )
+
+    for path, original in zip(paths, originals):
+        assert path.read_text(encoding="utf-8") == original
+        assert not path.with_name(path.name + "_old").exists()
+
+
 def _instance_block(
     refs: Sequence[str],
     variant: bool = False,
@@ -290,19 +419,119 @@ def _run_export(
     return path.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("version", [7, 8])
+@pytest.mark.parametrize("lcsc", ["", "C200"])
+@pytest.mark.parametrize(
+    "alias", ["LCSC", "LCSC_PN", "JLC_PN", "jlcpcb Part Number", "LCSC-Code"]
+)
+def test_export_persists_current_assignment_in_every_supported_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: int,
+    lcsc: str,
+    alias: str,
+) -> None:
+    """An explicit native clear must persist before legacy storage is retired."""
+    path = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("RV2",)).replace(
+        '(property "LCSC" "OLD"', f'(property "{alias}" "OLD"'
+    )
+    path.write_text(original, encoding="utf-8")
+
+    _load_schematic(tmp_path, monkeypatch, version, [path], [_part("RV2", lcsc, False)])
+
+    result = path.read_text(encoding="utf-8")
+    assert f'(property "{alias}" "{lcsc}"' in result
+    assert result.count(f'(property "{alias}"') == 1
+    assert '(property "LCSC"' not in result or alias == "LCSC"
+    assert path.with_suffix(".kicad_sch_old").read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("version", [7, 8])
+@pytest.mark.parametrize("lcsc", ["", "C200"])
+def test_export_preserves_unmatched_symbols_and_unrelated_prefixed_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: int,
+    lcsc: str,
+) -> None:
+    """Only recognized assignments on matching references follow native data."""
+    matched = _symbol(version, "yes", ("RV2",))
+    unrelated = matched.replace('"LCSC"', '"JLCPCB Rotation"')
+    unmatched = _symbol(version, "yes", ("RV3",), reference="RV3")
+    path = tmp_path / "board.kicad_sch"
+    path.write_text(
+        f"(kicad_sch\n  (lib_symbols)\n{unrelated}\n{unmatched}\n)\n",
+        encoding="utf-8",
+    )
+
+    _load_schematic(tmp_path, monkeypatch, version, [path], [_part("RV2", lcsc, False)])
+
+    result = path.read_text(encoding="utf-8")
+    assert '(property "JLCPCB Rotation" "OLD"' in result
+    assert unmatched in result
+
+
+@pytest.mark.parametrize("version", [7, 8])
+@pytest.mark.parametrize("lcsc", ["", "C200"])
+def test_export_updates_conflicting_schematic_aliases_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: int,
+    lcsc: str,
+) -> None:
+    """Saving native truth must not leave another alias able to revive stale data."""
+    path = tmp_path / "board.kicad_sch"
+    original = _schematic(version, "yes", ("RV2",))
+    extra = (
+        '    (property "JLCPCB Part Number" "C999" (at 0 0 0))\n'
+        if version == 7
+        else '    (property "JLCPCB Part Number" "C999"\n      (at 0 0 0)\n    )\n'
+    )
+    path.write_text(original.replace('    (pin "1"', extra + '    (pin "1"'))
+
+    _load_schematic(tmp_path, monkeypatch, version, [path], [_part("RV2", lcsc, False)])
+
+    result = path.read_text(encoding="utf-8")
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == [lcsc]
+    assert re.findall(r'\(property\s+"JLCPCB Part Number"\s+"([^"]*)"', result) == [
+        lcsc
+    ]
+
+
+@pytest.mark.parametrize("version", [7, 8])
+def test_export_replaces_only_the_assignment_property_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """An invalid old value equal to its field name cannot rename the field."""
+    path = tmp_path / "board.kicad_sch"
+    path.write_text(
+        _schematic(version, "yes", ("RV2",)).replace('"OLD"', '"LCSC"'),
+        encoding="utf-8",
+    )
+
+    _load_schematic(
+        tmp_path, monkeypatch, version, [path], [_part("RV2", "C200", False)]
+    )
+
+    result = path.read_text(encoding="utf-8")
+    assert '(property "LCSC" "C200"' in result
+    assert '(property "C200"' not in result
+
+
 CASES = [
     pytest.param("yes", ("RV2",), [_part("RV2", "NEW", True)], "no", id="single"),
     pytest.param(
         "yes",
         ("RV2", "RV6"),
-        [_part("RV2", "NEW", True), _part("RV6", "SECONDARY", True)],
+        [_part("RV2", "NEW", True), _part("RV6", "NEW", True)],
         "no",
         id="reused-agree",
     ),
     pytest.param(
         "yes",
         ("RV2", "RV6"),
-        [_part("RV2", "NEW", True), _part("RV6", "SECONDARY", False)],
+        [_part("RV2", "NEW", True), _part("RV6", "NEW", False)],
         "yes",
         id="reused-disagree",
     ),
@@ -316,7 +545,7 @@ CASES = [
     pytest.param(
         "no",
         ("RV2", "RV6"),
-        [_part("RV2", "NEW", False), _part("RV6", "SECONDARY", False)],
+        [_part("RV2", "NEW", False), _part("RV6", "NEW", False)],
         "yes",
         id="reused-included",
     ),
@@ -329,7 +558,7 @@ CASES = [
     ids=["kicad7", "kicad8+"],
 )
 @pytest.mark.parametrize(("initial_bom", "refs", "parts", "expected_bom"), CASES)
-def test_export_syncs_bom_without_changing_lcsc_resolution(
+def test_export_syncs_bom_with_complete_shared_assignments(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     version: int,
@@ -338,8 +567,13 @@ def test_export_syncs_bom_without_changing_lcsc_resolution(
     parts: list[dict[str, object]],
     expected_bom: str,
 ) -> None:
-    """BOM sync handles each format while LCSC still follows the top reference."""
+    """BOM state is independent once repeated instances have a safe assignment."""
     parts = [*parts, _part("RV99", "FOREIGN", False)]
+    if not set(refs).issubset({part["reference"] for part in parts}):
+        with pytest.raises(ValueError, match="assignments are missing"):
+            _run_export(tmp_path, monkeypatch, version, initial_bom, refs, parts)
+        assert not (tmp_path / "child.kicad_sch_old").exists()
+        return
     result = _run_export(tmp_path, monkeypatch, version, initial_bom, refs, parts)
 
     assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == [
@@ -401,6 +635,7 @@ def test_export_syncs_bom_for_locally_modified_symbol(
     )
 
     assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == ["no"]
+    assert '(property "LCSC" "NEW"' in result
 
 
 @pytest.mark.parametrize("version", [8], ids=["kicad8+"])
@@ -435,7 +670,7 @@ def test_export_resolves_instances_in_empty_project(
     """An empty project name resolves every instance in its sole group."""
     parts = [
         _part("RV2", "NEW", True),
-        _part("RV6", "SECONDARY", secondary_excluded),
+        _part("RV6", "NEW", secondary_excluded),
     ]
     result = _run_export(
         tmp_path,
@@ -461,10 +696,10 @@ def test_export_resolves_instances_in_empty_project(
 def test_export_ignores_foreign_top_reference_for_bom(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
 ) -> None:
-    """BOM state follows active instances while LCSC follows the top reference."""
+    """Both assignment and BOM state follow the active project instances."""
     parts = [
         _part("RV2", "ACTIVE", True),
-        _part("RV6", "SECONDARY", True),
+        _part("RV6", "ACTIVE", True),
         _part("RV99", "TOP", False),
     ]
     result = _run_export(
@@ -478,7 +713,7 @@ def test_export_ignores_foreign_top_reference_for_bom(
     )
 
     assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == ["no"]
-    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["TOP"]
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["ACTIVE"]
 
 
 @pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
@@ -503,7 +738,7 @@ def test_export_ignores_foreign_top_reference_for_bom(
         ),
     ],
 )
-def test_export_skips_unresolved_instances(
+def test_export_rejects_unresolved_instances(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     version: int,
@@ -514,32 +749,35 @@ def test_export_skips_unresolved_instances(
     """Unresolved instance data must not fall back to the top reference."""
     parts = [
         _part("RV2", "NEW", True),
-        _part("RV6", "SECONDARY", True),
+        _part("RV6", "NEW", True),
         _part("RV99", "FOREIGN", True),
     ]
     (tmp_path / "foreign.kicad_pro").write_text("{}", encoding="utf-8")
     pcbnew = _project_api(board_project, {"foreign.kicad_pro": foreign_project})
-    result = _run_export(
-        tmp_path,
-        monkeypatch,
-        version,
-        "yes",
-        ("RV2", "RV6"),
-        parts,
-        instance_text=instance_text,
-        pcbnew=pcbnew,
-    )
+    with pytest.raises(ValueError, match="instance references do not resolve"):
+        _run_export(
+            tmp_path,
+            monkeypatch,
+            version,
+            "yes",
+            ("RV2", "RV6"),
+            parts,
+            instance_text=instance_text,
+            pcbnew=pcbnew,
+        )
+    result = (tmp_path / "child.kicad_sch").read_text(encoding="utf-8")
+    assert not (tmp_path / "child.kicad_sch_old").exists()
 
     assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == ["yes"]
-    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
+    assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["OLD"]
 
 
-def test_export_warns_for_stale_project_instances(
+def test_export_rejects_stale_project_instances(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A real-world mixed project table reports a skipped symbol."""
+    """A real-world stale project table cannot silently count as fully saved."""
     caplog.set_level(logging.WARNING)
     path = tmp_path / "board.kicad_sch"
     path.write_text(_MIXED_PROJECT_FIXTURE.read_text(encoding="utf-8"))
@@ -548,16 +786,11 @@ def test_export_warns_for_stale_project_instances(
         _part("R2", "CURRENT", False),
     ]
 
-    _load_schematic(tmp_path, monkeypatch, 9, [path], parts)
-    result = path.read_text(encoding="utf-8")
-
-    assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == [
-        "no",
-        "yes",
-    ]
-    assert caplog.messages == [
-        "Not updating BOM state for R1; no instances resolve for project board"
-    ]
+    original = path.read_bytes()
+    with pytest.raises(ValueError, match="R1.*instance references do not resolve"):
+        _load_schematic(tmp_path, monkeypatch, 9, [path], parts)
+    assert path.read_bytes() == original
+    assert not path.with_name(path.name + "_old").exists()
 
 
 @pytest.mark.parametrize("version", [8], ids=["kicad8+"])
@@ -588,7 +821,7 @@ def test_export_keeps_symbol_resolution_independent(
     )
     parts = [
         _part("RV2", "FIRST", True),
-        _part("RV6", "SECONDARY", True),
+        _part("RV6", "FIRST", True),
         _part("RV3", "SECOND", False),
         _part("RV99", "FOREIGN", False),
     ]
@@ -624,7 +857,7 @@ def test_export_uses_loaded_project_for_renamed_board(
     )
     parts = [
         _part("RV2", "NEW", True),
-        _part("RV6", "SECONDARY", True),
+        _part("RV6", "NEW", True),
         _part("RV99", "FOREIGN", False),
     ]
 
@@ -652,7 +885,7 @@ def test_export_uses_loaded_project_for_renamed_board(
 @pytest.mark.parametrize(
     "match_count", [None, 0, 2], ids=["unloaded", "no-match", "multiple-matches"]
 )
-def test_export_skips_ambiguous_board_project(
+def test_export_rejects_ambiguous_board_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -661,17 +894,20 @@ def test_export_skips_ambiguous_board_project(
 ) -> None:
     """A board-stem instance group is unsafe without one authenticated project."""
     caplog.set_level(logging.WARNING)
-    result = _run_export(
-        tmp_path,
-        monkeypatch,
-        version,
-        "yes",
-        ("RV2", "RV6"),
-        [_part("RV2", "NEW", True), _part("RV6", "SECONDARY", True)],
-        project_name="renamed_board",
-        board_name="renamed_board.kicad_pcb",
-        pcbnew=_ambiguous_project_api(tmp_path, match_count),
-    )
+    with pytest.raises(ValueError, match="instance references do not resolve"):
+        _run_export(
+            tmp_path,
+            monkeypatch,
+            version,
+            "yes",
+            ("RV2", "RV6"),
+            [_part("RV2", "NEW", True), _part("RV6", "NEW", True)],
+            project_name="renamed_board",
+            board_name="renamed_board.kicad_pcb",
+            pcbnew=_ambiguous_project_api(tmp_path, match_count),
+        )
+    result = (tmp_path / "child.kicad_sch").read_text(encoding="utf-8")
+    assert not (tmp_path / "child.kicad_sch_old").exists()
 
     assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == ["yes"]
     reason = (
@@ -688,14 +924,14 @@ def test_export_skips_ambiguous_board_project(
 @pytest.mark.parametrize(
     "match_count", [None, 0, 2], ids=["unloaded", "no-match", "multiple-matches"]
 )
-def test_export_still_syncs_unscoped_symbol_when_project_is_ambiguous(
+def test_ambiguous_scoped_symbol_prevents_partial_unscoped_save(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     version: int,
     match_count: Optional[int],  # noqa: UP045
 ) -> None:
-    """Project authentication is unnecessary for an unscoped symbol."""
+    """One unresolved scoped symbol blocks every sheet before writing any."""
     caplog.set_level(logging.WARNING)
     symbols = "\n".join(
         [
@@ -730,30 +966,24 @@ def test_export_still_syncs_unscoped_symbol_when_project_is_ambiguous(
     )
     parts = [
         _part("RV2", "FIRST", True),
-        _part("RV6", "SECONDARY", True),
+        _part("RV6", "FIRST", True),
         _part("RV3", "STANDALONE", True),
     ]
 
-    _load_schematic(
-        tmp_path,
-        monkeypatch,
-        version,
-        [path, second_path],
-        parts,
-        board_name="renamed_board.kicad_pcb",
-        pcbnew=_ambiguous_project_api(tmp_path, match_count),
-    )
-    result = path.read_text(encoding="utf-8")
-
-    assert re.findall(r"^\s*\(in_bom\s+(yes|no)\)", result, re.MULTILINE) == [
-        "yes",
-        "no",
-    ]
-    assert re.findall(
-        r"^\s*\(in_bom\s+(yes|no)\)",
-        second_path.read_text(encoding="utf-8"),
-        re.MULTILINE,
-    ) == ["yes"]
+    originals = {item: item.read_bytes() for item in (path, second_path)}
+    with pytest.raises(ValueError, match="instance references do not resolve"):
+        _load_schematic(
+            tmp_path,
+            monkeypatch,
+            version,
+            [path, second_path],
+            parts,
+            board_name="renamed_board.kicad_pcb",
+            pcbnew=_ambiguous_project_api(tmp_path, match_count),
+        )
+    for item, original in originals.items():
+        assert item.read_bytes() == original
+        assert not item.with_name(item.name + "_old").exists()
     reason = (
         "open board has no project identity"
         if match_count is None
@@ -793,7 +1023,7 @@ def test_export_writes_nothing_while_the_schematic_is_locked(
     with pytest.raises(SchematicLockedError, match="locked by alice@mac") as raised:
         _load_schematic(tmp_path, monkeypatch, version, [path], parts)
     assert path.read_text(encoding="utf-8") == original
-    assert not (tmp_path / "board.kicad_sch_old").exists()
+    assert not (tmp_path / "child.kicad_sch_old").exists()
 
     approved = [locked for locked, _info in raised.value.locks]
     _load_schematic(
@@ -946,7 +1176,7 @@ def test_export_finds_the_lock_beside_a_symlinked_schematic(
     assert re.findall(r'\(property\s+"LCSC"\s+"([^"]*)"', result) == ["NEW"]
     backup = target.parent / "real.kicad_sch_old"
     assert backup.read_text(encoding="utf-8") == original
-    assert not (tmp_path / "board.kicad_sch_old").exists()
+    assert not (tmp_path / "child.kicad_sch_old").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
@@ -1202,7 +1432,7 @@ def test_export_checks_the_lock_of_the_project_schematic_that_is_not_a_root(
     )
     assert _lcsc_values(power) == ["POWER"]
     assert board.read_text(encoding="utf-8") == board_text
-    assert not (tmp_path / "board.kicad_sch_old").exists()
+    assert not (tmp_path / "child.kicad_sch_old").exists()
 
 
 @pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])

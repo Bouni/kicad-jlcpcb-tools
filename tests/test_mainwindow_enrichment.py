@@ -1,4 +1,4 @@
-"""Assembly status through real window/model constructors and database events."""
+"""Assembly status through real window/model constructors and board-backed stores."""
 
 from collections.abc import Callable, Iterator
 from functools import partial
@@ -25,14 +25,13 @@ _clear_callbacks = layout._clear_callbacks
 def workflow(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database_mainwindow: Any
 ) -> Iterator[SimpleNamespace]:
-    """Construct the window, real model and persistent store with queued workers."""
+    """Construct the window, real model and native board view with queued workers."""
     with stock_modules() as modules:
         main = layout.mainwindow
         monkeypatch.setattr(
             main, "PartListDataModel", modules.datamodel.PartListDataModel
         )
         monkeypatch.setattr(main, "TypeCellTooltip", MagicMock())
-        monkeypatch.setattr(main, "set_lcsc_value", database_mainwindow.set_lcsc_value)
         monkeypatch.setattr(main.wx, "PostEvent", MagicMock(), raising=False)
         monkeypatch.setattr(main.wx, "ToolTip", str, raising=False)
         window = layout._open_main(monkeypatch, {})
@@ -63,7 +62,9 @@ def workflow(
             worker, "LCSCAssemblyMetadataProvider", MagicMock(return_value=provider)
         )
         board = Board([Footprint("R1", lcsc="C100"), Footprint("R2", lcsc="C200")])
+        board.filename = str(tmp_path / "board.kicad_pcb")
         window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+        window._board_identity = main.board_identity(board)
         window.store = database_mainwindow.Store(window, str(tmp_path), board)
         window.library = MagicMock()
         window.library.get_part_details.return_value = {"type": "Basic", "stock": 100}
@@ -145,10 +146,10 @@ def test_each_result_updates_std_before_batch_completion(
 @pytest.mark.parametrize(
     "classification,expected", [(None, "?"), (2, "✓"), (0, "—"), (1, "—")]
 )
-def test_partial_cache_survives_empty_result_and_reopen(
+def test_partial_cache_survives_empty_result_but_reopen_fetches_again(
     workflow: SimpleNamespace, classification: Any, expected: str
 ) -> None:
-    """A process-only fetch preserves classification through SQLite and reopening."""
+    """Partial in-memory results survive empty fetches and are disposable on reopen."""
     window = workflow.window
     window.store.set_assembly_metadata("R1", "", classification, expected_lcsc="C100")
     window.populate_footprint_list()
@@ -164,7 +165,8 @@ def test_partial_cache_survives_empty_result_and_reopen(
     assert "C100" in window.store.get_assembly_enrichment_targets()
     window.store = workflow.db.Store(window, window.store.project_path, workflow.board)
     window.populate_footprint_list()
-    assert cell(workflow) == expected
+    assert cell(workflow) == "?"
+    assert "C100" in window.store.get_assembly_enrichment_targets()
 
 
 def test_completed_cache_repopulates_without_retrieval(
@@ -190,7 +192,6 @@ def test_reassignment_and_stale_callbacks_cannot_restore_old_classification(
     window.start_assembly_enrichment(["R1"])
     run_worker(workflow)
     workflow.board.footprints["R1"].SetField("LCSC", "C300")
-    window.store.set_lcsc_assignments([("R1", "C300", None)])
     window.partlist_data_model.set_lcsc("R1", "C300", "Basic", 100, "")
     assert cell(workflow) == "?"
     drain_delivery(workflow)
@@ -207,6 +208,55 @@ def test_reassignment_and_stale_callbacks_cannot_restore_old_classification(
     model.remove_lcsc_number(model.ObjectToItem(model.data[model.find_index("R1")]))
     assert cell(workflow) == ""
     assert "No assigned LCSC" in tooltip(workflow)
+
+
+@pytest.mark.parametrize("count", [8, 64])
+def test_supplier_result_reads_each_native_recipient_once(
+    workflow: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, count: int
+) -> None:
+    """A shared supplier result scales with PCB size instead of rescanning per part."""
+    window = workflow.window
+    workflow.board.footprints = {
+        f"R{index}": Footprint(f"R{index}", lcsc="C100")
+        for index in range(1, count + 1)
+    }
+    window.populate_footprint_list()
+    field_reads = []
+    for footprint in workflow.board.GetFootprints():
+        read = MagicMock(wraps=footprint.GetFields)
+        monkeypatch.setattr(footprint, "GetFields", read)
+        field_reads.append(read)
+
+    window._apply_assembly_metadata(
+        "C100", {"assembly_process": "SMT", "component_product_type": 2}
+    )
+
+    assert sum(read.call_count for read in field_reads) == count
+    assert all(cell(workflow, f"R{index}") == "✓" for index in range(1, count + 1))
+
+
+def test_late_supplier_result_is_cached_by_code_without_changing_current_assignment(
+    workflow: SimpleNamespace,
+) -> None:
+    """Late facts remain reusable for their code while a different current part stays unknown."""
+    window = workflow.window
+    window.start_assembly_enrichment(["R1"])
+    run_worker(workflow)
+    footprint = workflow.board.footprints["R1"]
+    footprint.SetField("LCSC", "C300")
+    window.partlist_data_model.set_lcsc("R1", "C300", "Basic", 100, "")
+
+    drain_delivery(workflow)
+
+    assert footprint.field.text == "C300"
+    assert cell(workflow) == "?"
+    assert window.store.get_part("R1")["component_product_type"] is None
+    footprint.SetField("LCSC", "C100")
+    window.populate_footprint_list()
+    assert cell(workflow) == "✓"
+    assert window.store.get_part("R1")["component_product_type"] == 2
+    assert "C100" not in window.store.get_assembly_enrichment_targets(["R1"])
+    workflow.provider.fetch_iter.assert_called_once()
 
 
 def test_metadata_changes_refresh_stationary_hover(workflow: SimpleNamespace) -> None:

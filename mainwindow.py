@@ -5,7 +5,7 @@ from __future__ import annotations
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 # ruff: noqa: I001, UP045
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
@@ -23,6 +23,8 @@ import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
 from .board_context import BoardContextChanged, board_identity
+from .board_part_edits import BoardEditRecoveryError, apply_board_part_edits
+from .legacy_part_storage import retire_legacy_part_info
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
@@ -67,9 +69,6 @@ from .footprint_helpers import (
     get_is_dnp,
     find_lcsc_assignment_text,
     iter_board_items,
-    set_lcsc_value,
-    toggle_exclude_from_bom,
-    toggle_exclude_from_pos,
 )
 from .generate_hooks import format_hook_error, run_configured_hook
 from .helpers import (
@@ -81,6 +80,7 @@ from .helpers import (
 )
 from .kicad_drc import DRCViolationCounter
 from .library import CorrectionState, Library, LibraryState
+from .lcsc import normalize_lcsc
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
@@ -93,7 +93,6 @@ from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
 from .stock_concern import stock_concern_references
-from .stock_display import parse_stock
 from .type_cell_tooltip import TypeCellTooltip
 from .why_standard_dialog import WhyStandardDialog
 from .window_layout import get_column_widths, restore_column_widths
@@ -156,6 +155,7 @@ class JLCPCBTools(wx.Frame):
         self,
         parent: Optional[wx.Window],
         kicad_provider: KicadProvider = KicadProvider(),
+        board_action: Optional[Callable[[Callable[[], None]], None]] = None,
     ) -> None:
         self.library: Optional[Library] = None
         self._catalog_details: dict[str, dict[str, Any]] = {}
@@ -169,6 +169,11 @@ class JLCPCBTools(wx.Frame):
         self.pcbnew = kicad_provider.get_pcbnew()
         board = self.pcbnew.GetBoard()
         self._schematic_board_identity = board_identity(board)
+        self._board_identity = board_identity(board)
+        self._board_action = board_action
+        self._board_unreliable = False
+        self._ordinary_generating = False
+        self._refreshing_board = False
         board_filename = str(board.GetFileName())
         if not board_filename.strip():
             raise ValueError("Save the PCB before opening the JLCPCB plugin.")
@@ -794,6 +799,7 @@ class JLCPCBTools(wx.Frame):
                     root.removeHandler(handler)
             self.Destroy()
             raise
+        self.Bind(wx.EVT_ACTIVATE, self.on_window_activated)
 
     def Layout(self) -> bool:
         """Lay out the form after resizing or changing the visible controls."""
@@ -817,14 +823,97 @@ class JLCPCBTools(wx.Frame):
                     self.library.update()
                 else:
                     self._clear_catalog_views()
-        except (sqlite3.Error, OSError, ValueError) as error:
+        except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
 
-    def _get_current_board(self):
-        """Return current board instance for BOM controller callbacks."""
-        return self.pcbnew.GetBoard()
+    def _get_current_board(self) -> Any:
+        """Validate the native board lifetime before accessing modeless state."""
+        board = self.pcbnew.GetBoard()
+        identity = board_identity(board)
+        if identity != getattr(self, "_board_identity", identity):
+            raise BoardContextChanged(
+                "The PCB was closed, replaced, or saved under another name. "
+                "Reopen JLCPCB Tools."
+            )
+        if getattr(self, "_board_unreliable", False):
+            raise BoardContextChanged(
+                "A board edit could not be restored. Inspect the PCB and reopen JLCPCB Tools."
+            )
+        if not getattr(self, "_variant_mode", False) and _board_has_variants(board):
+            raise BoardContextChanged(
+                "The PCB now contains variants. Reopen JLCPCB Tools to edit them."
+            )
+        return board
+
+    def on_window_activated(self, event: wx.ActivateEvent) -> None:
+        """Refresh external PCB edits and undo without applying opening preferences."""
+        event.Skip()
+        if (
+            not event.GetActive()
+            or getattr(self, "_closing", False)
+            or getattr(self, "_refreshing_board", False)
+            or getattr(self, "_ordinary_generating", False)
+            or getattr(self, "_variant_controller", None)
+            or self.store is None
+        ):
+            return
+        self._refreshing_board = True
+        try:
+            self._get_current_board()
+            self._refresh_footprints_preserving_selection()
+            self.start_assembly_enrichment()
+            self.recompute_stock_concerns()
+            self.recompute_bom_estimate()
+        except (BoardContextChanged, OSError, sqlite3.Error) as error:
+            self._set_project_storage_error(error)
+        finally:
+            self._refreshing_board = False
+
+    def _refresh_footprints_preserving_selection(self) -> None:
+        """Rebuild native rows while retaining selected component references."""
+        selected = {
+            self.partlist_data_model.get_reference(item)
+            for item in self.footprint_list.GetSelections()
+        }
+        self.populate_footprint_list()
+        for row in self.partlist_data_model.get_all():
+            if row[PartListDataModel.columns["REF_COL"]] in selected:
+                self.footprint_list.Select(self.partlist_data_model.ObjectToItem(row))
+
+    def _apply_board_change(self, change: Callable[[], None], action: str) -> bool:
+        """Execute one native edit before publishing its dependent UI state."""
+        try:
+            self._get_current_board()
+            if getattr(self, "_ordinary_generating", False):
+                raise RuntimeError("Finish generation before editing part assignments.")
+
+            def apply() -> None:
+                self._get_current_board()
+                change()
+
+            callback = getattr(self, "_board_action", None)
+            if callback is None:
+                apply()
+            else:
+                callback(apply)
+        except (BoardContextChanged, BoardEditRecoveryError) as error:
+            self._board_unreliable = True
+            self._set_project_storage_error(error)
+            return False
+        except Exception as error:
+            self.logger.warning("Unable to %s: %s", action, error)
+            return False
+        # Redraw failure cannot undo a verified native transaction or suppress
+        # publication of its current assignment in the plugin's own controls.
+        try:
+            refresh = getattr(self.pcbnew, "Refresh", None)
+            if callable(refresh):
+                refresh()
+        except Exception as error:
+            self.logger.warning("Unable to redraw the PCB after %s: %s", action, error)
+        return True
 
     def _set_standard_only_refs(self, refs: Iterable[str]) -> None:
         """Update computed Standard-only cells and refresh the current row help."""
@@ -1107,7 +1196,7 @@ class JLCPCBTools(wx.Frame):
         try:
             if getattr(self, "fabrication", None) is None:
                 self.init_fabrication()
-            board = self.pcbnew.GetBoard()
+            board = self._get_current_board()
             if not self._variant_mode and _board_has_variants(board):
                 raise ValueError(
                     "The PCB now contains variants. Reopen JLCPCB Tools to edit them."
@@ -1127,7 +1216,7 @@ class JLCPCBTools(wx.Frame):
                 self._variant_controller.start_enrichment()
                 return
             self._initialize_catalog_parts()
-        except (sqlite3.Error, OSError, ValueError) as error:
+        except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
 
     def _initialize_catalog_parts(self) -> None:
@@ -1180,7 +1269,7 @@ class JLCPCBTools(wx.Frame):
 
     def init_fabrication(self) -> None:
         """Initialize the fabrication."""
-        self.fabrication = Fabrication(self, self.pcbnew.GetBoard())
+        self.fabrication = Fabrication(self, self._get_current_board())
 
     def reset_gauge(self, *_):
         """Initialize the gauge."""
@@ -1353,10 +1442,15 @@ class JLCPCBTools(wx.Frame):
         remember_part_preferences: bool = False,
         notify: bool = True,
     ) -> list[str]:
-        """Commit project changes before updating board fields or displayed rows."""
+        """Apply a verified native batch before publishing assignments or preferences."""
         if self.store is None or not self.is_catalog_available():
             return []
-        board = self.pcbnew.GetBoard()
+        try:
+            board = self._get_current_board()
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return []
+        assignments = {ref: normalize_lcsc(lcsc) for ref, lcsc in assignments.items()}
         footprints = {
             reference: footprint
             for reference in assignments
@@ -1370,21 +1464,28 @@ class JLCPCBTools(wx.Frame):
                 part = (details or {}).get(lcsc)
                 if part is None:
                     part = self._catalog_get_part_details(lcsc, strict=True)
-                stored_stock = parse_stock(part.get("stock"))
-                catalog[lcsc] = (part, stored_stock, params_for_part(part))
-            self.store.set_lcsc_assignments(
-                (ref, assignments[ref], catalog[assignments[ref]][1])
-                for ref in footprints
-            )
+                catalog[lcsc] = (part, params_for_part(part))
         except (sqlite3.Error, OSError) as error:
             self.logger.warning("Unable to apply LCSC assignments: %s", error)
             return []
 
+        if not self._apply_board_change(
+            lambda: apply_board_part_edits(
+                [(fp, {"lcsc": assignments[ref]}) for ref, fp in footprints.items()]
+            ),
+            "apply LCSC assignments",
+        ):
+            return []
+
         preferences = []
         for reference, footprint in footprints.items():
+            try:
+                current_part = self.store.get_part(reference)
+            except BoardContextChanged as error:
+                self._set_project_storage_error(error)
+                return []
             lcsc = assignments[reference]
-            part, _stored_stock, params = catalog[lcsc]
-            set_lcsc_value(footprint, lcsc)
+            part, params = catalog[lcsc]
             stock = part.get("stock")
             self.partlist_data_model.set_lcsc(
                 reference,
@@ -1393,6 +1494,14 @@ class JLCPCBTools(wx.Frame):
                 stock if stock is not None else "",
                 params,
             )
+            # Assigning clears the row's old facts. A cached code needs no
+            # supplier callback, so publish its current facts immediately.
+            if current_part is not None:
+                self.partlist_data_model.set_assembly_metadata(
+                    reference,
+                    current_part,
+                    pending=current_part["lcsc"] in self.assembly_lookup.pending,
+                )
             preferences.append(
                 (str(footprint.GetFPID().GetLibItemName()), footprint.GetValue(), lcsc)
             )
@@ -1434,10 +1543,10 @@ class JLCPCBTools(wx.Frame):
         return saved
 
     def _fill_empty_lcsc_assignments_from_part_preferences(self) -> None:
-        """Fill truly empty eligible fields once, in one project transaction."""
+        """Fill truly empty eligible native fields once per plugin opening."""
         if getattr(self, "_variant_controller", None):
             return
-        board = self.pcbnew.GetBoard()
+        board = self._get_current_board()
         part_preferences = {}
         assignments = {}
         try:
@@ -1536,6 +1645,8 @@ class JLCPCBTools(wx.Frame):
 
     def show_assembly_mode_details(self, *_: Any) -> None:
         """Open or raise the modeless assembly-mode details dialog."""
+        if getattr(self, "_closing", False):
+            return
         controller = getattr(self, "_variant_controller", None)
         parts = None
         if controller is not None:
@@ -1546,6 +1657,14 @@ class JLCPCBTools(wx.Frame):
                 if self._why_standard_dialog is not None:
                     self._why_standard_dialog.Close()
                 controller._error(error)
+                return
+        else:
+            try:
+                parts = self.read_assembly_parts()
+            except (BoardContextChanged, sqlite3.Error, OSError) as error:
+                if self._why_standard_dialog is not None:
+                    self._why_standard_dialog.Close()
+                self._set_project_storage_error(error)
                 return
         if self.bom_estimator_decision is None:
             self.recompute_bom_estimate()
@@ -1560,20 +1679,25 @@ class JLCPCBTools(wx.Frame):
 
     def recompute_bom_estimate(self) -> None:
         """Recompute and display estimated BOM+assembly cost."""
+        if getattr(self, "_closing", False):
+            return
         if controller := getattr(self, "_variant_controller", None):
             if not controller.session.generating:
                 controller.recompute()
             return
-        board_count = self._normalize_board_count(self.bom_estimator_board_count)
-        self.bom_estimator_decision = self.bom_estimator_controller.recompute(
-            board_count
-        )
-        if self._why_standard_dialog is not None:
-            parts = self.read_assembly_parts()
-            self._why_standard_dialog.update_content(
-                self.bom_estimator_decision,
-                parts,
+        try:
+            board_count = self._normalize_board_count(self.bom_estimator_board_count)
+            self.bom_estimator_decision = self.bom_estimator_controller.recompute(
+                board_count
             )
+            if self._why_standard_dialog is not None:
+                parts = self.read_assembly_parts()
+                self._why_standard_dialog.update_content(
+                    self.bom_estimator_decision,
+                    parts,
+                )
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
 
     def on_bom_data_changed(self, _e):
         """Coalesce a burst of BomDataChangedEvent posts into one recompute.
@@ -1592,11 +1716,15 @@ class JLCPCBTools(wx.Frame):
     def _run_coalesced_bom_recompute(self) -> None:
         """Drain the coalesced recompute latch and run a single estimate."""
         self._bom_recompute_scheduled = False
+        if getattr(self, "_closing", False):
+            return
         self.recompute_stock_concerns()
         self.recompute_bom_estimate()
 
     def recompute_stock_concerns(self) -> None:
         """Refresh Stock attributes from all live BOM parts, before view filtering."""
+        if getattr(self, "_closing", False):
+            return
         if getattr(self, "_variant_controller", None):
             # The matrix computes availability from each variant's own population.
             return
@@ -1609,7 +1737,7 @@ class JLCPCBTools(wx.Frame):
             model.set_stock_concern_refs(set())
             return
         try:
-            board = self.pcbnew.GetBoard()
+            board = self._get_current_board()
             parts = []
             if board is not None:
                 for part in self.store.read_all():
@@ -1629,6 +1757,9 @@ class JLCPCBTools(wx.Frame):
                     getattr(self, "bom_estimator_board_count", 5)
                 ),
             )
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
         except (sqlite3.Error, OSError) as error:
             self.logger.warning("Unable to update stock concerns: %s", error)
             refs = set()
@@ -1652,17 +1783,21 @@ class JLCPCBTools(wx.Frame):
         self, references: Optional[Iterable[str]] = None
     ) -> None:
         """Start background enrichment for missing assembly process metadata."""
+        if getattr(self, "_closing", False):
+            return
         if controller := getattr(self, "_variant_controller", None):
             return controller.start_enrichment()
         if self.store is None:
             return
         try:
             targets = self.store.get_assembly_enrichment_targets(references)
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
         except sqlite3.Error as error:
             self.logger.warning("Unable to start assembly enrichment: %s", error)
             return
-        # Normal assignments store facts per reference, so a newly assigned
-        # reference may need a code fetched earlier in this same dialog.
+        # Supplier facts are shared by LCSC for this dialog's lifetime.
         self.assembly_lookup.request(targets, retry=True)
         for lcsc, refs in targets.items():
             if lcsc in self.assembly_lookup.pending:
@@ -1672,22 +1807,25 @@ class JLCPCBTools(wx.Frame):
 
     def _apply_assembly_metadata(self, lcsc: str, metadata: dict[str, Any]) -> None:
         """Apply results to current recipients, including assignments made in flight."""
+        if getattr(self, "_closing", False) or self.store is None:
+            return
+        try:
+            self._get_current_board()
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
         assembly_process = metadata.get("assembly_process", "")
         component_product_type = metadata.get("component_product_type")
-        for reference in self.store.get_assembly_enrichment_targets().get(lcsc, ()):
-            updated = self.store.set_assembly_metadata(
-                reference,
-                assembly_process,
-                component_product_type,
-                expected_lcsc=lcsc,
-            )
-            if updated:
-                current_part = self.store.get_part(reference) or {}
-                self.partlist_data_model.set_assembly_metadata(reference, current_part)
+        self.store.cache_lcsc_metadata(lcsc, assembly_process, component_product_type)
+        for part in self.store.read_all():
+            if part["lcsc"] == lcsc:
+                self.partlist_data_model.set_assembly_metadata(part["reference"], part)
         self._refresh_assembly_tooltip()
 
     def _refresh_bom_after_enrichment_update(self) -> None:
         """Clear finished status even after failures, then refresh the BOM once."""
+        if getattr(self, "_closing", False) or self.store is None:
+            return
         try:
             for part in self.store.read_all():
                 self.partlist_data_model.set_assembly_metadata(
@@ -1695,7 +1833,7 @@ class JLCPCBTools(wx.Frame):
                     part,
                     pending=self._get_enrichment_status_label(part) == "Pending",
                 )
-        except (sqlite3.Error, OSError) as error:
+        except (sqlite3.Error, OSError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
         finally:
             self._refresh_assembly_tooltip()
@@ -1801,18 +1939,19 @@ class JLCPCBTools(wx.Frame):
             return
         try:
             self._populate_footprint_rows()
-        except (sqlite3.Error, OSError) as error:
+        except (sqlite3.Error, OSError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
 
     def _populate_footprint_rows(self) -> None:
         """Read a complete project view, allowing the caller to recover storage errors."""
+        board = self._get_current_board()
         self.partlist_data_model.RemoveAll()
         parts = self.store.read_all()
         snapshot = self.library.read_correction_data()
         self.update_correction_status(snapshot)
         corrections = snapshot.corrections
         for part in parts:
-            fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
+            fp = board.FindFootprintByReference(part["reference"])
             if fp is None:
                 continue
             is_dnp = get_is_dnp(fp)
@@ -1920,9 +2059,18 @@ class JLCPCBTools(wx.Frame):
             self.hide_pos_button.SetLabel("Hide excluded POS")
         self.populate_footprint_list()
 
-    def OnFootprintSelected(self, *_):
+    def OnFootprintSelected(self, *_: object) -> None:
         """Enable the toolbar buttons when a selection was made."""
-        if self.select_alike_in_progress:
+        if (
+            self.select_alike_in_progress
+            or getattr(self, "_closing", False)
+            or getattr(self, "_project_storage_unavailable", False)
+        ):
+            return
+        try:
+            board = self._get_current_board()
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
             return
 
         self.enable_part_specific_toolbar_buttons(
@@ -1941,7 +2089,7 @@ class JLCPCBTools(wx.Frame):
         if self.footprint_list.GetSelectedItemsCount() > 0:
             for item in self.footprint_list.GetSelections():
                 ref = self.partlist_data_model.get_reference(item)
-                fp = self.pcbnew.GetBoard().FindFootprintByReference(ref)
+                fp = board.FindFootprintByReference(ref)
                 if fp:
                     fp.SetSelected()
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
@@ -1963,54 +2111,67 @@ class JLCPCBTools(wx.Frame):
         """Toggle the exclude from BOM/POS attribute of a footprint."""
         if controller := getattr(self, "_variant_controller", None):
             return controller.toggle(("bom", "pos"))
-        for item in self.footprint_list.GetSelections():
-            ref = self.partlist_data_model.get_reference(item)
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(ref)
-            if fp is None:
-                continue
-            bom = toggle_exclude_from_bom(fp)
-            pos = toggle_exclude_from_pos(fp)
-            self.store.set_bom(ref, int(bool(bom)))
-            self.store.set_pos(ref, int(bool(pos)))
-            self.partlist_data_model.toggle_bom_pos(item)
-        wx.PostEvent(self, BomDataChangedEvent(source="toggle_bom_pos"))
+        self._toggle_exclusions(bom=True, pos=True)
 
     def toggle_bom(self, *_: object) -> None:
         """Toggle the exclude from BOM attribute of a footprint."""
         if controller := getattr(self, "_variant_controller", None):
             return controller.toggle(("bom",))
-        for item in self.footprint_list.GetSelections():
-            ref = self.partlist_data_model.get_reference(item)
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(ref)
-            if fp is None:
-                continue
-            bom = toggle_exclude_from_bom(fp)
-            self.store.set_bom(ref, int(bool(bom)))
-            self.partlist_data_model.toggle_bom(item)
-        wx.PostEvent(self, BomDataChangedEvent(source="toggle_bom"))
+        self._toggle_exclusions(bom=True, pos=False)
 
     def toggle_pos(self, *_: object) -> None:
         """Toggle the exclude from POS attribute of a footprint."""
         if controller := getattr(self, "_variant_controller", None):
             return controller.toggle(("pos",))
-        for item in self.footprint_list.GetSelections():
-            ref = self.partlist_data_model.get_reference(item)
-            board = self.pcbnew.GetBoard()
-            fp = board.FindFootprintByReference(ref)
-            if fp is None:
-                continue
-            pos = toggle_exclude_from_pos(fp)
-            self.store.set_pos(ref, int(bool(pos)))
-            self.partlist_data_model.toggle_pos(item)
-        wx.PostEvent(self, BomDataChangedEvent(source="toggle_pos"))
+        self._toggle_exclusions(bom=False, pos=True)
+
+    def _toggle_exclusions(self, *, bom: bool, pos: bool) -> None:
+        """Change each selected native footprint's flags as one reversible batch."""
+        if self.store is None:
+            return
+        try:
+            board = self._get_current_board()
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
+        selected = []
+        selections = self.footprint_list.GetSelections()
+        for item in selections:
+            reference = self.partlist_data_model.get_reference(item)
+            footprint = board.FindFootprintByReference(reference)
+            if footprint is not None:
+                selected.append((item, footprint))
+        edits = []
+        for _item, footprint in selected:
+            changes = {}
+            if bom:
+                changes["exclude_from_bom"] = not bool(get_exclude_from_bom(footprint))
+            if pos:
+                changes["exclude_from_pos"] = not bool(get_exclude_from_pos(footprint))
+            edits.append((footprint, changes))
+        if not edits or not self._apply_board_change(
+            lambda: apply_board_part_edits(edits), "change assembly exclusions"
+        ):
+            return
+        for item, _footprint in selected:
+            if bom and pos:
+                self.partlist_data_model.toggle_bom_pos(item)
+            elif bom:
+                self.partlist_data_model.toggle_bom(item)
+            else:
+                self.partlist_data_model.toggle_pos(item)
+        wx.PostEvent(self, BomDataChangedEvent(source="toggle_exclusions"))
 
     def remove_lcsc_number(self, *_: object) -> None:
-        """Clear selected assignments after committing one project transaction."""
+        """Clear native assignments before changing displayed rows."""
         if controller := getattr(self, "_variant_controller", None):
             return controller.remove()
         if self.store is None:
+            return
+        try:
+            board = self._get_current_board()
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
             return
         selected = []
         # wx selection items borrow storage from this native array. Keep it
@@ -2018,22 +2179,20 @@ class JLCPCBTools(wx.Frame):
         selections = self.footprint_list.GetSelections()
         for item in selections:
             ref = self.partlist_data_model.get_reference(item)
-            board = self.pcbnew.GetBoard()
             fp = board.FindFootprintByReference(ref)
             if fp is None:
                 continue
             selected.append((item, ref, fp))
         if not selected:
             return
-        try:
-            self.store.set_lcsc_assignments(
-                (ref, "", None) for _item, ref, _fp in selected
-            )
-        except sqlite3.Error as error:
-            self.logger.warning("Unable to clear LCSC assignments: %s", error)
+        if not self._apply_board_change(
+            lambda: apply_board_part_edits(
+                [(fp, {"lcsc": ""}) for _, _, fp in selected]
+            ),
+            "clear LCSC assignments",
+        ):
             return
-        for item, _ref, fp in selected:
-            set_lcsc_value(fp, "")
+        for item, _ref, _fp in selected:
             self.partlist_data_model.remove_lcsc_number(item)
         self.refresh_corrections([ref for _item, ref, _fp in selected])
         wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
@@ -2255,7 +2414,7 @@ class JLCPCBTools(wx.Frame):
     def count_order_number_placeholders(self):
         """Count the JLC order/serial number placeholders."""
         count = 0
-        for drawing in iter_board_items(self.pcbnew.GetBoard().Drawings()):
+        for drawing in iter_board_items(self._get_current_board().Drawings()):
             if drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or drawing.IsOnLayer(
                 kicad_pcbnew.B_SilkS
             ):
@@ -2313,7 +2472,7 @@ class JLCPCBTools(wx.Frame):
         self, stage: str, placeholder_count: int, generation_count: int
     ) -> dict[str, str]:
         """Build environment variables for configured generation hooks."""
-        board_filename = self.pcbnew.GetBoard().GetFileName()
+        board_filename = self._get_current_board().GetFileName()
         artifact_paths = self.fabrication.get_artifact_paths()
         env = os.environ.copy()
         env.update(
@@ -2390,9 +2549,20 @@ class JLCPCBTools(wx.Frame):
             )
             if controller := getattr(self, "_variant_controller", None):
                 controller.begin_generation(corrections)
-            placements = self.run_generation_step(
-                "Preparing placement data", self.fabrication.prepare_cpl, corrections
-            )
+                placements = self.run_generation_step(
+                    "Preparing placement data",
+                    self.fabrication.prepare_cpl,
+                    corrections,
+                )
+            else:
+                self._get_current_board()
+                self._ordinary_generating = True
+                output = self.run_generation_step(
+                    "Preparing placement data",
+                    self.fabrication.begin_ordinary_generation,
+                    corrections,
+                )
+                placements = output.cpl_rows
             layer_selection = self.layer_selection.GetSelection()
             number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
             layer_count = int(number.group(0)) if number else None
@@ -2497,6 +2667,8 @@ class JLCPCBTools(wx.Frame):
             if not self.run_generate_hook("pre", pre_hook_env, allow_continue=True):
                 return
 
+            self.fabrication.validate_generation()
+
             self.run_generation_step(
                 "Plotting Gerbers",
                 self.fabrication.generate_geber,
@@ -2536,6 +2708,7 @@ class JLCPCBTools(wx.Frame):
                 ):
                     publication.enter_context(self.fabrication.generation_publication())
             else:
+                self.fabrication.validate_generation()
                 generation_count = self.store.increment_generation_count()
             post_hook_env = self.build_generate_hook_env(
                 stage="post",
@@ -2565,11 +2738,13 @@ class JLCPCBTools(wx.Frame):
             if controller := getattr(self, "_variant_controller", None):
                 controller.end_generation()
             else:
+                self.fabrication.end_ordinary_generation()
+                self._ordinary_generating = False
                 self.generate_button.Enable(True)
 
-    def save_board_for_drc(self):
+    def save_board_for_drc(self) -> None:
         """Save the current board so DRC checks operate on latest board state."""
-        board = self.pcbnew.GetBoard()
+        board = self._get_current_board()
         board_filename = board.GetFileName()
         if not board_filename:
             raise RuntimeError("Board must be saved before running DRC checks")
@@ -2587,12 +2762,12 @@ class JLCPCBTools(wx.Frame):
 
         raise RuntimeError("Unable to save board using current KiCad API")
 
-    def run_drc_before_gerber_export(self):
+    def run_drc_before_gerber_export(self) -> bool:
         """Run optional DRC via KiCad Python API and prompt when violations exist."""
         if not self.settings.get("gerber", {}).get("force_drc", False):
             return True
 
-        board_filename = self.pcbnew.GetBoard().GetFileName()
+        board_filename = self._get_current_board().GetFileName()
         if not board_filename:
             wx.MessageBox(
                 "Board must be saved before DRC can be run.",
@@ -2717,6 +2892,7 @@ class JLCPCBTools(wx.Frame):
         Projects without a matching schematic need no write or file picker.
         Forced shutdown never opens a dialog or approves a schematic lock.
         """
+        schematic_saved = False
         try:
 
             def check_board() -> None:
@@ -2761,22 +2937,45 @@ class JLCPCBTools(wx.Frame):
                 if decision is not True:
                     return decision
                 export(approved_locks=[path for path, _info in exc.locks])
+            # Both Store implementations now read native board fields. Retire
+            # their old shared assignment table only after every sheet is saved.
+            schematic_saved = True
+            check_board()
+            retire_legacy_part_info(self.store.dbfile)
             return True
         except Exception as exc:
-            self.logger.exception("Automatic schematic save failed")
+            if schematic_saved:
+                self.logger.exception(
+                    "Legacy assignment cleanup failed after schematic save"
+                )
+                title = "Legacy assignment cleanup failed"
+                message = (
+                    "The schematics were saved, but the old part assignment table "
+                    f"could not be removed:\n\n{exc}\n\n"
+                    "Keep this window open to correct the problem and retry, or "
+                    "close and retry cleanup after the next successful save."
+                )
+                close_label = "Close"
+            else:
+                self.logger.exception("Automatic schematic save failed")
+                title = "Schematic save failed"
+                message = (
+                    f"Could not save the schematic:\n\n{exc}\n\n"
+                    "Keep this window open to correct the problem and try again, "
+                    "or close without saving the remaining changes."
+                )
+                close_label = "Close without saving"
             if not interactive:
                 return False
             # Use wx's modal lifecycle so forced close can end the prompt on macOS.
             dialog = wx.GenericMessageDialog(
                 self,
-                f"Could not save the schematic:\n\n{exc}\n\n"
-                "Keep this window open to correct the problem and try again, "
-                "or close without saving the remaining changes.",
-                "Schematic save failed",
+                message,
+                title,
                 wx.YES_NO | wx.NO_DEFAULT | wx.ICON_ERROR | wx.CENTER,
             )
             try:
-                dialog.SetYesNoLabels("Close without saving", "Keep open")
+                dialog.SetYesNoLabels(close_label, "Keep open")
                 result = dialog.ShowModal()
             finally:
                 dialog.Destroy()
@@ -2815,12 +3014,17 @@ class JLCPCBTools(wx.Frame):
         """Remember the selected LCSC assignments as part preferences."""
         if controller := getattr(self, "_variant_controller", None):
             return controller.save_preferences()
+        if self.store is None:
+            return
         preferences = []
-        for item in self.footprint_list.GetSelections():
-            footprint = self.partlist_data_model.get_footprint(item)
-            value = self.partlist_data_model.get_value(item)
-            lcsc = self.partlist_data_model.get_lcsc(item)
-            preferences.append((footprint, value, lcsc))
+        try:
+            for item in self.footprint_list.GetSelections():
+                reference = self.partlist_data_model.get_reference(item)
+                if part := self.store.get_part(reference):
+                    preferences.append((part["footprint"], part["value"], part["lcsc"]))
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
         self._save_part_preferences(preferences)
 
     def apply_selected_part_preferences(self, *_: object) -> None:
@@ -2833,12 +3037,17 @@ class JLCPCBTools(wx.Frame):
         try:
             for item in self.footprint_list.GetSelections():
                 reference = self.partlist_data_model.get_reference(item)
-                footprint = self.partlist_data_model.get_footprint(item)
-                value = self.partlist_data_model.get_value(item)
+                part = self.store.get_part(reference)
+                if part is None:
+                    continue
+                footprint, value = part["footprint"], part["value"]
                 if footprint and value:
                     if preference := self.library.get_part_preference(footprint, value):
                         assignments[reference] = preference
             updated_references = self._apply_lcsc_assignments(assignments)
+        except BoardContextChanged as error:
+            self._set_project_storage_error(error)
+            return
         except sqlite3.Error as error:
             self.logger.warning("Unable to apply part preferences: %s", error)
             return

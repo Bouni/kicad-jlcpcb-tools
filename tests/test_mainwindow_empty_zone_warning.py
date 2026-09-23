@@ -1,7 +1,8 @@
 """Tests for empty-zone warnings during fabrication-data generation."""
 
+from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Optional
+from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,6 +36,9 @@ def _make_window(
 ) -> tuple[SimpleNamespace, list[str]]:
     """Build the smallest object needed by generate_fabrication_data()."""
     fabrication = SimpleNamespace(
+        begin_ordinary_generation=MagicMock(return_value=SimpleNamespace(cpl_rows=())),
+        end_ordinary_generation=MagicMock(),
+        validate_generation=MagicMock(),
         get_part_consistency_warnings=MagicMock(return_value=""),
         fill_zones=MagicMock(return_value=empty_pours),
         generate_geber=MagicMock(),
@@ -50,6 +54,7 @@ def _make_window(
 
     window = SimpleNamespace(
         _project_storage_unavailable=False,
+        _get_current_board=MagicMock(return_value=SimpleNamespace()),
         generate_button=MagicMock(),
         reset_gauge=MagicMock(),
         settings=settings,
@@ -76,7 +81,9 @@ def _make_window(
 
     generation_steps = []
 
-    def run_generation_step(description, function, *args):
+    def run_generation_step(
+        description: str, function: Callable[..., Any], *args: Any
+    ) -> Any:
         window._current_generation_step = description
         generation_steps.append(description)
         return function(*args)

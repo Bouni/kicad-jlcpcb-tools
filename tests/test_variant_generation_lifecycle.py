@@ -121,6 +121,10 @@ def generation(mainwindow_module: Any, modules: Any, tmp_path: Path) -> Generati
     )
     window.project_path = str(tmp_path)
     window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+    window._variant_mode = True
+    window._get_current_board = window_module.JLCPCBTools._get_current_board.__get__(
+        window
+    )
     window.build_generate_hook_env = (
         window_module.JLCPCBTools.build_generate_hook_env.__get__(window)
     )

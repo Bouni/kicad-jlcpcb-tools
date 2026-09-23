@@ -1,4 +1,4 @@
-"""Part preference lifecycle with real project and shared SQLite persistence."""
+"""Native board assignment lifecycle with real shared SQLite preferences."""
 
 from collections.abc import Callable
 import sqlite3
@@ -13,6 +13,54 @@ from .part_preferences_test_support import Footprint, act, info_messages
 
 mainwindow = support.mainwindow
 make_window = support.make_window
+
+
+def test_manual_save_reads_current_native_part_instead_of_stale_visible_row(
+    make_window: Callable[..., Any],
+) -> None:
+    """A preference remembers the actual board choice after an external PCB edit."""
+    window = make_window()
+    footprint = window.pcbnew.GetBoard().footprints["R1"]
+    footprint.value = "22k"
+    footprint.footprint = "R_0805"
+    footprint.SetField("LCSC", "C300")
+    assert window.test_rows["R1"]["lcsc"] == "C100"
+
+    window.save_selected_part_preferences()
+
+    assert window.library.get_all_part_preferences() == [["R_0805", "22k", "C300"]]
+
+
+def test_manual_apply_uses_current_native_value_and_footprint(
+    make_window: Callable[..., Any],
+) -> None:
+    """Applying preferences selects the current PCB component's key before editing."""
+    window = make_window(
+        part_preferences={("R_0603", "10k"): "C200", ("R_0805", "22k"): "C300"}
+    )
+    footprint = window.pcbnew.GetBoard().footprints["R1"]
+    footprint.value = "22k"
+    footprint.footprint = "R_0805"
+
+    window.apply_selected_part_preferences()
+
+    assert footprint.field.text == "C300"
+    assert window.store.get_part("R1")["lcsc"] == "C300"
+    window.library.get_part_preference.assert_called_once_with("R_0805", "22k")
+
+
+def test_manual_save_skips_deleted_selected_part(
+    make_window: Callable[..., Any],
+) -> None:
+    """Stale selections cannot preserve an assignment belonging to a deleted component."""
+    window = make_window(
+        footprints=[Footprint("R1"), Footprint("R2", value="22k", lcsc="C200")]
+    )
+    del window.pcbnew.GetBoard().footprints["R1"]
+
+    window.save_selected_part_preferences()
+
+    assert window.library.get_all_part_preferences() == [["R_0603", "22k", "C200"]]
 
 
 @pytest.mark.parametrize("action", ["picker", "paste"])
@@ -80,14 +128,14 @@ def test_part_preferences_fill_only_eligible_blank_parts_before_initial_populati
     window.recompute_bom_estimate.assert_called_once_with()
 
 
-def test_part_preferences_respect_existing_project_assignment(
+def test_part_preferences_respect_existing_board_assignment(
     make_window: Callable[..., Any],
 ) -> None:
-    """A saved project choice must take precedence over shared part preferences."""
+    """A native board choice must take precedence over shared part preferences."""
     window = make_window(
         footprints=[Footprint(lcsc="")], part_preferences={("R_0603", "10k"): "C200"}
     )
-    window.store.set_lcsc("R1", "C300")
+    window.pcbnew.GetBoard().FindFootprintByReference("R1").SetField("LCSC", "C300")
 
     window.init_store()
 
@@ -179,7 +227,7 @@ def test_part_preferences_skip_footprint_deleted_after_board_reconciliation(
 
     window.init_store()
 
-    assert window.store.get_part("R1")["lcsc"] == ""
+    assert window.store.get_part("R1") is None
     assert window.store.get_part("R2")["lcsc"] == "C200"
 
 
@@ -306,11 +354,11 @@ def test_saved_preferences_are_validated_before_application(
 
 
 @pytest.mark.parametrize("preference", [None, "Z999", "C999"])
-def test_supplier_metadata_skip_is_reported_only_for_a_usable_preference(
+def test_unrelated_supplier_metadata_does_not_block_usable_preference(
     make_window: Callable[..., Any],
     preference: Any,
 ) -> None:
-    """The conservative raw-field guard explains actual blocked autofill choices."""
+    """Supplier metadata stays intact while a usable preference fills the part field."""
     window = make_window(
         footprints=[Footprint(fields={"JLC Rotation": "90"})],
         part_preferences={("R_0603", "10k"): preference}
@@ -322,9 +370,9 @@ def test_supplier_metadata_skip_is_reported_only_for_a_usable_preference(
     messages = info_messages(window)
     assert len(messages) == (1 if preference == "C999" else 0)
     if messages:
-        assert (
-            "R1" in messages[0]
-            and "JLC Rotation" in messages[0]
-            and "90" in messages[0]
-        )
-    assert window.store.get_part("R1")["lcsc"] == ""
+        assert "Filled 1 empty LCSC assignment(s)" in messages[0]
+    assert window.store.get_part("R1")["lcsc"] == (
+        "C999" if preference == "C999" else ""
+    )
+    fields = window.pcbnew.GetBoard().footprints["R1"].fields
+    assert fields["JLC Rotation"].GetText() == "90"

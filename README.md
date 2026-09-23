@@ -194,12 +194,56 @@ This saves schematic files. Use KiCad's PCB save command to persist changes to
 the PCB itself. An already-open Schematic Editor does not reload exported files
 automatically and can overwrite them if you choose **Save Anyway**.
 
+### Where part assignments are stored
+
+The live KiCad board is the sole source of LCSC assignments, with or without
+named design variants. Selecting, pasting, or clearing a part updates the native
+footprint fields or the selected variant's fields. **Save the PCB in KiCad to
+persist these changes.** Refreshing the plugin reads the current board, including
+edits made outside the plugin.
+
+Both table modes recognize `LCSC`, `JLC`, and `JLCPCB` assignment fields,
+optionally followed by `Part`, `Part Number`, `Part Num`, `Part No`, `PN`,
+`Number`, `Code`, or `ID`; case, spaces, and punctuation are ignored. Conflicting
+or invalid assignments appear unassigned. Selecting or clearing a part updates
+all recognized assignment fields together. Other prefixed fields, such as
+`JLCPCB Rotation` or `LCSC custom code`, remain metadata; move part numbers from
+such fields into a recognized assignment field.
+
+Previously, ordinary boards used database or CSV assignments while boards with
+named variants read native fields. Editing or clearing Default, then removing
+the last named variant, could therefore restore an obsolete database assignment.
+Both modes now read and edit the board; the former schematic/database priority
+setting no longer applies.
+
+Older database and CSV assignments are not imported automatically. If an
+assignment existed only in that older storage, assign it to the board before
+relying on it for assembly output. After all associated schematics are saved
+successfully on close, the obsolete `part_info` table is removed from
+`jlcpcb/project.db`. Cancellation, skipped saves, and failed or partial saves
+retain the table. Invalid or conflicting native assignment fields block saving;
+correct those fields before retrying. Intentional clears are saved as blanks.
+
+Cleanup preserves generation counters, corrections, other tables, and legacy
+CSV files. The old database is shared by boards in the same directory, so a
+successful save of any board retires that shared obsolete table. A cleanup
+failure reports that the schematics were saved and offers a retry; the table is
+retained until cleanup succeeds. Opening or refreshing a board does not create
+the table or remove it.
+
+Supplier descriptions and other part details are cached in memory by LCSC
+number and fetched again as needed. Stock and pricing come from the currently
+selected parts catalog; they are not persisted as board assignments.
+
 ### Part preferences
 
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
 
 - **Remember my part preferences** remembers each successful part selection or pasted LCSC assignment. The latest explicit assignment replaces the preference; opening a board does not change preferences.
 - **Parts preferences fill in empty LCSC assignments** fills blank LCSC assignments once each time the plugin window opens. Existing assignments are preserved. DNP parts and parts excluded from BOM or POS are skipped.
+
+Applying part preferences, including automatic filling on opening, writes the
+native board fields. Save the PCB to keep those assignments.
 
 Clearing an LCSC assignment keeps its part preference, so an eligible blank assignment may fill again on the next opening. Exclude the part or disable automatic filling to keep it blank. The right-click actions **Save part preferences** and **Apply part preferences** remain available even when automation is disabled. Use **Part preferences** to delete, import, or export preferences. Deleting a preference does not remove assignments from your boards.
 

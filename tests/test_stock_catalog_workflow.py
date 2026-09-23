@@ -189,12 +189,87 @@ def test_new_and_equivalently_spelled_lcsc_numbers_share_one_lookup(
     window.library.get_part_details.reset_mock()
     for reference, lcsc in (("R2", " c2 "), ("R3", "C2")):
         window.store.parts[reference] = part(reference, lcsc)
-        window.footprints[reference] = controller_tests.Footprint(lcsc)
+        window.footprints[reference] = controller_tests.Footprint(
+            lcsc, reference=reference
+        )
     window.populate_footprint_list()
     workflow.drain()
     assert raw_stocks(window) == {"R1": 1000, "R2": 99, "R3": 99}
     assert window.partlist_data_model.stock_concern_refs == {"R2", "R3"}
     window.library.get_part_details.assert_called_once_with("C2")
+
+
+@pytest.mark.parametrize("assignment", ["C2", ""])
+def test_external_board_assignment_refreshes_stock_and_estimate_on_activation(
+    workflow: types.SimpleNamespace,
+    catalog_window: Callable[..., Any],
+    assignment: str,
+) -> None:
+    """Board edits and restored fields refresh warmed views on window activation."""
+    window = catalog_window(
+        [part("R1")], {"C1": details(49, "0.10"), "C2": details(1000, "0.25")}
+    )
+    window.populate_footprint_list()
+    workflow.drain()
+    assert "Direct BOM Cost: $0.50" in window.catalog_summaries[-1]
+    assert window.partlist_data_model.stock_concern_refs == {"R1"}
+    activated = types.SimpleNamespace(GetActive=lambda: True, Skip=lambda: None)
+
+    window.footprints["R1"].SetField("LCSC", assignment)
+    window.on_window_activated(activated)
+    workflow.drain()
+
+    assert window.store.get_part("R1")["lcsc"] == assignment
+    assert window.partlist_data_model.data[0][3] == assignment
+    assert raw_stocks(window) == {"R1": 1000 if assignment else ""}
+    assert window.partlist_data_model.stock_concern_refs == set()
+    assert "Direct BOM Cost: $0.50" not in window.catalog_summaries[-1]
+    if assignment:
+        assert "Direct BOM Cost: $1.25" in window.catalog_summaries[-1]
+
+    # Model restored native state; this does not exercise KiCad's own undo stack.
+    window.footprints["R1"].SetField("LCSC", "C1")
+    window.on_window_activated(activated)
+    workflow.drain()
+    assert window.partlist_data_model.data[0][3] == "C1"
+    assert raw_stocks(window) == {"R1": 49}
+    assert window.partlist_data_model.stock_concern_refs == {"R1"}
+    assert "Direct BOM Cost: $0.50" in window.catalog_summaries[-1]
+
+
+def test_enrichment_result_reaches_current_assignments_without_overwriting_new_code(
+    workflow: types.SimpleNamespace,
+    catalog_window: Callable[..., Any],
+) -> None:
+    """An in-flight supplier response follows its code through native reassignment."""
+    window = catalog_window(
+        [part("R1"), part("R2"), part("R3", "C2")],
+        {"C1": details(1000), "C2": details(1000)},
+    )
+    window.populate_footprint_list()
+    window.footprints["R1"].SetField("LCSC", "C2")
+    window.footprints["R3"].SetField("LCSC", "C1")
+    window.populate_footprint_list()
+
+    window._apply_assembly_metadata(
+        "C1", {"assembly_process": "manual", "component_product_type": 2}
+    )
+
+    for reference in ("R2", "R3"):
+        current = window.store.get_part(reference)
+        assert current["lcsc"] == "C1"
+        assert current["assembly_process"] == "manual"
+        assert current["component_product_type"] == 2
+    assert window.store.get_part("R1")["lcsc"] == "C2"
+    assert window.store.get_part("R1")["component_product_type"] == 0
+    tooltips = {
+        row[0]: window.partlist_data_model.get_assembly_tooltip(row)
+        for row in window.partlist_data_model.data
+    }
+    assert "Economic and Standard" in tooltips["R1"]
+    assert "Standard Only" in tooltips["R2"]
+    assert "Standard Only" in tooltips["R3"]
+    workflow.drain()
 
 
 @pytest.mark.parametrize("failure", [sqlite3.OperationalError, OSError])
@@ -441,7 +516,10 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
         provider = MagicMock()
         board_path = tmp_path / "test.kicad_pcb"
         board_path.write_text("(kicad_pcb)\n", encoding="utf-8")
-        provider.get_pcbnew().GetBoard().GetFileName.return_value = str(board_path)
+        board = MagicMock(spec=["GetFileName", "GetFootprints"])
+        board.GetFileName.return_value = str(board_path)
+        board.GetFootprints.return_value = []
+        provider.get_pcbnew().GetBoard.return_value = board
         window = module.JLCPCBTools(None, provider)
         assert window._catalog_details == {}
         assert window.is_catalog_available() is ready
@@ -469,6 +547,7 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
 def test_assignment_publishes_selected_stock_to_cached_siblings_only_after_commit(
     workflow: types.SimpleNamespace,
     catalog_window: Callable[..., Any],
+    monkeypatch: pytest.MonkeyPatch,
     fail_write: bool,
 ) -> None:
     """A failed assignment cannot publish supply; a committed one updates siblings."""
@@ -478,7 +557,20 @@ def test_assignment_publishes_selected_stock_to_cached_siblings_only_after_commi
     window.populate_footprint_list()
     workflow.drain()
     window.library.get_part_details.reset_mock()
-    window.store.fail_write = fail_write
+    if fail_write:
+        footprint = window.footprints["R2"]
+        set_field = footprint.SetField
+        failed = False
+
+        def reject_assignment(name: str, value: str) -> None:
+            """Fail before applying the selection, then allow native rollback."""
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError("assignment write failed")
+            set_field(name, value)
+
+        monkeypatch.setattr(footprint, "SetField", reject_assignment)
     window.assign_parts(
         types.SimpleNamespace(lcsc="C1", stock="999", type="Basic", references=["R2"])
     )
@@ -505,14 +597,14 @@ def test_assignment_catalog_failure_does_not_commit_incomplete_details(
         types.SimpleNamespace(lcsc="C2", stock="999", type="Basic", references=["R1"])
     )
     workflow.drain()
-    assert window.store.parts["R1"]["lcsc"] == "C1"
+    assert window.store.get_part("R1")["lcsc"] == "C1"
     assert raw_stocks(window) == {"R1": 99}
     assert "C2" not in window._catalog_details
 
 
 @pytest.mark.parametrize("stock", [0.1, True, -1, "5+"])
 @pytest.mark.parametrize("action", ["selector", "preferences"])
-def test_assignment_preserves_unparseable_stock_as_unknown_in_storage(
+def test_assignment_preserves_unparseable_stock_as_unknown_in_catalog_views(
     workflow: types.SimpleNamespace,
     catalog_window: Callable[..., Any],
     stock: object,
@@ -531,8 +623,8 @@ def test_assignment_preserves_unparseable_stock_as_unknown_in_storage(
     else:
         window._apply_lcsc_assignments({"R1": "C2"})
     workflow.drain()
-    assert window.store.parts["R1"]["lcsc"] == "C2"
-    assert window.store.parts["R1"]["stock"] is None
+    assert window.store.get_part("R1")["lcsc"] == "C2"
+    assert window.store.get_part("R1")["stock"] is None
     assert raw_stocks(window)["R1"] == stock
     assert window.partlist_data_model.stock_concern_refs == {"R1"}
 
