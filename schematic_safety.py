@@ -370,11 +370,7 @@ def _replacing(
         raise
 
 
-def atomic_write_schematic(
-    path: str,
-    content: str,
-    make_backup: bool = True,
-) -> None:
+def atomic_write_schematic(path: str, content: str) -> None:
     """Atomically write content to a schematic file, safely creating a backup.
 
     Args:
@@ -382,9 +378,10 @@ def atomic_write_schematic(
             KiCad follows it when it saves: the file it points to is
             replaced and the link is kept.
         content: The text content to write.
-        make_backup: If True and target exists, copies existing target to
-            `<path>_old` first, beside the file itself rather than a link
-            to it. The target is not replaced unless that backup is complete.
+
+    An existing target is first copied to `<path>_old`, beside the file
+    itself rather than a link to it, and is not replaced unless that backup
+    is complete.
 
     Raises:
         OSError: If backing up, writing or replacing fails.
@@ -393,7 +390,7 @@ def atomic_write_schematic(
     abs_path = os.path.realpath(path)
 
     # 1. Back up the existing file; an earlier backup stays until this one is whole
-    if make_backup and os.path.exists(abs_path):
+    if os.path.exists(abs_path):
         with open(abs_path, "rb") as original:
             previous = original.read()
         # The backup also keeps the original's modification time

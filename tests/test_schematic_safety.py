@@ -241,7 +241,7 @@ def test_atomic_write_schematic(tmp_path: Path) -> None:
     sch.chmod(0o640)
     os.utime(sch, (1_000_000_000, 1_000_000_000))
 
-    atomic_write_schematic(str(sch), "new content\n", make_backup=True)
+    atomic_write_schematic(str(sch), "new content\n")
 
     assert sch.read_text(encoding="utf-8") == "new content\n"
     backup = tmp_path / "test.kicad_sch_old"
@@ -266,7 +266,7 @@ def test_metadata_copy_failure_is_logged_not_fatal(
         raise PermissionError(errno.EPERM, "Operation not permitted")
 
     monkeypatch.setattr(os, "chmod", refuse_chmod)
-    atomic_write_schematic(str(sch), "new content\n", make_backup=True)
+    atomic_write_schematic(str(sch), "new content\n")
 
     assert sch.read_text(encoding="utf-8") == "new content\n"
     backup = tmp_path / "test.kicad_sch_old"
@@ -293,7 +293,7 @@ def test_locked_file_leaves_no_temporary_files(tmp_path: Path) -> None:
     os.chflags(sch, stat.UF_IMMUTABLE)
     try:
         with pytest.raises(PermissionError):
-            atomic_write_schematic(str(sch), "new content\n", make_backup=True)
+            atomic_write_schematic(str(sch), "new content\n")
         leftovers = [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"]
     finally:
         for path in tmp_path.iterdir():
@@ -329,7 +329,7 @@ def test_failed_replace_removes_a_read_only_temporary_file(
     monkeypatch.setattr(os, "remove", windows_remove)
     try:
         with pytest.raises(PermissionError):
-            atomic_write_schematic(str(sch), "new content\n", make_backup=True)
+            atomic_write_schematic(str(sch), "new content\n")
     finally:
         sch.chmod(0o644)
 
@@ -344,7 +344,7 @@ def test_failed_backup_leaves_schematic_unchanged(tmp_path: Path) -> None:
     (tmp_path / "test.kicad_sch_old").mkdir()
 
     with pytest.raises(OSError):
-        atomic_write_schematic(str(sch), "new content\n", make_backup=True)
+        atomic_write_schematic(str(sch), "new content\n")
 
     assert sch.read_text(encoding="utf-8") == "original content\n"
     assert sorted(p.name for p in tmp_path.iterdir()) == [
@@ -367,7 +367,7 @@ def test_interrupted_backup_keeps_the_previous_backup(
 
     monkeypatch.setattr(os, "fsync", disk_full)
     with pytest.raises(OSError, match="No space left on device"):
-        atomic_write_schematic(str(sch), "new content\n", make_backup=True)
+        atomic_write_schematic(str(sch), "new content\n")
 
     assert backup.read_text(encoding="utf-8") == "previous backup\n"
     assert sch.read_text(encoding="utf-8") == "original content\n"
@@ -488,7 +488,7 @@ def test_atomic_write_schematic_new_file_permissions(
     monkeypatch.setattr(os, "umask", process_wide_umask)
     sch = tmp_path / "new_sch.kicad_sch"
     try:
-        atomic_write_schematic(str(sch), "new file\n", make_backup=False)
+        atomic_write_schematic(str(sch), "new file\n")
     finally:
         set_umask(previous)
 
@@ -580,7 +580,7 @@ def test_atomic_write_schematic_writes_the_target_of_a_link(tmp_path: Path) -> N
     """Like KiCad, the export writes through a link; the backup sits by the target."""
     target, alias = _symlinked_schematic(tmp_path, "original content\n")
 
-    atomic_write_schematic(str(alias), "new content\n", make_backup=True)
+    atomic_write_schematic(str(alias), "new content\n")
 
     assert alias.is_symlink()
     assert target.read_text(encoding="utf-8") == "new content\n"

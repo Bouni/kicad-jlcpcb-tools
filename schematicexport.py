@@ -330,7 +330,7 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
 
-        atomic_write_schematic(path, "\n".join(newlines) + "\n", make_backup=True)
+        atomic_write_schematic(path, "\n".join(newlines) + "\n")
         self.logger.info("Added LCSC's to %s (maybe?)", path)
 
     def _update_schematic(
@@ -414,5 +414,5 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
         newlines.append(lines[len(lines) - 1].rstrip())
-        atomic_write_schematic(path, "\n".join(newlines) + "\n", make_backup=True)
+        atomic_write_schematic(path, "\n".join(newlines) + "\n")
         self.logger.info("Added LCSC's to %s (maybe?)", path)
