@@ -43,9 +43,16 @@ class _SelectedItem:
 class _SelectableFootprint(Footprint, _SelectedItem):
     """Combine native variant state with observable board selection."""
 
-    def __init__(self, board: Any, component: str, ref: str = "R1") -> None:
+    def __init__(
+        self, board: Any, component: str, ref: str = "R1", *, schematic_path: str = ""
+    ) -> None:
         Footprint.__init__(self, board, component, ref)
         _SelectedItem.__init__(self)
+        self.schematic_path = schematic_path
+
+    def GetPath(self) -> Any:
+        """Read the retained schematic link independently of the display reference."""
+        return SimpleNamespace(AsString=lambda: self.schematic_path)
 
     def GetFPID(self) -> Any:
         return SimpleNamespace(

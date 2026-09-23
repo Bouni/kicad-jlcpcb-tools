@@ -14,7 +14,7 @@ from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
     get_is_dnp,
-    get_lcsc_value,
+    get_lcsc_assignment,
     get_valid_footprints,
 )
 from .footprint_metadata import get_assembly_flags, get_footprint_pad_metadata
@@ -77,7 +77,7 @@ class Store:
 
     def _part_row(self, footprint: Any) -> dict[str, Any]:
         """Capture one footprint's current native data and matching supplier facts."""
-        lcsc = get_lcsc_value(footprint)
+        assignment, lcsc = get_lcsc_assignment(footprint)
         metadata = self._assembly_metadata.get(lcsc, {})
         pad_count, has_tht = get_footprint_pad_metadata(footprint)
         return {
@@ -85,6 +85,7 @@ class Store:
             "value": footprint.GetValue(),
             "footprint": str(footprint.GetFPID().GetLibItemName()),
             "lcsc": lcsc,
+            "assignment_status": assignment.status,
             "stock": None,
             "exclude_from_bom": get_exclude_from_bom(footprint),
             "exclude_from_pos": get_exclude_from_pos(footprint),
@@ -182,7 +183,6 @@ class Store:
         lcsc: str,
         assembly_process: Optional[str],
         component_product_type: object,
-
     ) -> None:
         """Merge supplier facts independently of any current footprint assignment."""
         code = normalize_lcsc(lcsc)

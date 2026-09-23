@@ -1,27 +1,35 @@
-"""Module for exporting LCSC data to schematic."""
+"""Export Default PCB assignments through authenticated schematic UUID paths."""
 
 from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from functools import cached_property
 import logging
 import os
-import os.path
-import re
 from typing import Any, Optional
 
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
 from .core.version import is_version7
+from .part_assignments import safe_assignment_value
+from .schematic_fields import update_symbol_fields
+from .schematic_links import SchematicIndex
 from .schematic_safety import (
     SchematicLockedError,
     assert_schematics_not_locked,
     assert_schematics_writable,
     atomic_write_schematic,
-    collect_schematic_hierarchy,
     matching_project_names,
     project_schematic_path,
 )
+from .schematic_snapshot import (
+    DefaultSchematicSnapshot,
+    FootprintAssignment,
+    capture_board,
+    capture_rows,
+)
 
 __all__ = [
+    "ExportOutcome",
     "SchematicExport",
     "SchematicLockedError",
     "SchematicVariantExportError",
@@ -32,28 +40,35 @@ class SchematicVariantExportError(ValueError):
     """Reject named-variant data before the base schematic writer touches files."""
 
 
-def _file_identity(path: str) -> Optional[tuple[int, int]]:  # noqa: UP045
-    """Return the device and inode that `path` currently refers to.
-
-    None when the filesystem reports no inode, as some Windows filesystems
-    do, since a zero inode would make every file look like the same one.
-    """
+def _file_identity(path: str) -> Optional[tuple[int, int]]:
+    """Identify aliases, falling back to path names on inode-less filesystems."""
     file_stat = os.stat(path)
     if file_stat.st_ino == 0:
         return None
-    return (file_stat.st_dev, file_stat.st_ino)
+    return file_stat.st_dev, file_stat.st_ino
+
+
+@dataclass(frozen=True)
+class ExportOutcome:
+    """Completed writes and assignment preservation, separate from recovery retirement.
+
+    IDs name native footprints, never display references. A successful partial
+    save still returns normally; filesystem, parse and lock failures raise.
+    """
+
+    saved: tuple[str, ...] = ()
+    preserved: tuple[str, ...] = ()
+    skipped: tuple[str, ...] = ()
+    unresolved: tuple[str, ...] = ()
+    bom_saved: tuple[str, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+    retirement_eligible: bool = False
+    advisory: tuple[str, ...] = ()
+    information: tuple[str, ...] = ()
 
 
 class SchematicExport:
-    """A class to export Schematic files."""
-
-    # This only works with KiCad v7+ files; if the format changes, this will probably break.
-
-    _IN_BOM_RX = re.compile(r"^(\s*)\(in_bom\s+(yes|no)\)")
-    _REFERENCE_RX = re.compile(r'\(property\s+"Reference"\s+"([^"]*)"')
-    _INSTANCE_REF_RX = re.compile(r'\(reference\s+"([^"]*)"\)')
-    _PROJECT_RX = re.compile(r'\(project\s+"([^"]*)"')
-    _UUID_RX = re.compile(r'\(uuid\s+"?([^"\s)]*)"?\)')
+    """Prepare every sheet from one native snapshot before writing any file."""
 
     def __init__(self, parent: Any) -> None:
         self.logger = logging.getLogger(__name__)
@@ -75,8 +90,8 @@ class SchematicExport:
         board_project = get_project()
         if board_project is None:
             self.logger.warning(
-                "Not updating project-specific BOM states for %s; "
-                "open board has no project identity",
+                "Using board-name schematic lock lookup for %s; "
+                "open board has no authenticated project identity",
                 self.parent.board_name,
             )
             return None
@@ -87,118 +102,50 @@ class SchematicExport:
         if len(matches) == 1:
             return matches[0]
         self.logger.warning(
-            "Not updating project-specific BOM states for %s; "
+            "Using board-name schematic lock lookup for %s; "
             "expected one matching .kicad_pro file, found %d",
             self.parent.board_name,
             len(matches),
         )
         return None
 
-    def _resolved_bom(
-        self, refs: set[str], store_parts: tuple[dict[str, Any], ...]
-    ) -> Optional[bool]:  # noqa: UP045
-        """Return a shared exclude-from-BOM state, or None when it is unsafe."""
-        matched = {
-            part["reference"]: bool(part["exclude_from_bom"])
-            for part in store_parts
-            if part["reference"] in refs
-        }
-        if not matched:
-            return None
-        if set(matched) != refs:
-            self.logger.warning(
-                "Not updating BOM state for %s; PCB data is missing %s",
-                sorted(refs),
-                sorted(refs - set(matched)),
+    @staticmethod
+    def _require_default(variant_name: str) -> None:
+        """Require the canonical empty Default name, never a display label."""
+        if not isinstance(variant_name, str):
+            raise TypeError("Schematic export requires a canonical variant name.")
+        if variant_name:
+            raise SchematicVariantExportError(
+                "Schematic export supports Default only. "
+                f"Variant {variant_name!r} cannot be written into base fields."
             )
-            return None
-        states = set(matched.values())
-        if len(states) != 1:
-            self.logger.warning(
-                "Not updating BOM state for %s; instances disagree", sorted(refs)
-            )
-            return None
-        return states.pop()
 
-    def _bom_updates(
+    def _snapshot(
         self,
-        lines: list[str],
-        store_parts: tuple[dict[str, Any], ...],
-    ) -> dict[int, str]:
-        """Return in_bom line updates that are safe for every symbol instance."""
-        symbols = []
-        symbol = None
-        symbol_end = ""
-        project = None
-
-        for index, line in enumerate(lines):
-            in_line = line.rstrip()
-            stripped = in_line.strip()
-            symbol_start = stripped == "(symbol" or stripped.startswith(
-                ("(symbol (lib_id", "(symbol (lib_name")
-            )
-            if symbol_start:
-                symbol = {
-                    "bom_line": None,
-                    "uuid": "",
-                    "reference": "",
-                    "instances": None,
-                }
-                symbols.append(symbol)
-                symbol_end = in_line[: in_line.index("(symbol")] + ")"
-                project = None
-                continue
-            if symbol is None:
-                continue
-            if in_line == symbol_end:
-                symbol = None
-                project = None
-                continue
-            if symbol["bom_line"] is None and self._IN_BOM_RX.search(in_line):
-                symbol["bom_line"] = index
-            if not symbol["uuid"] and (match := self._UUID_RX.search(in_line)):
-                symbol["uuid"] = match.group(1)
-            if match := self._REFERENCE_RX.search(in_line):
-                symbol["reference"] = match.group(1)
-            if "(instances" in in_line:
-                symbol["instances"] = {}
-            if match := self._PROJECT_RX.search(in_line):
-                project = match.group(1)
-                if symbol["instances"] is None:
-                    symbol["instances"] = {}
-                symbol["instances"].setdefault(project, set())
-            if project is not None and (match := self._INSTANCE_REF_RX.search(in_line)):
-                symbol["instances"][project].add(match.group(1))
-
-        project_name = None
-        if any(
-            symbol["instances"] is not None and set(symbol["instances"]) != {""}
-            for symbol in symbols
-        ):
-            project_name = self._project_name
-
-        updates = {}
-        for symbol in symbols:
-            if symbol["instances"] is None:
-                refs = {symbol["reference"]}
-            elif set(symbol["instances"]) == {""}:
-                refs = symbol["instances"][""]
-            elif project_name is None:
-                refs = set()
-            else:
-                refs = symbol["instances"].get(project_name, set())
-            if not refs:
-                if project_name is not None:
-                    self.logger.warning(
-                        "Not updating BOM state for %s; no instances resolve for project %s",
-                        symbol["reference"] or symbol["uuid"],
-                        project_name,
-                    )
-                continue
-            bom = self._resolved_bom(refs, store_parts)
-            if bom is not None and symbol["bom_line"] is not None:
-                updates[symbol["bom_line"]] = "no" if bom else "yes"
-        return updates
+        parts: Optional[Iterable[Mapping[str, Any]]],
+        snapshot: Optional[DefaultSchematicSnapshot],
+    ) -> DefaultSchematicSnapshot:
+        """Guard the live board, then capture Default fields without a store view."""
+        get_board = getattr(self.parent, "_get_current_board", None)
+        board = get_board() if callable(get_board) else None
+        if parts is not None and snapshot is not None:
+            raise ValueError("Supply one Default snapshot source")
+        if snapshot is not None:
+            if not isinstance(snapshot, DefaultSchematicSnapshot):
+                raise TypeError("Expected a Default schematic snapshot")
+            return snapshot
+        if parts is not None:
+            return capture_rows(parts)
+        if board is None:
+            board = getattr(self.parent, "board", None)
+        if board is None:
+            pcbnew = getattr(self.parent, "pcbnew", None)
+            getter = getattr(pcbnew, "GetBoard", None)
+            if callable(getter):
+                board = getter()
+        if board is None:
+            raise ValueError("Default schematic export requires the live PCB")
+        return capture_board(board)
 
     def load_schematic(
         self,
@@ -206,48 +153,27 @@ class SchematicExport:
         approved_locks: Collection[str] = (),
         *,
         variant_name: str = "",
-        parts: Optional[Iterable[Mapping[str, Any]]] = None,  # noqa: UP045
-    ) -> None:
-        """Export one validated Default snapshot using the existing base writer.
+        parts: Optional[Iterable[Mapping[str, Any]]] = None,
+        snapshot: Optional[DefaultSchematicSnapshot] = None,
+        shared_project: bool = False,
+        root_uuids: Optional[Mapping[str, str]] = None,
+    ) -> ExportOutcome:
+        """Write safe linked assignments and report every preserved PCB assignment.
 
-        Every sheet under the given schematics is exported once. Nothing is
-        written if a sheet file is missing, unreadable or read-only, or
-        while KiCad has a lock on any sheet, or on the project's own
-        schematic, other than approved_locks (SchematicLockedError names
-        them all). Every sheet is prepared before the first is written, so
-        a sheet that cannot be processed stops the export before any write;
-        a sheet that cannot be replaced still leaves the sheets before it
-        exported.
-
-        Matrix callers supply an explicit Default snapshot. The ordinary fallback
-        accepts only a Default store view and reads it once for the whole export.
-        Neither the focused matrix cell nor the native editor selection changes
-        the meaning of this source.
+        Links contain the real root UUID, sheet UUIDs, and placed-symbol UUID.
+        All instances of a physical symbol must agree, independently for LCSC
+        and BOM. Missing fields preserve; only explicit empty fields clear.
+        Parsing, locks and permissions are checked for the whole hierarchy
+        before the first write. Existing atomic backups remain in force.
         """
         self._require_default(variant_name)
-        get_board = getattr(self.parent, "_get_current_board", None)
-        if callable(get_board):
-            get_board()
-        if parts is None:
-            store = self.parent.store
-            self._require_default(getattr(store, "variant_name", ""))
-            parts = store.read_all()
-        store_parts = tuple(dict(part) for part in parts)
-        for part in store_parts:
-            self._require_default(part.get("variant_name", ""))
-            # Check required source keys before any format branch opens a file.
-            if not {"reference", "lcsc", "exclude_from_bom"}.issubset(part):
-                raise ValueError(
-                    "Default schematic export requires reference, LCSC, and BOM data."
-                )
-
-        # Every name a sheet is reached by is checked for a lock, because
-        # KiCad locks the path it opened; each file is then written once.
-        encountered = list(
-            dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
+        captured = self._snapshot(parts, snapshot)
+        index = SchematicIndex.from_paths(
+            paths,
+            shared_project=shared_project,
+            root_uuids=root_uuids,
         )
-        # KiCad locks the project's own schematic whenever the project is
-        # open, even when that file is not one of the sheets written here.
+        encountered = list(index.encountered_paths)
         project_schematic = project_schematic_path(
             getattr(self.parent, "project_path", None),
             getattr(self.parent, "board_name", None),
@@ -259,193 +185,223 @@ class SchematicExport:
         assert_schematics_not_locked(lock_paths, approved_locks)
         assert_schematics_writable(encountered)
 
-        if is_version7(GetBuildVersion()):
-            self.logger.info("Kicad 7...")
-            render = self._render_schematic7
-        else:
-            self.logger.info("Kicad 8+...")
-            render = self._render_schematic
-        rendered = [(path, render(path, store_parts)) for path in encountered]
-
-        # A name that already refers to a file this export wrote, through a
-        # symlink or as another spelling of one directory entry, is not
-        # written again, or its backup would hold the first export's output.
-        # Writing replaces a directory entry, so a hard link to an exported
-        # file still refers to the original and is written under its own name.
+        outcome, assignments, bom_states = self._decisions(index, captured)
+        rendered = {
+            path: update_symbol_fields(
+                text,
+                assignments.get(path, {}),
+                bom_states.get(path, {}),
+                version7=is_version7(GetBuildVersion()),
+            )
+            for path, text in index.texts.items()
+        }
+        # Preserve every independently named hardlink, but write symlink aliases
+        # only once so a second write cannot replace its original backup.
         written: set[tuple[int, int]] = set()
-        for path, content in rendered:
+        for path in encountered:
+            physical = index.file_paths[path]
             identity = _file_identity(path)
             if identity is not None and identity in written:
-                self.logger.info("%s is another name for a sheet already written", path)
                 continue
-            atomic_write_schematic(path, content)
-            self.logger.info("Added LCSC's to %s (maybe?)", path)
+            atomic_write_schematic(path, rendered[physical])
             identity = _file_identity(path)
             if identity is not None:
                 written.add(identity)
+        for diagnostic in outcome.diagnostics:
+            self.logger.warning("%s", diagnostic)
+        for message in (*outcome.advisory, *outcome.information):
+            self.logger.info("%s", message)
+        return outcome
 
     @staticmethod
-    def _require_default(variant_name: str) -> None:
-        """Require the canonical empty Default name, never a display label."""
-        if not isinstance(variant_name, str):
-            raise TypeError("Schematic export requires a canonical variant name.")
-        if variant_name:
-            raise SchematicVariantExportError(
-                "Schematic export supports Default only. "
-                f"Variant {variant_name!r} assignments cannot be written into "
-                "base schematic fields."
-            )
+    def _decisions(
+        index: SchematicIndex,
+        snapshot: DefaultSchematicSnapshot,
+    ) -> tuple[ExportOutcome, dict[str, dict[str, str]], dict[str, dict[str, bool]]]:
+        """Require complete connected components before planning physical writes.
 
-    def _render_schematic7(
-        self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> str:
-        """Return a KiCad V7 schematic's text with its LCSC and BOM fields updated."""
-        self.logger.info("Reading %s...", path)
-        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
-        # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile(
-            '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
-        )
-        pinRx = re.compile('\\(pin\\s\\"(.*)\\"\\s\\(')
-
-        lastLoc = ""
-        lastLcsc = ""
-        newLcsc = ""
-        lastRef = ""
-
-        lines = []
-        newlines = []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        for index, desired in self._bom_updates(lines, store_parts).items():
-            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-
-        partSection = False
-
-        for line in lines:
-            inLine = line.rstrip()
-            outLine = inLine
-            if "(symbol (lib_id" in inLine:  # skip library section
-                partSection = True
-            m = propRx.search(inLine)
-            if m and partSection:
-                key = m.group(1)
-                value = m.group(2)
-
-                # found a LCSC property, so update it if needed
-                if key == "LCSC":
-                    lastLcsc = value
-                    if newLcsc not in (lastLcsc, ""):
-                        self.logger.info("Updating %s on %s", newLcsc, lastRef)
-                        outLine = outLine.replace(
-                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
-                        )
-                        lastLcsc = newLcsc
-
-                if key == "Reference":
-                    lastLoc = m.group(3)
-                    lastRef = value
-                    for part in store_parts:
-                        if value == part["reference"]:
-                            newLcsc = part["lcsc"]
-                            break
-            # if we hit the pin section without finding a LCSC property, add it
-            m = pinRx.search(inLine)
-            if m:
-                if lastLcsc == "" and newLcsc != "" and lastLoc != "":
-                    self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'    (property "LCSC" "{newLcsc}" (at {lastLoc} 0)'
-                    newlines.append(newTxt)
-                    newlines.append("      (effects (font (size 1.27 1.27)) hide)")
-                    newlines.append("    )")
-                lastLoc = ""
-                lastLcsc = ""
-                newLcsc = ""
-                lastRef = ""
-            newlines.append(outLine)
-
-        return "\n".join(newlines) + "\n"
-
-    def _render_schematic(
-        self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> str:
-        """Return a KiCad V8+ schematic's text with its LCSC and BOM fields updated."""
-        self.logger.info("Reading %s...", path)
-        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
-        # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile('\\(property\\s\\"(.*)\\"\\s"(.*)\\"')
-        atRx = re.compile("\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)")
-        pinRx = re.compile('\\(pin\\s\\"(.*)\\"')
-
-        lastLoc = ""
-        lastLcsc = ""
-        newLcsc = ""
-        lastRef = ""
-
-        lines = []
-        newlines = []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        for index, desired in self._bom_updates(lines, store_parts).items():
-            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-
-        partSection = False
-
-        for i in range(0, len(lines) - 1):
-            inLine = lines[i].rstrip()
-            inLine2 = lines[i + 1].rstrip()
-            outLine = inLine
-
-            if "(symbol" in inLine and "(lib_id" in inLine2:  # skip library section
-                partSection = True
-
-            # self.logger.info("line %d", i)
-            m = propRx.search(inLine)
-            m2 = atRx.search(inLine2)
-            if m and m2 and partSection:
-                key = m.group(1)
-                # self.logger.info("key %s", key)
-                # found a LCSC property, so update it if needed
-                if key in {"LCSC", "LCSC_PN", "JLC_PN"}:
-                    value = m.group(2)
-                    lastLcsc = value
-                    if newLcsc not in (lastLcsc, ""):
-                        self.logger.info(
-                            "Updating %s on %s in %s", newLcsc, lastRef, path
-                        )
-                        outLine = outLine.replace(
-                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
-                        )
-                        lastLcsc = newLcsc
-
-                if key == "Reference":
-                    lastLoc = m2.group(1)
-                    value = m.group(2)
-                    # self.logger.info("value %s", value)
-                    lastRef = value
-                    for part in store_parts:
-                        if value == part["reference"]:
-                            newLcsc = part["lcsc"]
-                            break
-
-            # if we hit the pin section without finding a LCSC property, add it
-            m3 = pinRx.search(inLine)
-            if m3 and partSection:
-                if lastLcsc == "" and newLcsc != "" and lastLoc != "":
-                    self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'\t\t(property "LCSC" "{newLcsc}"\n\t\t\t(at {lastLoc} 0)'
-                    newlines.append(newTxt)
-                    newlines.append(
-                        "\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\n\t\t\t\t)\n\t\t\t\t(hide yes)"
+        A reused unit can connect otherwise separate packages. Consensus must
+        then extend to all of their units, so an exclusive sibling cannot be
+        partially updated when a shared member disagrees or lacks a PCB peer.
+        """
+        groups: dict[tuple[str, str], list[FootprintAssignment]] = {}
+        instance_paths: dict[tuple[str, str], list[str]] = {}
+        neighbors: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        diagnostics = list(index.issues)
+        blocked = bool(index.issues)
+        advisory: list[str] = []
+        information: list[str] = []
+        saved: list[str] = []
+        preserved: list[str] = []
+        skipped: list[str] = []
+        unresolved: list[str] = []
+        bom_saved: list[str] = []
+        assignments: dict[str, dict[str, str]] = {}
+        bom_states: dict[str, dict[str, bool]] = {}
+        for part in snapshot.parts:
+            if part.schematic_path in {"", "/"}:
+                preserved.append(part.component_id)
+                if part.value is None and (
+                    part.assignment.status != "missing" or part.assignment.aliases
+                ):
+                    blocked = True
+                    diagnostics.append(
+                        f"{part.label}: unsafe PCB-only assignment; native fields preserved."
                     )
-                    newlines.append("\t\t\t)")
-                    newlines.append("\t\t)")
-                lastLoc = ""
-                lastLcsc = ""
-                newLcsc = ""
-                lastRef = ""
-            newlines.append(outLine)
-        newlines.append(lines[len(lines) - 1].rstrip())
-        return "\n".join(newlines) + "\n"
+                else:
+                    information.append(
+                        f"{part.label}: PCB-only footprint has no schematic assignment to save."
+                    )
+                continue
+            component = index.resolve_component(part.schematic_path)
+            if not component.resolved:
+                blocked = True
+                unresolved.append(part.component_id)
+                diagnostics.append(
+                    f"{part.label}: schematic link {part.schematic_path!r} is "
+                    f"unresolved ({'; '.join(component.issues)}); "
+                    "assignment and BOM preserved."
+                )
+            else:
+                keys = {member.target.key for member in component.members}
+                for member in component.members:
+                    key = member.target.key
+                    groups.setdefault(key, []).append(part)
+                    instance_paths.setdefault(key, []).append(member.path)
+                    neighbors.setdefault(key, set()).update(keys)
+
+        pending = dict.fromkeys(groups)
+        while pending:
+            first = next(iter(pending))
+            region: set[tuple[str, str]] = set()
+            queue = [first]
+            while queue:
+                key = queue.pop()
+                if key not in region:
+                    region.add(key)
+                    pending.pop(key, None)
+                    queue.extend(neighbors[key] - region)
+            targets = [index.targets[key] for key in sorted(region)]
+            by_id = {
+                part.component_id: part
+                for key in sorted(region)
+                for part in groups[key]
+            }
+            group = list(by_id.values())
+            incomplete = [
+                target
+                for target in targets
+                if set(instance_paths[target.key]) != set(target.instance_paths)
+                or len(instance_paths[target.key])
+                != len(set(instance_paths[target.key]))
+            ]
+            if incomplete:
+                blocked = True
+                reason = "PCB links do not cover every schematic instance exactly once"
+                missing = {
+                    path
+                    for target in incomplete
+                    for path in set(target.instance_paths)
+                    - set(instance_paths[target.key])
+                }
+                if missing:
+                    reason += f" (missing: {', '.join(sorted(missing))})"
+                for part in group:
+                    skipped.append(part.component_id)
+                    diagnostics.append(
+                        f"{part.label}: {reason}; assignment and BOM preserved."
+                    )
+                continue
+            values = {part.value for part in group}
+            if all(
+                part.assignment.status == "missing" and not part.assignment.aliases
+                for part in group
+            ):
+                preserved.extend(part.component_id for part in group)
+                existing_values = {
+                    safe_assignment_value(target.assignment, target.lcsc)
+                    for target in targets
+                    if target.assignment.status != "missing"
+                }
+                unsafe = any(
+                    safe_assignment_value(target.assignment, target.lcsc) is None
+                    and not (
+                        target.assignment.status == "missing"
+                        and not target.assignment.aliases
+                    )
+                    for target in targets
+                )
+                conflict = len(existing_values - {None}) > 1
+                for part in group:
+                    if unsafe or conflict:
+                        blocked = True
+                        reason = (
+                            "component units disagree on schematic assignment; "
+                            "reconcile their fields before running Update PCB"
+                            if conflict
+                            else "unsafe schematic assignment preserved"
+                        )
+                        diagnostics.append(f"{part.label}: {reason}.")
+                    elif existing_values - {None, ""}:
+                        schematic_value = next(iter(existing_values - {None, ""}))
+                        advisory.append(
+                            f"{part.label}: schematic assignment {schematic_value} was "
+                            "preserved; run Update PCB to copy it to the board."
+                        )
+                    else:
+                        information.append(
+                            f"{part.label}: no PCB or schematic assignment; nothing to save."
+                        )
+            elif None not in values and len(values) == 1:
+                value = next(iter(values))
+                assert value is not None
+                for target in targets:
+                    assignments.setdefault(target.file_path, {})[target.symbol_uuid] = (
+                        value
+                    )
+                saved.extend(part.component_id for part in group)
+            else:
+                blocked = True
+                for part in group:
+                    if part.assignment.status == "missing":
+                        preserved.append(part.component_id)
+                    else:
+                        skipped.append(part.component_id)
+                    reason = (
+                        f"{part.assignment.status} assignment"
+                        if part.value is None
+                        else "schematic instances disagree"
+                    )
+                    if part.value is None and part.assignment.status == "valid":
+                        reason = "unsafe assignment aliases (including whitespace)"
+                    diagnostics.append(
+                        f"{part.label}: {reason}; schematic assignment preserved."
+                    )
+            states = {part.exclude_from_bom for part in group}
+            if len(states) == 1:
+                state = states.pop()
+                for target in targets:
+                    bom_states.setdefault(target.file_path, {})[target.symbol_uuid] = (
+                        state
+                    )
+                bom_saved.extend(part.component_id for part in group)
+            else:
+                blocked = True
+                for part in group:
+                    diagnostics.append(
+                        f"{part.label}: schematic instances disagree; BOM preserved."
+                    )
+        if not index.texts:
+            diagnostics.append("No schematic files selected; no assignments saved.")
+        outcome = ExportOutcome(
+            tuple(dict.fromkeys(saved)),
+            tuple(dict.fromkeys(preserved)),
+            tuple(dict.fromkeys(skipped)),
+            tuple(dict.fromkeys(unresolved)),
+            tuple(dict.fromkeys(bom_saved)),
+            tuple(dict.fromkeys(diagnostics)),
+            bool(index.texts) and not blocked,
+            tuple(dict.fromkeys(advisory)),
+            tuple(dict.fromkeys(information)),
+        )
+        return outcome, assignments, bom_states
