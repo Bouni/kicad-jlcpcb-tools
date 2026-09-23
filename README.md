@@ -236,9 +236,15 @@ Both table modes recognize `LCSC`, `JLC`, and `JLCPCB` assignment fields,
 optionally followed by `Part`, `Part Number`, `Part Num`, `Part No`, `PartNr`,
 `PN`, `Number`, `Code`, or `ID`; case, spaces, and punctuation are ignored.
 Conflicting or invalid assignments appear unassigned. Selecting or clearing a part updates
-all recognized assignment fields together. Other prefixed fields, such as
-`JLCPCB Rotation` or `LCSC custom code`, remain metadata; move part numbers from
-such fields into a recognized assignment field.
+all recognized assignment fields together. Assignments and schematic saves preserve
+existing alias names. A nonempty assignment creates a hidden `LCSC` field when no
+recognized alias exists. Other prefixed fields, such as `JLCPCB Rotation` or
+`LCSC custom code`, remain metadata; move part numbers from such fields into a
+recognized assignment field.
+
+![KiCad Symbol Properties showing a 10k 0603 resistor with LCSC field C25804](images/schematic-lcsc-field.png)
+
+*KiCad Symbol Properties with sample data for a 10k 0603 resistor (C25804).*
 
 Previously, ordinary boards used database or CSV assignments while boards with
 named variants read native fields. Editing or clearing Default, then removing
