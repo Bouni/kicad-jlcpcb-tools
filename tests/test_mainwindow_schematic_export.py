@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from schematic_safety import SchematicLockedError
+from schematic_safety import SchematicLockedError, authenticated_project_name
 
 from .wx_harness import load_mainwindow, wx_stubs
 
@@ -44,7 +44,9 @@ def _export(
     root = str(tmp_path / "board.kicad_sch")
     roots = [root, *extra_roots] if board_schematic else []
     monkeypatch.setattr(
-        mainwindow, "resolve_project_schematics", lambda _project, _board: roots
+        mainwindow,
+        "resolve_project_schematics",
+        lambda _project, _board, _name=None: roots,
     )
     exporter = MagicMock()
     exporter.load_schematic.side_effect = list(load_results)
@@ -301,3 +303,43 @@ def test_variant_boards_export_through_the_controller_with_the_lock_prompt(
     mainwindow.SchematicExport.assert_not_called()
     exporter.load_schematic.assert_not_called()
     wx.MessageBox.assert_not_called()
+
+
+def test_roots_come_from_the_loaded_project_for_a_renamed_board(
+    mainwindow_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The project is identified through pcbnew, not assumed from the board name."""
+    mainwindow, _wx = mainwindow_module
+    (tmp_path / "realproject.kicad_pro").write_text("{}", encoding="utf-8")
+    project = object()
+    pcbnew = SimpleNamespace(
+        GetBoard=lambda: SimpleNamespace(GetProject=lambda: project),
+        GetSettingsManager=lambda: SimpleNamespace(
+            GetProject=lambda path: project
+            if path.endswith("realproject.kicad_pro")
+            else None
+        ),
+    )
+    asked: list[tuple] = []
+
+    def resolve(project_path: str, board: str, project_name: str) -> list[str]:
+        asked.append((project_path, board, project_name))
+        return [str(tmp_path / "power.kicad_sch")]
+
+    monkeypatch.setattr(mainwindow, "resolve_project_schematics", resolve)
+    monkeypatch.setattr(
+        mainwindow, "authenticated_project_name", authenticated_project_name
+    )
+    exporter = MagicMock()
+    monkeypatch.setattr(mainwindow, "SchematicExport", MagicMock(return_value=exporter))
+    window = SimpleNamespace(
+        project_path=str(tmp_path),
+        board_name="board.kicad_pcb",
+        schematic_name="board.kicad_sch",
+        logger=MagicMock(),
+        pcbnew=pcbnew,
+    )
+    mainwindow.JLCPCBTools.export_to_schematic(window)
+
+    assert asked == [(str(tmp_path), "board.kicad_pcb", "realproject")]
+    exporter.load_schematic.assert_called_once_with([str(tmp_path / "power.kicad_sch")])

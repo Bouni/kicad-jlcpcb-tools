@@ -6,6 +6,7 @@ hierarchical sheet discovery, and atomic file write/backup operations.
 
 from collections.abc import Callable, Collection, Iterator
 import contextlib
+import glob
 import json
 import logging
 import os
@@ -155,33 +156,86 @@ def assert_schematics_not_locked(
         raise SchematicLockedError(locks)
 
 
+def matching_project_names(
+    manager: Any, project_path: str, board_project: object
+) -> list[str]:
+    """Return the names of the project files in the folder that KiCad has loaded as `board_project`.
+
+    SWIG exposes a PROJECT only as an opaque handle, so the project of the
+    open board is found by comparing that handle with the one the settings
+    manager holds for each .kicad_pro in the folder.
+    """
+    return [
+        os.path.splitext(os.path.basename(path))[0]
+        for path in sorted(glob.glob(os.path.join(project_path, "*.kicad_pro")))
+        if manager.GetProject(path) == board_project
+    ]
+
+
+def authenticated_project_name(
+    pcbnew: Any, project_path: Optional[str]
+) -> Optional[str]:
+    """Return the name of the project KiCad has loaded for the open board.
+
+    Pcbnew normally loads the project named after the board, but a board
+    saved under another name belongs to the project that loaded it, and
+    KiCad opens and locks that project's schematic. None when the API is
+    not there, the board has no project, or the folder holds more than one
+    matching project file; callers then fall back to the board's name.
+    """
+    get_manager = getattr(pcbnew, "GetSettingsManager", None)
+    get_board = getattr(pcbnew, "GetBoard", None)
+    if get_manager is None or get_board is None or not project_path:
+        return None
+    get_project = getattr(get_board(), "GetProject", None)
+    board_project = get_project() if get_project is not None else None
+    if board_project is None:
+        return None
+    names = matching_project_names(get_manager(), project_path, board_project)
+    return names[0] if len(names) == 1 else None
+
+
+def _project_name_for(
+    board_filename: Optional[str], project_name: Optional[str]
+) -> str:
+    """Return the project's name, or the board's when the project is not known."""
+    if project_name:
+        return project_name
+    return os.path.splitext(os.path.basename(board_filename or ""))[0]
+
+
 def resolve_project_schematics(
     project_path: Optional[str],
     board_filename: Optional[str],
+    project_name: Optional[str] = None,
 ) -> list[str]:
     """Return the top-level schematics of the board's KiCad project.
 
-    Pcbnew loads the project named after the board. KiCad 10 lists that
-    project's top-level sheets in its .kicad_pro, and eeschema loads every
-    one of them: a listed file that is missing is replaced by
-    `<project>.kicad_sch` when that exists, or else skipped. Projects
-    without the list have one root, named after the project. Any other
-    schematic in the directory may belong to a different board, so it is
-    left for the user to choose.
+    The project is `project_name` when the caller could identify it (see
+    authenticated_project_name), otherwise the one named after the board,
+    which is what pcbnew loads. KiCad 10 lists the project's top-level
+    sheets in its .kicad_pro, and eeschema loads every one of them: a
+    listed file that is missing is replaced by `<project>.kicad_sch` when
+    that exists, or else skipped. Projects without the list have one root,
+    named after the project. Any other schematic in the directory may
+    belong to a different board, so it is left for the user to choose.
 
     Args:
         project_path: Directory containing the KiCad project.
         board_filename: Filename or full path of the PCB file (e.g. 'board.kicad_pcb').
+        project_name: Name of the loaded project, when known.
 
     Returns:
         Absolute paths of the existing top-level schematics, in project
         order; empty if none is found.
 
     """
-    if not project_path or not os.path.isdir(project_path) or not board_filename:
+    if not project_path or not os.path.isdir(project_path):
+        return []
+    project_name = _project_name_for(board_filename, project_name)
+    if not project_name:
         return []
 
-    project_name = os.path.splitext(os.path.basename(board_filename))[0]
     default_root = f"{project_name}.kicad_sch"
     try:
         with open(
@@ -218,17 +272,19 @@ def resolve_project_schematics(
 def project_schematic_path(
     project_path: Optional[str],
     board_filename: Optional[str],
+    project_name: Optional[str] = None,
 ) -> Optional[str]:
     """Return the path of the schematic KiCad opens with the board's project.
 
     The project manager always opens `<project>.kicad_sch`, and eeschema
     locks that file, whether or not it is listed as a top-level sheet and
     whether or not it exists yet. Its lock therefore has to be checked
-    before any sheet of the project is written.
+    before any sheet of the project is written. The project is
+    `project_name` when known, otherwise the one named after the board.
     """
-    if not project_path or not board_filename:
+    project_name = _project_name_for(board_filename, project_name)
+    if not project_path or not project_name:
         return None
-    project_name = os.path.splitext(os.path.basename(board_filename))[0]
     return os.path.normpath(os.path.join(project_path, f"{project_name}.kicad_sch"))
 
 

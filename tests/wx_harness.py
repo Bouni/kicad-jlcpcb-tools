@@ -331,6 +331,7 @@ def mainwindow_stubs(
         "schematicexport": {"SchematicExport": object},
         "schematic_safety": {
             "SchematicLockedError": RuntimeError,
+            "authenticated_project_name": lambda *args: None,
             "resolve_project_schematics": lambda *args: [],
         },
         "settings": {"SettingsDialog": object},

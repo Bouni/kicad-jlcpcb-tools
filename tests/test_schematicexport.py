@@ -1271,3 +1271,33 @@ def test_export_writes_every_name_when_files_have_no_identity(
 
     assert _lcsc_values(target) == ["NEW"]
     assert _lcsc_values(tmp_path / "real.kicad_sch_old") == ["NEW"]
+
+
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+def test_export_checks_the_loaded_projects_lock_for_a_renamed_board(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    """A board saved under another name is still locked through its project's schematic."""
+    power = tmp_path / "power.kicad_sch"
+    power.write_text(
+        _schematic(version, "yes", ("RV3",), reference="RV3"), encoding="utf-8"
+    )
+    (tmp_path / "realproject.kicad_pro").write_text("{}", encoding="utf-8")
+    project = object()
+    pcbnew = _project_api(project, {"realproject.kicad_pro": project})
+    (tmp_path / "~realproject.kicad_sch.lck").write_text(
+        '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+    )
+    parts = [_part("RV3", "POWER", False)]
+
+    with pytest.raises(SchematicLockedError, match="'realproject.kicad_sch' is locked"):
+        _load_schematic(
+            tmp_path,
+            monkeypatch,
+            version,
+            [power],
+            parts,
+            board_name="renamed_board.kicad_pcb",
+            pcbnew=pcbnew,
+        )
+    assert _lcsc_values(power) == ["OLD"]

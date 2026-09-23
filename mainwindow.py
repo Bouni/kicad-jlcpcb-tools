@@ -83,7 +83,11 @@ from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
 from .partselector import PartSelectorDialog
-from .schematic_safety import SchematicLockedError, resolve_project_schematics
+from .schematic_safety import (
+    SchematicLockedError,
+    authenticated_project_name,
+    resolve_project_schematics,
+)
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
@@ -2660,7 +2664,13 @@ class JLCPCBTools(wx.Frame):
 
     def export_to_schematic(self, *_: object) -> None:
         """Export assignments to schematics with auto-detection and lock protection."""
-        paths = resolve_project_schematics(self.project_path, self.board_name)
+        paths = resolve_project_schematics(
+            self.project_path,
+            self.board_name,
+            authenticated_project_name(
+                getattr(self, "pcbnew", None), self.project_path
+            ),
+        )
         if not paths:
             with wx.FileDialog(
                 self,

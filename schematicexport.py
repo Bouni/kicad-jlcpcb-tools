@@ -2,7 +2,6 @@
 
 from collections.abc import Collection, Iterable, Mapping
 from functools import cached_property
-import glob
 import logging
 import os
 import os.path
@@ -18,6 +17,7 @@ from .schematic_safety import (
     assert_schematics_writable,
     atomic_write_schematic,
     collect_schematic_hierarchy,
+    matching_project_names,
     project_schematic_path,
 )
 
@@ -81,14 +81,11 @@ class SchematicExport:
             )
             return None
 
-        manager = get_manager()
-        matches = [
-            path
-            for path in glob.glob(os.path.join(self.parent.project_path, "*.kicad_pro"))
-            if manager.GetProject(path) == board_project
-        ]
+        matches = matching_project_names(
+            get_manager(), self.parent.project_path, board_project
+        )
         if len(matches) == 1:
-            return os.path.splitext(os.path.basename(matches[0]))[0]
+            return matches[0]
         self.logger.warning(
             "Not updating project-specific BOM states for %s; "
             "expected one matching .kicad_pro file, found %d",
@@ -251,6 +248,7 @@ class SchematicExport:
         project_schematic = project_schematic_path(
             getattr(self.parent, "project_path", None),
             getattr(self.parent, "board_name", None),
+            self._project_name,
         )
         lock_paths = list(encountered)
         if project_schematic and project_schematic not in lock_paths:

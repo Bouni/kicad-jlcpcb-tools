@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import socket
 import stat
+import types
 
 import pytest
 
@@ -15,9 +16,11 @@ from schematic_safety import (
     assert_schematics_not_locked,
     assert_schematics_writable,
     atomic_write_schematic,
+    authenticated_project_name,
     check_schematic_lock,
     collect_schematic_hierarchy,
     get_schematic_lock_path,
+    project_schematic_path,
     resolve_project_schematics,
 )
 
@@ -705,3 +708,54 @@ def test_read_only_schematics_are_refused_before_any_write(tmp_path: Path) -> No
             assert_schematics_writable([str(inner)])
     finally:
         folder.chmod(0o755)
+
+
+def _pcbnew_with_projects(
+    board_project: object, loaded: dict[str, object]
+) -> types.SimpleNamespace:
+    """Return a pcbnew stand-in whose settings manager knows the given projects."""
+    return types.SimpleNamespace(
+        GetBoard=lambda: types.SimpleNamespace(GetProject=lambda: board_project),
+        GetSettingsManager=lambda: types.SimpleNamespace(
+            GetProject=lambda path: loaded.get(Path(path).name)
+        ),
+    )
+
+
+def test_authenticated_project_name_follows_the_loaded_project(tmp_path: Path) -> None:
+    """A board saved under another name still belongs to its loaded project."""
+    project = object()
+    for name in ("realproject.kicad_pro", "foreign.kicad_pro"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+
+    pcbnew = _pcbnew_with_projects(project, {"realproject.kicad_pro": project})
+    assert authenticated_project_name(pcbnew, str(tmp_path)) == "realproject"
+
+    both = _pcbnew_with_projects(
+        project, {"realproject.kicad_pro": project, "foreign.kicad_pro": project}
+    )
+    assert authenticated_project_name(both, str(tmp_path)) is None
+    assert (
+        authenticated_project_name(_pcbnew_with_projects(None, {}), str(tmp_path))
+        is None
+    )
+    assert authenticated_project_name(types.SimpleNamespace(), str(tmp_path)) is None
+    assert authenticated_project_name(None, str(tmp_path)) is None
+
+
+def test_project_lookups_use_the_loaded_projects_name(tmp_path: Path) -> None:
+    """Roots and the project's own schematic come from the project, not the board name."""
+    _project(tmp_path, "realproject", "power.kicad_sch")
+    power, _renamed = _schematics(
+        tmp_path, "power.kicad_sch", "renamed_board.kicad_sch"
+    )
+
+    assert resolve_project_schematics(
+        str(tmp_path), "renamed_board.kicad_pcb", project_name="realproject"
+    ) == [power]
+    assert project_schematic_path(
+        str(tmp_path), "renamed_board.kicad_pcb", project_name="realproject"
+    ) == str(tmp_path / "realproject.kicad_sch")
+    assert project_schematic_path(str(tmp_path), "renamed_board.kicad_pcb") == str(
+        tmp_path / "renamed_board.kicad_sch"
+    )
