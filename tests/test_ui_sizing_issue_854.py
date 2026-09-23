@@ -12,6 +12,7 @@ Verifies:
 """
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -162,7 +163,8 @@ class _ToolBar:
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         self.min_size: Optional[_Size] = None
         self.tools: dict[int, Any] = {}
-        self._text_extents: dict[str, tuple[int, int]] = {}
+        self._text_extents: dict[str, Any] = {}
+        self.text_extent_fn: Optional[Callable[[str], Any]] = None
 
     def AddTool(self, *args: Any, **kwargs: Any) -> Any:
         tool = MagicMock()
@@ -197,7 +199,9 @@ class _ToolBar:
     def GetMinSize(self) -> Optional[_Size]:
         return self.min_size
 
-    def GetTextExtent(self, text: str) -> tuple[int, int]:
+    def GetTextExtent(self, text: str) -> Any:
+        if self.text_extent_fn is not None:
+            return self.text_extent_fn(text)
         return self._text_extents.get(text, (len(text) * 8, 16))
 
     def Enable(self, *args: Any, **kwargs: Any) -> None:
@@ -313,14 +317,19 @@ def test_corrections_dialog_unconstrained_label_and_input_heights(
 def _create_mainwindow_test_env(
     monkeypatch: pytest.MonkeyPatch,
     scale_factor: int = 1,
-    custom_extents: Optional[dict[str, tuple[int, int]]] = None,
+    custom_extents: Optional[dict[str, Any]] = None,
+    text_extent_fn: Optional[Callable[[str], Any]] = None,
 ) -> tuple[Any, Any]:
     """Instantiate JLCPCBTools in a stubbed wx environment."""
     pkg = "ui_sizing_tests"
 
-    toolbar_instance = _ToolBar()
-    if custom_extents:
-        toolbar_instance._text_extents.update(custom_extents)
+    def make_toolbar(*args: Any, **kwargs: Any) -> _ToolBar:
+        tb = _ToolBar(*args, **kwargs)
+        if custom_extents:
+            tb._text_extents.update(custom_extents)
+        if text_extent_fn:
+            tb.text_extent_fn = text_extent_fn
+        return tb
 
     stubs = wx_stubs(
         Dialog=_Dialog,
@@ -339,7 +348,7 @@ def _create_mainwindow_test_env(
         GetApp=lambda: True,
         CallAfter=lambda fn, *args: None,
         GetTopLevelParent=lambda win: win,
-        ToolBar=lambda *args, **kwargs: toolbar_instance,
+        ToolBar=make_toolbar,
         **{
             name: MagicMock()
             for name in (
@@ -407,7 +416,7 @@ def _create_mainwindow_test_env(
     mw_module.JLCPCBTools.__init__(window, None, provider)
     window.library = SimpleNamespace(categories=[])
 
-    return window, toolbar_instance
+    return window, window.right_toolbar
 
 
 def test_mainwindow_right_toolbar_sizer_proportion_is_zero(
@@ -416,17 +425,27 @@ def test_mainwindow_right_toolbar_sizer_proportion_is_zero(
     """right_toolbar must be added to table_sizer with proportion=0 (not 1)."""
     window, toolbar = _create_mainwindow_test_env(monkeypatch)
 
+    # Ensure distinct toolbar instances were created for upper and right toolbars
+    assert window.upper_toolbar is not None
+    assert window.right_toolbar is not None
+    assert window.upper_toolbar is not window.right_toolbar
+    assert toolbar is window.right_toolbar
+
     # Walk the window's sizer hierarchy to locate table_sizer containing right_toolbar
     frame_sizer = window.GetSizer()
     assert frame_sizer is not None
 
     found_toolbar_item: Optional[_SizerItem] = None
+    found_toolbar_sizer: Optional[_Sizer] = None
 
     def search_sizer(sizer: _Sizer) -> None:
-        nonlocal found_toolbar_item
+        nonlocal found_toolbar_item, found_toolbar_sizer
         for item in sizer.items:
-            if item.child is toolbar or item.child is window.right_toolbar:
+            if found_toolbar_item is not None:
+                return
+            if item.child is window.right_toolbar:
                 found_toolbar_item = item
+                found_toolbar_sizer = sizer
                 return
             if isinstance(item.child, _Sizer):
                 search_sizer(item.child)
@@ -438,6 +457,10 @@ def test_mainwindow_right_toolbar_sizer_proportion_is_zero(
     assert found_toolbar_item is not None, (
         "right_toolbar was not found in any sizer item"
     )
+    assert found_toolbar_sizer is not None
+    assert any(
+        item.child is window.footprint_list for item in found_toolbar_sizer.items
+    ), "right_toolbar was not found in table_sizer alongside footprint_list"
     # The fix ensures proportion=0 so the toolbar doesn't stretch or compress
     assert found_toolbar_item.proportion == 0, (
         f"Expected toolbar proportion=0, got {found_toolbar_item.proportion}"
@@ -522,94 +545,12 @@ def test_mainwindow_right_toolbar_nonnumeric_text_extent_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """right_toolbar safely falls back to 170 DIP if GetTextExtent returns mocks or non-numerics."""
-    pkg = "ui_sizing_tests_mock"
-
-    toolbar_instance = _ToolBar()
-    # Mock GetTextExtent returning a MagicMock (like in test_window_layout)
-    toolbar_instance.GetTextExtent = MagicMock(return_value=MagicMock())
-
-    stubs = wx_stubs(
-        Dialog=_Dialog,
-        Frame=_Frame,
-        Panel=_Panel,
-        BoxSizer=_Sizer,
-        StaticBoxSizer=_Sizer,
-        Size=_Size,
-        DefaultPosition=(-1, -1),
-        DefaultSize=(-1, -1),
-        NOT_FOUND=-1,
-        EmptyString="",
-        NullBitmap=None,
-        NewId=lambda: 1,
-        NewIdRef=lambda: 1,
-        GetApp=lambda: True,
-        CallAfter=lambda fn, *args: None,
-        GetTopLevelParent=lambda win: win,
-        ToolBar=lambda *args, **kwargs: toolbar_instance,
-        **{
-            name: MagicMock()
-            for name in (
-                "Timer StaticText TextCtrl Button ComboBox CheckBox Gauge "
-                "ScrolledWindow AcceleratorEntry AcceleratorTable"
-            ).split()
-        },
-    )
-    stubs["wx"].DEFAULT_FRAME_STYLE = 0
-    stubs["wx.adv"].BitmapComboBox = MagicMock()
-    stubs["wx.dataview"].PyDataViewModel = object
-    stubs["wx.dataview"].DataViewCustomRenderer = object
-    data_view_ctrl = MagicMock()
-    data_view_ctrl.GetColumns.return_value = []
-    data_view_ctrl.GetClientSize.return_value = _Size(1000, 600)
-    data_view_ctrl.ToDIP = lambda val: val
-    data_view_ctrl.FromDIP = lambda val: val
-    stubs["wx.dataview"].DataViewCtrl = MagicMock(return_value=data_view_ctrl)
-    stubs["wx.dataview"].DataViewColumn = MagicMock()
-
-    helpers_module = load(pkg, "helpers", stubs)
-    helpers_override = {
-        "PLUGIN_PATH": helpers_module.PLUGIN_PATH,
-        "GetScaleFactor": lambda _window: 1,
-        "HighResWxSize": lambda _win, size: size,
-        "getVersion": lambda: "test",
-        "loadBitmapScaled": lambda *_args: None,
-    }
-
-    mw_module = load_mainwindow(
-        pkg,
-        wx=stubs,
-        helpers=helpers_override,
-        datamodel={
-            "PartListDataModel": MagicMock(columns=defaultdict(int)),
-            "STANDARD_ONLY_TOOLTIP": "",
-        },
-        dataview_highlight={
-            "HighlightedTextRenderer": MagicMock(),
-            "decode_highlighted_value": lambda value: (value, []),
-            "simplify_footprint_name": lambda value: value,
-        },
-        bom_widget={
-            "BomEstimatorController": MagicMock(),
-            "BomEstimatorWidget": MagicMock(),
-        },
+    _window, toolbar = _create_mainwindow_test_env(
+        monkeypatch,
+        text_extent_fn=lambda _text: MagicMock(),
     )
 
-    monkeypatch.setattr(
-        mw_module.JLCPCBTools,
-        "load_settings",
-        lambda self: setattr(self, "settings", {}),
-    )
-    monkeypatch.setattr(mw_module.JLCPCBTools, "init_logger", lambda self: None)
-    monkeypatch.setattr(mw_module.JLCPCBTools, "init_data", lambda self: None)
-
-    provider = MagicMock()
-    assert _board_path is not None
-    provider.get_pcbnew().GetBoard().GetFileName.return_value = _board_path
-
-    window = object.__new__(mw_module.JLCPCBTools)
-    mw_module.JLCPCBTools.__init__(window, None, provider)
-
-    min_size = toolbar_instance.GetMinSize()
+    min_size = toolbar.GetMinSize()
     assert min_size is not None
     # Must safely fall back to 170 without error
     assert min_size[0] == 170
