@@ -44,6 +44,7 @@ from .lcsc import normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
+from .value_normalize import exact_case_resistance
 
 DatabasePath = Union[str, os.PathLike[str]]
 
@@ -445,6 +446,7 @@ class Library:
         like_chunks = []
 
         query_chunks = []
+        query_params = []
 
         # Build 'match_chunks' and 'like_chunks' arrays
         #
@@ -471,6 +473,14 @@ class Library:
                         escaped = escape_fts_phrase(w)
                         kw = f'"{escaped}"'
                         match_keywords_intermediate.append(kw)
+                        # MATCH folds case, so 10mΩ finds 10MΩ parts too
+                        # (issue #849).  GLOB does not fold it, and FTS5 runs it
+                        # through the same trigram index.  The pattern is bound,
+                        # and the term it comes from holds no GLOB metacharacter.
+                        exact = exact_case_resistance(w)
+                        if exact is not None:
+                            query_chunks.append('"Description" GLOB ?')
+                            query_params.append(f"*{exact}*")
             if match_keywords_intermediate:
                 match_entry = " AND ".join(match_keywords_intermediate)
                 match_chunks.append(f"{match_entry}")
@@ -555,7 +565,7 @@ class Library:
                 lambda a, b: price_sort_collation(a, b, False, quantity=quantity),
             )
             with con as cur:
-                return cur.execute(query).fetchall()
+                return cur.execute(query, query_params).fetchall()
 
     def delete_parts_table(self):
         """Delete the parts table."""

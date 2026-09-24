@@ -267,3 +267,27 @@ def quantity_for_reference(reference: str) -> Optional[Quantity]:
     if match is None:
         return None
     return _QUANTITY_BY_REFERENCE_PREFIX.get(match.group(1).upper())
+
+
+# A resistance on the milli or mega rung, written with its unit: 10mΩ, 1.5MΩ.
+# The catalog's full-text index folds case, and these are the terms where case
+# is the whole meaning -- 62 resistor values are written both ways in a
+# 717,025-part snapshot.  Either ohm sign is accepted; the catalog writes only
+# U+03A9, never U+2126.  The digits are ASCII on purpose: the match is all a
+# caller needs to know the term holds no GLOB or LIKE metacharacter.
+_EXACT_CASE_RESISTANCE_RE = re.compile(r"[0-9]*\.?[0-9]+[mM][\u03a9\u2126]")
+
+
+def exact_case_resistance(term: str) -> Optional[str]:
+    """Return a search term in the catalog's spelling if its case must match.
+
+    ``10mΩ`` is a current-sense shunt and ``10MΩ`` a bias resistor, and nothing
+    but the case of one letter tells them apart.  A term that spells out both
+    the prefix and the ohm sign means one of them exactly, so it comes back
+    with the ohm sign the catalog uses.  Anything else returns None, including
+    a bare ``10m``: with no unit its case is not evidence of anything, since a
+    megohm is often written in lower case on a schematic.
+    """
+    if _EXACT_CASE_RESISTANCE_RE.fullmatch(term) is None:
+        return None
+    return term.replace("\u2126", "\u03a9")

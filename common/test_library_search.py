@@ -25,6 +25,17 @@ _ROOT = Path(__file__).resolve().parent.parent
 _PACKAGE = "_issue_578_library_search_tests"
 
 
+def _add_parts(library, rows):
+    """Add ``(LCSC Part, Package, Description, First Category)`` catalog rows."""
+    with closing(sqlite3.connect(library.partsdb_file)) as con, con:
+        con.executemany(
+            'INSERT INTO parts ("LCSC Part", "Package", "Description", '
+            '"First Category", "Library Type", "Stock") '
+            "VALUES (?, ?, ?, ?, 'Basic', '1000')",
+            rows,
+        )
+
+
 @pytest.fixture
 def search_library(tmp_path, monkeypatch):
     """Load real search code with isolated GUI imports and a small catalog."""
@@ -62,12 +73,7 @@ def search_library(tmp_path, monkeypatch):
         with closing(sqlite3.connect(library.partsdb_file)) as con, con:
             for statement in _CREATE_STATEMENTS:
                 con.execute(statement)
-            con.executemany(
-                'INSERT INTO parts ("LCSC Part", "Package", "Description", '
-                '"First Category", "Library Type", "Stock") '
-                "VALUES (?, ?, ?, ?, 'Basic', '1000')",
-                rows,
-            )
+        _add_parts(library, rows)
 
         yield library
     finally:
@@ -193,3 +199,68 @@ def test_canonicalized_board_value_finds_the_part(
 def test_values_the_prefill_must_not_rewrite(reference, board_value):
     """Anything that is not a passive value reaches the search box untouched."""
     assert canonicalize(board_value, quantity_for_reference(reference)) is None
+
+
+# Issue #849: one milliohm and one megohm part at each of two values, as the
+# catalog writes them.  62 resistor values appear both ways in a 717,025-part
+# snapshot; at 10MΩ only 274 of the 1000 rows the search showed were 10MΩ parts.
+_OHM_CASE_PARTS = [
+    ("C849001", "2512", "10mΩ ±1% 1W Current Sense Resistor", "Resistors"),
+    ("C849002", "0603", "10MΩ ±1% 100mW Chip Resistor", "Resistors"),
+    ("C849003", "0603", "1.5mΩ ±1% 2W Current Sense Resistor", "Resistors"),
+    ("C849004", "0603", "1.5MΩ ±1% 100mW Chip Resistor", "Resistors"),
+]
+
+
+@pytest.mark.parametrize(
+    ("keyword", "expected"),
+    [
+        pytest.param("10mΩ", {"C849001"}, id="milliohm"),
+        pytest.param("10MΩ", {"C849002"}, id="megohm"),
+        pytest.param("1.5mΩ", {"C849003"}, id="fractional-milliohm"),
+        pytest.param("1.5MΩ 0603", {"C849004"}, id="with-package"),
+        pytest.param("10m\u2126", {"C849001"}, id="ohm-sign"),
+    ],
+)
+def test_a_resistance_with_its_unit_matches_its_prefix_case(
+    search_library, keyword, expected
+):
+    """The trigram index folds case, so 10mΩ used to find 10MΩ as well."""
+    _add_parts(search_library, _OHM_CASE_PARTS)
+    assert _search_ids(search_library, keyword) == expected
+
+
+@pytest.mark.parametrize("keyword", ["10m", "10M"])
+def test_a_bare_prefix_still_finds_both(search_library, keyword):
+    """Without the Ω the term names no unit, so its case is not trusted."""
+    _add_parts(search_library, _OHM_CASE_PARTS)
+    assert _search_ids(search_library, keyword) == {"C849001", "C849002"}
+
+
+@pytest.mark.parametrize(
+    ("board_value", "expected"),
+    [
+        pytest.param("10m", {"C849001"}, id="lower-case-is-milli"),
+        pytest.param("10M", {"C849002"}, id="upper-case-is-mega"),
+        pytest.param("0R01", {"C849001"}, id="rkm-milliohm"),
+    ],
+)
+def test_the_prefill_settles_a_bare_prefix(search_library, board_value, expected):
+    """The part selector opens on the canonical spelling, which writes the Ω.
+
+    So a resistor valued 10m opens on 10mΩ and finds only milliohm parts.  A 1m
+    that meant a megohm shows a list of shunts, each labelled with its value in
+    ohms in the Params column, rather than a mix the eye can misread.
+    """
+    _add_parts(search_library, _OHM_CASE_PARTS)
+    keyword = canonicalize(board_value, quantity_for_reference("R1"))
+    assert _search_ids(search_library, keyword) == expected
+
+
+def test_the_case_pattern_is_bound_not_inlined(search_library, caplog):
+    """The GLOB pattern reaches SQLite as a parameter, never as SQL text."""
+    caplog.set_level(logging.DEBUG, logger=__name__)
+    _search_ids(search_library, "10mΩ")
+    (query,) = [r.args[0] for r in caplog.records if r.msg == "query '%s'"]
+    assert '"Description" GLOB ?' in query
+    assert "*10mΩ*" not in query

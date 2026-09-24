@@ -9,6 +9,7 @@ from value_normalize import (
     INDUCTANCE,
     RESISTANCE,
     canonicalize,
+    exact_case_resistance,
     quantity_for_reference,
 )
 
@@ -492,3 +493,58 @@ def test_a_value_already_in_catalog_form_is_returned_unchanged():
         once = canonicalize(value, quantity)
         assert once == value
         assert canonicalize(once, quantity) == once
+
+
+@pytest.mark.parametrize(
+    ("term", "expected"),
+    [
+        ("10mΩ", "10mΩ"),
+        ("10MΩ", "10MΩ"),
+        ("1.5mΩ", "1.5mΩ"),
+        ("0.5mΩ", "0.5mΩ"),
+        ("2.2MΩ", "2.2MΩ"),
+        # U+2126 OHM SIGN is spelled as the Greek capital omega the catalog
+        # writes: no description in a 717,025-part snapshot uses U+2126.
+        ("10m\u2126", "10mΩ"),
+    ],
+)
+def test_a_resistance_written_with_its_unit_keeps_its_prefix_case(term, expected):
+    """10mΩ and 10MΩ are nine orders of magnitude apart and one letter's case.
+
+    The catalog's full-text index folds case, so a search for either found both
+    (issue #849); these are the terms the search must match exactly.
+    """
+    assert exact_case_resistance(term) == expected
+
+
+@pytest.mark.parametrize(
+    "term",
+    [
+        # No unit: 10m could be a length, a current, or a megohm written in lower
+        # case, so its case says nothing.
+        "10m",
+        "10M",
+        "1m",
+        # No m or M, so no case to keep.
+        "10Ω",
+        "4.7kΩ",
+        "10KΩ",
+        # Another quantity.
+        "10mF",
+        "10MHz",
+        "10mA",
+        # Not a bare value.  Nothing but digits, a point, the prefix and the ohm
+        # sign ever reaches a GLOB pattern, so none of * ? [ can.
+        "1*mΩ",
+        "1?MΩ",
+        "[1]mΩ",
+        "mΩ",
+        "10mΩ5",
+        "x10mΩ",
+        "10mohm",
+        "",
+    ],
+)
+def test_anything_else_is_left_to_the_case_blind_search(term):
+    """Only a resistance spelled with its prefix and its Ω is matched exactly."""
+    assert exact_case_resistance(term) is None

@@ -9,11 +9,29 @@
 # significant parameters of the parts from the LCSC data so they can be displayed
 # separately in the footprint list.
 
+from decimal import Decimal
 import logging
 import re
 
 logger = logging.getLogger()
 logging.basicConfig(encoding="utf-8", level=logging.DEBUG)
+
+_MILLIOHMS_RE = re.compile(r"([0-9]*\.?[0-9]+)mΩ")
+
+
+def _with_ohms(resistance: str) -> str:
+    """Follow a milliohm resistance with its value in ohms: 200mΩ (0.2Ω).
+
+    1mΩ and 1MΩ differ only in the case of one letter, and a schematic often
+    writes a megohm as 1m, which the part selector reads as milli (issue #849).
+    Written in ohms it starts with a zero and a point, which no megohm does, so
+    it reads as sub-ohm in the selector and in the footprint list once assigned.
+    """
+    match = _MILLIOHMS_RE.fullmatch(resistance)
+    if match is None:
+        return resistance
+    ohms = Decimal(match.group(1)).scaleb(-3).normalize()
+    return f"{resistance} ({ohms:f}Ω)"
 
 
 def params_for_part(part) -> str:
@@ -36,7 +54,9 @@ def params_for_part(part) -> str:
     # For passives, focus on generic values like resistance, capacitance, voltage
 
     if "Resistors" in category:
-        result.extend(re.findall(r"([.\d]+[mkM]?Ω)", description))
+        result.extend(
+            _with_ohms(value) for value in re.findall(r"([.\d]+[mkM]?Ω)", description)
+        )
         result.extend(re.findall(r"(±[.\d]+%)", description))
     elif "Capacitors" in category:
         result.extend(re.findall(r"([.\d]+[pnmuμ]?F)", description))
@@ -98,7 +118,7 @@ def test_params_for_part():
             ("250mW Thin Film Resistor 200V ±0.1% ±25ppm/℃ 284kΩ", "284kΩ ±0.1%"),
             ("Metal Film Resistors 357kΩ 400mW ±50ppm/℃ ±1%", "357kΩ ±1%"),
             ("Wirewound Resistors 800Ω 13W ±30ppm/℃ ±5%", "800Ω ±5%"),
-            ("7W ±75ppm/℃ ±1% 200mΩ", "200mΩ ±1%"),
+            ("7W ±75ppm/℃ ±1% 200mΩ", "200mΩ (0.2Ω) ±1%"),
             ("500mW Thick Film Resistors ±100ppm/℃ ±1% 365Ω", "365Ω ±1%"),
             ("250mW ±0.1% ±100ppm/℃ 6.04kΩ", "6.04kΩ ±0.1%"),
             ("±20% 250mW 1kΩ   Potentiometers, Variable Resistors", "1kΩ ±20%"),
