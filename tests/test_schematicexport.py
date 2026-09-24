@@ -926,6 +926,64 @@ def test_export_writes_nothing_past_an_unapproved_lock(
     ) == ["C300"]
 
 
+@pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
+@pytest.mark.parametrize(
+    "comment",
+    [
+        '  # (sheet (property "Sheetfile" "missing.kicad_sch"))\n',
+        "  # ignored closing parentheses )))\n",
+        '  # ignored opening parentheses ((( and an "unterminated quote\n',
+    ],
+    ids=["fake-sheet", "unbalanced-parentheses", "unclosed-quote"],
+)
+def test_export_comments_do_not_hide_child_locks_or_create_sheets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: int,
+    comment: str,
+) -> None:
+    """Only real child sheets participate in preflight and receive the export."""
+    root = tmp_path / "board.kicad_sch"
+    child = tmp_path / "child#literal.kicad_sch"
+    sheet = _sheet(version, child.name).replace(
+        '(property "Sheetfile"', "\n" + comment + '    (property "Sheetfile"', 1
+    )
+    root_text = _schematic(version, "yes", ("RV2",)).replace(
+        "\n)\n", "\n" + sheet + ")\n"
+    )
+    child_text = _schematic(version, "yes", ("RV3",), reference="RV3")
+    root.write_text(root_text, encoding="utf-8")
+    child.write_text(child_text, encoding="utf-8")
+    (tmp_path / f"~{child.name}.lck").write_text(
+        '{"hostname":"mac","username":"alice"}', encoding="utf-8"
+    )
+    parts = [_part("RV2", "C200", False), _part("RV3", "C300", False)]
+
+    with pytest.raises(SchematicLockedError, match="locked by alice@mac") as raised:
+        _load_schematic(tmp_path, monkeypatch, version, [root], parts)
+
+    approved = [path for path, _info in raised.value.locks]
+    assert approved == [str(child)]
+    assert root.read_text(encoding="utf-8") == root_text
+    assert child.read_text(encoding="utf-8") == child_text
+    assert not list(tmp_path.glob("*_old"))
+
+    _load_schematic(
+        tmp_path, monkeypatch, version, [root], parts, approved_locks=approved
+    )
+
+    assert _lcsc_values(root) == ["C200"]
+    assert _lcsc_values(child) == ["C300"]
+    written = root.read_text(encoding="utf-8")
+    assert comment in written
+    assert f'(property "Sheetfile" "{child.name}"' in written
+    assert root.with_name(root.name + "_old").read_text(encoding="utf-8") == root_text
+    assert (
+        child.with_name(child.name + "_old").read_text(encoding="utf-8") == child_text
+    )
+    assert not (tmp_path / "missing.kicad_sch").exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
 @pytest.mark.parametrize("version", [7, 8], ids=["kicad7", "kicad8+"])
 def test_export_finds_the_lock_beside_a_symlinked_schematic(

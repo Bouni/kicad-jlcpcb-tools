@@ -234,7 +234,9 @@ class SchematicExport:
             # Every name a sheet is reached by is checked for a lock, because
             # KiCad locks the path it opened; each file is then written once.
             encountered = list(
-                dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
+                dict.fromkeys(
+                    hp for p in paths for hp in collect_schematic_hierarchy(p)
+                )
             )
             # KiCad locks the project's own schematic whenever the project is
             # open, even when that file is not one of the sheets written here.
@@ -270,7 +272,9 @@ class SchematicExport:
             for path, content in rendered:
                 identity = _file_identity(path)
                 if identity is not None and identity in written:
-                    self.logger.info("%s is another name for a sheet already written", path)
+                    self.logger.info(
+                        "%s is another name for a sheet already written", path
+                    )
                     continue
                 atomic_write_schematic(path, content)
                 self.logger.info("Updated part assignments in %s", path)
