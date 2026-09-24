@@ -1,8 +1,7 @@
 """Module for exporting LCSC data to schematic."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from functools import cached_property
-import glob
 import logging
 import os
 import os.path
@@ -12,10 +11,37 @@ from typing import Any, Optional
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
 from .core.version import is_version7
+from .schematic_safety import (
+    SchematicLockedError,
+    assert_schematics_not_locked,
+    assert_schematics_writable,
+    atomic_write_schematic,
+    collect_schematic_hierarchy,
+    matching_project_names,
+    project_schematic_path,
+)
+
+__all__ = [
+    "SchematicExport",
+    "SchematicLockedError",
+    "SchematicVariantExportError",
+]
 
 
 class SchematicVariantExportError(ValueError):
     """Reject named-variant data before the base schematic writer touches files."""
+
+
+def _file_identity(path: str) -> Optional[tuple[int, int]]:  # noqa: UP045
+    """Return the device and inode that `path` currently refers to.
+
+    None when the filesystem reports no inode, as some Windows filesystems
+    do, since a zero inode would make every file look like the same one.
+    """
+    file_stat = os.stat(path)
+    if file_stat.st_ino == 0:
+        return None
+    return (file_stat.st_dev, file_stat.st_ino)
 
 
 class SchematicExport:
@@ -55,14 +81,11 @@ class SchematicExport:
             )
             return None
 
-        manager = get_manager()
-        matches = [
-            path
-            for path in glob.glob(os.path.join(self.parent.project_path, "*.kicad_pro"))
-            if manager.GetProject(path) == board_project
-        ]
+        matches = matching_project_names(
+            get_manager(), self.parent.project_path, board_project
+        )
         if len(matches) == 1:
-            return os.path.splitext(os.path.basename(matches[0]))[0]
+            return matches[0]
         self.logger.warning(
             "Not updating project-specific BOM states for %s; "
             "expected one matching .kicad_pro file, found %d",
@@ -180,11 +203,21 @@ class SchematicExport:
     def load_schematic(
         self,
         paths: Iterable[str],
+        approved_locks: Collection[str] = (),
         *,
         variant_name: str = "",
-        parts: Optional[Iterable[Mapping[str, Any]]] = None,
+        parts: Optional[Iterable[Mapping[str, Any]]] = None,  # noqa: UP045
     ) -> None:
         """Export one validated Default snapshot using the existing base writer.
+
+        Every sheet under the given schematics is exported once. Nothing is
+        written if a sheet file is missing, unreadable or read-only, or
+        while KiCad has a lock on any sheet, or on the project's own
+        schematic, other than approved_locks (SchematicLockedError names
+        them all). Every sheet is prepared before the first is written, so
+        a sheet that cannot be processed stops the export before any write;
+        a sheet that cannot be replaced still leaves the sheets before it
+        exported.
 
         Matrix callers supply an explicit Default snapshot. The legacy fallback
         accepts only a Default store view and reads it once for the whole export.
@@ -205,14 +238,48 @@ class SchematicExport:
                     "Default schematic export requires reference, LCSC, and BOM data."
                 )
 
+        # Every name a sheet is reached by is checked for a lock, because
+        # KiCad locks the path it opened; each file is then written once.
+        encountered = list(
+            dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
+        )
+        # KiCad locks the project's own schematic whenever the project is
+        # open, even when that file is not one of the sheets written here.
+        project_schematic = project_schematic_path(
+            getattr(self.parent, "project_path", None),
+            getattr(self.parent, "board_name", None),
+            self._project_name,
+        )
+        lock_paths = list(encountered)
+        if project_schematic and project_schematic not in lock_paths:
+            lock_paths.append(project_schematic)
+        assert_schematics_not_locked(lock_paths, approved_locks)
+        assert_schematics_writable(encountered)
+
         if is_version7(GetBuildVersion()):
             self.logger.info("Kicad 7...")
-            for path in paths:
-                self._update_schematic7(path, store_parts)
+            render = self._render_schematic7
         else:
             self.logger.info("Kicad 8+...")
-            for path in paths:
-                self._update_schematic(path, store_parts)
+            render = self._render_schematic
+        rendered = [(path, render(path, store_parts)) for path in encountered]
+
+        # A name that already refers to a file this export wrote, through a
+        # symlink or as another spelling of one directory entry, is not
+        # written again, or its backup would hold the first export's output.
+        # Writing replaces a directory entry, so a hard link to an exported
+        # file still refers to the original and is written under its own name.
+        written: set[tuple[int, int]] = set()
+        for path, content in rendered:
+            identity = _file_identity(path)
+            if identity is not None and identity in written:
+                self.logger.info("%s is another name for a sheet already written", path)
+                continue
+            atomic_write_schematic(path, content)
+            self.logger.info("Added LCSC's to %s (maybe?)", path)
+            identity = _file_identity(path)
+            if identity is not None:
+                written.add(identity)
 
     @staticmethod
     def _require_default(variant_name: str) -> None:
@@ -226,10 +293,10 @@ class SchematicExport:
                 "base schematic fields."
             )
 
-    def _update_schematic7(
+    def _render_schematic7(
         self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> None:
-        """Only works with KiCad V7 files."""
+    ) -> str:
+        """Return a KiCad V7 schematic's text with its LCSC and BOM fields updated."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
@@ -251,9 +318,6 @@ class SchematicExport:
         for index, desired in self._bom_updates(lines, store_parts).items():
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
 
-        if os.path.exists(path + "_old"):
-            os.remove(path + "_old")
-        os.rename(path, path + "_old")
         partSection = False
 
         for line in lines:
@@ -298,15 +362,12 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
 
-        with open(path, "w", encoding="utf-8") as f:
-            for line in newlines:
-                f.write(line + "\n")
-        self.logger.info("Added LCSC's to %s (maybe?)", path)
+        return "\n".join(newlines) + "\n"
 
-    def _update_schematic(
+    def _render_schematic(
         self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> None:
-        """Only works with KiCad V8+ files."""
+    ) -> str:
+        """Return a KiCad V8+ schematic's text with its LCSC and BOM fields updated."""
         self.logger.info("Reading %s...", path)
         # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
         # keep track of property ids and Reference property location to use with new LCSC property
@@ -328,7 +389,6 @@ class SchematicExport:
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
 
         partSection = False
-        files_seen = set()  # keeps sheet files already processed.
 
         for i in range(0, len(lines) - 1):
             inLine = lines[i].rstrip()
@@ -366,14 +426,7 @@ class SchematicExport:
                         if value == part["reference"]:
                             newLcsc = part["lcsc"]
                             break
-                if key == "Sheetfile":
-                    file_name = m.group(2)
-                    if file_name not in files_seen:
-                        files_seen.add(file_name)
-                        dir_name = os.path.dirname(path)
-                        self._update_schematic(
-                            os.path.join(dir_name, file_name), store_parts
-                        )
+
             # if we hit the pin section without finding a LCSC property, add it
             m3 = pinRx.search(inLine)
             if m3 and partSection:
@@ -392,10 +445,4 @@ class SchematicExport:
                 lastRef = ""
             newlines.append(outLine)
         newlines.append(lines[len(lines) - 1].rstrip())
-        if os.path.exists(path + "_old"):
-            os.remove(path + "_old")
-        os.rename(path, path + "_old")
-        with open(path, "w", encoding="utf-8") as f:
-            for line in newlines:
-                f.write(line + "\n")
-        self.logger.info("Added LCSC's to %s (maybe?)", path)
+        return "\n".join(newlines) + "\n"
