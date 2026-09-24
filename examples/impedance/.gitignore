@@ -1,0 +1,6 @@
+# Local state created when inspecting the examples in KiCad.
+*.kicad_prl
+*.lck
+*-backups/
+*.bak
+*.kicad_pcb~

@@ -1,22 +1,28 @@
 """Tests for empty-zone findings during fabrication-data generation."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+import logging
 from types import MethodType, ModuleType, SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import pytest
 
-from .modal_test_support import review_pane
-from .wx_harness import load_mainwindow, wx_stubs
+from copper_zones import EmptyCopperZone
+
+from .modal_test_support import ModalDialog, review_pane
+from .test_fabrication_zone_fills import _make_fabrication, _make_zone, zone_harness
+from .wx_harness import load_siblings, mainwindow_stubs, wx_stubs
+
+__all__ = ["zone_harness"]
 
 _PACKAGE = "mainwindow_empty_zone_tests"
 
 
 @pytest.fixture
-def mainwindow_module():
+def mainwindow_module() -> Iterator[tuple[ModuleType, Any]]:
     """Provide an isolated mainwindow module and its wx stub."""
-    module = load_mainwindow(
+    replacements = mainwindow_stubs(
         _PACKAGE,
         wx=wx_stubs(
             Frame=type("Frame", (), {}),
@@ -27,8 +33,18 @@ def mainwindow_module():
             MessageBox=MagicMock(),
             MessageDialog=MagicMock(),
         ),
+        copper_zone_dialog={"EmptyCopperZonesDialog": MagicMock()},
     )
-    return module, module.wx
+    # Reports import vendored dependencies lazily, as they do while the plugin
+    # package remains loaded. Scope the complete alias subtree to this fixture.
+    levels = {name: logging.getLogger(name).level for name in ("requests", "urllib3")}
+    try:
+        with load_siblings(_PACKAGE, ("mainwindow",), replacements) as loaded:
+            module = loaded["mainwindow"]
+            yield module, module.wx
+    finally:
+        for name, level in levels.items():
+            logging.getLogger(name).setLevel(level)
 
 
 def _make_window(
@@ -47,6 +63,19 @@ def _make_window(
         validate_generation=MagicMock(),
         get_part_consistency_warnings=MagicMock(return_value={}),
         fill_zones=MagicMock(return_value=empty_pours),
+        fill_zone_regions=MagicMock(
+            return_value=[
+                EmptyCopperZone(
+                    str(index),
+                    pour.split(" on ")[0],
+                    index,
+                    pour.split(" on ")[1],
+                    (((index * 1000000, 0), (10000000, 0), (10000000, 5000000)),),
+                )
+                for index, pour in enumerate(empty_pours)
+            ]
+        ),
+        board=MagicMock(name="retained_board"),
         generate_geber=MagicMock(),
         generate_excellon=MagicMock(),
         zip_gerber_excellon=MagicMock(),
@@ -65,6 +94,7 @@ def _make_window(
         reset_gauge=MagicMock(),
         settings=settings,
         fabrication=fabrication,
+        pcbnew=SimpleNamespace(GetBoard=MagicMock(return_value=object())),
         logger=MagicMock(),
         drc_review_findings=MagicMock(return_value=[]),
         layer_selection=MagicMock(),
@@ -82,6 +112,12 @@ def _make_window(
     )
     window.review_generation_findings = MethodType(
         mainwindow.JLCPCBTools.review_generation_findings, window
+    )
+    window.prepare_copper_zones = MethodType(
+        mainwindow.JLCPCBTools.prepare_copper_zones, window
+    )
+    window._impedance_plan_for_generation = MethodType(
+        mainwindow.JLCPCBTools._impedance_plan_for_generation, window
     )
     window.layer_selection.GetSelection.return_value = 0
     window.layer_selection.GetString.return_value = "Auto"
@@ -101,14 +137,16 @@ def _make_window(
     return window, generation_steps
 
 
-def _install_pane(mainwindow: ModuleType, monkeypatch: pytest.MonkeyPatch, result):
+def _install_pane(
+    mainwindow: ModuleType, monkeypatch: pytest.MonkeyPatch, result: int
+) -> type[ModalDialog]:
     """Replace the review pane with a double that closes with ``result``."""
     pane = review_pane(result)
     monkeypatch.setattr(mainwindow, "GenerationReviewDialog", pane)
     return pane
 
 
-def _warning_text(logger):
+def _warning_text(logger: MagicMock) -> str:
     """Render lazy logger arguments into searchable warning text."""
     messages = []
     for logged in logger.warning.call_args_list:
@@ -117,7 +155,9 @@ def _warning_text(logger):
     return "\n".join(messages)
 
 
-def test_no_empty_zones_generates_without_a_pane(mainwindow_module, monkeypatch):
+def test_no_empty_zones_generates_without_a_pane(
+    mainwindow_module: tuple[ModuleType, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A board without empty fills proceeds without opening the review pane."""
     mainwindow, wx = mainwindow_module
     pane = _install_pane(mainwindow, monkeypatch, wx.ID_CANCEL)
@@ -126,6 +166,8 @@ def test_no_empty_zones_generates_without_a_pane(mainwindow_module, monkeypatch)
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
     assert "Filling copper zones" in steps
+    window.fabrication.fill_zones.assert_called_once_with()
+    window.pcbnew.GetBoard.assert_not_called()
     assert pane.instances == []
     wx.MessageDialog.assert_not_called()
     window.logger.warning.assert_not_called()
@@ -143,11 +185,11 @@ def test_no_empty_zones_generates_without_a_pane(mainwindow_module, monkeypatch)
     ],
 )
 def test_generate_anyway_logs_all_zones_and_uses_refill_aware_wording(
-    mainwindow_module,
-    monkeypatch,
-    fill_zones,
-    expected_step,
-):
+    mainwindow_module: tuple[ModuleType, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    fill_zones: Optional[bool],  # noqa: UP045
+    expected_step: str,
+) -> None:
     """Every empty zone is a red finding; Generate anyway is logged and exports."""
     mainwindow, wx = mainwindow_module
     pane = _install_pane(mainwindow, monkeypatch, wx.ID_OK)
@@ -175,10 +217,10 @@ def test_generate_anyway_logs_all_zones_and_uses_refill_aware_wording(
 
 @pytest.mark.parametrize("result_name", ["ID_CANCEL", "unexpected"])
 def test_anything_but_generate_anyway_stops_export(
-    mainwindow_module,
-    monkeypatch,
-    result_name,
-):
+    mainwindow_module: tuple[ModuleType, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    result_name: str,
+) -> None:
     """Cancel, Escape, the close box and unexpected results all fail closed."""
     mainwindow, wx = mainwindow_module
     result = 999 if result_name == "unexpected" else getattr(wx, result_name)
@@ -204,10 +246,10 @@ def test_anything_but_generate_anyway_stops_export(
 
 @pytest.mark.parametrize("failing", ["construct", "show"])
 def test_pane_failure_reports_the_error_and_restores_the_window(
-    mainwindow_module,
-    monkeypatch,
-    failing,
-):
+    mainwindow_module: tuple[ModuleType, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    failing: str,
+) -> None:
     """A pane that fails is still destroyed, and the UI state is restored."""
     mainwindow, wx = mainwindow_module
     pane = _install_pane(mainwindow, monkeypatch, wx.ID_OK)
@@ -230,3 +272,360 @@ def test_pane_failure_reports_the_error_and_restores_the_window(
     assert "pane failed" in wx.MessageBox.call_args.args[0]
     assert wx.BeginBusyCursor.call_count == wx.EndBusyCursor.call_count == 2
     window.generate_button.Enable.assert_any_call(True)
+
+
+def _set_dialog_result(mainwindow: Any, result: int) -> MagicMock:
+    """Configure and return the fake empty-zone dialog."""
+    dialog = MagicMock()
+    dialog.ShowModal.return_value = result
+    mainwindow.EmptyCopperZonesDialog.return_value = dialog
+    return dialog
+
+
+@pytest.mark.parametrize("fill_zones", [True, False])
+def test_review_preparation_reuses_fill_without_generating_outputs(
+    mainwindow_module: Any, fill_zones: bool
+) -> None:
+    """Review runs the existing operation on the active board, not export work."""
+    mainwindow, wx = mainwindow_module
+    window, steps = _make_window(mainwindow, [], fill_zones=fill_zones)
+
+    assert window.prepare_copper_zones() is True
+
+    window.fabrication.fill_zone_regions.assert_called_once_with(
+        window.pcbnew.GetBoard()
+    )
+    window.fabrication.fill_zones.assert_not_called()
+    assert steps == [
+        "Filling copper zones" if fill_zones else "Checking copper zone fills"
+    ]
+    wx.MessageDialog.assert_not_called()
+    mainwindow.EmptyCopperZonesDialog.assert_not_called()
+    window.drc_review_findings.assert_not_called()
+    window.run_generate_hook.assert_not_called()
+    for name in (
+        "generate_geber",
+        "generate_excellon",
+        "zip_gerber_excellon",
+        "write_cpl",
+        "generate_bom",
+    ):
+        getattr(window.fabrication, name).assert_not_called()
+    assert window.store.mock_calls == []
+    window.reset_gauge.assert_called_once_with()
+
+
+def test_standalone_review_prepares_the_active_board(
+    mainwindow_module: Any,
+) -> None:
+    """Standalone review uses current editor copper, independent of retained exports."""
+    mainwindow, _wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, [])
+    active_board = window.pcbnew.GetBoard.return_value
+    window.fabrication.board = object()
+    assert active_board is not window.fabrication.board
+    assert window.prepare_copper_zones() is True
+    window.fabrication.fill_zone_regions.assert_called_once_with(active_board)
+    window.pcbnew.GetBoard.assert_called_once_with()
+    window.reset_gauge.assert_called_once_with()
+
+
+@pytest.mark.parametrize("result_name", ["ID_YES", "ID_NO", "ID_CANCEL", "unexpected"])
+def test_review_empty_zone_warning_is_explicit_and_fails_closed(
+    mainwindow_module: Any, result_name: str
+) -> None:
+    """Only Continue Anyway proceeds with missing copper in review previews."""
+    mainwindow, wx = mainwindow_module
+    result = 999 if result_name == "unexpected" else getattr(wx, result_name)
+    window, _steps = _make_window(mainwindow, ["GND on F.Cu", "VCC on In1.Cu"])
+    dialog = _set_dialog_result(mainwindow, result)
+
+    assert window.prepare_copper_zones() is (result == wx.ID_YES)
+
+    args = mainwindow.EmptyCopperZonesDialog.call_args.args
+    assert args[:3] == (window, window.pcbnew.GetBoard.return_value, window.pcbnew)
+    assert args[3] is window.fabrication.fill_zone_regions.return_value
+    assert [region.label for region in args[3]] == ["GND on F.Cu", "VCC on In1.Cu"]
+    assert mainwindow.EmptyCopperZonesDialog.call_args.kwargs == {"for_review": True}
+    wx.MessageDialog.assert_not_called()
+    dialog.Destroy.assert_called_once_with()
+    decision = "continue" if result == wx.ID_YES else "stop"
+    assert f"chose to {decision} review" in _warning_text(window.logger)
+    window.reset_gauge.assert_called_once_with()
+
+
+@pytest.mark.parametrize("failing_method", ["ShowModal"])
+def test_review_warning_errors_propagate_and_destroy_dialog(
+    mainwindow_module: Any, failing_method: str
+) -> None:
+    """The caller handles errors, while shared preparation owns dialog cleanup."""
+    mainwindow, wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, ["GND on F.Cu"])
+    dialog = _set_dialog_result(mainwindow, wx.ID_YES)
+    getattr(dialog, failing_method).side_effect = RuntimeError("dialog failed")
+
+    with pytest.raises(RuntimeError, match="dialog failed"):
+        window.prepare_copper_zones()
+
+    dialog.Destroy.assert_called_once_with()
+    window.reset_gauge.assert_called_once_with()
+
+
+def test_review_fill_error_propagates_without_showing_empty_zone_warning(
+    mainwindow_module: Any,
+) -> None:
+    """A failed fill cannot be converted into permission to review stale copper."""
+    mainwindow, wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, [])
+    window.fabrication.fill_zone_regions.side_effect = RuntimeError("fill failed")
+
+    with pytest.raises(RuntimeError, match="fill failed"):
+        window.prepare_copper_zones()
+
+    wx.MessageDialog.assert_not_called()
+    mainwindow.EmptyCopperZonesDialog.assert_not_called()
+    window.reset_gauge.assert_called_once_with()
+
+
+def test_review_preserves_distinct_locations_and_refreshes_when_reopened(
+    mainwindow_module: Any,
+) -> None:
+    """Same-net zones stay selectable, and reopening uses the latest fill result."""
+    mainwindow, wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, [])
+    first = EmptyCopperZone(
+        "left", "VIN", 0, "F.Cu", (((0, 0), (1000000, 0), (0, 1000000)),)
+    )
+    second = EmptyCopperZone(
+        "right",
+        "VIN",
+        0,
+        "F.Cu",
+        (((20000000, 0), (21000000, 0), (20000000, 1000000)),),
+    )
+    window.fabrication.fill_zone_regions.side_effect = [[first, second], [second], []]
+    dialog = _set_dialog_result(mainwindow, wx.ID_YES)
+
+    assert window.prepare_copper_zones()
+    assert window.prepare_copper_zones()
+    assert window.prepare_copper_zones()
+
+    calls = mainwindow.EmptyCopperZonesDialog.call_args_list
+    assert [call.args[3] for call in calls] == [[first, second], [second]]
+    assert first.label == second.label
+    assert first.bounds != second.bounds
+    assert dialog.Destroy.call_count == 2
+    assert window.fabrication.fill_zone_regions.call_count == 3
+    assert window.reset_gauge.call_count == 3
+    assert window.store.mock_calls == []
+
+
+def test_visual_warning_construction_failure_restores_gauge(
+    mainwindow_module: Any,
+) -> None:
+    """An unavailable dialog cannot silently authorize reviewing missing copper."""
+    mainwindow, wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, ["VIN on F.Cu"])
+    mainwindow.EmptyCopperZonesDialog.side_effect = RuntimeError("dialog failed")
+
+    with pytest.raises(RuntimeError, match="dialog failed"):
+        window.prepare_copper_zones()
+
+    window.reset_gauge.assert_called_once_with()
+    wx.MessageDialog.assert_not_called()
+
+
+def _empty_zone_with_native_flags(
+    harness: SimpleNamespace, net_name: str, *, teardrop: bool
+) -> MagicMock:
+    """Give the existing zone double real geometry and mutable native flag reads."""
+    front = harness.constants["F_Cu"]
+    zone = _make_zone([front], {front: 0}, netname=net_name)
+    zone.m_Uuid.AsString.return_value = f"zone-{net_name}"
+    zone.GetZoneName.return_value = "Pad transition"
+    zone.IsTeardropArea.return_value = teardrop
+    zone.IsFilled.return_value = True
+    zone.NeedRefill.return_value = False
+    points = [
+        SimpleNamespace(x=10_000_000, y=20_000_000),
+        SimpleNamespace(x=11_000_000, y=20_000_000),
+        SimpleNamespace(x=10_000_000, y=20_300_000),
+    ]
+    outline = zone.Outline.return_value
+    outline.OutlineCount.return_value = 1
+    outline.HoleCount.return_value = 0
+    chain = outline.COutline.return_value
+    chain.PointCount.return_value = len(points)
+    chain.CPoint.side_effect = points.__getitem__
+    return zone
+
+
+def _use_real_copper_preparation(
+    window: SimpleNamespace, harness: SimpleNamespace, zones: list[MagicMock]
+) -> None:
+    """Keep production collection and policy between native data and both UI paths."""
+    fabrication, board = _make_fabrication(harness, zones, window.settings)
+    fabrication.parent = window
+    fabrication.logger = window.logger
+    window.fabrication.fill_zone_regions = fabrication.fill_zone_regions
+    window.fabrication.fill_zones = fabrication.fill_zones
+    window.fabrication.board = board
+    window.pcbnew.GetBoard.return_value = board
+    harness.zone_filler.Fill.return_value = True
+
+
+@pytest.mark.parametrize("refill", [True, False])
+def test_configure_completed_teardrop_is_logged_without_empty_zone_modal(
+    mainwindow_module: tuple[ModuleType, Any],
+    zone_harness: SimpleNamespace,  # noqa: F811 -- imported pytest fixture.
+    refill: bool,
+) -> None:
+    """A completed empty teardrop reaches the log through real copper preparation."""
+    mainwindow, wx = mainwindow_module
+    window, steps = _make_window(mainwindow, [], fill_zones=refill)
+    zone = _empty_zone_with_native_flags(zone_harness, "VEXT", teardrop=True)
+    _use_real_copper_preparation(window, zone_harness, [zone])
+    _set_dialog_result(mainwindow, wx.ID_CANCEL)
+
+    assert window.prepare_copper_zones() is True
+
+    mainwindow.EmptyCopperZonesDialog.assert_not_called()
+    window.logger.warning.assert_not_called()
+    window.logger.info.assert_called_once()
+    message, *arguments = window.logger.info.call_args.args
+    information = message % tuple(arguments)
+    assert "VEXT on F.Cu" in information
+    assert "generated teardrop" in information
+    assert "zone-VEXT" in information
+    assert "Board X 10.000 to 11.000 mm" in information
+    assert "1.000 × 0.300 mm" in information
+    assert "filled; refill not required" in information
+    if not refill:
+        assert "Refilling is disabled" in information
+        zone_harness.zone_filler.Fill.assert_not_called()
+    else:
+        zone_harness.zone_filler.Fill.assert_called_once_with([zone])
+    assert steps == ["Filling copper zones" if refill else "Checking copper zone fills"]
+    window.fabrication.generate_geber.assert_not_called()
+    window.store.increment_generation_count.assert_not_called()
+
+
+@pytest.mark.parametrize("refill", [True, False])
+def test_generate_disabled_impedance_logs_completed_teardrop_without_errors(
+    mainwindow_module: tuple[ModuleType, Any],
+    zone_harness: SimpleNamespace,  # noqa: F811 -- imported pytest fixture.
+    monkeypatch: pytest.MonkeyPatch,
+    refill: bool,
+) -> None:
+    """Generate needs no freshness gate or user decision for a completed teardrop."""
+    mainwindow, wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, [], fill_zones=refill)
+    window._impedance = SimpleNamespace(
+        preflight=MagicMock(return_value=None),
+        verify_disabled=MagicMock(),
+        on_configure=MagicMock(),
+    )
+    zone = _empty_zone_with_native_flags(zone_harness, "VEXT", teardrop=True)
+    _use_real_copper_preparation(window, zone_harness, [zone])
+    pane = _install_pane(mainwindow, monkeypatch, wx.ID_CANCEL)
+
+    mainwindow.JLCPCBTools.generate_fabrication_data(window)
+
+    assert pane.instances == []
+    mainwindow.EmptyCopperZonesDialog.assert_not_called()
+    window.logger.info.assert_called_once()
+    window.logger.warning.assert_not_called()
+    window.logger.exception.assert_not_called()
+    window._impedance.on_configure.assert_not_called()
+    window._impedance.verify_disabled.assert_called()
+    window.fabrication.generate_geber.assert_called_once_with(None)
+    window.fabrication.zip_gerber_excellon.assert_called_once_with()
+    window.store.increment_generation_count.assert_called_once_with()
+    wx.MessageBox.assert_not_called()
+    if refill:
+        zone_harness.zone_filler.Fill.assert_called_once_with([zone])
+    else:
+        zone_harness.zone_filler.Fill.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["configure", "generate"])
+def test_mixed_teardrop_policy_keeps_ordinary_stale_and_unknown_findings(
+    mainwindow_module: tuple[ModuleType, Any],
+    zone_harness: SimpleNamespace,  # noqa: F811 -- imported pytest fixture.
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    """Only the completed generated item leaves the existing missing-copper UI."""
+    mainwindow, wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, [], fill_zones=False)
+    completed = _empty_zone_with_native_flags(zone_harness, "VEXT", teardrop=True)
+    ordinary = _empty_zone_with_native_flags(zone_harness, "GND", teardrop=False)
+    stale = _empty_zone_with_native_flags(zone_harness, "STALE", teardrop=True)
+    stale.NeedRefill.return_value = True
+    unfilled = _empty_zone_with_native_flags(zone_harness, "UNFILLED", teardrop=True)
+    unfilled.IsFilled.return_value = False
+    unknown = _empty_zone_with_native_flags(zone_harness, "UNKNOWN", teardrop=True)
+    unknown.IsTeardropArea.return_value = None
+    _use_real_copper_preparation(
+        window, zone_harness, [completed, ordinary, stale, unfilled, unknown]
+    )
+
+    if operation == "configure":
+        _set_dialog_result(mainwindow, wx.ID_CANCEL)
+
+        assert window.prepare_copper_zones() is False
+
+        (shown,) = mainwindow.EmptyCopperZonesDialog.call_args_list
+        assert [region.net_name for region in shown.args[3]] == [
+            "GND",
+            "STALE",
+            "UNFILLED",
+            "UNKNOWN",
+        ]
+    else:
+        pane = _install_pane(mainwindow, monkeypatch, wx.ID_CANCEL)
+
+        mainwindow.JLCPCBTools.generate_fabrication_data(window)
+
+        (shown,) = pane.instances
+        assert [
+            (finding.severity.name, finding.title) for finding in shown.findings
+        ] == [
+            ("ERROR", "Copper zone GND on F.Cu has no fill"),
+            ("ERROR", "Generated teardrop STALE on F.Cu has no fill"),
+            ("ERROR", "Generated teardrop UNFILLED on F.Cu has no fill"),
+            ("ERROR", "Copper zone UNKNOWN on F.Cu has no fill"),
+        ]
+    window.logger.info.assert_called_once()
+    window.logger.exception.assert_not_called()
+    window.fabrication.generate_geber.assert_not_called()
+    window.store.increment_generation_count.assert_not_called()
+    zone_harness.zone_filler.Fill.assert_not_called()
+
+
+def test_teardrop_reopening_rechecks_native_flags_without_remembering_dismissals(
+    mainwindow_module: tuple[ModuleType, Any],
+    zone_harness: SimpleNamespace,  # noqa: F811 -- imported pytest fixture.
+) -> None:
+    """A current, stale, current transition restores and then removes the warning."""
+    mainwindow, wx = mainwindow_module
+    window, _steps = _make_window(mainwindow, [], fill_zones=False)
+    zone = _empty_zone_with_native_flags(zone_harness, "VEXT", teardrop=True)
+    _use_real_copper_preparation(window, zone_harness, [zone])
+    _set_dialog_result(mainwindow, wx.ID_CANCEL)
+
+    assert window.prepare_copper_zones() is True
+    zone.NeedRefill.return_value = True
+    assert window.prepare_copper_zones() is False
+    zone.NeedRefill.return_value = False
+    assert window.prepare_copper_zones() is True
+
+    mainwindow.EmptyCopperZonesDialog.assert_called_once()
+    (stale_region,) = mainwindow.EmptyCopperZonesDialog.call_args.args[3]
+    assert stale_region.needs_refill is True
+    assert zone.GetFilledPolysList.call_count == 3
+    assert zone.NeedRefill.call_count == 3
+    assert window.logger.info.call_count == 2
+    assert window.logger.warning.call_count == 1
+    window.store.increment_generation_count.assert_not_called()
+    zone_harness.zone_filler.Fill.assert_not_called()

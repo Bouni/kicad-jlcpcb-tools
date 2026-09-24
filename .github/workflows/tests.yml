@@ -55,7 +55,7 @@ jobs:
   native-kicad:
     name: Native KiCad ${{ matrix.kicad }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +69,10 @@ jobs:
             ppa: ppa:kicad/kicad-9.0-releases
           - kicad: "10"
             ppa: ppa:kicad/kicad-10.0-releases
+    env:
+      KICAD_CLI: /usr/bin/kicad-cli
+      KICAD_CAPTURE_PNG: '1'
+      NATIVE_KICAD_ARTIFACTS: ${{ runner.temp }}/native-kicad-${{ matrix.kicad }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -78,12 +82,49 @@ jobs:
             sudo add-apt-repository --yes ${{ matrix.ppa }}
           fi
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends 'kicad=${{ matrix.kicad }}.*' python3-wxgtk4.0 python3-venv xvfb xauth
+          sudo apt-get install -y --no-install-recommends 'kicad=${{ matrix.kicad }}.*' python3-wxgtk4.0 python3-venv xvfb xauth x11-utils openbox
           /usr/bin/python3 -m venv --system-site-packages .venv-kicad
       - name: Install test dependencies
         run: .venv-kicad/bin/python -m pip install '.[dev]'
-      - name: Require the native KiCad checks
-        run: >-
-          timeout 300s xvfb-run -a -s '-screen 0 1920x1080x24'
-          .venv-kicad/bin/python -m pytest -rs
-          --require-native=kicad --kicad-major=${{ matrix.kicad }} -m native_kicad
+      - name: Prepare disposable native test preferences
+        run: |
+          mkdir -p "$NATIVE_KICAD_ARTIFACTS/config/${{ matrix.kicad }}.0"
+          printf '%s\n' '{"appearance":{"color_theme":"_builtin_default"}}' > "$NATIVE_KICAD_ARTIFACTS/config/${{ matrix.kicad }}.0/pcbnew.json"
+          echo "KICAD_CONFIG_HOME=$NATIVE_KICAD_ARTIFACTS/config" >> "$GITHUB_ENV"
+      - name: Require native variant editing, windows, and fabrication checks
+        shell: bash
+        run: |
+          timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24' \
+          .venv-kicad/bin/python -m pytest -rs \
+          --require-native=kicad --kicad-major=${{ matrix.kicad }} -m native_kicad \
+          --basetemp="$NATIVE_KICAD_ARTIFACTS/pytest-work" \
+          --junitxml="$NATIVE_KICAD_ARTIFACTS/pytest.xml" \
+          2>&1 | tee "$NATIVE_KICAD_ARTIFACTS/pytest.log"
+      - name: Exercise native impedance review and reports
+        if: matrix.kicad == '10'
+        shell: bash
+        run: |
+          timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24' sh -eu -c '
+            openbox >"$NATIVE_KICAD_ARTIFACTS/openbox.log" 2>&1 &
+            window_manager=$!
+            trap "kill $window_manager 2>/dev/null || true" EXIT
+            for attempt in $(seq 1 50); do
+              kill -0 "$window_manager"
+              if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id #"; then
+                .venv-kicad/bin/python scripts/linux_native_impedance_smoke.py \
+                  --output "$NATIVE_KICAD_ARTIFACTS/impedance" --timeout 600
+                exit $?
+              fi
+              sleep 0.1
+            done
+            echo "Openbox did not become ready" >&2
+            exit 1
+          ' 2>&1 | tee "$NATIVE_KICAD_ARTIFACTS/impedance.log"
+      - name: Retain native workflow products and validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-kicad-${{ matrix.kicad }}
+          path: ${{ env.NATIVE_KICAD_ARTIFACTS }}
+          if-no-files-found: error
+          retention-days: 14

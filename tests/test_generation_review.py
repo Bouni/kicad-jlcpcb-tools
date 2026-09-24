@@ -120,6 +120,16 @@ def test_each_empty_zone_layer_is_an_error_with_its_consequence(
     assert review.empty_zone_findings([]) == []
 
 
+def test_empty_teardrop_export_finding_names_the_item_type(review: ModuleType) -> None:
+    """Generated teardrops stay serious findings with a recognizable item type."""
+    (finding,) = review.empty_zone_findings(["VEXT on F.Cu — generated teardrop"])
+
+    assert finding.severity == review.Severity.ERROR
+    assert finding.title == "Generated teardrop VEXT on F.Cu has no fill"
+    assert "This generated teardrop contains no filled copper." in finding.detail
+    assert "Plotting now ships the board without that copper." in finding.detail
+
+
 def test_drc_errors_are_one_finding_listing_every_message(
     review: ModuleType,
 ) -> None:

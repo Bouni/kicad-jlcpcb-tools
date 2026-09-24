@@ -239,13 +239,32 @@ def test_native_text_cache_and_font_dpi_invalidation(
 
 
 @pytest.mark.parametrize("narrow", [False, True])
+@pytest.mark.parametrize(
+    "footprint,highlighted_terms",
+    [
+        ("Resistor_SMD:R_0603_1608Metric", ("0603", "10kΩ")),
+        ("Resistor_SMD:R_0603", ("0603", "10kΩ")),
+        ("Custom:R_Custom", ("10kΩ",)),
+    ],
+)
 @pytest.mark.native_wx
 def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
-    matrix: Any, modules: tuple[ModuleType, ModuleType], narrow: bool
+    matrix: Any,
+    modules: tuple[ModuleType, ModuleType],
+    narrow: bool,
+    footprint: str,
+    highlighted_terms: tuple[str, ...],
 ) -> None:
     source = "fi ffi AVAV prefix " * 10 + "0603 10kΩ"
     model = sample_model(
         modules[1],
+        # Canonical and abbreviated chip names both identify the package size.
+        # A custom name still matches the resistor's value without inventing a size.
+        changes={
+            (row, variant): {"footprint": footprint, "footprint_field": footprint}
+            for row in range(3)
+            for variant in ("", "A", "B")
+        },
         catalog={
             (row, variant): {"params": source}
             for row in range(3)
@@ -260,7 +279,7 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
         width = 100 if narrow else dc.GetTextExtent(source)[0] + h.view.FromDIP(20)
         painted = paint_cell(h, 0, col, width=width)
         baseline, *colored = painted.of("DrawText")
-        assert len(colored) == 2
+        assert len(colored) == len(highlighted_terms)
         assert all(
             item["args"] == baseline["args"] and item["size"] == baseline["size"]
             for item in colored
@@ -268,7 +287,7 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
         text, x, y = baseline["args"]
         assert text.startswith("…") is narrow
         dc.SetFont(h.view.GetDefaultCellFont().Scaled(0.8 if narrow else 1))
-        for item, term in zip(colored, ("0603", "10kΩ")):
+        for item, term in zip(colored, highlighted_terms):
             left, right = text.index(term), text.index(term) + len(term)
             # The tokens have whitespace boundaries. Independent prefix
             # measurements include ligatures in the preceding text without

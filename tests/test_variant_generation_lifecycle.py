@@ -1,13 +1,16 @@
 """Exercise publication and bookkeeping through the real generation handler."""
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
+import hashlib
 import importlib
+import json
 from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Optional
+from unittest.mock import MagicMock
 from zipfile import ZipFile
 
 import pytest
@@ -18,6 +21,7 @@ from .test_mainwindow_empty_zone_warning import (
     _make_window,
     mainwindow_module as handler_module,
 )
+from .test_mainwindow_impedance_flow import _reports, _reviewed_plan
 from .variant_data_support import _native_session
 
 modules = fabrication_modules
@@ -497,4 +501,116 @@ def test_post_hook_failure_warns_after_committing_outputs(
     generation.assert_generated_outputs()
     assert generation.store.get_generation_count() == 2
     assert generation.hooks == ["pre", "post"]
+    generation.assert_released()
+
+
+@pytest.mark.parametrize("change_at", [None, "render", "archive", "publication"])
+def test_impedance_reports_use_reviewed_output_variant_before_publication(
+    generation: Generation,
+    monkeypatch: pytest.MonkeyPatch,
+    change_at: Optional[str],
+) -> None:
+    """Only a reviewed output clone can accompany the variant's real ZIP and CSVs."""
+    plan = _reviewed_plan(generation.module)
+    report_board = SimpleNamespace(GetCurrentVariant=lambda: "A")
+    snapshot = plan.snapshot
+    # Approval describes output A; the native reader below independently supplies
+    # the actual plot board snapshot when the real output verifier reads it.
+    output_context = hashlib.sha256(
+        json.dumps((snapshot.context_digest, "A"), ensure_ascii=True).encode("ascii")
+    ).hexdigest()
+    approved_snapshot = replace(snapshot, context_digest=output_context)
+    service = importlib.import_module(
+        generation.module.export_impedance_reports.__module__
+    )
+    approved_config = replace(
+        plan.config,
+        reviewed_digest=service.analyze(plan.config, approved_snapshot).digest,
+    )
+    plan = service.prepare(approved_config, approved_snapshot)
+    assert plan is not None
+    controls = generation.module.ImpedanceControls.__new__(
+        generation.module.ImpedanceControls
+    )
+    controls.parent = generation.window
+    controls.board_path = generation.window.pcbnew.GetBoard().GetFileName()
+    controls.repository = None
+    controls.preflight = MagicMock(return_value=plan)
+    controls.verify_current = MagicMock()
+    controls.verify_disabled = MagicMock()
+    generation.window._impedance = controls
+    monkeypatch.setattr(
+        generation.module, "ArchiveEntry", generation.archive.ArchiveEntry
+    )
+    monkeypatch.setattr(
+        generation.exporter,
+        "get_report_board",
+        MagicMock(return_value=report_board),
+        raising=False,
+    )
+    reads: list[tuple[Any, Any, Any]] = []
+
+    def read_snapshot(board: Any, pcbnew: Any, *, netclass_source: Any = None) -> Any:
+        """Read output state separately from the saved approval and production verifier."""
+        reads.append((board, pcbnew, netclass_source))
+        assert board is report_board
+        assert netclass_source is generation.window.pcbnew.GetBoard()
+        boundaries = {"render": 1, "archive": 2, "publication": 3}
+        if change_at is not None and len(reads) >= boundaries[change_at]:
+            return replace(snapshot, context_digest="different output variant text")
+        return snapshot
+
+    adapter = importlib.import_module(
+        f"{generation.module.ImpedanceControls.__module__.rsplit('.', 1)[0]}.pcbnew_adapter"
+    )
+    monkeypatch.setattr(
+        adapter,
+        "snapshot_board",
+        read_snapshot,
+    )
+    rendered_boards = []
+    scratch_paths = []
+
+    def export(_plan: Any, board: Any, _pcbnew: Any, scratch: Path) -> Any:
+        """Write real report members while observing the selected native boundary."""
+        rendered_boards.append(board)
+        scratch_paths.append(scratch)
+        return _reports(scratch)
+
+    monkeypatch.setattr(generation.module, "export_impedance_reports", export)
+    generation.run()
+
+    assert all(not path.exists() for path in scratch_paths)
+    if change_at is None:
+        generation.wx.MessageBox.assert_not_called()
+        assert rendered_boards == [report_board]
+        generation.assert_generated_outputs()
+        with ZipFile(generation.paths["gerber_zip"]) as archive:
+            assert archive.read("Required_impedance_control.xlsx") == b"workbook"
+            assert (
+                archive.read("Required_impedance_control.html")
+                == b"<html>report</html>"
+            )
+        assert generation.store.get_generation_count() == 2
+        assert generation.hooks == ["pre", "post"]
+    else:
+        generation.wx.MessageBox.assert_called_once()
+        message = generation.wx.MessageBox.call_args.args[0]
+        boundary = {
+            "render": "Validating controlled-impedance output variant",
+            "archive": "Validating controlled-impedance captures before archive",
+            "publication": "Validating controlled-impedance captures before publication",
+        }[change_at]
+        assert boundary in message
+        assert rendered_boards == ([] if change_at == "render" else [report_board])
+        generation.assert_previous_outputs()
+        assert generation.store.get_generation_count() == 1
+        assert generation.hooks == ["pre"]
+    expected_reads = {None: 3, "render": 1, "archive": 2, "publication": 3}[change_at]
+    expected_read = (
+        report_board,
+        generation.window.pcbnew,
+        generation.window.pcbnew.GetBoard(),
+    )
+    assert reads == [expected_read] * expected_reads
     generation.assert_released()
