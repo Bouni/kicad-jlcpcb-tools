@@ -1,0 +1,16 @@
+(version 1)
+
+(rule "RF 50 ohm noncoplanar: F.Cu track to GND >= 1.050000mm"
+  (layer "F.Cu")
+  (condition "A.Type == 'Track' && A.hasNetclass('RF 50 ohm noncoplanar') && B.Type == 'Zone' && B.NetName == 'GND'")
+  (constraint clearance (min 1.050000mm)))
+
+(rule "RF 50 ohm noncoplanar: In2.Cu track to GND >= 0.390000mm"
+  (layer "In2.Cu")
+  (condition "A.Type == 'Track' && A.hasNetclass('RF 50 ohm noncoplanar') && B.Type == 'Zone' && B.NetName == 'GND'")
+  (constraint clearance (min 0.390000mm)))
+
+(rule "RF 50 ohm noncoplanar: B.Cu track to GND >= 1.050000mm"
+  (layer "B.Cu")
+  (condition "A.Type == 'Track' && A.hasNetclass('RF 50 ohm noncoplanar') && B.Type == 'Zone' && B.NetName == 'GND'")
+  (constraint clearance (min 1.050000mm)))

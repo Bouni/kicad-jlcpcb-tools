@@ -9,7 +9,7 @@ from zipfile import BadZipFile, ZipFile
 import pytest
 
 import fabrication_archive
-from fabrication_archive import build_archive, collect_gerber_entries
+from fabrication_archive import ArchiveEntry, build_archive, collect_gerber_entries
 
 
 def _source(directory: Path, name: str, content: bytes = b"manufacturing data") -> Path:
@@ -36,6 +36,9 @@ def test_collects_only_exact_legacy_suffixes_in_sorted_order(tmp_path: Path) -> 
         "screenshot.png",
         "parts.csv",
         "notes.txt",
+        "stale.xlsx",
+        "template.xlsx",
+        "stale.html",
         "notgbr",
         "UPPER.GBR",
         "board.gbr.backup",
@@ -283,3 +286,211 @@ def test_interrupted_restoration_keeps_remaining_originals(
     assert "restoration interrupted" in caplog.text
     assert str(recovery) in caplog.text
     assert str(destinations[1]) in caplog.text
+
+
+def test_archive_has_exact_sorted_members_and_embedded_workbook(tmp_path: Path) -> None:
+    """The explicit workbook and legacy manufacturing files are embedded once."""
+    gerbers = tmp_path / "gerbers"
+    copper = _source(gerbers, "copper.gbr", b"copper")
+    drill = _source(gerbers, "holes.drl", b"drill")
+    workbook = _source(tmp_path, "report.xlsx", b"workbook content")
+    destination = tmp_path / "manufacturing.zip"
+    result = build_archive(
+        destination,
+        [
+            ArchiveEntry(drill, drill.name),
+            ArchiveEntry(workbook, "Required_impedance_control.xlsx"),
+            ArchiveEntry(copper, copper.name),
+        ],
+    )
+    workbook.unlink()
+    assert result == destination
+    with ZipFile(destination) as archive:
+        assert archive.namelist() == [
+            "Required_impedance_control.xlsx",
+            "copper.gbr",
+            "holes.drl",
+        ]
+        assert archive.read("Required_impedance_control.xlsx") == b"workbook content"
+        assert archive.read("copper.gbr") == b"copper"
+        assert archive.testzip() is None
+
+
+def test_enabled_then_disabled_does_not_reuse_stale_workbook(tmp_path: Path) -> None:
+    """Rebuilding without an extra entry drops all previous impedance assets."""
+    gerbers = tmp_path / "gerbers"
+    _source(gerbers, "board.gbr")
+    _source(gerbers, "stale.xlsx")
+    _source(gerbers, "snippet.png")
+    workbook = _source(tmp_path, "impedance.xlsx")
+    destination = tmp_path / "production.zip"
+    gerber_entries = collect_gerber_entries(gerbers)
+    build_archive(destination, (*gerber_entries, ArchiveEntry(workbook, workbook.name)))
+    with ZipFile(destination) as archive:
+        assert "impedance.xlsx" in archive.namelist()
+    build_archive(destination, gerber_entries)
+    with ZipFile(destination) as archive:
+        assert archive.namelist() == ["board.gbr"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        ".",
+        "..",
+        "../board.gbr",
+        "/board.gbr",
+        "sub/board.gbr",
+        "sub\\board.gbr",
+        "C:board.gbr",
+        "C:\\board.gbr",
+        "board\x00.gbr",
+        "board\n.gbr",
+    ],
+)
+def test_rejects_unsafe_member_names_before_output(tmp_path: Path, name: str) -> None:
+    """Portable archive names cannot escape the root or be silently truncated."""
+    source = _source(tmp_path, "board.gbr")
+    destination = tmp_path / "production.zip"
+    previous = _previous_archive(destination)
+    with pytest.raises(ValueError, match="safe root-level"):
+        build_archive(destination, [ArchiveEntry(source, name)])
+    assert destination.read_bytes() == previous
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "board.gbr",
+        "production.zip",
+    ]
+
+
+@pytest.mark.parametrize(
+    "names", [("board.gbr", "board.gbr"), ("board.gbr", "BOARD.GBR")]
+)
+def test_rejects_colliding_archive_names_with_named_entries(
+    tmp_path: Path, names: tuple[str, str]
+) -> None:
+    """Flattening directories cannot overwrite same-name or case-folded members."""
+    source = _source(tmp_path, "board.gbr")
+    with pytest.raises(ValueError, match="Duplicate archive member"):
+        build_archive(
+            tmp_path / "production.zip", [ArchiveEntry(source, name) for name in names]
+        )
+
+
+def test_nested_collector_collision_is_rejected(tmp_path: Path) -> None:
+    """Two accepted Gerber files with identical basenames must fail explicitly."""
+    _source(tmp_path, "first/board.gbr")
+    _source(tmp_path, "second/board.gbr")
+    with pytest.raises(ValueError, match="Duplicate"):
+        build_archive(tmp_path / "production.zip", collect_gerber_entries(tmp_path))
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "empty", "no_entries"])
+def test_rejects_unusable_inputs_preserving_previous_archive_with_named_entries(
+    tmp_path: Path, kind: str
+) -> None:
+    """Incomplete exports cannot replace a previous valid ZIP."""
+    destination = tmp_path / "production.zip"
+    previous = _previous_archive(destination)
+    source = tmp_path / "input"
+    if kind == "directory":
+        source.mkdir()
+    elif kind == "empty":
+        source.write_bytes(b"")
+    entries = [] if kind == "no_entries" else [ArchiveEntry(source, "board.gbr")]
+    with pytest.raises((ValueError, FileNotFoundError)):
+        build_archive(destination, entries)
+    assert destination.read_bytes() == previous
+
+
+def test_unreadable_input_preserves_previous_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read permission errors propagate without creating a replacement ZIP."""
+    source = _source(tmp_path, "board.gbr")
+    destination = tmp_path / "production.zip"
+    previous = _previous_archive(destination)
+    original_open = Path.open
+
+    def unreadable(path: Path, *args: Any, **kwargs: Any) -> Any:
+        """Simulate a source read denial without depending on operating system ACLs."""
+        if path == source:
+            raise PermissionError("source is unreadable")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", unreadable)
+    with pytest.raises(PermissionError):
+        build_archive(destination, [ArchiveEntry(source, source.name)])
+    assert destination.read_bytes() == previous
+
+
+@pytest.mark.parametrize("failure", ["write", "verify", "replace"])
+def test_mid_export_failures_preserve_old_zip_and_remove_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """Failures at each publication phase leave only the prior valid artifact."""
+    source = _source(tmp_path, "board.gbr")
+    destination = tmp_path / "production.zip"
+    previous = _previous_archive(destination)
+
+    def fail(*args: Any, **kwargs: Any) -> None:
+        """Inject an I/O failure during archive construction or publication."""
+        raise OSError("injected archive failure")
+
+    def invalid_member(archive: ZipFile) -> str:
+        """Report a simulated member checksum mismatch."""
+        return "board.gbr"
+
+    if failure == "write":
+        monkeypatch.setattr(ZipFile, "write", fail)
+    elif failure == "verify":
+        monkeypatch.setattr(ZipFile, "testzip", invalid_member)
+    else:
+        monkeypatch.setattr(fabrication_archive.os, "replace", fail)
+    with pytest.raises((OSError, BadZipFile)):
+        build_archive(destination, [ArchiveEntry(source, source.name)])
+    assert destination.read_bytes() == previous
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "board.gbr",
+        "production.zip",
+    ]
+
+
+def test_mixed_paths_and_named_impedance_documents(tmp_path: Path) -> None:
+    """Keep path-based Gerbers compatible with explicitly named workbook and HTML."""
+    gerbers = tmp_path / "gerbers"
+    _source(gerbers, "board.gbr", b"copper")
+    workbook = _source(tmp_path, "temporary.xlsx", b"workbook")
+    report = _source(tmp_path, "temporary.html", b"report")
+    destination = tmp_path / "manufacturing.zip"
+    collected = collect_gerber_entries(gerbers)
+    build_archive(
+        destination,
+        (
+            *collected,
+            ArchiveEntry(workbook, "Required_impedance_control.xlsx"),
+            ArchiveEntry(report, "Controlled_impedance.html"),
+        ),
+    )
+    with ZipFile(destination) as archive:
+        assert archive.namelist() == [
+            "Controlled_impedance.html",
+            "Required_impedance_control.xlsx",
+            "board.gbr",
+        ]
+        assert archive.read("Controlled_impedance.html") == b"report"
+        assert archive.read("Required_impedance_control.xlsx") == b"workbook"
+        assert archive.read("board.gbr") == b"copper"
+    build_archive(destination, collected)
+    with ZipFile(destination) as archive:
+        assert archive.namelist() == ["board.gbr"]
+
+
+def test_mixed_entries_reject_colliding_names(tmp_path: Path) -> None:
+    """Implicit path names share the same portable namespace as explicit names."""
+    source = _source(tmp_path, "board.gbr")
+    destination = tmp_path / "manufacturing.zip"
+    previous = _previous_archive(destination)
+    with pytest.raises(ValueError, match="Duplicate archive member"):
+        build_archive(destination, [source, ArchiveEntry(source, "BOARD.GBR")])
+    assert destination.read_bytes() == previous

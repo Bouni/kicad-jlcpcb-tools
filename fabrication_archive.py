@@ -2,12 +2,22 @@
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
 import shutil
 import tempfile
+from typing import Union
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
+
+
+@dataclass(frozen=True)
+class ArchiveEntry:
+    """Describe one existing file and its root-level manufacturing ZIP name."""
+
+    source: Path
+    archive_name: str
 
 
 def collect_gerber_entries(directory: Path) -> tuple[Path, ...]:
@@ -27,14 +37,23 @@ def collect_gerber_entries(directory: Path) -> tuple[Path, ...]:
     )
 
 
-def _validate_entries(entries: Sequence[Path]) -> tuple[Path, ...]:
+def _validate_entries(
+    entries: Sequence[Union[Path, ArchiveEntry]],
+) -> tuple[ArchiveEntry, ...]:
     """Reject ambiguous names and unusable inputs before opening an output file."""
-    entries = tuple(Path(entry) for entry in entries)
+    entries = tuple(
+        ArchiveEntry(Path(entry.source), entry.archive_name)
+        if isinstance(entry, ArchiveEntry)
+        else ArchiveEntry(Path(entry), Path(entry).name)
+        for entry in entries
+    )
     if not entries:
         raise ValueError("A manufacturing archive must contain at least one file")
     names = set()
     for entry in entries:
-        name = entry.name
+        name = entry.archive_name
+        if not isinstance(name, str):
+            raise TypeError("Archive member names must be strings")
         if (
             not name
             or name in {".", ".."}
@@ -48,20 +67,23 @@ def _validate_entries(entries: Sequence[Path]) -> tuple[Path, ...]:
         if folded_name in names:
             raise ValueError(f"Duplicate archive member name: {name}")
         names.add(folded_name)
-        source = entry
+        source = entry.source
         if not source.is_file():
             raise FileNotFoundError(f"Archive source is not an existing file: {source}")
         with source.open("rb") as stream:
             if not stream.read(1):
                 raise ValueError(f"Archive source is empty: {source}")
-    return tuple(sorted(entries, key=lambda entry: entry.name))
+    return tuple(sorted(entries, key=lambda entry: entry.archive_name))
 
 
-def build_archive(destination: Path, entries: Sequence[Path]) -> Path:
+def build_archive(
+    destination: Path, entries: Sequence[Union[Path, ArchiveEntry]]
+) -> Path:
     """Validate and atomically publish a ZIP, preserving the previous ZIP on error.
 
     The destination directory must already exist. Only the supplied ``entries``
     become archive members; unrelated directory contents are never added.
+    Paths use their basenames; ``ArchiveEntry`` supplies an explicit member name.
     Temporary output is created beside the destination so publication stays on
     the same filesystem.
     """
@@ -79,12 +101,12 @@ def build_archive(destination: Path, entries: Sequence[Path]) -> Path:
             temporary_path, "w", compression=ZIP_DEFLATED, compresslevel=9
         ) as archive:
             for entry in members:
-                archive.write(entry, entry.name)
+                archive.write(entry.source, entry.archive_name)
         with ZipFile(temporary_path, "r") as archive:
             invalid_member = archive.testzip()
             if invalid_member is not None:
                 raise BadZipFile(f"Archive failed CRC verification: {invalid_member}")
-            if archive.namelist() != [entry.name for entry in members]:
+            if archive.namelist() != [entry.archive_name for entry in members]:
                 raise BadZipFile("Archive does not match the requested member list")
         os.replace(temporary_path, destination)
     finally:

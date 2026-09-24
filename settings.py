@@ -66,7 +66,9 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.fill_zones_setting.SetToolTip(
-            wx.ToolTip("Whether zones should be filled on gerber generation")
+            wx.ToolTip(
+                "Fill copper zones before controlled-impedance review and Gerber generation"
+            )
         )
 
         self.fill_zones_image = wx.StaticBitmap(
