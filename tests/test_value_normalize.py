@@ -244,6 +244,41 @@ def test_mega_still_goes_to_mega():
     assert canonicalize("0.1M", RESISTANCE) == "100kΩ"
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1meg", "1MΩ"),
+        ("1Meg", "1MΩ"),
+        ("1MEG", "1MΩ"),
+        ("1mEg", "1MΩ"),
+        ("1MeG", "1MΩ"),
+        ("4.7meg", "4.7MΩ"),
+        ("2.2Meg", "2.2MΩ"),
+        ("0.47meg", "470kΩ"),
+        ("1 meg", "1MΩ"),
+        ("1megohm", "1MΩ"),
+        ("1MegΩ", "1MΩ"),
+        ("10MEGOHMS", "10MΩ"),
+    ],
+)
+def test_spice_meg_is_mega(value, expected):
+    """SPICE spells mega 'meg', because its own M means milli, in any case.
+
+    The catalog never does: no resistor description in a 717,025-part snapshot
+    contains 'meg', so a 1meg passed through untouched finds nothing at all.
+    """
+    assert canonicalize(value, RESISTANCE) == expected
+
+
+def test_meg_has_no_rkm_form():
+    """RKM puts a single letter where the decimal point goes, never meg.
+
+    SPICE, where meg comes from, has no RKM notation at all; in RKM 4.7
+    megohms is 4M7, which already canonicalizes.
+    """
+    assert canonicalize("4meg7", RESISTANCE) is None
+
+
 def test_the_catalog_spells_small_resistances_in_milliohms():
     """0.05Ω appears nowhere in the catalog; 50mΩ is how it is written.
 
@@ -267,7 +302,9 @@ def test_milli_is_the_bottom_of_the_resistance_ladder():
     assert canonicalize("0.001", RESISTANCE) == "1mΩ"
 
 
-@pytest.mark.parametrize("value", ["0.1MF", "0.1MH", "1M5", "100M"])
+@pytest.mark.parametrize(
+    "value", ["0.1MF", "0.1MH", "1M5", "100M", "1meg", "1Meg", "1MEG", "1mEg"]
+)
 def test_mega_is_not_milli(value):
     """And the reactive quantities have no mega rung."""
     assert canonicalize(value, CAPACITANCE) is None

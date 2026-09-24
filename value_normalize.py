@@ -26,7 +26,9 @@ class Quantity:
     ``rungs`` are the SI prefixes the catalog uses for this quantity, largest
     first.  ``prefixes`` maps every spelling a schematic might use onto one of
     them, which is also where prefix case is decided: M and m belong to
-    different quantities and must never be folded together.
+    different quantities and must never be folded together.  ``prefix_words``
+    are the prefixes spelled with more than one letter.  They are matched in
+    any case, because unlike M and m no two of them differ by case alone.
     """
 
     # Only the name is shown when one of these appears in an assertion message;
@@ -39,6 +41,7 @@ class Quantity:
     units: frozenset = field(repr=False)
     prefixes: Mapping[str, str] = field(repr=False)
     rkm_prefixes: Mapping[str, str] = field(repr=False)
+    prefix_words: Mapping[str, str] = field(default_factory=dict, repr=False)
 
 
 # k and K are the same prefix by convention, but M and m are not: the tables are
@@ -57,6 +60,9 @@ RESISTANCE = Quantity(
     units=frozenset({"ω", "r", "o", "ohm", "ohms"}),
     prefixes={"M": "M", "k": "k", "K": "k", "m": "m"},
     rkm_prefixes={"M": "M", "k": "k", "K": "k", "m": "m", "R": "", "r": ""},
+    # meg is how SPICE spells mega, since M means milli there, and SPICE ignores
+    # case.  No catalog description spells it.
+    prefix_words={"meg": "M"},
 )
 
 CAPACITANCE = Quantity(
@@ -149,6 +155,12 @@ def _resolve_rung(rest: str, quantity: Quantity) -> Optional[str]:
         # base rung.  Resistance does ('100' is 100Ω); capacitance does not,
         # since the catalog has no use for bare farads.
         return "" if "" in quantity.rungs else None
+    # Words first, so meg is read whole before its m can be read as milli.
+    folded = rest.casefold()
+    for word, rung in quantity.prefix_words.items():
+        if folded.startswith(word):
+            tail = folded[len(word) :]
+            return rung if not tail or tail in quantity.units else None
     rung = quantity.prefixes.get(rest[0])
     if rung is None:
         return None
