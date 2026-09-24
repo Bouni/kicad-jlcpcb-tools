@@ -84,7 +84,7 @@ jobs:
           --basetemp="$RUNNER_TEMP/native-kicad/pytest-work" \
           --junitxml="$RUNNER_TEMP/native-kicad/pytest.xml" \
           2>&1 | tee "$RUNNER_TEMP/native-kicad/pytest.log"
-      - name: Exercise native impedance review and reports
+      - name: Exercise native impedance Configure through Generate
         shell: bash
         run: |
           timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24' sh -eu -c '

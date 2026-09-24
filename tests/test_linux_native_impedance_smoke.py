@@ -22,7 +22,7 @@ def test_plan_covers_native_layers_connectors_dialogs_and_persistence() -> None:
     """Do not allow a CLI-only subset to masquerade as the whole smoke run."""
     stages = runner().STAGES
     assert stages[0] == "prerequisites"
-    assert {"dialogs", "workflow", "custom-palette"}.issubset(stages)
+    assert {"dialogs", "workflow", "generate", "custom-palette"}.issubset(stages)
     assert {"single-ended-50-ohm", "usb-differential-90-ohm"}.issubset(stages)
     for name in runner().CASES:
         case, source = runner().fixture(name)
@@ -547,7 +547,7 @@ def test_storage_workflow_preserves_both_board_intents(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Check SQLite and report contents independently of native rendering."""
+    """Check SQLite and report contents; native Generate is a separate stage."""
     from impedance import service
     from scripts.generate_rf_impedance_captures import (
         fixture_snapshot,

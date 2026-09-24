@@ -450,20 +450,77 @@ def width_results_fingerprint(results: Sequence[WidthResult]) -> str:
                 "assumptions": result.assumptions,
                 "calculation_digest": result.calculation_digest,
             }
-            for result in sorted(results, key=lambda item: (item.spec_id, item.layer))
+            for result in sorted(
+                results, key=lambda item: (item.spec_id, item.layer, item.input_digest)
+            )
         ]
     )
 
 
 def find_width_result(
-    results: Sequence[WidthResult], spec_id: str, layer: str
+    results: Sequence[WidthResult],
+    spec_id: str,
+    layer: str,
+    input_digest: Optional[str] = None,
 ) -> Optional[WidthResult]:
-    """Return a saved summary; callers must compare its input fingerprint."""
-    return next(
-        (
-            result
-            for result in results
-            if (result.spec_id, result.layer) == (spec_id, layer)
-        ),
-        None,
+    """Return a saved summary for a specification layer.
+
+    When ``input_digest`` is provided, only a result for that exact declared
+    geometry matches. Callers comparing against the active stackup must pass the
+    current fingerprint so historical results for other stackups are not treated
+    as current.
+    """
+    matches = tuple(
+        result
+        for result in results
+        if result.spec_id == spec_id and result.layer == layer
+    )
+    if not matches:
+        return None
+    if input_digest is None:
+        return matches[0]
+    for result in matches:
+        if result.input_digest == input_digest:
+            return result
+    return None
+
+
+def merge_width_results(
+    existing: Sequence[WidthResult],
+    incoming: Sequence[WidthResult],
+) -> tuple[WidthResult, ...]:
+    """Retain historical input digests while replacing exact geometry matches.
+
+    Nominal widths are cached by ``input_digest``, which already binds stackup,
+    impedance kind, target resistance, signal layer, reference (ground) layers,
+    and declared gaps. Switching stackups must not discard the previous stackup's
+    successful results.
+    """
+    for result in existing:
+        validate_width_result(result)
+    for result in incoming:
+        validate_width_result(result)
+    by_digest = {result.input_digest: result for result in existing}
+    for result in incoming:
+        by_digest[result.input_digest] = result
+    merged = tuple(
+        sorted(
+            by_digest.values(),
+            key=lambda item: (item.spec_id, item.layer, item.input_digest),
+        )
+    )
+    if len(merged) <= MAX_WIDTH_RESULTS:
+        return merged
+    protected = {result.input_digest for result in incoming}
+    keep = [result for result in merged if result.input_digest in protected]
+    extras = sorted(
+        (result for result in merged if result.input_digest not in protected),
+        key=lambda item: item.calculated_at_utc or "",
+        reverse=True,
+    )
+    room = MAX_WIDTH_RESULTS - len(keep)
+    if room > 0:
+        keep.extend(extras[:room])
+    return tuple(
+        sorted(keep, key=lambda item: (item.spec_id, item.layer, item.input_digest))
     )

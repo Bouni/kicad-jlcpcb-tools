@@ -68,6 +68,7 @@ def pcm_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "impedance/model.pyc",
         "impedance/model.pyo",
         "impedance/.DS_Store",
+        "lib/websockets/tests/fixture.json",
     ):
         artifact = source / relative
         artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -135,10 +136,13 @@ def test_pcm_archive_retains_runtime_resources_and_licenses(pcm_archive: Path) -
         "__init__.py",
         "plugin.py",
         "fabrication_archive.py",
+        "impedance/jlcpcb_calculator.py",
         "impedance/workbook.py",
         _TEMPLATE,
         "impedance/resources/preferred-fire.svg",
         "impedance/resources/preferred-fire-LICENSE.txt",
+        "lib/websockets/sync/client.py",
+        "lib/websockets-15.0.1.dist-info/LICENSE",
         "lib/openpyxl/__init__.py",
         "lib/openpyxl-3.1.5.dist-info/LICENCE.rst",
         "lib/et_xmlfile/__init__.py",
@@ -187,11 +191,14 @@ sys.path[:0] = [str(plugins), str(plugins / "lib")]
 import et_xmlfile
 import openpyxl
 import packaging
+import websockets
+from websockets.sync.client import connect
 from impedance.service import CapturedImage, ReportRow
 from impedance.workbook import write_workbook
 
-for dependency in (et_xmlfile, openpyxl, packaging):
+for dependency in (et_xmlfile, openpyxl, packaging, websockets):
     assert Path(dependency.__file__).is_relative_to(plugins / "lib")
+assert callable(connect)
 row = ReportRow(
     "PCM sample", ("RF",), "RF", ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
     "F.Cu", ("In1.Cu",), "single_ended", 254000, None, "50",

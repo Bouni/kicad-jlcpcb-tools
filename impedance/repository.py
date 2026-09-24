@@ -2,6 +2,11 @@
 
 from typing import Any, Optional, Protocol
 
+from .calculator_config_cache import (
+    CalculatorConfigCache,
+    calculator_config_from_payload,
+    calculator_config_to_payload,
+)
 from .catalog_cache import CatalogCache, parse_catalog_checked_at
 from .model import Config, ValidationError, validate_config
 from .stackup_model import Stackup, stackup_from_dict, stackup_to_dict, validate_stackup
@@ -51,6 +56,14 @@ class ConfigDatabase(Protocol):
 
     def save_stackup_catalog(self, layer_count: int, payload: dict[str, Any]) -> None:
         """Save reusable catalog data independently from board edit revisions."""
+        ...
+
+    def load_calculator_config(self) -> Optional[dict[str, Any]]:
+        """Return the project-shared calculator metadata cache, if present."""
+        ...
+
+    def save_calculator_config(self, payload: dict[str, Any]) -> None:
+        """Save calculator metadata independently from board edit revisions."""
         ...
 
 
@@ -196,3 +209,28 @@ class ImpedanceRepository:
                 "checked_at_utc": cache.checked_at_utc,
             },
         )
+
+    def load_calculator_config(self) -> CalculatorConfigCache:
+        """Load provider calculator metadata without writing a migration."""
+        return self.read_calculator_config(self.database)
+
+    @classmethod
+    def read_calculator_config(cls, database: ConfigDatabase) -> CalculatorConfigCache:
+        """Read the project-shared calculator cache without requiring a PCB."""
+        payload = database.load_calculator_config()
+        if payload is None:
+            return CalculatorConfigCache()
+        try:
+            return calculator_config_from_payload(payload)
+        except ValueError as error:
+            raise ValidationError(
+                f"Cached calculator configuration is invalid; a new fetch is needed: {error}"
+            ) from error
+
+    def save_calculator_config(self, cache: CalculatorConfigCache) -> None:
+        """Atomically cache a successful calculator-config check."""
+        try:
+            payload = calculator_config_to_payload(cache)
+        except ValueError as error:
+            raise ValidationError(str(error)) from error
+        self.database.save_calculator_config(payload)

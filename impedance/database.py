@@ -116,6 +116,11 @@ class ImpedanceDatabase:
             "layer_count INTEGER PRIMARY KEY NOT NULL CHECK(layer_count BETWEEN 2 AND 64), "
             "payload_json TEXT NOT NULL)"
         )
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS impedance_calculator_config ("
+            "id INTEGER PRIMARY KEY NOT NULL CHECK(id = 1), "
+            "payload_json TEXT NOT NULL)"
+        )
 
     def _validate_tables(self, connection: sqlite3.Connection) -> None:
         """Reject damaged impedance tables without modifying unrelated schemas."""
@@ -137,7 +142,21 @@ class ImpedanceDatabase:
                 ("layer_count",),
             ),
         }
-        for table, (required, primary_key) in tables.items():
+        optional = {
+            "impedance_calculator_config": (
+                {"id", "payload_json"},
+                ("id",),
+            ),
+        }
+        present = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        for table, (required, primary_key) in {**tables, **optional}.items():
+            if table in optional and table not in present:
+                continue
             columns = connection.execute(f"PRAGMA table_info({table})").fetchall()
             actual_key = tuple(
                 row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5]
@@ -200,7 +219,8 @@ class ImpedanceDatabase:
         """Distinguish untouched legacy stores from valid impedance storage."""
         owned_schema = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE lower(name) IN "
-            "('boards', 'board_feature_config', 'impedance_stackup_catalog') LIMIT 1"
+            "('boards', 'board_feature_config', 'impedance_stackup_catalog', "
+            "'impedance_calculator_config') LIMIT 1"
         ).fetchone()
         if owned_schema is None:
             return False
@@ -330,6 +350,55 @@ class ImpedanceDatabase:
                 "INSERT INTO impedance_stackup_catalog (layer_count, payload_json) VALUES (?, ?) "
                 "ON CONFLICT(layer_count) DO UPDATE SET payload_json = excluded.payload_json",
                 (layer_count, encoded),
+            )
+
+    def load_calculator_config(self) -> Optional[dict[str, Any]]:
+        """Read project-shared calculator metadata without touching board revisions."""
+        if not self.path.exists():
+            return None
+        try:
+            with self.connect() as connection:
+                if not self._validate_existing_tables(connection):
+                    return None
+                present = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                    "AND name = 'impedance_calculator_config'"
+                ).fetchone()
+                if present is None:
+                    return None
+                row = connection.execute(
+                    "SELECT payload_json FROM impedance_calculator_config WHERE id = 1"
+                ).fetchone()
+        except sqlite3.DatabaseError as error:
+            raise DatabaseMigrationError(
+                f"Cannot read controlled-impedance storage: {error}"
+            ) from error
+        if row is None:
+            return None
+        if not isinstance(row[0], str) or len(row[0].encode("utf-8")) > 32_000_000:
+            raise ValueError("Cached calculator configuration is invalid or too large.")
+        payload = json.loads(row[0])
+        if not isinstance(payload, dict):
+            raise ValueError("Cached calculator configuration must be an object.")  # noqa: TRY004
+        return payload
+
+    def save_calculator_config(self, payload: dict[str, Any]) -> None:
+        """Atomically replace calculator metadata and successful-check timestamp."""
+        if not isinstance(payload, dict):
+            raise ValueError("Cached calculator configuration must be an object.")  # noqa: TRY004
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, allow_nan=False
+        )
+        if len(encoded.encode("utf-8")) > 32_000_000:
+            raise ValueError(
+                "Cached calculator configuration exceeds its storage limit."
+            )
+        with self.connect(write=True) as connection:
+            self._create_tables(connection)
+            connection.execute(
+                "INSERT INTO impedance_calculator_config (id, payload_json) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json",
+                (encoded,),
             )
 
     @staticmethod

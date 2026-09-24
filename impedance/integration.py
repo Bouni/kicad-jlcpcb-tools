@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import wx
 
+from .calculator_config_cache import CalculatorConfigCache
 from .catalog_cache import CatalogCache
 from .database import ImpedanceDatabase
 from .model import BoardSnapshot, Config, Section, ValidationError
@@ -282,6 +283,17 @@ class ImpedanceControls:
                     """Persist successful automatic checks, never the board selection."""
                     self._writable_repository().save_stackup_catalog(layer_count, cache)
 
+                def load_calculator_config() -> CalculatorConfigCache:
+                    """Read reusable calculator metadata without altering board intent."""
+                    self.check_board()
+                    if self.database is None:
+                        raise ValidationError("The project database is not ready.")
+                    return ImpedanceRepository.read_calculator_config(self.database)
+
+                def save_calculator_config(cache: CalculatorConfigCache) -> None:
+                    """Persist a successful calculator-config fetch."""
+                    self._writable_repository().save_calculator_config(cache)
+
                 dialog = ImpedanceDialog(
                     self.parent,
                     config,
@@ -292,6 +304,8 @@ class ImpedanceControls:
                     appearance_context=lambda: read_theme_context(self.parent.pcbnew),
                     load_stackup_catalog=load_stackup_catalog,
                     save_stackup_catalog=save_stackup_catalog,
+                    load_calculator_config=load_calculator_config,
+                    save_calculator_config=save_calculator_config,
                     load_stackup_colors=lambda: read_stackup_copper_colors(
                         self.parent.pcbnew
                     ),

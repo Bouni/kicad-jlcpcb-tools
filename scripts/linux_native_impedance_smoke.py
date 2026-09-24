@@ -3,6 +3,7 @@
 Run with Python that can import KiCad and wxGTK, under Xvfb. Every stage runs in a
 fresh process; unsupported bindings, crashes and timeouts are failures, not skips.
 Only fresh artifact directories and copies of checked-in boards are writable.
+The Generate stage exercises the actual plugin constructor and toolbar workflow.
 """
 
 import argparse
@@ -34,7 +35,7 @@ CASES = (
     "single-ended-50-ohm",
     "usb-differential-90-ohm",
 )
-STAGES = ("prerequisites", *CASES, "custom-palette", "dialogs", "workflow")
+STAGES = ("prerequisites", *CASES, "custom-palette", "dialogs", "workflow", "generate")
 
 
 def require(condition: Any, message: str) -> None:
@@ -134,7 +135,7 @@ def run(output: Path, timeout: int = 240) -> int:
             "schema_version": 1,
             "status": "FAIL" if failed else "PASS",
             "stages": records,
-            "scope": "native pcbnew/GTK, layer reviews, workbook/HTML reports and board-scoped persistence",
+            "scope": "native pcbnew/GTK, Configure/calculation/review/Save/reopen/Generate, real fabrication reports and publication",
         },
     )
     return int(failed)
@@ -1111,7 +1112,7 @@ def workflow(plan: Any, board: Any, pcbnew: Any, output: Path) -> dict[str, Any]
         "Explicit impedance reset failed, created an archive, or changed another board",
     )
     return {
-        "scope": "real service.export_reports/Excel/HTML and board-scoped SQLite",
+        "scope": "real service.export_reports/Excel/HTML and board-scoped SQLite; Generate/fabrication is exercised separately",
         "rows": len(plan.sections),
         "boards": [first_id, second_id, copied_id, renamed_id],
         "new_filenames_start_fresh": True,
@@ -1135,7 +1136,7 @@ def worker(stage: str, output: Path) -> int:
         if stage != "prerequisites":
             name = (
                 "usb-differential-90-ohm"
-                if stage in ("dialogs", "workflow")
+                if stage in ("dialogs", "workflow", "generate")
                 else ("single-ended-50-ohm" if stage == "custom-palette" else stage)
             )
             with loaded_fixture(name, output, pcbnew) as (case, board, path):
@@ -1144,6 +1145,10 @@ def worker(stage: str, output: Path) -> int:
                     evidence = dialogs(plan, board, pcbnew, wx, app, output)
                 elif stage == "workflow":
                     evidence = workflow(plan, board, pcbnew, output)
+                elif stage == "generate":
+                    from scripts.native_impedance_workflow import generate_workflow
+
+                    evidence = generate_workflow(plan, board, pcbnew, wx, app, output)
                 else:
                     evidence = {
                         "captures": render_rows(

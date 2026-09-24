@@ -1,13 +1,13 @@
-# Stackup selection and saved width results
+# Stackup selection and nominal width checks
 
-This iteration adds board-level JLCPCB stackup selection and offline display of
-saved nominal trace-width results to controlled-impedance review. It does not
-change the PCB, net-class assignments, trace geometry, or the vendor workbook's
-actual-width field.
+This iteration adds board-level JLCPCB stackup selection and provider-calculated
+nominal trace widths to controlled-impedance review. It does not change the PCB,
+net-class assignments, trace geometry, or the vendor workbook's actual-width field.
 Targeted automated checks exercise transport adapters, persistence and simulated
 dialog workflows. [Native Linux checks](linux-impedance-testing.md) separately
-exercise real dialogs and report output. Live catalog compatibility requires
-provider probes; neither source review nor mocked tests establish native behavior.
+exercise real dialogs and fabrication output. Live catalog and solver compatibility
+require provider probes; neither source review nor mocked tests establish native
+behavior.
 
 ## Workflow and persistence
 
@@ -93,7 +93,7 @@ does not change board settings or their revision. Cache-write failures are shown
 explicitly and leave the previous persistent cache intact. Selection,
 specification edits, results and audit records remain
 private until accepted through the parent configuration save. No configuration,
-catalog, result or image sidecars are introduced.
+catalog, calculation or image sidecars are introduced.
 
 Catalog payload version 2 adds the check timestamp inside the existing database
 table. Version 1 rows load unchanged with unknown freshness and are checked on
@@ -102,19 +102,27 @@ board configuration's version and approval fingerprints.
 
 Specifications select complete net classes. Actual widths, including neckdowns,
 are discovered from routing. Enter the intended target, reference layers and
-applicable pair/ground gaps. Existing saved width results report target width,
+applicable pair/ground gaps. Nominal widths refresh automatically in the
+background when a calculator-supported stackup and complete layer settings are
+present, and again when those inputs change. Comparisons report target width,
 actual width and signed dimensional difference in mm/mil. Unavailable,
-unsupported, failed and outdated results are shown as such, never converted into
-a successful match.
+unsupported, failed and outdated results are shown with a clear reason, never
+converted into a successful match. The dialog stays quiet while a refresh is in
+flight; if results still have not arrived after about 15 seconds, one status
+alert explains the delay. Failed or missing results retry about every three
+minutes while the dialog remains open. JLCPCB calculator metadata is cached in
+the project database for seven days.
 
-Changing meaningful stackup or specification inputs invalidates final section
+Changing meaningful stackup or calculation inputs invalidates final section
 approval and makes earlier layer approvals historical. Workbook rows repopulate
 automatically after those changes; use **Approve N workbook rows** below the list
 to approve the new report selection. **Needs approval** makes the pending action
 explicit, and a green check with **N workbook rows approved** identifies an
-approved selection. Reopening a specification requires a fresh layer review and
-records a new layer approval only when explicitly approved. Saved result model,
-numeric-input fingerprints and assumptions participate in approval currentness.
+approved selection. Advisory calculations do not force a separate
+reopening of every unchanged image; reopening a specification still requires a
+fresh layer review and records a new layer approval only when explicitly approved.
+Solver model, numeric-input fingerprints and assumptions participate in approval
+currentness even if recalculation returns the same rounded nominal width.
 Numeric fingerprints omit retrieval timestamps and transient request identifiers,
 so audit metadata alone does not alter physical intent or reset final report
 approval. Accepting an unchanged specification likewise retains final report
@@ -158,7 +166,7 @@ column: **Normal**, **Additional**, or **—** when surcharge information is
 unavailable. These labels use the existing provider surcharge evidence, not the
 preferred boolean, and are price categories rather than currency quotes. Absence
 of the fire does not establish that a stackup costs more. Missing calculator
-metadata means preference is unknown, not “non-preferred.”
+metadata means preference/calculation availability is unknown, not “non-preferred.”
 Quoted fabrication prices remain JLCPCB's responsibility.
 
 The icon is **Fire, Font Awesome Free 6.7.2**, ©2024 Fonticons, Inc., licensed
@@ -168,7 +176,16 @@ the fill is orange and display dimensions are explicit. The packaged
 and offline HTML attribution preserve its source and license. It is not copied
 JLCPCB artwork. [Original SVG](https://github.com/FortAwesome/Font-Awesome/blob/6.7.2/svgs/solid/fire.svg).
 
-## Catalog transport and saved results
+## Provider calculation and boundaries
+
+The client uses the same JSON and WebSocket services as JLCPCB's public frontend,
+not a documented stable integration API. Requests carry numeric geometry,
+material/model identifiers and random correlation IDs only. They do not transmit
+board files, screenshots, paths, net names, or specification labels. TLS remains
+verified; requests and received data are bounded, cancellation-aware, and matched
+to the calculation that requested them. A late response cannot authorize a
+different selection. No silently substituted local approximation is labeled as
+a JLCPCB result.
 
 HTTP requests honor configured proxies and Requests CA-bundle overrides while
 explicitly suppressing implicit `.netrc` origin authentication. Redirects remain
@@ -179,17 +196,28 @@ elapsed-time checks prevent accepting late results; they cannot forcibly interru
 an operating-system DNS lookup already in progress. Cancellation never waits for
 the HTTP worker on the GUI thread.
 
+The mapping distinguishes coated outer microstrip, inner stripline and coplanar
+variants, single-ended or differential. It uses the saved construction and live
+provider model/configuration data, recording result provenance. Insufficient or
+ambiguous geometry is unsupported rather than guessed, including reference planes
+with intervening copper, unsupported construction types, or incompatible dielectric
+information. Outer calculations assume the supported coated model; absence of
+solder mask is not inferred from the board.
+
 The catalog normalizes JLCPCB's type-3 “Bare board” entry as one dielectric, with
 the frontend's summed top/dielectric/bottom thickness and supplied dielectric
 constant. It does not invent copper layers for this unnamed entry. This permits
-complete six-layer catalogs to load.
+complete six-layer catalogs to load; it does not relax the calculator's separate
+rejection of unsupported or mixed-dielectric reference geometry.
 
 Saved results retain nominal width, status, calculation time, provider/model,
-assumptions, and declared/effective-input fingerprints. Raw provider responses,
-numeric request archives, and full solver configuration dumps are not retained in
-board settings or shown as HTML forensic details. The HTML shows the compact
-model/assumption summary; it does not imply that nominal catalog copper thickness
-is always the finished-copper model input. Effective-input fingerprints still participate in approval even
+assumptions, and declared/effective-input fingerprints. Returned widths, units,
+correlation IDs, and relevant solver inputs are still validated while processing
+the live result. Raw provider responses, numeric request archives, and full solver
+configuration dumps are no longer retained in board settings or shown as HTML
+forensic details. The HTML shows the compact model/assumption summary; it does
+not imply that nominal catalog copper thickness is always the finished-copper
+model input. Effective-input fingerprints still participate in approval even
 when the rounded nominal width is unchanged.
 
 Configuration payload version 5 writes these compact results. An ordinary
@@ -207,8 +235,13 @@ and connectors, or establish manufacturing tolerance. No percent-width tolerance
 is presented as a percent-impedance tolerance. Actual routed width remains in
 the XLSX; the HTML adds the frozen stackup, nominal comparison and provenance.
 Generation does not fetch the network or invent new review/calculation timestamps.
-Saved results remain part of review currentness; “nominal” does not mean that
-changing their meaningful inputs or results bypasses approval.
+These calculations remain part of review currentness; “nominal” does not mean
+that changing their meaningful inputs or results bypasses approval.
+
+`websockets` 15.0.1 is bundled as a pure-Python wheel in `lib/`, with its BSD
+license, so the KiCad plugin does not depend on a user's separate Python packages.
+The dependency is also declared in `pyproject.toml`; no platform-specific build is
+required for this bundled copy.
 
 ## Catalog diagnostic evidence
 
@@ -232,8 +265,9 @@ Before release, execute—not merely inspect—the following scenarios:
 - Reopen new, draft and approved configurations and verify automatic row
   population, an explanatory no-specification state, restored approved selections,
   and a visible relevant preview. Add, edit and remove specifications, select a
-  different stackup: no manual scan should be needed. Check selected-row retention
-  on harmless updates, no-op edits and metadata-only changes preserving approval, contextual **Retry** after population
+  different stackup and accept new calculation results: no manual scan should be
+  needed. Check selected-row retention on harmless updates, no-op edits and
+  metadata-only changes preserving approval, contextual **Retry** after population
   failure, and absence of stale previews after removal or failure. Confirm the
   count-bearing approval button and pending/green-approved state match the checked
   rows. A board change discovered at approval must refresh without approving in
@@ -291,11 +325,20 @@ Before release, execute—not merely inspect—the following scenarios:
   show actionable errors and require explicit reset before recreation.
   Exercise child/outer Cancel, concurrent saves, rollback, board copy/rename and
   unknown-schema errors; none may silently reset or broaden matching.
+- Verify provider wire requests and returned W1 widths against the official
+  calculator for single-ended/differential outer/inner CPWG/noncoplanar cases,
+  both copper orientations, multiple copper weights and supported dielectric
+  stacks. Include unsupported geometry, timeout, reconnect/late messages, wrong
+  correlation ID, dialog close while a worker finishes, and editing that
+  supersedes an in-flight refresh. Confirm quiet auto-refresh after stackup or
+  specification changes, a single slow-update alert after roughly 15 seconds, and
+  background retry about every three minutes while results remain missing.
 - Confirm each compact width result is tied to all relevant inputs, model and
   assumptions; current results and approval survive a normal version-5 reopen,
   meaningful changes require review, and stale results never appear current.
-  Verify exact width and differing neckdown rows, and confirm saved settings
-  contain no raw solver archive.
+  Recalculation with changed effective inputs must require review even when its
+  nominal width is unchanged. Verify exact width and differing neckdown rows, and
+  confirm new settings contain no raw solver archive.
 - Export offline HTML/XLSX/ZIP and inspect actual widths, nominal comparisons,
   immutable stackup details, fee/preference, timestamp currentness, escaped vendor
   data and embedded CC icon attribution. Failure must preserve the previous ZIP.

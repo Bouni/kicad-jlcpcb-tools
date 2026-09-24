@@ -326,6 +326,7 @@ def test_impedance_initialization_and_save_preserve_existing_parts_and_counters(
             "boards",
             "board_feature_config",
             "impedance_stackup_catalog",
+            "impedance_calculator_config",
         }
         for name, sql in original_schema:
             assert connection.execute(
@@ -474,31 +475,27 @@ def test_feature_configuration_failure_preserves_prior_revision(
     assert database.load_config(board_id) == before
 
 
-def test_catalog_cache_is_shared_by_layer_count_without_changing_board_intent(
+def test_calculator_config_cache_is_shared_without_changing_board_intent(
     tmp_path: Path, database_module: ModuleType
 ) -> None:
-    """Catalog refresh survives reopening but never changes either board's revision."""
+    """Calculator metadata survives reopen and stays independent of board revisions."""
     path = tmp_path / "jlcpcb" / "project.db"
     database = database_module.ImpedanceDatabase(path)
-    first = database.resolve_board(_board(tmp_path, "main"))
-    second = database.resolve_board(_board(tmp_path, "panel"))
-    database.save_config(first, {"target_ohms": "50"}, False, 0)
-    database.save_config(second, {"target_ohms": "90"}, False, 0)
-    records = [database.load_config(board_id) for board_id in (first, second)]
+    board_id = database.resolve_board(_board(tmp_path, "main"))
+    database.save_config(board_id, {"target_ohms": "50"}, False, 0)
+    before = database.load_config(board_id)
     cache = {
-        "schema_version": 2,
-        "stackups": [],
-        "checked_at_utc": "2026-09-14T14:00:00Z",
+        "schema_version": 1,
+        "models": [{"impedanceType": "CoatedMicrostrip1B"}],
+        "copper": [{"baseCopperThickness": "1"}],
+        "coating": [{"coatingAboveSubstrate": "0.01"}],
+        "limits": [{"impedanceName": "W2", "minValue": "2.5", "maxValue": "100"}],
+        "checked_at_utc": "2026-09-14T14:00:00.000000Z",
     }
-    database.save_stackup_catalog(6, cache)
+    database.save_calculator_config(cache)
     reopened = database_module.ImpedanceDatabase(path)
-    assert reopened.load_stackup_catalog(6) == cache
-    assert reopened.load_stackup_catalog(4) is None
-    assert [reopened.load_config(board_id) for board_id in (first, second)] == records
-    updated = dict(cache, checked_at_utc="2026-09-15T14:00:00Z")
-    reopened.save_stackup_catalog(6, updated)
-    assert database.load_stackup_catalog(6) == updated
-    assert [database.load_config(board_id) for board_id in (first, second)] == records
+    assert reopened.load_calculator_config() == cache
+    assert reopened.load_config(board_id) == before
 
 
 @pytest.mark.parametrize("layer_count", [True, 1, 65, "6", 6.0])
@@ -656,7 +653,12 @@ def test_configuration_reset_replaces_invalid_record_without_creating_archive(
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
-        } == {"boards", "board_feature_config", "impedance_stackup_catalog"}
+        } == {
+            "boards",
+            "board_feature_config",
+            "impedance_stackup_catalog",
+            "impedance_calculator_config",
+        }
     assert database.config_reset_token(board_id) != token
 
 

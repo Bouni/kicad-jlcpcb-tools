@@ -21,6 +21,7 @@ dependencies = [
     "click>=8.0",
     "humanize>=4.0",
     "requests>=2.28",
+    "websockets>=15.0.1,<16",
     "openpyxl==3.1.5",
     "et-xmlfile==2.0.0",
     "cachetools>=5.0",

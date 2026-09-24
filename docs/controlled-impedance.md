@@ -62,7 +62,8 @@ specifications in the existing board database so you can reopen **Configure…**
 and continue later. **Needs approval** is separate from the save action:
 saving does not approve the report or create review timestamps. If controlled
 impedance is enabled, fabrication export remains blocked until review is complete;
-saving a draft never silently disables the report.
+saving a draft never silently disables the report. Closing the dialog cancels any
+in-flight width refresh; save does not wait on the calculator.
 
 Opening review does not save the PCB. **Cancel** discards unsaved impedance
 settings, but does not undo the in-memory refill. Image navigation and rendering
@@ -71,8 +72,8 @@ do not refill copper; a later export still performs its normal preparation.
 An unchanged, previously approved configuration restores its workbook rows,
 saved checked-row selection, and approval when reopened. Population preserves the
 selected row during harmless updates. The rows also update automatically after
-accepted specification additions, edits or removals and meaningful stackup
-changes. There is no manual **Rescan / reset review** step. If row
+accepted specification additions, edits or removals and meaningful stackup or
+calculation changes. There is no manual **Rescan / reset review** step. If row
 population fails, an inline explanation and contextual **Retry** replace an
 unexplained empty pane; an empty configuration instead prompts you to add a
 specification.
@@ -392,8 +393,10 @@ The feature is isolated in `impedance/`:
   `stackup_construction.py` displays the in-memory schematic cross-section;
   `palette.py` reads saved KiCad copper colors without changing settings.
   `stackup_text.py` formats the selected construction for explicit clipboard copy.
-  `width_checks.py` provides offline nominal dimensional comparisons from saved
-  results. See [Stackup selection and saved width results](stackup-width-checks.md).
+  `calculation_geometry.py` maps reviewed dimensions to provider models;
+  `jlcpcb_calculator.py` correlates asynchronous vendor results, and
+  `width_checks.py` provides nominal dimensional comparisons. See
+  [Stackup selection and width checks](stackup-width-checks.md).
 - `pcbnew_adapter.py` extracts the live board into plain records. `render.py`
   plots the native layers off-screen with `pcbnew.PLOT_CONTROLLER`, composites
   their native colors, adds the annotation, and rasterizes through KiCad's
@@ -428,13 +431,13 @@ repository's `myenv` for pytest and Ruff; do not substitute another Python envir
 
 Targeted automated checks exercise pure logic, simulated KiCad/wx adapters, SQLite,
 and actual workbook/HTML/archive output. Native rendering, event ordering and
-layout require the separate native checks; live catalog compatibility requires a
+layout require the separate native checks; live solver compatibility requires a
 provider check. Before release, exercise this native and end-to-end acceptance checklist:
 
 - Open a new, draft, and unchanged approved configuration: rows populate without
   a manual scan, the approved selection and approval return when still current,
   and a stackup-only draft has an explanatory empty state. Add, edit and remove
-  specifications and change stackup inputs: affected rows update
+  specifications and change stackup/calculation inputs: affected rows update
   automatically, the relevant preview is selected, and meaningful changes require
   explicit approval. An unchanged edit or metadata-only refresh retains approval.
   Harmless updates retain the selected row; deleted rows cannot leave a stale

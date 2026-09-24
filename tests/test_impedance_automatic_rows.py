@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 import importlib
 import sys
+from threading import Event
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -316,6 +317,44 @@ def test_stackup_acceptance_repopulates_rows_and_requires_new_approval(
     dialog.stackup_button.emit(api.wx.EVT_BUTTON)
 
     assert dialog.session.config.stackup == selected
+    assert len(dialog.sections.items) == 2
+    assert dialog.session.approved is False
+    assert dialog.session.config.reviewed_digest == ""
+    api.drain()
+    api.paint(dialog.preview_pane)
+    assert dialog.approve_button.enabled is True
+    assert dialog.FindWindow(api.wx.ID_OK).enabled is True
+
+
+def test_complete_calculation_refreshes_rows_without_approving_new_results(
+    draft_api: SimpleNamespace,
+) -> None:
+    """Accept a complete immutable worker result through its actual completion handler."""
+    api = draft_api
+    board = _board(api)
+    original = replace(_intent(api), stackup=_stackup(api))
+    dialog = _open(api, original, board)
+    _show(api, dialog)
+    dialog.approve_button.emit(api.wx.EVT_BUTTON)
+    model = importlib.import_module(api.dialog.__package__ + ".stackup_model")
+    config = dialog.session.config
+    result = model.WidthResult(
+        spec_id="rf",
+        layer="F.Cu",
+        input_digest=model.calculation_fingerprint(
+            config.stackup, config.specifications[0], "F.Cu"
+        ),
+        status="unsupported",
+        message="Construction is unavailable to the nominal-width solver.",
+    )
+    key = dialog._calculation_key(config, board)
+    dialog._calculation_cancel = Event()
+    generation = dialog._calculation_generation
+
+    dialog._finish_calculation(generation, key, (result,), "")
+
+    assert dialog._calculation_cancel is None
+    assert dialog.session.config.width_results == (result,)
     assert len(dialog.sections.items) == 2
     assert dialog.session.approved is False
     assert dialog.session.config.reviewed_digest == ""
