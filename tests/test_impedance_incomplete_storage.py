@@ -121,7 +121,7 @@ def test_incomplete_v6_intent_roundtrips_real_storage(
     record = repository.database.load_config(repository.board_id)
     assert record is not None
     assert record["version"] == 1
-    assert record["payload"]["schema_version"] == 6
+    assert record["payload"]["schema_version"] == 8
     assert record["payload"]["specifications"][0]["linked_layer_groups"] == []
     assert record["payload"]["specifications"][0]["independent_layers"] == []
     for operation in (
@@ -199,7 +199,7 @@ def test_legacy_load_is_read_only_and_preserves_physical_intent(
     assert config.included_section_ids == (
         () if version == 4 else ("previous-section",)
     )
-    assert config.to_dict()["schema_version"] == 6
+    assert config.to_dict()["schema_version"] == 8
 
 
 @pytest.mark.parametrize("version", [4, 5])

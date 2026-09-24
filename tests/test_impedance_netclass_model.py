@@ -65,7 +65,8 @@ def class_spec(**changes: Any) -> model.Specification:
 def current_payload() -> dict[str, Any]:
     """Describe the upgraded draft schema without changing the historical fixture."""
     payload = class_payload()
-    payload["schema_version"] = 6
+    payload["schema_version"] = 8
+    payload["reviewed_captures"] = []
     for spec in payload["specifications"]:
         spec.update(linked_layer_groups=[], independent_layers=[])
     return payload

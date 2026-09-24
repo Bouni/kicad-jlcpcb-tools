@@ -25,6 +25,9 @@
     "pre_script": "",
     "timeout_seconds": 30
   },
+  "impedance": {
+    "skip_stub_review": true
+  },
   "library": {
     "data_path": "",
     "selected_library": "current-parts"

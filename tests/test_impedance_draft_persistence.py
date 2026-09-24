@@ -94,7 +94,7 @@ def test_enabled_empty_draft_roundtrips_real_database_without_approval(
     record = reopened.load_config(repository.board_id)
     assert record is not None
     assert record["version"] == 1
-    assert record["payload"]["schema_version"] == 6
+    assert record["payload"]["schema_version"] == 8
     assert record["enabled"] is True
     with pytest.raises(ValidationError, match="requires at least one specification"):
         prepare(restored, _snapshot())

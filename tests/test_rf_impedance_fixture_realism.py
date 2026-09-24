@@ -203,6 +203,7 @@ def test_usb_launches_do_not_shorten_the_120mm_coupled_region(case: RFCase) -> N
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 @pytest.mark.parametrize(
     "case",
     [case for case in RF_CASES if case.length_mm > 2],
@@ -299,47 +300,59 @@ def test_fence_vias_clear_full_signal_capsules_at_connector_fanout_corners(
 def test_capture_includes_whole_sma_signal_pads_and_local_connector_context(
     case: RFCase,
 ) -> None:
-    """The 15% crop retains signal pads; connector bodies may extend outside it."""
+    """The region owning a connector endpoint retains its signal pad and context."""
     from impedance.render import section_viewport
     from tests.rf_impedance_fixtures import BOARD_BOUNDS
     from tests.test_rf_impedance_matrix import _native_component_bounds, _native_tree
 
-    components = dict(_native_component_bounds(_native_tree(case.board_text())))
-    member_count = 2 if case.paired else 1
+    native = _native_tree(case.board_text())
+    components = dict(_native_component_bounds(native))
+    connectors = {}
+    for connector in _children(native, "footprint"):
+        if connector[1] != "Connector_Coaxial:SMA_Amphenol_132134_Vertical":
+            continue
+        reference = next(
+            prop[2]
+            for prop in _children(connector, "property")
+            if prop[1] == "Reference"
+        )
+        origin = tuple(
+            round(float(value) * 1_000_000) for value in _field(connector, "at")[:2]
+        )
+        pad = next(pad for pad in _children(connector, "pad") if pad[1] == "1")
+        size = [round(float(value) * 1_000_000) for value in _field(pad, "size")]
+        pad_bounds = (
+            origin[0] - size[0] // 2,
+            origin[1] - size[1] // 2,
+            origin[0] + size[0] // 2,
+            origin[1] + size[1] // 2,
+        )
+        connectors[reference] = (origin, pad_bounds)
+    assert set(connectors) == {"JRF1", "JRF2"}
     sections = analyze(
         Config(enabled=True, specifications=case.specifications()), case.snapshot()
     ).sections
+    captured_connectors = Counter()
     for section in sections:
-        required = []
-        if section.layer == case.legs[0].layer:
-            required.extend(f"JRF{index + 1}" for index in range(member_count))
-        if section.layer == case.legs[-1].layer:
-            required.extend(
-                f"JRF{member_count + index + 1}" for index in range(member_count)
-            )
+        # Long single-ended profiles may have separate core/launch captures.
+        # A core crop need not contain either remote connector, but an endpoint
+        # crop must include the full pad rather than just its centre.
+        endpoints = {
+            point
+            for trace in section.traces
+            for point in (trace.points[0], trace.points[-1])
+        }
+        required = [
+            reference
+            for reference, (origin, _) in connectors.items()
+            if origin in endpoints
+        ]
         view = section_viewport(section, 800, 420, board_bounds=BOARD_BOUNDS)
         assert _complete_component_visible(view, section.bounds)
         for reference in required:
+            captured_connectors[reference] += 1
             bounds = components[reference]
-            connector = next(
-                item
-                for item in _children(_native_tree(case.board_text()), "footprint")
-                if any(
-                    prop[1:3] == ["Reference", reference]
-                    for prop in _children(item, "property")
-                )
-            )
-            origin = [
-                round(float(value) * 1_000_000) for value in _field(connector, "at")[:2]
-            ]
-            pad = next(pad for pad in _children(connector, "pad") if pad[1] == "1")
-            size = [round(float(value) * 1_000_000) for value in _field(pad, "size")]
-            pad_bounds = (
-                origin[0] - size[0] // 2,
-                origin[1] - size[1] // 2,
-                origin[0] + size[0] // 2,
-                origin[1] + size[1] // 2,
-            )
+            origin, pad_bounds = connectors[reference]
             assert _complete_component_visible(view, pad_bounds), (case.name, reference)
             if len(case.legs) == 1:
                 assert _complete_component_visible(view, bounds)
@@ -355,6 +368,7 @@ def test_capture_includes_whole_sma_signal_pads_and_local_connector_context(
                 assert min(bounds[3], view.top + view.height) > max(bounds[1], view.top)
             clipped = replace(view, left=bounds[0] + 1)
             assert not _complete_component_visible(clipped, bounds)
+    assert captured_connectors == {"JRF1": 1, "JRF2": 1}
 
 
 def _complete_component_visible(

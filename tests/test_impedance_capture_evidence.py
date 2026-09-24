@@ -60,6 +60,49 @@ def test_known_capture_verification_has_one_source_check_for_any_image_count(
         captures.close()
 
 
+@pytest.mark.parametrize("count", [1, 25])
+def test_background_capture_preparation_does_not_rescan_each_image(
+    harness: SimpleNamespace, tmp_path: Path, count: int
+) -> None:
+    """One owned revision warms many images, and Save still checks the live source."""
+    captures, state, section = _session(harness, tmp_path)
+    sections = tuple(replace(section, section_id=f"image-{i}") for i in range(count))
+    try:
+        snapshot = captures.snapshot()
+        hashes = {row: captures.prepare(snapshot, row).sha256 for row in sections}
+        assert state.reads == 2
+        assert len(harness.renderers) == 1
+        assert len(harness.renders) == count
+        evidence = captures.verify_captures(captures.snapshot(), sections)
+        assert evidence.current
+        assert evidence.hashes == hashes
+        assert state.reads == 3
+        assert len(harness.renders) == count
+    finally:
+        captures.close()
+
+
+@pytest.mark.parametrize("change", ["snapshot", "palette"])
+def test_historical_restoration_rejects_revision_changed_since_initial_snapshot(
+    harness: SimpleNamespace, tmp_path: Path, change: str
+) -> None:
+    """An opening's checked source cannot silently become proof for a later revision."""
+    captures, state, section = _session(harness, tmp_path)
+    try:
+        captures.snapshot()
+        if change == "snapshot":
+            state.snapshot = replace(state.snapshot, context_digest="changed")
+        else:
+            harness.palette = "changed"
+        evidence = captures.verify_captures(captures.snapshot(), (section,))
+        assert not evidence.current
+        assert evidence.hashes == {section: None}
+        assert not harness.renders
+        assert not harness.renderers
+    finally:
+        captures.close()
+
+
 def test_png_lru_eviction_preserves_verified_hashes(
     harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

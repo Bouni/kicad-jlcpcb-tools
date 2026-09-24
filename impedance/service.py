@@ -431,6 +431,7 @@ def export_reports(
             plan.analysis.sections,
             stackup=plan.config.stackup,
             width_results=plan.config.width_results,
+            workbook_captures=plan.config.reviewed_captures,
         )
         if expected is not None and expected != capture_fingerprint(
             source_digest, spec, section, image.sha256

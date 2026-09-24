@@ -94,10 +94,16 @@ def test_classes_use_constituent_membership_not_names_or_matching_geometry() -> 
 
 
 def test_all_class_members_are_included_without_optional_net_filters() -> None:
-    """Selecting a class includes all its routed nets, including additional pair families."""
+    """Pruning equal boxes retains every selected signal, including other pair families."""
     board = snapshot(trace("a", "D+"), trace("b", "D-"), trace("c", "D2+"))
     result = analyze(model.Config(True, (specification(),)), board)
-    assert {row.net_names for row in result.sections} == {("D+",), ("D-",), ("D2+",)}
+    assert len(result.sections) == 1
+    assert result.sections[0].net_names == ("D+", "D-", "D2+")
+    assert sorted(item.trace_id for row in result.sections for item in row.traces) == [
+        "a",
+        "b",
+        "c",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -279,10 +285,26 @@ def test_separate_net_classes_can_have_independent_impedance_requirements() -> N
         ),
     )
     result = analyze(model.Config(True, (first, second)), board)
-    assert len(result.sections) == 4
+    assert len(result.sections) == 2
     assert {(row.spec_id, row.net_names) for row in result.sections} == {
-        ("first", ("D1+",)),
-        ("first", ("D1-",)),
-        ("second", ("D2+",)),
-        ("second", ("D2-",)),
+        ("first", ("D1+", "D1-")),
+        ("second", ("D2+", "D2-")),
     }
+    assert sorted(item.trace_id for row in result.sections for item in row.traces) == [
+        "0",
+        "1",
+        "2",
+        "3",
+    ]
+    assert {
+        item.net
+        for row in result.sections
+        if row.spec_id == "first"
+        for item in row.traces
+    } == {"D1+", "D1-"}
+    assert {
+        item.net
+        for row in result.sections
+        if row.spec_id == "second"
+        for item in row.traces
+    } == {"D2+", "D2-"}

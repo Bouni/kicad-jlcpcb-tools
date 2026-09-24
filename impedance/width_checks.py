@@ -5,17 +5,91 @@ The provider does not document an error bound, so no tolerance is invented from
 its displayed precision. All functions are read-only and work offline.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal, localcontext
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Optional
 
-from .model import Config, Specification, ValidationError
+from .model import Config, Specification, ValidationError, format_length
 from .stackup_model import (
     WidthResult,
     calculation_fingerprint,
     find_width_result,
     validate_width_result,
 )
+
+# UI thresholds for colouring difference text and workbook values (nanometres).
+WIDTH_DIFF_CLOSE_NM = 1_000  # 0.001 mm — green Difference text below this
+WIDTH_DIFF_HIGHLIGHT_NM = 10_000  # 0.01 mm — amber workbook widths above this
+WIDTH_MATCH_COLOUR = (35, 135, 60)
+WIDTH_MISMATCH_COLOUR = (180, 140, 0)
+COVERED_STUB_COLOUR = (120, 120, 120)
+
+
+def difference_text_colour(delta_nm: int) -> tuple[int, int, int]:
+    """Return green when the gap is under 0.001 mm, otherwise yellow."""
+    if type(delta_nm) is not int:
+        raise TypeError("A width delta must be an integer number of nanometres.")
+    if abs(delta_nm) < WIDTH_DIFF_CLOSE_NM:
+        return WIDTH_MATCH_COLOUR
+    return WIDTH_MISMATCH_COLOUR
+
+
+def width_row_mismatch(actual_width_nm: int, target_width_nm: int) -> bool:
+    """Return whether the routed width differs from nominal by more than 0.01 mm."""
+    if type(actual_width_nm) is not int or type(target_width_nm) is not int:
+        raise TypeError("Widths must be integer nanometre values.")
+    return abs(actual_width_nm - target_width_nm) > WIDTH_DIFF_HIGHLIGHT_NM
+
+
+def target_width_cell_text(check: "WidthCheck") -> str:
+    """Show workbook nominals to five decimal places without rounding the data."""
+    if (
+        check.result_current
+        and check.target_width_nm is not None
+        and check.status in {"matches_nominal", "different"}
+    ):
+        with localcontext() as context:
+            context.prec = max(40, len(str(check.target_width_nm)) + 12)
+            millimetres = Decimal(check.target_width_nm) / Decimal(1_000_000)
+            text = format(
+                millimetres.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP), "f"
+            )
+        return f"{text.rstrip('0').rstrip('.')} mm"
+    if check.result_status == "pending" or (
+        not check.result_current and "pending" in check.message.casefold()
+    ):
+        return "Pending"
+    return "Not calculated"
+
+
+def specification_nominal_summary(config: Config, spec: Specification) -> str:
+    """Summarise calculated nominals for the specifications table Width column."""
+    if config.stackup is None:
+        return "Not calculated"
+    parts: list[str] = []
+    for settings in spec.layer_settings:
+        try:
+            digest = calculation_fingerprint(config.stackup, spec, settings.layer)
+        except ValidationError:
+            parts.append(f"{settings.layer}: Not calculated")
+            continue
+        result = find_width_result(
+            config.width_results, spec.spec_id, settings.layer, digest
+        )
+        if result is None:
+            parts.append(f"{settings.layer}: Pending")
+        elif result.status == "success" and result.target_width_nm is not None:
+            parts.append(f"{settings.layer}: {format_length(result.target_width_nm)}")
+        elif result.status == "pending":
+            parts.append(f"{settings.layer}: Pending")
+        else:
+            parts.append(f"{settings.layer}: Not calculated")
+    if not parts:
+        return "Not calculated"
+    if len(parts) == 1:
+        return parts[0].split(": ", 1)[1]
+    return "; ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -46,20 +120,79 @@ def _bounded_text(value: str, limit: int = 1024) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def format_width_nm(value_nm: int) -> str:
-    """Format exact millimetres and readable mils, including signed deltas."""
+def format_width_parts_nm(value_nm: int, *, show_plus: bool = False) -> tuple[str, str]:
+    """Split a width into millimetre and mil columns for aligned comparison rows."""
     if type(value_nm) is not int:
         raise TypeError("A width must be an integer number of nanometres.")
     with localcontext() as context:
         context.prec = max(96, len(str(abs(value_nm))) + 12)
         millimetres = format(Decimal(value_nm) / Decimal(1_000_000), "f")
         mils = format(Decimal(value_nm) / Decimal(25_400), ".2f")
-    return f"{millimetres} mm ({mils} mil)"
+    if show_plus and value_nm > 0:
+        millimetres = "+" + millimetres
+        mils = "+" + mils
+    return f"{millimetres} mm", f"({mils} mil)"
+
+
+def format_width_nm(value_nm: int) -> str:
+    """Format exact millimetres and readable mils, including signed deltas."""
+    millimetres, mils = format_width_parts_nm(value_nm)
+    return f"{millimetres} {mils}"
 
 
 def format_width_delta_nm(value_nm: int) -> str:
     """Make the actual-minus-nominal direction explicit without a percent limit."""
-    return ("+" if value_nm > 0 else "") + format_width_nm(value_nm)
+    millimetres, mils = format_width_parts_nm(value_nm, show_plus=True)
+    return f"{millimetres} {mils}"
+
+
+@dataclass(frozen=True)
+class WidthComparisonRow:
+    """One label/mm/mil triple for a three-column comparison layout."""
+
+    label: str
+    millimetres: str
+    mils: str
+
+
+def width_comparison_rows(
+    actual_width_nm: int, target_width_nm: int, delta_nm: int
+) -> tuple[WidthComparisonRow, WidthComparisonRow, WidthComparisonRow]:
+    """Build right-aligned labels with independent left-aligned mm and mil columns."""
+    return (
+        WidthComparisonRow("Actual:", *format_width_parts_nm(actual_width_nm)),
+        WidthComparisonRow("Nominal:", *format_width_parts_nm(target_width_nm)),
+        WidthComparisonRow(
+            "Difference:", *format_width_parts_nm(delta_nm, show_plus=True)
+        ),
+    )
+
+
+def select_comparison_width_nm(
+    widths: Sequence[int], target_width_nm: Optional[int] = None
+) -> int:
+    """Choose one actual width for the active layer's impedance comparison.
+
+    Prefers an exact nominal match, otherwise the most common routed width, with
+    ties broken by closeness to the nominal when one is known.
+    """
+    counts: dict[int, int] = {}
+    for width in widths:
+        if type(width) is not int or width <= 0:
+            raise TypeError("A width must be a positive integer number of nanometres.")
+        counts[width] = counts.get(width, 0) + 1
+    if not counts:
+        raise ValueError("No actual widths.")
+    if target_width_nm is not None and target_width_nm in counts:
+        return target_width_nm
+
+    def sort_key(width: int) -> tuple[int, int, int]:
+        frequency = -counts[width]
+        if target_width_nm is None:
+            return (frequency, width, 0)
+        return (frequency, abs(width - target_width_nm), width)
+
+    return sorted(counts, key=sort_key)[0]
 
 
 def _not_calculated(
@@ -98,47 +231,61 @@ def width_check(
     """
     if type(actual_width_nm) is not int or actual_width_nm <= 0:
         raise ValidationError("The actual trace width must be a positive integer.")
-    result = find_width_result(config.width_results, spec.spec_id, layer)
-    if result is not None:
+    stale = find_width_result(config.width_results, spec.spec_id, layer)
+    if stale is not None:
         try:
-            validate_width_result(result)
+            validate_width_result(stale)
         except ValidationError:
             return _not_calculated(
                 actual_width_nm,
                 None,
-                "Not calculated: the saved calculation summary is invalid.",
+                "Nominal width unavailable: the saved calculation summary is invalid.",
             )
     if config.stackup is None:
         return _not_calculated(
-            actual_width_nm, result, "Not calculated: no stackup is selected."
+            actual_width_nm,
+            stale,
+            "Nominal width unavailable: select a JLCPCB stackup first.",
         )
-    if result is None:
+    if not config.stackup.calculator_id:
         return _not_calculated(
-            actual_width_nm, None, "Not calculated for the selected stackup and layer."
+            actual_width_nm,
+            stale,
+            "Nominal width unavailable: the selected stackup has no JLCPCB calculator construction.",
         )
     try:
         input_digest = calculation_fingerprint(config.stackup, spec, layer)
-    except ValidationError:
+    except ValidationError as error:
         return _not_calculated(
             actual_width_nm,
-            result,
-            "Not calculated: the current stackup or layer inputs are incomplete.",
+            stale,
+            f"Nominal width unavailable: {error}",
         )
-    if result.input_digest != input_digest:
+    result = find_width_result(config.width_results, spec.spec_id, layer, input_digest)
+    if result is None:
+        if stale is not None:
+            return _not_calculated(
+                actual_width_nm,
+                stale,
+                "Nominal width pending: inputs changed; refreshing from JLCPCB's calculator.",
+            )
         return _not_calculated(
             actual_width_nm,
-            result,
-            "Not calculated for current inputs; the saved result is historical.",
+            None,
+            "Nominal width pending: waiting for JLCPCB's calculator.",
         )
     if result.status != "success" or result.target_width_nm is None:
         detail = result.message or {
             "pending": "A nominal-width calculation is pending.",
-            "unavailable": "The nominal-width calculator is unavailable.",
-            "unsupported": "The calculator does not support the declared construction.",
+            "unavailable": "JLCPCB's calculator did not return a usable result.",
+            "unsupported": "JLCPCB's calculator does not support this construction.",
             "error": "The nominal-width calculation failed.",
         }.get(result.status, "No nominal width is available.")
         return _not_calculated(
-            actual_width_nm, result, f"Not calculated: {detail}", current=True
+            actual_width_nm,
+            result,
+            f"Nominal width unavailable: {detail}",
+            current=True,
         )
     delta = actual_width_nm - result.target_width_nm
     return WidthCheck(
@@ -150,7 +297,7 @@ def width_check(
         message=(
             "Actual width matches the saved nominal width exactly."
             if delta == 0
-            else f"Actual width differs from nominal by {format_width_delta_nm(delta)}."
+            else f"Differs from nominal by {format_width_delta_nm(delta)}."
         ),
         result_status=result.status,
         calculated_at_utc=result.calculated_at_utc,

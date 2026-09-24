@@ -11,6 +11,7 @@ from dataclasses import replace
 import importlib
 import inspect
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
@@ -89,7 +90,9 @@ def save_api(
     class Renderer:
         """Retain lifetime and write valid immutable PNG bytes for real loading."""
 
-        def __init__(self, _board: object, _pcbnew: object) -> None:
+        def __init__(
+            self, _board: object, _pcbnew: object, *, appearance: object = None
+        ) -> None:
             self.closed = False
 
         def close(self) -> None:
@@ -125,10 +128,12 @@ def save_api(
                 (
                     dialog._closing,
                     dialog.modal_result,
+                    dialog.preview_pane._closed,
+                    dialog._width_refresh_timer.IsRunning(),
+                    dialog._width_slow_timer.IsRunning(),
                 )
             )
 
-    monkeypatch.setattr(api.wx, "ICON_INFORMATION", 0, raising=False)
     monkeypatch.setattr(integration, "read_theme_context", appearance)
     monkeypatch.setattr(render, "SectionRenderer", Renderer)
     monkeypatch.setattr(api.dialog, "analyze", analyze)
@@ -173,14 +178,19 @@ def save_api(
             inspect.signature(api.dialog.ImpedanceDialog).parameters
         ):
             kwargs["verify_captures"] = captures.verify_captures
+        if (
+            "prepare_capture"
+            in inspect.signature(api.dialog.ImpedanceDialog).parameters
+        ):
+            kwargs["prepare_capture"] = captures.prepare
         dialog = api.dialog.ImpedanceDialog(
             None,
             config,
-            state.snapshot,
+            captures.snapshot(),
             preview,
             captures.snapshot,
             verify_snapshot=captures.verify,
-            appearance_context=appearance,
+            appearance_context=lambda: (appearance(), state.variant),
             save_config=save,
             **kwargs,
         )
@@ -267,11 +277,8 @@ def _approve_child(
     monkeypatch.setattr(
         api.dialog.SpecificationDialog, "ShowModal", show, raising=False
     )
-    parent.specifications.Select(0)
-    parent.specifications.emit(api.wx.EVT_LIST_ITEM_ACTIVATED)
-    api.drain()
-    api.paint(parent.preview_pane)
-    parent.approve_button.emit(api.wx.EVT_BUTTON)
+    parent.specifications.SelectRow(0)
+    parent.specifications.emit(api.dv.EVT_DATAVIEW_ITEM_ACTIVATED)
     assert parent.session.approved
     assert len(parent.session.config.review_tracking.images) == count
     return parent
@@ -335,15 +342,23 @@ def test_reopened_verified_approval_save_reuses_hashes_after_png_eviction(
     env.reset_counts()
     dialog = env.main(approved)
     assert dialog.session.approved
+    assert env.state.renders == []
+    dialog.on_screen = True
+    dialog.bindings[env.api.wx.EVT_PAINT, -1](SimpleNamespace(Skip=lambda: None))
+    env.api.drain()
+    env.api.paint(dialog.preview_pane)
+    env.api.finish_preparation(dialog)
     assert len(env.state.renders) == 2
-    assert dialog.session.config.review_tracking == approved.review_tracking
+    verified = dialog.session.config
+    assert replace(verified, review_tracking=approved.review_tracking) == approved
+    assert verified.review_tracking.layers == approved.review_tracking.layers
     if evict:
         env.captures.images.clear()
         env.captures.image_bytes = 0
     env.reset_counts()
     _save(env, dialog)
     assert dialog.modal_result == env.api.wx.ID_OK
-    assert env.state.saved[-1] == approved
+    assert env.state.saved[-1] == verified
     _assert_reused(env)
 
 
@@ -360,6 +375,7 @@ def test_failed_write_retry_reuses_verified_hashes_and_retains_edits(
     _save(env, dialog)
     assert dialog.modal_result is None
     assert not dialog._closing
+    assert not dialog.preview_pane._closed
     assert env.state.saved == []
     assert dialog.config is original
     assert dialog.session.config == approved
@@ -394,6 +410,10 @@ def test_changed_revision_saves_draft_and_notifies_before_dismissal(
         env.state.palette = "changed-native-theme"
     else:
         env.state.variant = "B"
+    cancellation = Event()
+    dialog._calculation_cancel = cancellation
+    dialog._width_refresh_timer.StartOnce(1)
+    dialog._width_slow_timer.StartOnce(1)
     env.state.notice_dialog = dialog
     env.reset_counts()
     _save(env, dialog)
@@ -412,7 +432,8 @@ def test_changed_revision_saves_draft_and_notifies_before_dismissal(
     assert len(notices) == 1
     assert "draft" in notices[0]
     assert "changed" in notices[0] or "review" in notices[0]
-    assert env.state.notice_states == [(True, None)]
+    assert env.state.notice_states == [(True, None, True, False, False)]
+    assert cancellation.is_set()
 
 
 def test_unreadable_source_keeps_dialog_edits_and_persisted_configuration(
@@ -485,6 +506,7 @@ def test_failed_draft_write_notifies_downgrade_only_when_retry_succeeds(
         "nominal_result",
         "algorithm_policy",
         "capture_policy",
+        "stub_policy",
     ],
 )
 def test_save_result_reanalyzes_when_any_analysis_input_changes(
@@ -546,7 +568,7 @@ def test_uninitialized_analysis_recomputes_before_preserving_approval(
     env = save_api
     approved = _approve_child(env, monkeypatch).session.config
     session = env.api.dialog.ReviewSession(approved, env.state.snapshot)
-    assert session.analysis is None
+    session.analysis = None
     env.reset_counts()
     assert session.save_result() == approved
     assert len(env.state.analyses) == 1

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import replace
 import importlib
 import sys
+from threading import Event
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from impedance.dialog import ImpedanceDialog
     from impedance.model import BoardSnapshot, Config
     from impedance.stackup_model import Stackup
+    from impedance.workbook_grid import WorkbookGrid
 
 
 class _NotebookControl(_ConstructedControl):
@@ -195,7 +197,7 @@ def test_stackup_only_can_be_saved_and_reopened_without_report_approval(
 
     button = dialog.FindWindow(api.wx.ID_OK)
     assert button.enabled is True
-    assert button.GetLabel() == "Save and close"
+    assert button.GetLabel() == "Save draft and close"
     assert dialog.review_status.GetLabel() == "No workbook rows to approve"
     dialog.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)
 
@@ -284,6 +286,59 @@ def test_cancel_discards_session_without_calling_persistence(
     assert dialog.config is original
     assert skipped == [True]
     assert dialog._closing is True
+
+
+def test_opening_sections_ignores_value_events_during_model_population(
+    draft_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Injected model notifications cannot read a half-rebuilt workbook table."""
+    api = draft_api
+    seen_updating: list[bool] = []
+    real = api.dialog.ImpedanceDialog._on_include
+    grid_type = importlib.import_module(
+        api.dialog.__package__ + ".workbook_grid"
+    ).WorkbookGrid
+    notify = grid_type.ProcessTableMessage
+
+    def notify_and_include(control: WorkbookGrid, message: object) -> bool:
+        """Stress the rebuild guard without claiming native event ordering."""
+        result = notify(control, message)
+        if control._on_include is not None:
+            control._on_include(control.GetItemCount() - 1)
+        return result
+
+    def tracking(self: ImpedanceDialog, row: int) -> None:
+        seen_updating.append(self._updating_sections)
+        return real(self, row)
+
+    monkeypatch.setattr(api.dialog.ImpedanceDialog, "_on_include", tracking)
+    monkeypatch.setattr(grid_type, "ProcessTableMessage", notify_and_include)
+    dialog = _open(api, _intent(api), _board(api))
+    assert dialog.sections.GetItemCount() >= 1 or dialog._row_ids == ()
+    assert seen_updating
+    assert all(seen_updating), seen_updating
+    seen_updating.clear()
+    dialog._populate_sections()
+    assert seen_updating
+    assert all(flag is True for flag in seen_updating)
+
+
+def test_busy_calculation_does_not_block_save(
+    draft_api: SimpleNamespace,
+) -> None:
+    """Saving draft settings cancels in-flight width work instead of blocking."""
+    api = draft_api
+    writes: list[Config] = []
+    dialog = _open(api, _intent(api), _board(api), writes.append)
+    cancellation = Event()
+    dialog._calculation_cancel = cancellation
+    dialog._populate_sections()
+    assert dialog.FindWindow(api.wx.ID_OK).enabled is True
+    dialog.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)
+    assert cancellation.is_set()
+    assert len(writes) == 1
+    assert dialog.modal_result == api.wx.ID_OK
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -451,3 +506,31 @@ def test_stackup_layer_mismatch_can_be_saved_as_draft(
     assert dialog.config.stackup == selected
     assert dialog.config.enabled is True
     assert dialog.config.reviewed_digest == ""
+
+
+def test_edit_and_remove_require_a_selected_specification(
+    draft_api: SimpleNamespace,
+) -> None:
+    """Edit/Remove stay inactive until a specifications row is selected."""
+    api = draft_api
+    dialog = _open(api, _intent(api), _board(api))
+    edit, remove = dialog._selection_buttons
+    assert dialog.specifications.GetItemCount() == 1
+    assert dialog.specifications.GetSelectedRow() < 0
+    assert edit.enabled is False
+    assert remove.enabled is False
+
+    dialog.specifications.selection = 0
+    dialog._update_selection_buttons()
+    assert edit.enabled is True
+    assert remove.enabled is True
+
+    dialog.specifications.selection = -1
+    dialog._update_selection_buttons()
+    assert edit.enabled is False
+    assert remove.enabled is False
+
+    dialog.specifications.selection = 0
+    dialog._update_selection_buttons()
+    assert edit.enabled is True
+    assert remove.enabled is True

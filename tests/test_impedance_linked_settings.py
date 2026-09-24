@@ -3,30 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import importlib
 from types import SimpleNamespace
 
 from .test_impedance_dialog import _snapshot, constructor_api  # noqa: F401
 from .test_impedance_netclass_dialog import choose_class, choose_layer
-
-
-def _stackup(api: SimpleNamespace) -> object:
-    """Build a symmetric two-layer construction for linked settings."""
-    model = importlib.import_module(api.dialog.__package__ + ".stackup_model")
-    return model.Stackup(
-        "sample",
-        "Sample two-layer construction",
-        2,
-        "0.324",
-        "1",
-        "",
-        calculator_id="sample-calculator",
-        layers=(
-            model.StackupLayer("L1", "copper", "0.035"),
-            model.StackupLayer("Core", "core", "0.254", "FR4", "4.2"),
-            model.StackupLayer("L2", "copper", "0.035"),
-        ),
-    )
+from .test_impedance_spec_width_hint import _stackup
 
 
 def _open(api: SimpleNamespace, specification: object = None) -> object:
@@ -195,3 +176,33 @@ def test_rejoining_replaces_invalid_peer_with_valid_source(
     dialog.independent_layer.emit(api.wx.EVT_CHECKBOX)
     choose_layer(api, dialog, "B.Cu")
     assert dialog.spacing.GetValue() == "0.2"
+
+
+def test_kind_reactivation_synchronizes_linked_hidden_dimensions(
+    constructor_api: SimpleNamespace,  # noqa: F811
+) -> None:
+    """Rejoining while gaps are inactive cannot save conflicting linked values."""
+    api = constructor_api
+    dialog = _open(api)
+    dialog.spacing.SetValue("0.200001")
+    dialog.ground_gap.SetValue("0.100001")
+    choose_layer(api, dialog, "B.Cu")
+    dialog.independent_layer.SetValue(True)
+    dialog.independent_layer.emit(api.wx.EVT_CHECKBOX)
+    dialog.ground_gap.SetValue("0.250003")
+    dialog.kind.SetSelection(0)
+    dialog.kind.emit(api.wx.EVT_CHOICE)
+    dialog.independent_layer.SetValue(False)
+    dialog.independent_layer.emit(api.wx.EVT_CHECKBOX)
+    assert dialog._linked_layer_groups == (("F.Cu", "B.Cu"),)
+    dialog.kind.SetSelection(3)
+    dialog.kind.emit(api.wx.EVT_CHOICE)
+    dialog.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)
+    assert dialog.modal_result == api.wx.ID_OK
+    assert {item.ground_gap_nm for item in dialog.specification.layer_settings} == {
+        250_003
+    }
+    reopened = _open(api, dialog.specification)
+    assert reopened._linked_layer_groups == (("F.Cu", "B.Cu"),)
+    choose_layer(api, reopened, "F.Cu")
+    assert reopened.ground_gap.GetValue() == "0.250003"

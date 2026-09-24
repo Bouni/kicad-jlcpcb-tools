@@ -172,7 +172,9 @@ def test_class_intent_finds_every_physical_route_profile_including_usb_launches(
     analysis = analyze(
         Config(specifications=(case.netclass_specification(),)), snapshot
     )
-    assert len(analysis.sections) == len(case.signal_profiles)
+    # A physical profile may need several readable captures. Every native track
+    # must still belong to exactly one region, irrespective of that row count.
+    assert len(analysis.sections) >= len(case.signal_profiles)
     assert all(
         set(section.net_names) == set(case.net_names) for section in analysis.sections
     )
@@ -184,9 +186,27 @@ def test_class_intent_finds_every_physical_route_profile_including_usb_launches(
     assert {(section.layer, section.width_nm) for section in analysis.sections} == {
         (trace.layer, trace.width_nm) for trace in case.traces()
     }
+    for profile in case.signal_profiles:
+        rows = tuple(
+            section
+            for section in analysis.sections
+            if (section.layer, section.width_nm) == (profile.layer, profile.width_nm)
+        )
+        expected = {
+            trace.trace_id: trace
+            for trace in case.traces()
+            if (trace.layer, trace.width_nm) == (profile.layer, profile.width_nm)
+        }
+        assert {
+            trace.trace_id: trace for row in rows for trace in row.traces
+        } == expected
+        if case.paired:
+            # Native differential pairs remain one atomic capture per profile.
+            assert len(rows) == 1
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 @pytest.mark.parametrize("case", RF_CASES, ids=lambda case: case.name)
 def test_native_kicad_class_membership_selects_exactly_the_rf_route(
     case: RFCase, tmp_path: Path, rf_examples: Path

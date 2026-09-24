@@ -282,6 +282,7 @@ def native_rf_board(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 def test_native_refill_preserves_tracks_and_fills_ground_planes(
     native_rf_board: NativeBoard,
 ) -> None:
@@ -326,6 +327,7 @@ def test_native_refill_preserves_tracks_and_fills_ground_planes(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 def test_native_filled_copper_respects_rf_corridors_and_reference_continuity(
     native_rf_board: NativeBoard,
 ) -> None:
@@ -334,6 +336,7 @@ def test_native_filled_copper_respects_rf_corridors_and_reference_continuity(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 def test_native_copper_probes_reject_displaced_signal_clearance(
     native_rf_board: NativeBoard,
 ) -> None:
@@ -349,6 +352,7 @@ def test_native_copper_probes_reject_displaced_signal_clearance(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 def test_native_copper_probes_reject_remote_reference_fill(
     native_rf_board: NativeBoard,
 ) -> None:
@@ -391,6 +395,7 @@ def test_copper_containment_honors_native_self_bridged_holes() -> None:
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 def test_native_drc_has_no_copper_errors_or_unconnected_items(
     native_rf_board: NativeBoard,
 ) -> None:
@@ -435,6 +440,7 @@ def test_native_drc_has_no_copper_errors_or_unconnected_items(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 def test_native_color_plots_include_each_signal_layer_and_component_context(
     native_rf_board: NativeBoard,
 ) -> None:
