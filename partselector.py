@@ -114,6 +114,9 @@ class PartSelectorDialog(wx.Dialog):
             wx.TE_PROCESS_ENTER,
         )
         self.keyword.SetHint("e.g. 10k 0603")
+        # A prefilled box starts with the cursor at the end, where the Ω and µ
+        # buttons have always added their symbol.
+        self.keyword.SetInsertionPointEnd()
 
         self.ohm_button = wx.Button(
             self,
@@ -748,6 +751,7 @@ class PartSelectorDialog(wx.Dialog):
             self.SetTitle(assignment_label or "JLCPCB Library")
         self.assignment_label = assignment_label
         self.keyword.ChangeValue(self.get_existing_selection(self.parts))
+        self.keyword.SetInsertionPointEnd()
         self.search(None)
 
     def OnSortPartList(self, e):
@@ -771,12 +775,31 @@ class PartSelectorDialog(wx.Dialog):
             b.Enable(bool(state))
 
     def add_ohm_symbol(self, *_):
-        """Append the Ω symbol to the search string."""
-        self.keyword.AppendText("Ω")
+        """Type the Ω symbol at the cursor in the search string."""
+        self._type_symbol("Ω")
 
     def add_micro_symbol(self, *_):
-        """Append the µ symbol to the search string."""
-        self.keyword.AppendText("µ")
+        """Type the µ symbol at the cursor in the search string."""
+        self._type_symbol("µ")
+
+    def _type_symbol(self, symbol: str) -> None:
+        """Type a symbol as if from the keyboard, and hand the box back.
+
+        The symbol replaces any selected text at the cursor, and focus returns
+        to the box, which the click took on Windows and GTK.  A selection of
+        the whole box is what focus leaves when the dialog opens or the box is
+        tabbed into, on every platform, and nobody means to replace a whole
+        search with one symbol, so then the symbol goes at the end.  Taking
+        focus back can select everything again, and the next key would replace
+        it, so the cursor is put back after the symbol.
+        """
+        start, end = self.keyword.GetSelection()
+        if start != end and (start, end) == (0, self.keyword.GetLastPosition()):
+            self.keyword.SetInsertionPointEnd()
+        self.keyword.WriteText(symbol)
+        position = self.keyword.GetInsertionPoint()
+        self.keyword.SetFocus()
+        self.keyword.SetSelection(position, position)
 
     def search_dwell(self, *_):
         """Initiate a search once the timeout expires.
