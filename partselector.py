@@ -22,6 +22,7 @@ from .partselector_columns import (
     PARTSELECTOR_COLUMN_KEYS,
     PARTSELECTOR_COLUMNS,
 )
+from .value_normalize import fold_signs
 from .window_layout import get_column_widths, restore_column_widths, to_dip
 
 if TYPE_CHECKING:
@@ -841,10 +842,14 @@ class PartSelectorDialog(wx.Dialog):
         self.populate_part_list(result, search_duration)
 
     def get_highlight_text(self) -> str:
-        """Return the active keyword search text for result highlighting."""
+        """Return the active keyword search text for result highlighting.
+
+        Micro and ohm signs are read as the search reads them, so a 10µF search
+        highlights the 10uF it found.
+        """
         if not self.parent.settings.get("highlighting", {}).get("matches", True):
             return ""
-        return self.keyword.GetValue()
+        return fold_signs(self.keyword.GetValue())
 
     def update_subcategories(self, *_: object) -> None:
         """Update the possible subcategory selection."""

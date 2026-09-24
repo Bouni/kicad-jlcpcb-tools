@@ -136,9 +136,21 @@ def _format_decimal(value: Decimal) -> str:
     return f"{normalized:f}"
 
 
+def fold_signs(text: str) -> str:
+    """Spell the micro and ohm signs the way the catalog writes them.
+
+    The catalog writes 10uF, never 10µF, and its Ω is the Greek capital omega
+    U+03A9, never the ohm sign U+2126.  The full-text index folds the micro
+    sign U+00B5 onto the Greek mu U+03BC but never onto 'u', and LIKE folds
+    neither ohm character onto the other, so a term typed with any of them
+    can find nothing unless it is folded first.
+    """
+    return text.replace("µ", "u").replace("μ", "u").replace("\u2126", "\u03a9")
+
+
 def _clean(text: str) -> str:
-    """Fold both micro signs onto 'u', which is what the catalog writes."""
-    return text.strip().replace("µ", "u").replace("μ", "u")
+    """Strip a board value and fold its micro and ohm signs."""
+    return fold_signs(text.strip())
 
 
 def _resolve_rung(rest: str, quantity: Quantity) -> Optional[str]:
@@ -282,10 +294,10 @@ def quantity_for_reference(reference: str) -> Optional[Quantity]:
 
 
 # The quantity a value's unit letter names, for a term typed into the search.
-# Either ohm sign is accepted; the catalog writes only U+03A9, never U+2126.
+# fold_signs() has already turned the ohm sign U+2126 into U+03A9, the only one
+# the catalog writes.
 _QUANTITY_BY_UNIT = {
     "\u03a9": RESISTANCE,
-    "\u2126": RESISTANCE,
     "F": CAPACITANCE,
     "f": CAPACITANCE,
     "H": INDUCTANCE,
@@ -296,7 +308,7 @@ _QUANTITY_BY_UNIT = {
 # on purpose: a match is all a caller needs to know the term holds no GLOB or
 # LIKE metacharacter.
 _WHOLE_VALUE_RE = re.compile(
-    r"(?P<num>[0-9]*\.?[0-9]+)(?P<prefix>[^\W\d_]?)(?P<unit>[\u03a9\u2126FfHh])"
+    r"(?P<num>[0-9]*\.?[0-9]+)(?P<prefix>[^\W\d_]?)(?P<unit>[\u03a9FfHh])"
 )
 
 
@@ -309,14 +321,15 @@ def whole_value(term: str) -> Optional[str]:
     and the search can hold it to that.  The prefix is looked up in the
     quantity's own table, which is where its case is decided: ``1KΩ`` comes
     back as ``1kΩ`` and ``100NF`` as ``100nF``, while ``10mΩ`` and ``10MΩ``
-    stay apart.
+    stay apart.  Micro and ohm signs are read the way the catalog writes them
+    first, so 10µF is 10uF.
 
     Anything else returns None and is searched as a substring, as before: a
     bare ``1k`` names no unit, ``4k7`` is not how the catalog writes a value,
     and a prefix the quantity has no rung for (``10MH``, ``10uΩ``) is not a
     value the catalog spells at all.
     """
-    match = _WHOLE_VALUE_RE.fullmatch(term)
+    match = _WHOLE_VALUE_RE.fullmatch(fold_signs(term))
     if match is None:
         return None
     quantity = _QUANTITY_BY_UNIT[match.group("unit")]

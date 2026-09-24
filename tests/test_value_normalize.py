@@ -9,6 +9,7 @@ from value_normalize import (
     INDUCTANCE,
     RESISTANCE,
     canonicalize,
+    fold_signs,
     quantity_for_reference,
     whole_value,
 )
@@ -569,6 +570,9 @@ def test_a_value_already_in_catalog_form_is_returned_unchanged():
         ("4.7UH", "4.7uH"),
         ("100nf", "100nF"),
         ("100nh", "100nH"),
+        # Micro signs are read as the catalog's u.
+        ("10\u00b5F", "10uF"),
+        ("4.7\u03bcH", "4.7uH"),
     ],
 )
 def test_a_value_written_with_its_unit_is_matched_whole(term, expected):
@@ -596,8 +600,6 @@ def test_a_value_written_with_its_unit_is_matched_whole(term, expected):
         "10MH",
         "1MF",
         "10uΩ",
-        # Micro signs are folded by the search before this is asked.
-        "10µF",
         # Another quantity, or not a value at all.
         "10MHz",
         "10mA",
@@ -624,3 +626,21 @@ def test_a_value_written_with_its_unit_is_matched_whole(term, expected):
 def test_anything_else_is_left_to_the_substring_search(term):
     """Only a number, an optional prefix and Ω, F or H is matched whole."""
     assert whole_value(term) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("10\u00b5F", "10uF"),
+        ("10\u03bcF", "10uF"),
+        ("4.7\u00b5", "4.7u"),
+        ("10uF", "10uF"),
+        ("LM358", "LM358"),
+        ("5\u2126", "5\u03a9"),
+        ("10m\u2126", "10m\u03a9"),
+        ("10MΩ", "10MΩ"),
+    ],
+)
+def test_micro_and_ohm_signs_are_spelled_as_the_catalog_writes_them(text, expected):
+    """Both micro signs are written u, and the ohm sign as the Greek omega."""
+    assert fold_signs(text) == expected

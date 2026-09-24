@@ -44,7 +44,7 @@ from .lcsc import normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
-from .value_normalize import whole_value
+from .value_normalize import fold_signs, whole_value
 
 DatabasePath = Union[str, os.PathLike[str]]
 
@@ -486,6 +486,11 @@ class Library:
             for w in keywords:
                 # skip over empty keywords
                 if w != "":
+                    # The part selector's µ button types a micro sign, and some
+                    # keyboards type the ohm sign U+2126, where the catalog
+                    # writes u and U+03A9.  The box keeps what was typed; only
+                    # the query reads the catalog's spelling.
+                    w = fold_signs(w)
                     if len(w) < 3:  # LIKE entry
                         escaped = escape_like_term(w)
                         kw = f"description LIKE '%{escaped}%' ESCAPE '\\'"

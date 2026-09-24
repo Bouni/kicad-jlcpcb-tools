@@ -346,3 +346,26 @@ def test_a_value_only_in_the_part_number_is_found(search_library):
             ],
         )
     assert _search_ids(search_library, "4.7uH") == {"C200011", "C200013"}
+
+
+@pytest.mark.parametrize(
+    ("keyword", "expected"),
+    [
+        pytest.param("10\u00b5F", {"C200007"}, id="micro-sign"),
+        pytest.param("10\u03bcF", {"C200007"}, id="greek-mu"),
+        pytest.param("10\u00b5", {"C200007", "C200008"}, id="no-unit"),
+        pytest.param("0\u00b5", {"C200007", "C200008"}, id="short-term"),
+        pytest.param("5\u2126", {"C578005"}, id="short-ohm-sign"),
+    ],
+)
+def test_micro_and_ohm_signs_search_as_the_catalog_writes_them(
+    search_library, keyword, expected
+):
+    """The catalog writes 10uF and U+03A9, so 10µF and 5Ω in U+2126 found nothing.
+
+    The part selector's µ button types U+00B5.  Without a unit the term is
+    still a substring, so 10µ finds 110uF too.  Short terms go through LIKE,
+    which folds neither sign, so they need the fold as much as long ones.
+    """
+    _add_parts(search_library, _WHOLE_VALUE_PARTS)
+    assert _search_ids(search_library, keyword) == expected
