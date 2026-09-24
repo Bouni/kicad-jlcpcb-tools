@@ -1,0 +1,1724 @@
+[
+  {
+    "name": "single-ended-50-ohm",
+    "title": "Single-ended RF / 50 ohm",
+    "board": "single-ended-50-ohm.kicad_pcb",
+    "project": "single-ended-50-ohm.kicad_pro",
+    "custom_rules": "single-ended-50-ohm.kicad_dru",
+    "sha256": "aedca7b25f2dabf9a44c4fdb14ea2573e929950ac3b83c25f847d60c62b25363",
+    "target_ohms": "50",
+    "differential": false,
+    "board_bounds_nm": [
+      20000000,
+      20000000,
+      250000000,
+      350000000
+    ],
+    "net_classes": {
+      "RF 50 ohm noncoplanar": [
+        "RF01",
+        "RF02",
+        "RF03",
+        "RF04",
+        "RF05",
+        "RF06",
+        "RF07"
+      ],
+      "RF 50 ohm CPWG": [
+        "RF08",
+        "RF09",
+        "RF10",
+        "RF11",
+        "RF12",
+        "RF13",
+        "RF14"
+      ]
+    },
+    "circuit_count": 14,
+    "expected_reviewed_rows": 18,
+    "circuits": [
+      {
+        "name": "single-ended-microstrip-top-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "RF01": 26.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm noncoplanar",
+        "net_names": [
+          "RF01"
+        ],
+        "differential": false,
+        "coplanar": false,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "RF 01: microstrip top 2mm core + launches"
+      },
+      {
+        "name": "single-ended-microstrip-top-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "RF02": 144.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm noncoplanar",
+        "net_names": [
+          "RF02"
+        ],
+        "differential": false,
+        "coplanar": false,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "RF 02: microstrip top 120mm core + launches"
+      },
+      {
+        "name": "single-ended-stripline-inner-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "RF03": 26.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm noncoplanar",
+        "net_names": [
+          "RF03"
+        ],
+        "differential": false,
+        "coplanar": false,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.13,
+            "noncoplanar_ground_clearance_mm": 0.39,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.13,
+            "noncoplanar_ground_clearance_mm": 0.39,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "RF 03: stripline inner 2mm core + launches"
+      },
+      {
+        "name": "single-ended-stripline-inner-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "RF04": 144.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm noncoplanar",
+        "net_names": [
+          "RF04"
+        ],
+        "differential": false,
+        "coplanar": false,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.13,
+            "noncoplanar_ground_clearance_mm": 0.39,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.13,
+            "noncoplanar_ground_clearance_mm": 0.39,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "RF 04: stripline inner 120mm core + launches"
+      },
+      {
+        "name": "single-ended-microstrip-bottom-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "RF05": 26.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm noncoplanar",
+        "net_names": [
+          "RF05"
+        ],
+        "differential": false,
+        "coplanar": false,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "RF 05: microstrip bottom 2mm core + launches"
+      },
+      {
+        "name": "single-ended-microstrip-bottom-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "RF06": 144.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm noncoplanar",
+        "net_names": [
+          "RF06"
+        ],
+        "differential": false,
+        "coplanar": false,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "RF 06: microstrip bottom 120mm core + launches"
+      },
+      {
+        "name": "single-ended-noncoplanar-transition-150mm",
+        "nominal_route_length_mm_per_net": 150.0,
+        "actual_route_length_mm_per_net": {
+          "RF07": 174.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "150 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm noncoplanar",
+        "net_names": [
+          "RF07"
+        ],
+        "differential": false,
+        "coplanar": false,
+        "expected_raw_sections": 3,
+        "expected_electrical_components": 3,
+        "expected_reviewed_rows": 3,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.13,
+            "noncoplanar_ground_clearance_mm": 0.39,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.13,
+            "noncoplanar_ground_clearance_mm": 0.39,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.35,
+            "noncoplanar_ground_clearance_mm": 1.05,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 50.0
+          }
+        ],
+        "title": "RF 07: noncoplanar transition 150mm core + launches"
+      },
+      {
+        "name": "single-ended-cpwg-top-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "RF08": 26.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm CPWG",
+        "net_names": [
+          "RF08"
+        ],
+        "differential": false,
+        "coplanar": true,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "RF 08: cpwg top 2mm core + launches"
+      },
+      {
+        "name": "single-ended-cpwg-top-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "RF09": 144.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm CPWG",
+        "net_names": [
+          "RF09"
+        ],
+        "differential": false,
+        "coplanar": true,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "RF 09: cpwg top 120mm core + launches"
+      },
+      {
+        "name": "single-ended-buried-cpwg-inner-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "RF10": 26.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm CPWG",
+        "net_names": [
+          "RF10"
+        ],
+        "differential": false,
+        "coplanar": true,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "RF 10: buried cpwg inner 2mm core + launches"
+      },
+      {
+        "name": "single-ended-buried-cpwg-inner-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "RF11": 144.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm CPWG",
+        "net_names": [
+          "RF11"
+        ],
+        "differential": false,
+        "coplanar": true,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "RF 11: buried cpwg inner 120mm core + launches"
+      },
+      {
+        "name": "single-ended-cpwg-bottom-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "RF12": 26.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm CPWG",
+        "net_names": [
+          "RF12"
+        ],
+        "differential": false,
+        "coplanar": true,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "RF 12: cpwg bottom 2mm core + launches"
+      },
+      {
+        "name": "single-ended-cpwg-bottom-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "RF13": 144.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm CPWG",
+        "net_names": [
+          "RF13"
+        ],
+        "differential": false,
+        "coplanar": true,
+        "expected_raw_sections": 1,
+        "expected_electrical_components": 1,
+        "expected_reviewed_rows": 1,
+        "legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "RF 13: cpwg bottom 120mm core + launches"
+      },
+      {
+        "name": "single-ended-cpwg-transition-150mm",
+        "nominal_route_length_mm_per_net": 150.0,
+        "actual_route_length_mm_per_net": {
+          "RF14": 174.0
+        },
+        "launch_type": "SMA_Amphenol_132134_Vertical",
+        "launch_count": 2,
+        "length_description": "150 mm controlled core + connector launches",
+        "target_ohms": "50",
+        "net_class": "RF 50 ohm CPWG",
+        "net_names": [
+          "RF14"
+        ],
+        "differential": false,
+        "coplanar": true,
+        "expected_raw_sections": 3,
+        "expected_electrical_components": 3,
+        "expected_reviewed_rows": 3,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": null,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 50.0
+          }
+        ],
+        "title": "RF 14: cpwg transition 150mm core + launches"
+      }
+    ]
+  },
+  {
+    "name": "usb-differential-90-ohm",
+    "title": "USB differential / 90 ohm / 8 mil pair gap",
+    "board": "usb-differential-90-ohm.kicad_pcb",
+    "project": "usb-differential-90-ohm.kicad_pro",
+    "custom_rules": "usb-differential-90-ohm.kicad_dru",
+    "sha256": "937e4aa3af04a65a9ccf4ddafd85fd8fbadd6ffc1d72c1aca07f772b3a26ded7",
+    "target_ohms": "90",
+    "differential": true,
+    "board_bounds_nm": [
+      20000000,
+      20000000,
+      250000000,
+      350000000
+    ],
+    "net_classes": {
+      "USB 90 ohm noncoplanar": [
+        "USB01_D-",
+        "USB01_D+",
+        "USB02_D-",
+        "USB02_D+",
+        "USB03_D-",
+        "USB03_D+",
+        "USB04_D-",
+        "USB04_D+",
+        "USB05_D-",
+        "USB05_D+",
+        "USB06_D-",
+        "USB06_D+",
+        "USB07_D-",
+        "USB07_D+"
+      ],
+      "USB 90 ohm CPWG": [
+        "USB08_D-",
+        "USB08_D+",
+        "USB09_D-",
+        "USB09_D+",
+        "USB10_D-",
+        "USB10_D+",
+        "USB11_D-",
+        "USB11_D+",
+        "USB12_D-",
+        "USB12_D+",
+        "USB13_D-",
+        "USB13_D+",
+        "USB14_D-",
+        "USB14_D+"
+      ]
+    },
+    "circuit_count": 14,
+    "expected_reviewed_rows": 30,
+    "circuits": [
+      {
+        "name": "differential-microstrip-top-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "USB01_D-": 24.661512089235075,
+          "USB01_D+": 23.97700576850888
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm noncoplanar",
+        "net_names": [
+          "USB01_D-",
+          "USB01_D+"
+        ],
+        "differential": true,
+        "coplanar": false,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "USB 01: microstrip top 2mm core + launches"
+      },
+      {
+        "name": "differential-microstrip-top-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "USB02_D-": 142.66151208923506,
+          "USB02_D+": 141.9770057685089
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm noncoplanar",
+        "net_names": [
+          "USB02_D-",
+          "USB02_D+"
+        ],
+        "differential": true,
+        "coplanar": false,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "USB 02: microstrip top 120mm core + launches"
+      },
+      {
+        "name": "differential-stripline-inner-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "USB03_D-": 24.740212666085963,
+          "USB03_D+": 24.05570634535977
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm noncoplanar",
+        "net_names": [
+          "USB03_D-",
+          "USB03_D+"
+        ],
+        "differential": true,
+        "coplanar": false,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": 0.33,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": 0.33,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "USB 03: stripline inner 2mm core + launches"
+      },
+      {
+        "name": "differential-stripline-inner-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "USB04_D-": 142.74021266608597,
+          "USB04_D+": 142.05570634535977
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm noncoplanar",
+        "net_names": [
+          "USB04_D-",
+          "USB04_D+"
+        ],
+        "differential": true,
+        "coplanar": false,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": 0.33,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": 0.33,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "USB 04: stripline inner 120mm core + launches"
+      },
+      {
+        "name": "differential-microstrip-bottom-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "USB05_D-": 24.661512089235075,
+          "USB05_D+": 23.97700576850888
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm noncoplanar",
+        "net_names": [
+          "USB05_D-",
+          "USB05_D+"
+        ],
+        "differential": true,
+        "coplanar": false,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "USB 05: microstrip bottom 2mm core + launches"
+      },
+      {
+        "name": "differential-microstrip-bottom-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "USB06_D-": 142.66151208923506,
+          "USB06_D+": 141.9770057685089
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm noncoplanar",
+        "net_names": [
+          "USB06_D-",
+          "USB06_D+"
+        ],
+        "differential": true,
+        "coplanar": false,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "USB 06: microstrip bottom 120mm core + launches"
+      },
+      {
+        "name": "differential-noncoplanar-transition-150mm",
+        "nominal_route_length_mm_per_net": 150.0,
+        "actual_route_length_mm_per_net": {
+          "USB07_D-": 172.90457260763563,
+          "USB07_D+": 172.2200662869094
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "150 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm noncoplanar",
+        "net_names": [
+          "USB07_D-",
+          "USB07_D+"
+        ],
+        "differential": true,
+        "coplanar": false,
+        "expected_raw_sections": 3,
+        "expected_electrical_components": 10,
+        "expected_reviewed_rows": 3,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": 0.33,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.11,
+            "noncoplanar_ground_clearance_mm": 0.33,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.3,
+            "noncoplanar_ground_clearance_mm": 0.9,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": null,
+            "length_mm": 50.0
+          }
+        ],
+        "title": "USB 07: noncoplanar transition 150mm core + launches"
+      },
+      {
+        "name": "differential-cpwg-top-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "USB08_D-": 24.68636490297746,
+          "USB08_D+": 24.021409462395276
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm CPWG",
+        "net_names": [
+          "USB08_D-",
+          "USB08_D+"
+        ],
+        "differential": true,
+        "coplanar": true,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "USB 08: cpwg top 2mm core + launches"
+      },
+      {
+        "name": "differential-cpwg-top-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "USB09_D-": 142.68636490297746,
+          "USB09_D+": 142.02140946239527
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm CPWG",
+        "net_names": [
+          "USB09_D-",
+          "USB09_D+"
+        ],
+        "differential": true,
+        "coplanar": true,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "USB 09: cpwg top 120mm core + launches"
+      },
+      {
+        "name": "differential-buried-cpwg-inner-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "USB10_D-": 24.756781208580886,
+          "USB10_D+": 24.091825767998703
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm CPWG",
+        "net_names": [
+          "USB10_D-",
+          "USB10_D+"
+        ],
+        "differential": true,
+        "coplanar": true,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.1,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.1,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "USB 10: buried cpwg inner 2mm core + launches"
+      },
+      {
+        "name": "differential-buried-cpwg-inner-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "USB11_D-": 142.7567812085809,
+          "USB11_D+": 142.0918257679987
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm CPWG",
+        "net_names": [
+          "USB11_D-",
+          "USB11_D+"
+        ],
+        "differential": true,
+        "coplanar": true,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.1,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.1,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "USB 11: buried cpwg inner 120mm core + launches"
+      },
+      {
+        "name": "differential-cpwg-bottom-2mm",
+        "nominal_route_length_mm_per_net": 2.0,
+        "actual_route_length_mm_per_net": {
+          "USB12_D-": 24.68636490297746,
+          "USB12_D+": 24.021409462395276
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "2 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm CPWG",
+        "net_names": [
+          "USB12_D-",
+          "USB12_D+"
+        ],
+        "differential": true,
+        "coplanar": true,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 2.0
+          }
+        ],
+        "title": "USB 12: cpwg bottom 2mm core + launches"
+      },
+      {
+        "name": "differential-cpwg-bottom-120mm",
+        "nominal_route_length_mm_per_net": 120.0,
+        "actual_route_length_mm_per_net": {
+          "USB13_D-": 142.68636490297746,
+          "USB13_D+": 142.02140946239527
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "120 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm CPWG",
+        "net_names": [
+          "USB13_D-",
+          "USB13_D+"
+        ],
+        "differential": true,
+        "coplanar": true,
+        "expected_raw_sections": 2,
+        "expected_electrical_components": 8,
+        "expected_reviewed_rows": 2,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 120.0
+          }
+        ],
+        "title": "USB 13: cpwg bottom 120mm core + launches"
+      },
+      {
+        "name": "differential-cpwg-transition-150mm",
+        "nominal_route_length_mm_per_net": 150.0,
+        "actual_route_length_mm_per_net": {
+          "USB14_D-": 172.9335675570017,
+          "USB14_D+": 172.26861211641955
+        },
+        "launch_type": "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "launch_count": 2,
+        "length_description": "150 mm controlled core + connector launches",
+        "target_ohms": "90",
+        "net_class": "USB 90 ohm CPWG",
+        "net_names": [
+          "USB14_D-",
+          "USB14_D+"
+        ],
+        "differential": true,
+        "coplanar": true,
+        "expected_raw_sections": 3,
+        "expected_electrical_components": 10,
+        "expected_reviewed_rows": 3,
+        "legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.1,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2
+          }
+        ],
+        "controlled_core_legs": [
+          {
+            "signal_layer": "F.Cu",
+            "reference_layers": [
+              "In1.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "In2.Cu",
+            "reference_layers": [
+              "In1.Cu",
+              "In3.Cu"
+            ],
+            "width_mm": 0.1,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 50.0
+          },
+          {
+            "signal_layer": "B.Cu",
+            "reference_layers": [
+              "In4.Cu"
+            ],
+            "width_mm": 0.27,
+            "noncoplanar_ground_clearance_mm": null,
+            "pair_edge_gap_mm": 0.2032,
+            "coplanar_ground_gap_mm": 0.2,
+            "length_mm": 50.0
+          }
+        ],
+        "title": "USB 14: cpwg transition 150mm core + launches"
+      }
+    ]
+  }
+]

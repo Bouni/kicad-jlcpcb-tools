@@ -1,0 +1,21 @@
+preferred-fire.svg
+
+Fire icon from Font Awesome Free 6.7.2.
+Copyright 2024 Fonticons, Inc. (https://fontawesome.com).
+Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+License and legal terms: https://creativecommons.org/licenses/by/4.0/
+Legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Original SVG:
+https://github.com/FortAwesome/Font-Awesome/blob/6.7.2/svgs/solid/fire.svg
+Original license declaration:
+https://github.com/FortAwesome/Font-Awesome/blob/6.7.2/LICENSE.txt
+
+Changes made by kicad-jlcpcb-tools: orange fill (#ef6c00), explicit display
+dimensions, whitespace and adaptation comment. Original path unchanged.
+
+This attribution and the original SVG attribution comment must accompany
+redistributed copies. HTML reports also include visible attribution and a
+license link. This icon is not JLCPCB artwork and implies no endorsement by
+Fonticons, Inc. or JLCPCB. It has its own license, separate from this project's
+MIT-licensed code.

@@ -1,0 +1,16 @@
+(version 1)
+
+(rule "USB 90 ohm noncoplanar: F.Cu track to GND >= 0.900000mm"
+  (layer "F.Cu")
+  (condition "A.Type == 'Track' && A.hasNetclass('USB 90 ohm noncoplanar') && B.Type == 'Zone' && B.NetName == 'GND'")
+  (constraint clearance (min 0.900000mm)))
+
+(rule "USB 90 ohm noncoplanar: B.Cu track to GND >= 0.900000mm"
+  (layer "B.Cu")
+  (condition "A.Type == 'Track' && A.hasNetclass('USB 90 ohm noncoplanar') && B.Type == 'Zone' && B.NetName == 'GND'")
+  (constraint clearance (min 0.900000mm)))
+
+(rule "USB 90 ohm noncoplanar: In2.Cu track to GND >= 0.330000mm"
+  (layer "In2.Cu")
+  (condition "A.Type == 'Track' && A.hasNetclass('USB 90 ohm noncoplanar') && B.Type == 'Zone' && B.NetName == 'GND'")
+  (constraint clearance (min 0.330000mm)))

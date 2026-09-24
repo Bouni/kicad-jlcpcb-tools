@@ -16,6 +16,9 @@ options.
 
 Tests use tracked files with local edits; stage new files to include them.
 
+See [native impedance checks](linux-impedance-testing.md) for the KiCad 10 smoke
+workflow.
+
 Dependency image packages refresh on the first run of each ISO week in UTC,
 including local Docker builds. Both builders pass the same weekly revision to
 the Dockerfile; an existing layer cache therefore cannot keep an older package

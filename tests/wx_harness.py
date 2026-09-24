@@ -288,6 +288,7 @@ def mainwindow_stubs(
         },
         "bom_widget": {"BomEstimatorController": object, "BomEstimatorWidget": object},
         "corrections": {"CorrectionManagerDialog": object},
+        "copper_zone_dialog": {"EmptyCopperZonesDialog": object},
         "datamodel": {
             "PartListDataModel": type(
                 "PartListDataModel", (), {"columns": {"REF_COL": 0}}
