@@ -140,7 +140,7 @@ def test_v4_load_preserves_intent_and_history_without_writing(tmp_path: Path) ->
     assert revision == 7
     assert _state(repository.database) == before
     upgraded = config.to_dict()
-    assert upgraded["schema_version"] == 6
+    assert upgraded["schema_version"] == 8
     assert upgraded["enabled"] is True
     assert upgraded["specifications"] == [
         {**spec, "linked_layer_groups": [], "independent_layers": []}

@@ -118,6 +118,15 @@ def test_class_discovery_includes_actual_widths_and_reviews_every_routed_layer(
     """Discover all physical widths and explicitly review each routed layer before Apply."""
     api = constructor_api
     dialog = api.create_dialog(class_snapshot(api))
+    assert dialog.size == (1248, 740)
+    assert dialog.minimum_size == (1176, 680)
+    assert dialog.left_panel.minimum_size == (480, -1)
+    assert getattr(dialog.left_panel, "maximum_size", None) is None
+    assert dialog.preview_pane.window.parent.minimum_size == (420, -1)
+    assert any(
+        layout.proportions[:2] == [3, 1]
+        for layout in dialog_tests._LayoutDouble.instances
+    )
     choose_class(api, dialog)
     assert dialog._layer_names == ["F.Cu", "In2.Cu", "B.Cu"]
     assert "0.1, 0.15 mm" in dialog.layer_hint.GetValue()
@@ -950,9 +959,25 @@ def test_empty_manual_references_are_retained_and_self_reference_can_be_repaired
     save(api, dialog)
     assert dialog.modal_result == api.wx.ID_OK
     assert dialog.specification.layer_settings[0].reference_layers == ("In3.Cu",)
-    reopened = api.create_dialog(snapshot, dialog.specification)
+    reopened = api.create_dialog(
+        snapshot,
+        dialog.specification,
+        review_tracking=dialog.review_tracking,
+    )
     assert _checked_reference_layers(reopened) == ("In3.Cu",)
-    assert "F.Cu — needs review" in reopened.layer.items
+    api.finish_preparation(reopened)
+    assert "F.Cu — approved" in reopened.layer.items
+    assert all("needs review" not in item for item in reopened.layer.items)
+    assert all(
+        "needs review" not in item
+        for item in [
+            reopened.preview_pane.checklist.GetItemText(index, 1)
+            for index in range(reopened.preview_pane.checklist.GetItemCount())
+        ]
+    )
+    save(api, reopened)
+    assert reopened.modal_result == api.wx.ID_OK
+    assert reopened.specification == dialog.specification
 
 
 def test_approve_walks_pending_images_then_records_layer_approval(

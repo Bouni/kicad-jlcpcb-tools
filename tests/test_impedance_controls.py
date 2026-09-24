@@ -237,9 +237,17 @@ def harness(
             appearance_context: Optional[Callable[..., Any]] = None,
             load_stackup_catalog: Optional[Callable[..., Any]] = None,
             save_stackup_catalog: Optional[Callable[..., Any]] = None,
+            load_calculator_config: Optional[Callable[..., Any]] = None,
+            save_calculator_config: Optional[Callable[..., Any]] = None,
+            calculate_width: Optional[Callable[..., Any]] = None,
+            fetch_stackup_catalog: Optional[Callable[..., Any]] = None,
             load_stackup_colors: Optional[Callable[..., Any]] = None,
             save_config: Optional[Callable[[Any], None]] = None,
+            load_width_results: Optional[Callable[..., Any]] = None,
+            save_width_result: Optional[Callable[..., Any]] = None,
+            skip_stub_review: Optional[Callable[[], bool]] = None,
             verify_captures: Optional[Callable[..., Any]] = None,
+            prepare_capture: Optional[Callable[..., Any]] = None,
         ) -> None:
             if state.dialog_error is not None:
                 raise state.dialog_error
@@ -256,11 +264,19 @@ def harness(
             self.refresh_snapshot = refresh_snapshot
             self.verify_snapshot = verify_snapshot
             self.verify_captures = verify_captures
+            self.prepare_capture = prepare_capture
             self.save_config = save_config
             self.appearance_context = appearance_context
             self.load_stackup_catalog = load_stackup_catalog
             self.save_stackup_catalog = save_stackup_catalog
+            self.load_calculator_config = load_calculator_config
+            self.save_calculator_config = save_calculator_config
+            self.calculate_width = calculate_width
+            self.fetch_stackup_catalog = fetch_stackup_catalog
             self.load_stackup_colors = load_stackup_colors
+            self.load_width_results = load_width_results
+            self.save_width_result = save_width_result
+            self.skip_stub_review = skip_stub_review
             self.modal_open = False
             self.save_errors: list[str] = []
             self.destroyed = False
@@ -306,9 +322,12 @@ def harness(
     class Renderer:
         """Write a scratch artifact or fail after opening its destination."""
 
-        def __init__(self, board: Any, pcbnew: Any) -> None:
+        def __init__(
+            self, board: Any, pcbnew: Any, *, appearance: object = None
+        ) -> None:
             self.board = board
             self.pcbnew = pcbnew
+            self.appearance = appearance
             self.closed = False
             self.close_calls = 0
             state.renderers.append(self)
@@ -346,9 +365,30 @@ def harness(
         state.scratch.append(Path(directory.name))
         return directory
 
+    def call_after(callback: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        """Run marshalled UI work immediately; these tests are already on that thread."""
+        callback(*args, **kwargs)
+
+    wx.CallAfter = call_after
     wx.MessageBox = message_box
     wx.MessageDialog = ResetDialog
+    wx.adv = ModuleType("wx.adv")
+    wx.adv.HyperlinkCtrl = object
+    dataview = ModuleType("wx.dataview")
+
+    class _DataViewItemAttr:
+        def SetBackgroundColour(self, _colour: object) -> None:
+            return None
+
+        def SetColour(self, _colour: object) -> None:
+            return None
+
+    dataview.DataViewItemAttr = _DataViewItemAttr
+    dataview.DataViewListStore = type("DataViewListStore", (), {})
+    wx.dataview = dataview
     monkeypatch.setitem(sys.modules, "wx", wx)
+    monkeypatch.setitem(sys.modules, "wx.adv", wx.adv)
+    monkeypatch.setitem(sys.modules, "wx.dataview", dataview)
     for module_name, symbols in (
         ("dialog", {"ImpedanceDialog": ConfigurationDialog}),
         ("render", {"SectionRenderer": Renderer}),
@@ -764,6 +804,154 @@ def test_first_catalog_save_reopens_without_saving_board_configuration(
     assert reopened.config == harness.model.Config() and reopened.revision == 0
     assert reopened.repository is None
     assert path.read_bytes() == before
+
+
+def test_cancel_first_configuration_and_width_cache_read_create_no_storage(
+    harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reading cached widths from an unregistered PCB must not create project.db."""
+    path = tmp_path / "jlcpcb" / "project.db"
+    controls = harness.integration.ImpedanceControls(harness.parent, harness.toolbar)
+    controls.attach_store(Store(path))
+    monkeypatch.setattr(controls, "_snapshot", lambda: _snapshot(harness))
+
+    def read_cache(dialog: Any) -> None:
+        """Exercise the real database read through the dialog's width-cache callback."""
+        assert dialog.load_width_results() == ()
+
+    harness.modal_action = read_cache
+    controls.on_configure(None)
+    assert len(harness.dialogs) == 1
+    assert not harness.errors
+    assert not path.parent.exists()
+
+
+def test_first_width_cache_save_reopens_without_saving_board_configuration(
+    harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A settled solve persists independently of Save and close."""
+    path = tmp_path / "jlcpcb" / "project.db"
+    store = Store(path)
+    controls = harness.integration.ImpedanceControls(harness.parent, harness.toolbar)
+    controls.attach_store(store)
+    monkeypatch.setattr(controls, "_snapshot", lambda: _snapshot(harness))
+    stackups = importlib.import_module(
+        f"{harness.integration.__package__}.stackup_model"
+    )
+    result = stackups.WidthResult(
+        spec_id="clock",
+        layer="F.Cu",
+        input_digest="a" * 64,
+        status="success",
+        target_width_nm=181_400,
+        calculated_at_utc="2026-09-26T00:00:00.000000Z",
+        model="CoatedMicrostrip1B",
+        calculation_digest="b" * 64,
+    )
+
+    def save_cache(dialog: Any) -> None:
+        """Simulate a completed worker write through its production save callback."""
+        dialog.save_width_result(result)
+        assert dialog.load_width_results() == (result,)
+
+    harness.modal_action = save_cache
+    controls.on_configure(None)
+    assert not harness.errors
+    assert controls.config == harness.model.Config() and controls.revision == 0
+    assert controls.database.load_config(controls.repository.board_id) is None
+    reopened = harness.integration.ImpedanceControls(harness.parent, harness.toolbar)
+    reopened.attach_store(store)
+    monkeypatch.setattr(reopened, "_snapshot", lambda: _snapshot(harness))
+
+    def read_cache(dialog: Any) -> None:
+        """Verify persistence through the next dialog's real width-cache read."""
+        assert dialog.load_width_results() == (result,)
+
+    harness.modal_action = read_cache
+    reopened.on_configure(None)
+    assert not harness.errors and len(harness.dialogs) == 2
+    assert reopened.config == harness.model.Config() and reopened.revision == 0
+
+
+@pytest.mark.parametrize("changed_identity", [False, True])
+def test_late_calculator_cache_callback_preserves_board_identity_and_intent(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_identity: bool,
+) -> None:
+    """A GUI-dispatched completion after Cancel may cache metadata for its own PCB."""
+    path = tmp_path / "jlcpcb" / "project.db"
+    controls = harness.integration.ImpedanceControls(harness.parent, harness.toolbar)
+    controls.attach_store(Store(path))
+    monkeypatch.setattr(controls, "_snapshot", lambda: _snapshot(harness))
+    controls.on_configure(None)
+    dialog = harness.dialogs[0]
+    assert dialog.destroyed and not path.exists()
+    cache = harness.integration.CalculatorConfigCache(
+        models=({"impedanceType": "CoatedMicrostrip1B"},),
+        copper=({"baseCopperThickness": "1"},),
+        coating=({"coatingAboveSubstrate": "0.01"},),
+        limits=({"impedanceName": "W2", "minValue": "2.5", "maxValue": "100"},),
+        checked_at_utc="2026-09-01T00:00:00.000000Z",
+    )
+    if changed_identity:
+        harness.board_path += ".renamed"
+        with pytest.raises(harness.model.ValidationError, match="filename changed"):
+            dialog.save_calculator_config(cache)
+        assert not path.exists() and controls.repository is None
+    else:
+        dialog.save_calculator_config(cache)
+        assert controls.repository.read_calculator_config(controls.database) == cache
+        assert controls.database.load_config(controls.repository.board_id) is None
+    assert controls.config == harness.model.Config() and controls.revision == 0
+    assert not controls.checkbox.value
+    assert not harness.errors
+
+
+@pytest.mark.parametrize("changed_identity", [False, True])
+def test_gui_queued_width_cache_callback_after_cancel_checks_its_original_board(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_identity: bool,
+) -> None:
+    """The neighboring width callback also rejects Save As before delayed writes."""
+    path = tmp_path / "jlcpcb" / "project.db"
+    controls = harness.integration.ImpedanceControls(harness.parent, harness.toolbar)
+    controls.attach_store(Store(path))
+    monkeypatch.setattr(controls, "_snapshot", lambda: _snapshot(harness))
+    controls.on_configure(None)
+    dialog = harness.dialogs[0]
+    assert dialog.destroyed and not path.exists()
+    stackups = importlib.import_module(
+        f"{harness.integration.__package__}.stackup_model"
+    )
+    result = stackups.WidthResult(
+        spec_id="clock",
+        layer="F.Cu",
+        input_digest="a" * 64,
+        status="success",
+        target_width_nm=181_400,
+        calculated_at_utc="2026-09-26T00:00:00.000000Z",
+        model="CoatedMicrostrip1B",
+        calculation_digest="b" * 64,
+    )
+    queued = []
+    monkeypatch.setattr(harness.wx, "CallAfter", queued.append)
+    dialog.save_width_result(result)
+    assert len(queued) == 1 and not path.exists()
+    if changed_identity:
+        harness.board_path += ".renamed"
+    queued.pop()()
+    if changed_identity:
+        assert not path.exists() and controls.repository is None
+    else:
+        assert controls.repository.load_width_results() == (result,)
+        assert controls.database.load_config(controls.repository.board_id) is None
+    assert controls.config == harness.model.Config() and controls.revision == 0
+    assert not controls.checkbox.value
+    assert not harness.errors
 
 
 def test_disabled_preflight_reads_no_board_geometry(
@@ -1186,6 +1374,7 @@ def test_stored_approval_status_is_not_a_live_board_validation(
     controls = _controls(harness, monkeypatch, _record(approved))
     controls.reload()
     assert "saved approval" in controls.status.label
+    assert "All reviewed" in controls.status.label
     assert not harness.snapshots
     assert not harness.database.saves
 
@@ -1326,6 +1515,28 @@ def test_repeated_preview_reuses_capture_and_live_renderer(
     )
 
 
+def test_background_capture_callback_uses_bound_appearance_and_current_output_identity(
+    harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Speculative preparation shares pixels without bypassing presentation checks."""
+    controls = _controls(harness, monkeypatch, _record(_configuration(harness)))
+
+    def prepare_then_view(dialog: Any) -> None:
+        """Exercise the explicitly supplied preparation and appearance callbacks."""
+        section = harness.matching.analyze(dialog.config, dialog.snapshot).sections[0]
+        assert dialog.appearance_context() == (harness.palette, None)
+        capture = dialog.prepare_capture(dialog.snapshot, section)
+        assert harness.renderers[-1].appearance == harness.palette
+        assert dialog.guarded_preview(section) is capture
+        assert len(harness.renders) == 1
+
+    harness.modal_action = prepare_then_view
+    controls.on_configure(None)
+    assert not harness.errors
+    assert not harness.database.saves
+    assert all(renderer.close_calls == 1 for renderer in harness.renderers)
+
+
 @pytest.mark.parametrize("change", ["board", "palette"])
 def test_changed_revision_replaces_renderer_and_cached_capture(
     harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, change: str
@@ -1388,9 +1599,8 @@ def test_explicit_refresh_recaptures_without_discarding_other_rows(
     assert harness.renderers[0].close_calls == 1
 
 
-@pytest.mark.parametrize("phase", ["before_cached", "during_capture"])
 def test_unreadable_palette_closes_renderer_and_cannot_return_cached_pixels(
-    harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, phase: str
+    harness: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Unreadable appearance is never treated as the previous known palette."""
     controls = _controls(harness, monkeypatch, _record(_configuration(harness)))
@@ -1405,12 +1615,9 @@ def test_unreadable_palette_closes_renderer_and_cannot_return_cached_pixels(
     def inspect_palette_failure(dialog: Any) -> None:
         """Retry with a new owner and no stale captures once appearance is readable."""
         first = dialog.preview(section)
-        if phase == "before_cached":
-            fail_palette()
-        else:
-            harness.render_action = fail_palette
+        fail_palette()
         with pytest.raises(OSError, match="palette could not be read"):
-            dialog.preview(section, refresh=phase == "during_capture")
+            dialog.preview(section)
         assert harness.renderers[0].closed
         assert harness.renderers[0].close_calls == 1
         harness.palette_error = None

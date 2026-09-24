@@ -1,5 +1,6 @@
 """Exercise impedance persistence without migrating the existing parts store."""
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import importlib.util
@@ -75,6 +76,130 @@ def _contents(path: Path) -> list[str]:
     """Return SQL-level database content to compare transaction rollback."""
     with contextlib.closing(sqlite3.connect(path)) as connection:
         return list(connection.iterdump())
+
+
+def _storage_operation(
+    database: Any, board_id: str, board_path: Path, operation: str
+) -> Callable[[], object]:
+    """Exercise the same database entrypoints used by settings and optional caches."""
+    token = database.config_reset_token(board_id)
+    operations: dict[str, Callable[[], object]] = {
+        "find_board": lambda: database.find_board(board_path),
+        "identity": lambda: database.ensure_current_board(board_id, board_path),
+        "load_config": lambda: database.load_config(board_id),
+        "reset_token": lambda: database.config_reset_token(board_id),
+        "load_catalog": lambda: database.load_stackup_catalog(4),
+        "load_metadata": database.load_calculator_config,
+        "load_widths": lambda: database.load_width_results(board_id),
+        "initialize": database.initialize,
+        "register": lambda: database.resolve_board(_board(board_path.parent, "new")),
+        "save_config": lambda: database.save_config(board_id, {}, False, 1),
+        "reset": lambda: database.reset_config(board_id, token, {}),
+        "save_catalog": lambda: database.save_stackup_catalog(4, {}),
+        "save_metadata": lambda: database.save_calculator_config({}),
+        "save_width": lambda: database.save_width_result(
+            board_id, "digest", "spec", "F.Cu", "", {}, max_rows=10
+        ),
+    }
+    return operations[operation]
+
+
+@pytest.mark.parametrize(
+    ("lock", "operation"),
+    [
+        (lock, operation)
+        for lock in ("IMMEDIATE", "EXCLUSIVE")
+        for operation in (
+            "initialize",
+            "register",
+            "save_config",
+            "reset",
+            "save_catalog",
+            "save_metadata",
+            "save_width",
+        )
+    ]
+    + [
+        ("EXCLUSIVE", operation)
+        for operation in (
+            "find_board",
+            "identity",
+            "load_config",
+            "reset_token",
+            "load_catalog",
+            "load_metadata",
+            "load_widths",
+        )
+    ],
+)
+def test_locked_storage_fails_promptly_and_recovers_without_partial_writes(
+    tmp_path: Path, database_module: ModuleType, lock: str, operation: str
+) -> None:
+    """Neither authoritative storage nor optional cache access waits for a lock."""
+    board_path = _board(tmp_path)
+    database = database_module.ImpedanceDatabase(tmp_path / "jlcpcb" / "project.db")
+    board_id = database.resolve_board(board_path)
+    database.save_config(board_id, {"keep": True}, False, 0)
+    invoke = _storage_operation(database, board_id, board_path, operation)
+    before = _contents(database.path)
+
+    with contextlib.closing(sqlite3.connect(database.path)) as blocker:
+        blocker.execute(f"BEGIN {lock}")
+        started = perf_counter()
+        with pytest.raises(
+            (sqlite3.OperationalError, database_module.DatabaseMigrationError),
+            match="locked",
+        ):
+            invoke()
+        elapsed = perf_counter() - started
+        blocker.rollback()
+
+    assert elapsed < 0.250, f"{operation} waited {elapsed:.3f}s for {lock} lock"
+    assert _contents(database.path) == before
+    invoke()
+    assert database.find_board(board_path) == board_id
+
+
+def test_busy_commit_rolls_back_and_preserves_revision_conflicts(
+    tmp_path: Path, database_module: ModuleType
+) -> None:
+    """A reader blocking commit cannot partially publish settings or their revision."""
+    database = database_module.ImpedanceDatabase(tmp_path / "project.db")
+    board_id = database.resolve_board(_board(tmp_path))
+    database.save_config(board_id, {"keep": True}, False, 0)
+    before = database.load_config(board_id)
+    with contextlib.closing(sqlite3.connect(database.path)) as reader:
+        reader.execute("BEGIN")
+        reader.execute("SELECT * FROM board_feature_config").fetchall()
+        started = perf_counter()
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            database.save_config(board_id, {"changed": True}, False, 1)
+        elapsed = perf_counter() - started
+        reader.rollback()
+
+    assert elapsed < 0.250
+    assert database.load_config(board_id) == before
+    assert database.save_config(board_id, {"changed": True}, False, 1) == 2
+    with pytest.raises(database_module.ConfigConflictError):
+        database.save_config(board_id, {}, False, 1)
+
+
+def test_replaced_database_cannot_reuse_an_established_board_identity(
+    tmp_path: Path, database_module: ModuleType
+) -> None:
+    """Connection reuse must not retain identity evidence across database replacement."""
+    board_path = _board(tmp_path)
+    path = tmp_path / "project.db"
+    database = database_module.ImpedanceDatabase(path)
+    old_id = database.resolve_board(board_path)
+    path.rename(tmp_path / "previous.db")
+    replacement = database_module.ImpedanceDatabase(path)
+    new_id = replacement.resolve_board(board_path)
+    assert old_id != new_id
+
+    with pytest.raises(database_module.BoardIdentityError):
+        database.ensure_current_board(old_id, board_path)
+    assert database.find_board(board_path) == new_id
 
 
 @pytest.mark.parametrize("existing_directory", [False, True])
@@ -327,6 +452,8 @@ def test_impedance_initialization_and_save_preserve_existing_parts_and_counters(
             "boards",
             "board_feature_config",
             "impedance_stackup_catalog",
+            "impedance_calculator_config",
+            "impedance_width_cache",
         }
         for name, sql in original_schema:
             assert connection.execute(
@@ -475,31 +602,27 @@ def test_feature_configuration_failure_preserves_prior_revision(
     assert database.load_config(board_id) == before
 
 
-def test_catalog_cache_is_shared_by_layer_count_without_changing_board_intent(
+def test_calculator_config_cache_is_shared_without_changing_board_intent(
     tmp_path: Path, database_module: ModuleType
 ) -> None:
-    """Catalog refresh survives reopening but never changes either board's revision."""
+    """Calculator metadata survives reopen and stays independent of board revisions."""
     path = tmp_path / "jlcpcb" / "project.db"
     database = database_module.ImpedanceDatabase(path)
-    first = database.resolve_board(_board(tmp_path, "main"))
-    second = database.resolve_board(_board(tmp_path, "panel"))
-    database.save_config(first, {"target_ohms": "50"}, False, 0)
-    database.save_config(second, {"target_ohms": "90"}, False, 0)
-    records = [database.load_config(board_id) for board_id in (first, second)]
+    board_id = database.resolve_board(_board(tmp_path, "main"))
+    database.save_config(board_id, {"target_ohms": "50"}, False, 0)
+    before = database.load_config(board_id)
     cache = {
-        "schema_version": 2,
-        "stackups": [],
-        "checked_at_utc": "2026-09-14T14:00:00Z",
+        "schema_version": 1,
+        "models": [{"impedanceType": "CoatedMicrostrip1B"}],
+        "copper": [{"baseCopperThickness": "1"}],
+        "coating": [{"coatingAboveSubstrate": "0.01"}],
+        "limits": [{"impedanceName": "W2", "minValue": "2.5", "maxValue": "100"}],
+        "checked_at_utc": "2026-09-14T14:00:00.000000Z",
     }
-    database.save_stackup_catalog(6, cache)
+    database.save_calculator_config(cache)
     reopened = database_module.ImpedanceDatabase(path)
-    assert reopened.load_stackup_catalog(6) == cache
-    assert reopened.load_stackup_catalog(4) is None
-    assert [reopened.load_config(board_id) for board_id in (first, second)] == records
-    updated = dict(cache, checked_at_utc="2026-09-15T14:00:00Z")
-    reopened.save_stackup_catalog(6, updated)
-    assert database.load_stackup_catalog(6) == updated
-    assert [database.load_config(board_id) for board_id in (first, second)] == records
+    assert reopened.load_calculator_config() == cache
+    assert reopened.load_config(board_id) == before
 
 
 @pytest.mark.parametrize("layer_count", [True, 1, 65, "6", 6.0])
@@ -659,7 +782,13 @@ def test_configuration_reset_replaces_invalid_record_without_creating_archive(
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
-        } == {"boards", "board_feature_config", "impedance_stackup_catalog"}
+        } == {
+            "boards",
+            "board_feature_config",
+            "impedance_stackup_catalog",
+            "impedance_calculator_config",
+            "impedance_width_cache",
+        }
     assert database.config_reset_token(board_id) != token
 
 
@@ -747,45 +876,3 @@ def test_invalid_board_path_does_not_create_storage(
     with pytest.raises(database_module.BoardIdentityError):
         database_module.ImpedanceDatabase.validate_board_path(candidate)
     assert not path.parent.exists()
-
-
-def test_busy_commit_rolls_back_and_preserves_revision_conflicts(
-    tmp_path: Path, database_module: ModuleType
-) -> None:
-    """A reader blocking commit cannot partially publish settings or their revision."""
-    database = database_module.ImpedanceDatabase(tmp_path / "project.db")
-    board_id = database.resolve_board(_board(tmp_path))
-    database.save_config(board_id, {"keep": True}, False, 0)
-    before = database.load_config(board_id)
-    with contextlib.closing(sqlite3.connect(database.path)) as reader:
-        reader.execute("BEGIN")
-        reader.execute("SELECT * FROM board_feature_config").fetchall()
-        started = perf_counter()
-        with pytest.raises(sqlite3.OperationalError, match="locked"):
-            database.save_config(board_id, {"changed": True}, False, 1)
-        elapsed = perf_counter() - started
-        reader.rollback()
-
-    assert elapsed < 0.250
-    assert database.load_config(board_id) == before
-    assert database.save_config(board_id, {"changed": True}, False, 1) == 2
-    with pytest.raises(database_module.ConfigConflictError):
-        database.save_config(board_id, {}, False, 1)
-
-
-def test_replaced_database_cannot_reuse_an_established_board_identity(
-    tmp_path: Path, database_module: ModuleType
-) -> None:
-    """Connection reuse must not retain identity evidence across database replacement."""
-    board_path = _board(tmp_path)
-    path = tmp_path / "project.db"
-    database = database_module.ImpedanceDatabase(path)
-    old_id = database.resolve_board(board_path)
-    path.rename(tmp_path / "previous.db")
-    replacement = database_module.ImpedanceDatabase(path)
-    new_id = replacement.resolve_board(board_path)
-    assert old_id != new_id
-
-    with pytest.raises(database_module.BoardIdentityError):
-        database.ensure_current_board(old_id, board_path)
-    assert database.find_board(board_path) == new_id

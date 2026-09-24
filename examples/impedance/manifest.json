@@ -35,7 +35,7 @@
       ]
     },
     "circuit_count": 14,
-    "expected_reviewed_rows": 18,
+    "expected_reviewed_rows": 30,
     "circuits": [
       {
         "name": "single-ended-microstrip-top-2mm",
@@ -99,9 +99,9 @@
         ],
         "differential": false,
         "coplanar": false,
-        "expected_raw_sections": 1,
+        "expected_raw_sections": 3,
         "expected_electrical_components": 1,
-        "expected_reviewed_rows": 1,
+        "expected_reviewed_rows": 3,
         "legs": [
           {
             "signal_layer": "F.Cu",
@@ -193,9 +193,9 @@
         ],
         "differential": false,
         "coplanar": false,
-        "expected_raw_sections": 1,
+        "expected_raw_sections": 3,
         "expected_electrical_components": 1,
-        "expected_reviewed_rows": 1,
+        "expected_reviewed_rows": 3,
         "legs": [
           {
             "signal_layer": "In2.Cu",
@@ -287,9 +287,9 @@
         ],
         "differential": false,
         "coplanar": false,
-        "expected_raw_sections": 1,
+        "expected_raw_sections": 3,
         "expected_electrical_components": 1,
-        "expected_reviewed_rows": 1,
+        "expected_reviewed_rows": 3,
         "legs": [
           {
             "signal_layer": "B.Cu",
@@ -469,9 +469,9 @@
         ],
         "differential": false,
         "coplanar": true,
-        "expected_raw_sections": 1,
+        "expected_raw_sections": 3,
         "expected_electrical_components": 1,
-        "expected_reviewed_rows": 1,
+        "expected_reviewed_rows": 3,
         "legs": [
           {
             "signal_layer": "F.Cu",
@@ -563,9 +563,9 @@
         ],
         "differential": false,
         "coplanar": true,
-        "expected_raw_sections": 1,
+        "expected_raw_sections": 3,
         "expected_electrical_components": 1,
-        "expected_reviewed_rows": 1,
+        "expected_reviewed_rows": 3,
         "legs": [
           {
             "signal_layer": "In2.Cu",
@@ -657,9 +657,9 @@
         ],
         "differential": false,
         "coplanar": true,
-        "expected_raw_sections": 1,
+        "expected_raw_sections": 3,
         "expected_electrical_components": 1,
-        "expected_reviewed_rows": 1,
+        "expected_reviewed_rows": 3,
         "legs": [
           {
             "signal_layer": "B.Cu",

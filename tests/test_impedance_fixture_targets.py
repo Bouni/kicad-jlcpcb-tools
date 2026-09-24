@@ -98,13 +98,16 @@ def test_example_manifest_and_index_show_the_requested_targets(persisted: bool) 
     }
     assert len(records) == 2
     assert sum(record["circuit_count"] for record in records) == 28
-    # Single-ended: 12 single-layer routes + 2 three-layer transitions.
-    # USB: 12 core/launch profile pairs + 2 three-layer transitions.
-    assert {record["name"]: record["expected_reviewed_rows"] for record in records} == {
-        "single-ended-50-ohm": 18,
-        "usb-differential-90-ohm": 30,
-    }
+    boards = {board.name: board for board in COMBINED_BOARDS}
     for record in records:
+        board = boards[record["name"]]
+        # One profile may have multiple readable regions. The target contract
+        # does not prescribe a row count, but every circuit/profile needs cover.
+        profile_count = sum(len(circuit.signal_profiles) for circuit in board.circuits)
+        assert profile_count <= record["expected_reviewed_rows"] <= len(board.traces())
+        assert record["expected_reviewed_rows"] == sum(
+            circuit["expected_reviewed_rows"] for circuit in record["circuits"]
+        )
         target = "90" if record["differential"] else "50"
         assert record["target_ohms"] == target, record["name"]
         table_row = next(

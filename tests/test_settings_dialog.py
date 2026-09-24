@@ -10,6 +10,7 @@ must describe the behaviour when checked and never change with the state.
 Legacy LCSC priority settings must not expose a competing mapping source.
 """
 
+from itertools import zip_longest
 import json
 from pathlib import Path
 import types
@@ -215,6 +216,7 @@ _wx = settings.wx
 # Checkbox attribute on the dialog -> (settings section, settings key).
 _BOOLEAN_SETTINGS = {
     "fill_zones_setting": ("gerber", "fill_zones"),
+    "skip_stub_review_setting": ("impedance", "skip_stub_review"),
     "force_drc_setting": ("gerber", "force_drc"),
     "plot_values_setting": ("gerber", "plot_values"),
     "plot_references_setting": ("gerber", "plot_references"),
@@ -239,6 +241,7 @@ _BOOLEAN_SETTINGS = {
 # Every label describes what happens when the box is checked.
 _EXPECTED_LABELS = {
     "fill_zones_setting": "Fill zones",
+    "skip_stub_review_setting": "Skip covered-stub images during impedance review",
     "force_drc_setting": (
         "Force DRC check before Gerber export (saves board and fills zones)"
     ),
@@ -271,6 +274,7 @@ def _settings(flag: bool) -> dict[str, dict[str, Any]]:
         "gerber": {},
         "general": {},
         "highlighting": {},
+        "impedance": {},
         "part_preferences": {},
         "library": {"selected_library": "current-parts", "data_path": ""},
         "hooks": {"pre_script": "", "post_script": "", "timeout_seconds": 30},
@@ -379,11 +383,13 @@ class _GridRecorder(_FakeWidget):
         self.cells.append(None)
 
 
-def test_settings_grid_pairs_two_settings_per_row(monkeypatch):
-    """Each row holds two settings, and each setting keeps its neighbour."""
+def test_settings_grid_includes_stub_review_and_final_half_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin all neighbours after stub-review insertion, including the final half row."""
     grids = []
 
-    def record(*args, **kwargs):
+    def record(*args: Any, **kwargs: Any) -> _GridRecorder:
         grids.append(_GridRecorder(*args, **kwargs))
         return grids[-1]
 
@@ -396,14 +402,17 @@ def test_settings_grid_pairs_two_settings_per_row(monkeypatch):
         for cell in grid.cells[1::2]
     ]
 
-    assert list(zip(controls[0::2], controls[1::2])) == [
-        ("fill_zones_setting", "force_drc_setting"),
-        ("plot_values_setting", "plot_references_setting"),
-        ("subtract_mask_from_silk_setting", "lcsc_bom_cpl_setting"),
-        ("order_number_setting", "bom_manufacturer_columns_setting"),
-        ("highlight_matches_setting", "simplify_stock_setting"),
-        ("stock_concern_setting", "sizer"),
+    assert grid.args == (0, 4, 0, 0)
+    assert len(grid.cells) == 2 * len(controls)
+    assert list(zip_longest(controls[0::2], controls[1::2], fillvalue="empty")) == [
+        ("fill_zones_setting", "skip_stub_review_setting"),
+        ("force_drc_setting", "plot_values_setting"),
+        ("plot_references_setting", "subtract_mask_from_silk_setting"),
+        ("lcsc_bom_cpl_setting", "order_number_setting"),
+        ("bom_manufacturer_columns_setting", "highlight_matches_setting"),
+        ("simplify_stock_setting", "stock_concern_setting"),
         ("sizer", "sizer"),
+        ("sizer", "empty"),
     ]
 
 

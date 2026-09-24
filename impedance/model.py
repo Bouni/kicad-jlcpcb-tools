@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, localcontext
+import re
 from typing import Any, Optional
 
 from .review_tracking import (
@@ -22,7 +23,8 @@ from .stackup_model import (
     width_result_to_dict,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
+MAX_REVIEWED_CAPTURES = 10_000
 KINDS = (
     "single_ended",
     "differential",
@@ -32,6 +34,8 @@ KINDS = (
 UNIT_NM = {"mm": 1_000_000, "mil": 25_400}
 Point = tuple[int, int]
 Bounds = tuple[int, int, int, int]
+Contour = tuple[Point, ...]
+CopperPolygon = tuple[Contour, ...]  # Outer boundary followed by any holes.
 
 
 class ValidationError(ValueError):
@@ -65,7 +69,7 @@ class Specification:
 
 @dataclass(frozen=True)
 class Trace:
-    """A track centerline in nanometres; arcs are represented by sampled points."""
+    """Centerline plus optional outward native copper proof for actual arcs."""
 
     trace_id: str
     layer: str
@@ -73,6 +77,29 @@ class Trace:
     width_nm: int
     points: tuple[Point, ...]
     is_native_arc: bool = False
+    copper_polygons: tuple[CopperPolygon, ...] = ()
+
+
+# Machine-stable exclusion codes. Empty means the section is exportable.
+EXCLUSION_COVERED_STUB = "covered_stub"
+COPPER_FEATURE_SHAPES = ("circle", "oval", "rect", "roundrect", "polygon")
+
+
+@dataclass(frozen=True)
+class CopperFeature:
+    """Pad or via copper flash used to detect covered stubs (nanometres)."""
+
+    feature_id: str
+    net: str
+    layer: str
+    kind: str
+    shape: str
+    center: Point
+    size_x_nm: int
+    size_y_nm: int
+    rotation_deg: float = 0.0
+    corner_radius_nm: int = 0
+    polygons: tuple[CopperPolygon, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -88,11 +115,13 @@ class BoardSnapshot:
     net_class_error: str = ""
     differential_pairs: tuple[tuple[str, str], ...] = ()
     differential_pair_error: str = ""
+    copper_features: tuple[CopperFeature, ...] = ()
+    board_bounds: Optional[Bounds] = None
 
 
 @dataclass(frozen=True)
 class Section:
-    """One form row containing complete connected routes and their copper bounds."""
+    """One form region owning complete native tracks and their copper bounds."""
 
     section_id: str
     spec_id: str
@@ -101,6 +130,7 @@ class Section:
     traces: tuple[Trace, ...]
     bounds: Bounds
     net_names: tuple[str, ...]
+    exclusion_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -123,6 +153,7 @@ class Config:
     review_tracking: ReviewTracking = ReviewTracking()
     stackup: Optional[Stackup] = None
     width_results: tuple[WidthResult, ...] = ()
+    reviewed_captures: tuple[tuple[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return an explicitly versioned JSON-compatible object."""
@@ -135,6 +166,7 @@ class Config:
             ],
             "reviewed_digest": self.reviewed_digest,
             "included_section_ids": list(self.included_section_ids),
+            "reviewed_captures": [list(pair) for pair in self.reviewed_captures],
             "review_tracking": review_tracking_to_dict(self.review_tracking),
             "stackup": stackup_to_dict(self.stackup)
             if self.stackup is not None
@@ -168,8 +200,10 @@ class Config:
                 "Reset settings to replace the existing configuration, "
                 "then recreate specifications using net classes."
             )
-        if type(version) is not int or version not in (4, 5, SCHEMA_VERSION):
+        if type(version) is not int or version not in (4, 5, 6, 7, SCHEMA_VERSION):
             raise ValidationError("Unsupported impedance configuration schema version.")
+        if version >= 8:
+            fields.add("reviewed_captures")
         if version == 4:
             fields.update({"section_groups", "legacy_specifications"})
         data = _object(value, fields, "configuration")
@@ -204,8 +238,13 @@ class Config:
                 else None
             ),
             width_results=tuple(width_result_from_dict(item) for item in width_results),
+            reviewed_captures=(
+                _decode_reviewed_captures(data["reviewed_captures"])
+                if version >= 8
+                else ()
+            ),
         )
-        if version < SCHEMA_VERSION:
+        if version < 6:
             validate_config(result)
         else:
             validate_storage_config(result)
@@ -242,6 +281,29 @@ def _string(value: object, label: str, allow_empty: bool = False) -> str:
 def _strings(value: object, label: str) -> tuple[str, ...]:
     """Read a JSON array of nonempty strings."""
     return tuple(_string(item, label) for item in _array(value, label))
+
+
+def _decode_reviewed_captures(value: object) -> tuple[tuple[str, str], ...]:
+    """Read bounded workbook capture evidence without inventing viewing events."""
+    records = _array(value, "reviewed captures")
+    if len(records) > MAX_REVIEWED_CAPTURES:
+        raise ValidationError(
+            "Reviewed captures must be a bounded immutable collection."
+        )
+    captures = []
+    for record in records:
+        pair = _array(record, "reviewed capture")
+        if len(pair) != 2:
+            raise ValidationError(
+                "Reviewed captures must contain section ID/digest pairs."
+            )
+        captures.append(
+            (
+                _string(pair[0], "reviewed capture section ID"),
+                _string(pair[1], "reviewed capture digest"),
+            )
+        )
+    return tuple(captures)
 
 
 def _positive_integer(value: object, label: str) -> int:
@@ -531,6 +593,7 @@ def _validate_config(
     # silently disabling a draft would omit a user-required manufacturing report.
     _string(config.reviewed_digest, "reviewed digest", allow_empty=True)
     _validate_names(config.included_section_ids, "included section IDs")
+    _validate_reviewed_captures(config)
     validate_tracking(config.review_tracking)
     if layers is not None:
         _validate_names(layers, "board copper layers")
@@ -546,13 +609,13 @@ def _validate_config(
         or len(config.width_results) > MAX_WIDTH_RESULTS
     ):
         raise ValidationError("Width results must be a bounded immutable collection.")
-    result_keys: set[tuple[str, str]] = set()
+    result_keys: set[tuple[str, str, str]] = set()
     for result in config.width_results:
         validate_width_result(result)
-        key = (result.spec_id, result.layer)
+        key = (result.spec_id, result.layer, result.input_digest)
         if key in result_keys:
             raise ValidationError(
-                "Width results cannot repeat a specification/layer key."
+                "Width results cannot repeat a specification/layer/input fingerprint."
             )
         result_keys.add(key)
     seen_ids: set[str] = set()
@@ -569,3 +632,36 @@ def _validate_config(
         if spec.kind not in KINDS:
             raise ValidationError(f"Unsupported impedance kind: {spec.kind!r}.")
         _validate_netclass_spec(spec, layers, require_complete=require_complete)
+
+
+def _validate_reviewed_captures(config: Config) -> None:
+    """Bind independent immutable pixel consent to the approved included rows."""
+    captures = config.reviewed_captures
+    if not isinstance(captures, tuple) or len(captures) > MAX_REVIEWED_CAPTURES:
+        raise ValidationError(
+            "Reviewed captures must be a bounded immutable collection."
+        )
+    if captures and not config.reviewed_digest:
+        raise ValidationError("Reviewed captures require a reviewed digest.")
+    included = set(config.included_section_ids)
+    seen: set[str] = set()
+    for pair in captures:
+        if not isinstance(pair, tuple) or len(pair) != 2:
+            raise ValidationError(
+                "Reviewed captures must contain immutable section ID/digest pairs."
+            )
+        section_id, digest = pair
+        _string(section_id, "reviewed capture section ID")
+        if section_id in seen:
+            raise ValidationError(
+                "Reviewed capture section IDs must not contain duplicates."
+            )
+        if section_id not in included:
+            raise ValidationError(
+                "Reviewed captures must belong to included section IDs."
+            )
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValidationError(
+                "Reviewed capture digests must be lowercase SHA-256 digests."
+            )
+        seen.add(section_id)

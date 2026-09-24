@@ -89,3 +89,72 @@ def test_checklist_identifies_current_image_before_capture_finishes(
     assert "Current · " not in pane.checklist.cells[1, 1]
     assert pane.checklist.cells[1, 0] == "—"
     assert not pane.ready
+
+
+def test_preview_without_navigation_never_constructs_an_image_list(
+    shared_preview_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host with its own row grid needs only pixels and review evidence."""
+    api = shared_preview_api
+
+    def unexpected_list(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("The preview must not construct hidden navigation")
+
+    monkeypatch.setattr(api.wx, "ListCtrl", unexpected_list)
+    views = []
+    pane = api.module.WorkbookPreview(
+        preview_helpers.PreviewControl(),
+        lambda _section, **_options: api.capture,
+        image_viewed=lambda *args: views.append(args),
+    )
+    pane.set_sections((api.section,), "board")
+    api.drain()
+    assert pane.checklist is None
+    assert pane.capture_loaded and not pane.ready and not views
+    _paint(api, pane)
+    assert pane.ready
+    assert views[0][:2] == (api.section, api.capture.sha256)
+    pane.refresh_review_labels()
+    pane.clear("No image selected")
+    assert not pane.capture_loaded and not pane.ready
+
+
+@pytest.mark.parametrize("failure_at", ["capture", "paint"])
+def test_selected_failure_notifies_owner_before_automatic_retry(
+    shared_preview_api: SimpleNamespace, failure_at: str
+) -> None:
+    """Failed foreground work must release idle warming while its retry waits."""
+    api = shared_preview_api
+    opened = _open_preview(api)
+    pane, state = opened.pane, opened.state
+
+    if failure_at == "capture":
+
+        def fail_capture(_section: object, **_options: object) -> object:
+            raise ValueError("Temporary capture failure")
+
+        pane._preview = fail_capture
+    pane.set_sections((api.section,), "board")
+    api.drain()
+    if failure_at == "paint":
+        pane.canvas._failed("Temporary paint failure")
+    assert state.notices[-1] == (False, pane.failure)
+    assert "Temporary" in pane.failure
+    assert pane._retry_timer.IsRunning()
+    assert not state.views and not pane.capture_loaded
+
+
+def test_loaded_selection_notifies_owner_without_recording_a_view(
+    shared_preview_api: SimpleNamespace,
+) -> None:
+    """Loading progress and displayed evidence remain separate state changes."""
+    api = shared_preview_api
+    opened = _open_preview(api)
+    pane, state = opened.pane, opened.state
+    loaded_states = []
+    pane._state_changed = lambda: loaded_states.append(pane.capture_loaded)
+    pane.set_sections((api.section,), "board")
+    assert loaded_states == [False]
+    api.drain()
+    assert loaded_states == [False, True]
+    assert not pane.ready and not state.views

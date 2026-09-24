@@ -25,6 +25,7 @@ class Control:
     def __init__(self, parent: object = None, **kwargs: Any) -> None:
         self.parent = parent
         self.label = kwargs.get("label", "")
+        self.title = kwargs.get("title", self.label)
         self.bitmap = kwargs.get("bitmap")
         self.items: list[str] = []
         self.selection = -1
@@ -43,6 +44,8 @@ class Control:
         self.columns: list[tuple[str, int]] = []
         self.cells: dict[tuple[int, int], str] = {}
         self.colours: dict[int, object] = {}
+        self.modal_shown = False
+        self.cursor = None
 
     def __bool__(self) -> bool:
         """Match wx window lifetime checks."""
@@ -118,6 +121,10 @@ class Control:
         """Return native list selection independently of row text."""
         return self.selection
 
+    def SetItemTextColour(self, index: int, colour: object) -> None:
+        """Make completed versus pending row colours observable."""
+        self.colours[index] = colour
+
     def Select(self, index: int, on: bool = True) -> None:
         """Retain ListCtrl selection for the displayed workbook image."""
         self.selection = index if on else -1
@@ -126,10 +133,6 @@ class Control:
         """Retain the focused checklist row without claiming native focus."""
         self.focused_index = index
 
-    def SetItemTextColour(self, index: int, colour: object) -> None:
-        """Make completed versus pending row colours observable."""
-        self.colours[index] = colour
-
     def EnsureVisible(self, index: int) -> None:
         """Retain the row requested for native scrolling."""
         self.visible_index = index
@@ -137,6 +140,10 @@ class Control:
     def SetMinSize(self, size: tuple[int, int]) -> None:
         """Retain the requested native minimum independently of client size."""
         self.minimum_size = size
+
+    def SetCursor(self, cursor: object) -> None:
+        """Retain the cursor assigned while a capture can be enlarged."""
+        self.cursor = cursor
 
     def SetItems(self, items: list[str]) -> None:
         """Replace choices and clear native selection like wx.ItemContainer."""
@@ -219,6 +226,23 @@ class Control:
     def Layout(self) -> None:
         """Keep layout observable without generating synthetic resize events."""
         self.laid_out = True
+
+    def CreateButtonSizer(self, _flags: int) -> Sizer:
+        """Accept standard dialog buttons without claiming native layout."""
+        return Sizer(0)
+
+    def SetSizerAndFit(self, sizer: object) -> None:
+        """Retain the enlarge-dialog layout tree."""
+        self.sizer = sizer
+
+    def ShowModal(self) -> int:
+        """Record that the enlarge dialog became modal."""
+        self.modal_shown = True
+        return getattr(self, "modal_result", 5100)
+
+    def Destroy(self) -> None:
+        """Mark the enlarge dialog destroyed after ShowModal returns."""
+        self.alive = False
 
 
 class Sizer:
@@ -303,6 +327,8 @@ def _png() -> bytes:
 @pytest.fixture
 def pane_api() -> Iterator[SimpleNamespace]:
     """Import real constructors with queued callbacks and explicitly painted wx."""
+    from tests.test_impedance_dialog import _HarnessTimer
+
     package_name = "_impedance_workbook_preview_tests"
     package = ModuleType(package_name)
     package.__path__ = [str(Path(__file__).resolve().parents[1] / "impedance")]
@@ -337,12 +363,14 @@ def pane_api() -> Iterator[SimpleNamespace]:
     wx = FakeWxModule(
         "wx",
         Panel=Control,
+        Dialog=Control,
         Choice=Control,
         Button=Control,
         StaticText=Control,
         TextCtrl=Control,
         ListCtrl=Control,
         BoxSizer=Sizer,
+        Timer=_HarnessTimer,
         CallAfter=call_after,
         AutoBufferedPaintDC=PaintDC,
         Brush=lambda colour: colour,
@@ -351,6 +379,18 @@ def pane_api() -> Iterator[SimpleNamespace]:
         Image=load_image,
         LogNull=suspend_logging,
         Bitmap=lambda image: image,
+        NullCursor=object(),
+        Display=type(
+            "Display",
+            (),
+            {
+                "GetFromWindow": staticmethod(lambda _window: 0),
+                "__init__": lambda self, _index: None,
+                "GetClientArea": lambda self: SimpleNamespace(
+                    GetWidth=lambda: 1600, GetHeight=lambda: 1000
+                ),
+            },
+        ),
     )
     with temporary_modules(
         {package_name: package, "wx": wx}, namespaces=(package_name,)
@@ -406,7 +446,10 @@ def resize(api: SimpleNamespace, pane: Any, size: tuple[int, int]) -> list[bool]
 def open_pane(api: SimpleNamespace, **kwargs: Any) -> Any:
     """Construct a pane whose production provider returns immutable bytes."""
     return api.module.WorkbookPreview(
-        Control(), lambda section, **options: api.capture, **kwargs
+        Control(),
+        lambda section, **options: api.capture,
+        image_list=Control(),
+        **kwargs,
     )
 
 
@@ -421,6 +464,7 @@ def test_constructor_queues_exact_capture_but_requires_visible_paint(
         Control(),
         lambda section, **options: calls.append(section) or api.capture,
         image_viewed=lambda *args: views.append(args),
+        image_list=Control(),
     )
     assert pane.canvas.minimum_size == (420, 180)
     pane.set_sections((api.section,), ("board-a", "scan-1"))
@@ -448,6 +492,95 @@ def test_constructor_queues_exact_capture_but_requires_visible_paint(
     assert pane.checklist.colours[0] == (70, 210, 110)
     assert "last viewed" not in pane.checklist.cells[0, 1].lower()
     assert pane.reviewed_capture_hashes() == ((api.section, api.capture.sha256),)
+
+
+def test_covered_stub_preview_entries_are_labeled_and_stay_muted(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Covered stubs read as Covered stub and stay muted after viewing."""
+    api = pane_api
+    model = importlib.import_module(api.module.__package__ + ".model")
+    checks = importlib.import_module(api.module.__package__ + ".width_checks")
+    stub = replace(
+        api.section,
+        section_id="stub-a",
+        exclusion_reason=model.EXCLUSION_COVERED_STUB,
+        net_names=("USB_STUB",),
+        width_nm=100_000,
+    )
+    pane = open_pane(api)
+    pane.set_sections((api.section, stub), "board-a")
+    assert "0.175 mm" in pane.checklist.GetItemText(0, 1)
+    assert "Covered stub" not in pane.checklist.GetItemText(0, 1)
+    assert "Covered stub" in pane.checklist.GetItemText(1, 1)
+    assert "0.1 mm" not in pane.checklist.GetItemText(1, 1)
+    assert "Covered stub" in pane.checklist.cells[1, 1]
+    assert pane.checklist.colours[1] == checks.COVERED_STUB_COLOUR
+    choose(api, pane, 1)
+    show(api, pane)
+    assert "viewed" in pane.checklist.GetItemText(1, 1)
+    assert "Covered stub" in pane.checklist.GetItemText(1, 1)
+    assert pane.checklist.colours[1] == checks.COVERED_STUB_COLOUR
+    assert pane.checklist.colours[0] == api.wx.SystemSettings.GetColour(
+        api.wx.SYS_COLOUR_GRAYTEXT
+    )
+
+
+def test_skip_stub_review_ignores_unviewed_stubs_by_default(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Default skip leaves stubs listed but not required for layer approval."""
+    api = pane_api
+    model = importlib.import_module(api.module.__package__ + ".model")
+    stub = replace(
+        api.section,
+        section_id="stub-a",
+        exclusion_reason=model.EXCLUSION_COVERED_STUB,
+        net_names=("USB_STUB",),
+    )
+    exportable = replace(api.section, section_id="row-b", layer="B.Cu")
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda section, **options: api.capture,
+        skip_stub_review=lambda: True,
+        image_list=Control(),
+    )
+    pane.set_sections((stub, exportable), "board-a")
+    assert pane.checklist.GetFirstSelected() == 1
+    show(api, pane)
+    assert pane.advance_to_unreviewed() is False
+    pane.ensure_reviewed()
+    assert pane.reviewed_capture_hashes() == ((exportable, api.capture.sha256),)
+
+
+def test_skip_stub_review_off_requires_viewing_stubs(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Disabling skip stops on covered stubs until they are viewed."""
+    api = pane_api
+    model = importlib.import_module(api.module.__package__ + ".model")
+    stub = replace(
+        api.section,
+        section_id="stub-a",
+        exclusion_reason=model.EXCLUSION_COVERED_STUB,
+        net_names=("USB_STUB",),
+    )
+    exportable = replace(api.section, section_id="row-b", layer="B.Cu")
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda section, **options: api.capture,
+        skip_stub_review=lambda: False,
+        image_list=Control(),
+    )
+    pane.set_sections((exportable, stub), "board-a")
+    show(api, pane)
+    assert pane.advance_to_unreviewed() is True
+    assert pane.checklist.GetFirstSelected() == 1
+    with pytest.raises(ValueError, match="Images still needing review: 2"):
+        pane.ensure_reviewed()
+    show(api, pane)
+    assert pane.advance_to_unreviewed() is False
+    pane.ensure_reviewed()
 
 
 def test_every_row_requires_display_and_approve_advances_to_next(
@@ -520,7 +653,7 @@ def test_failed_repreview_clears_stale_pixels_and_explicit_retry_recaptures(
             raise RuntimeError("Native rendering failed")
         return api.capture
 
-    pane = api.module.WorkbookPreview(Control(), preview)
+    pane = api.module.WorkbookPreview(Control(), preview, image_list=Control())
     pane.set_sections((api.section,), "board-a")
     show(api, pane)
     pane.ensure_reviewed()
@@ -570,7 +703,7 @@ def test_clear_and_empty_results_remove_rows_pixels_and_approval(
         pane.checklist.GetItemText(index, 1)
         for index in range(pane.checklist.GetItemCount())
     ] == [] and not pane.checklist.enabled
-    assert not hasattr(pane, "refresh_button")
+    assert not pane._retry_timer.IsRunning()
     with pytest.raises(ValueError):
         pane.ensure_reviewed()
 
@@ -583,7 +716,7 @@ def test_offline_constructor_cannot_approve_without_production_renderer(
     pane = api.module.WorkbookPreview(Control(), None)
     pane.set_sections((api.section,), "board-a")
     show(api, pane)
-    assert pane.canvas._image is None and not hasattr(pane, "refresh_button")
+    assert pane.canvas._image is None and not pane._retry_timer.IsRunning()
     assert "unavailable" in pane.status.GetValue().lower()
     with pytest.raises(ValueError, match="(?i)preview"):
         pane.ensure_reviewed()
@@ -644,7 +777,7 @@ def test_callback_reentrancy_cannot_resurrect_invalidated_capture(
         pane.clear("Settings changed; refresh the preview.")
         return api.capture
 
-    pane = api.module.WorkbookPreview(Control(), preview)
+    pane = api.module.WorkbookPreview(Control(), preview, image_list=Control())
     pane.set_sections((api.section,), "board-a")
     show(api, pane)
     assert pane.canvas._image is None
@@ -664,6 +797,7 @@ def test_same_inputs_preserve_selected_row_without_recapture_or_restamping(
         Control(),
         lambda section, **options: captures.append(section) or api.capture,
         image_viewed=lambda *args: views.append(args),
+        image_list=Control(),
     )
     second = replace(api.section, section_id="row-b")
     sections = (api.section, second)
@@ -771,7 +905,7 @@ def test_failed_later_row_remains_unreviewed_after_returning_to_good_row(
             raise RuntimeError("Second row capture failed")
         return api.capture
 
-    pane = api.module.WorkbookPreview(Control(), preview)
+    pane = api.module.WorkbookPreview(Control(), preview, image_list=Control())
     second = replace(api.section, section_id="row-b")
     pane.set_sections((api.section, second), "board-a")
     show(api, pane)
@@ -794,7 +928,9 @@ def test_layer_navigation_uses_capture_provider_and_review_keys_not_row_indices(
     api = pane_api
     captures: list[object] = []
     pane = api.module.WorkbookPreview(
-        Control(), lambda section, **options: captures.append(section) or api.capture
+        Control(),
+        lambda section, **options: captures.append(section) or api.capture,
+        image_list=Control(),
     )
     second = replace(api.section, section_id="row-b")
     pane.set_sections((api.section, second), ("board-a", "In2.Cu"))
@@ -957,7 +1093,7 @@ def test_selection_error_is_literal_complete_readonly_multiline_status(
     assert pane.status.GetValue() == message
     assert pane.status.style & api.wx.TE_MULTILINE
     assert pane.status.style & api.wx.TE_READONLY
-    assert not hasattr(pane, "refresh_button") and pane.canvas._image is None
+    assert not pane._retry_timer.IsRunning() and pane.canvas._image is None
     with pytest.raises(ValueError, match="unpaired CONTEXT_1"):
         pane.ensure_reviewed()
     pane.set_sections((api.section,), "board-b")
@@ -965,14 +1101,46 @@ def test_selection_error_is_literal_complete_readonly_multiline_status(
     pane.ensure_reviewed()
 
 
-def test_only_image_list_is_taller_and_precedes_preview(
-    pane_api: SimpleNamespace,
+def test_click_with_loaded_capture_opens_enlarge_dialog(
+    pane_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Keep one image selector above the preview at the requested height."""
-    pane = open_pane(pane_api)
-    assert not hasattr(pane, "rows")
-    assert not hasattr(pane, "refresh_button")
-    assert pane.checklist.minimum_size == (1, 146)
-    children = [child for child, _arguments in pane.window.sizer.items]
-    assert children.index(pane.checklist) < children.index(pane.canvas)
-    assert pane_api.wx.EVT_LIST_ITEM_SELECTED in pane.checklist.bindings
+    """A thumbnail click opens a large modal of the same capture for inspection."""
+    api = pane_api
+    shown: list[Control] = []
+
+    def track_modal(self: Control) -> int:
+        shown.append(self)
+        self.modal_shown = True
+        return api.wx.ID_OK
+
+    monkeypatch.setattr(Control, "ShowModal", track_modal)
+    pane = open_pane(api)
+    pane.set_sections((api.section,), "board-a")
+    show(api, pane)
+    assert pane.canvas._image is not None
+    skipped: list[bool] = []
+    pane.canvas.bindings[api.wx.EVT_LEFT_UP](
+        SimpleNamespace(Skip=lambda: skipped.append(True))
+    )
+    assert skipped == [True]
+    assert len(shown) == 1
+    assert "In2.Cu" in shown[0].title
+    assert "USB_P" in shown[0].title
+    assert shown[0].alive is False
+
+
+def test_click_without_image_does_not_open_enlarge_dialog(
+    pane_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Clicks on an empty preview are ignored."""
+    api = pane_api
+    shown: list[Control] = []
+    monkeypatch.setattr(
+        Control,
+        "ShowModal",
+        lambda self: shown.append(self) or api.wx.ID_OK,
+    )
+    pane = open_pane(api)
+    assert pane.canvas._image is None
+    pane.canvas.bindings[api.wx.EVT_LEFT_UP](SimpleNamespace(Skip=lambda: None))
+    assert shown == []

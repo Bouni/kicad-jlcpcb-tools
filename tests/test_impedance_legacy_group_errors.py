@@ -58,6 +58,7 @@ def _config(*, differential: bool = True) -> model.Config:
 def _v4_payload() -> dict[str, Any]:
     """Keep historical specifications free of later editing metadata."""
     payload = _config().to_dict()
+    del payload["reviewed_captures"]
     for spec in payload["specifications"]:
         del spec["linked_layer_groups"]
         del spec["independent_layers"]

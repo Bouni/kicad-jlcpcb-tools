@@ -78,6 +78,11 @@ def hierarchy(
     )
     monkeypatch.setattr(_ConstructedControl, "FindWindow", find_child, raising=False)
     monkeypatch.setattr(_ConstructedControl, "CreateButtonSizer", create_buttons)
+    monkeypatch.setattr(
+        api.dialog.ImpedanceDialog,
+        "_ensure_catalog_started",
+        lambda _self, _count=None: None,
+    )
     foreign = _ConstructedControl()
     roots.append(foreign)
     foreign.CreateButtonSizer(api.wx.OK | api.wx.CANCEL)
@@ -95,9 +100,14 @@ def _open_main(hierarchy: SimpleNamespace) -> _ConstructedControl:
     )
     hierarchy.roots.append(dialog)
     dialog.on_screen = True
-    dialog._queue_selected_preview()
+    event = SimpleNamespace(
+        GetEventObject=lambda: dialog, IsShown=lambda: True, Skip=lambda: None
+    )
+    dialog.bindings[api.wx.EVT_SHOW, -1](event)
+    dialog.bindings[api.wx.EVT_PAINT, -1](event)
     api.drain()
     api.paint(dialog.preview_pane)
+    api.finish_preparation(dialog)
     return dialog
 
 
@@ -208,8 +218,8 @@ def test_revoking_approval_keeps_local_draft_save_available(
             replace(dialog.session.snapshot, context_digest="changed board text")
         )
     elif boundary == "include":
-        dialog.sections.Check(0, False)
-        dialog.sections.emit(api.wx.EVT_CHECKLISTBOX)
+        dialog.sections.SetToggleValue(False, 0, 0)
+        dialog._on_include(0)
     elif boundary == "save":
         dialog.refresh_snapshot = changed_board
         dialog.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)

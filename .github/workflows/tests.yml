@@ -22,6 +22,7 @@ jobs:
           - lane: native-wx-0
             name: Native wx (controls)
             target: wx
+            timeout_minutes: 20
           - lane: native-wx-1
             name: Native wx (isolated input)
             target: wx
@@ -49,6 +50,7 @@ jobs:
     env:
       KICAD_CLI: /usr/bin/kicad-cli
       KICAD_CAPTURE_PNG: '1'
+      KICAD_IMPEDANCE_NATIVE_BUDGET_PROFILE: ci
     steps:
       - uses: actions/checkout@v7
       - name: Prepare dependency image

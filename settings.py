@@ -82,6 +82,28 @@ class SettingsDialog(wx.Dialog):
 
         self.fill_zones_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
+        ##### Skip covered-stub impedance review #####
+
+        self.skip_stub_review_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Skip covered-stub images during impedance review",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="impedance_skip_stub_review",
+        )
+
+        self.skip_stub_review_setting.SetToolTip(
+            wx.ToolTip(
+                "When enabled, covered stubs stay listed in the impedance "
+                "specification preview but are skipped during layer image "
+                "approval. Uncheck to stop on each stub for manual review."
+            )
+        )
+
+        self.skip_stub_review_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
         ##### Force DRC before Gerber export #####
 
         self.force_drc_setting = wx.CheckBox(
@@ -639,6 +661,7 @@ class SettingsDialog(wx.Dialog):
         self._add_setting_row(
             settings_grid, self.fill_zones_image, self.fill_zones_setting
         )
+        self._add_setting_row(settings_grid, None, self.skip_stub_review_setting)
         self._add_setting_row(
             settings_grid, self.force_drc_image, self.force_drc_setting
         )
@@ -705,6 +728,10 @@ class SettingsDialog(wx.Dialog):
         self.fill_zones_image.SetBitmap(
             loadBitmapScaled(icon, self.parent.scale_factor, static=True)
         )
+
+    def update_skip_stub_review(self, enabled: bool) -> None:
+        """Update the covered-stub impedance review skip setting."""
+        self.skip_stub_review_setting.SetValue(bool(enabled))
 
     def build_force_drc_bitmap(self, enabled):
         """Build the Force DRC icon, overlaying a red X when disabled."""
@@ -823,6 +850,9 @@ class SettingsDialog(wx.Dialog):
         """Load settings and set checkboxes accordingly."""
         self.update_fill_zones(
             self.parent.settings.get("gerber", {}).get("fill_zones", True)
+        )
+        self.update_skip_stub_review(
+            self.parent.settings.get("impedance", {}).get("skip_stub_review", True)
         )
         self.update_force_drc(
             self.parent.settings.get("gerber", {}).get("force_drc", False)
