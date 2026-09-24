@@ -127,7 +127,7 @@ def test_assigning_a_part_refreshes_its_correction_cell(
 
     assert part["lcsc"] == "C12345"
     window.partlist_data_model.set_correction.assert_called_once_with("U1", PART_RULE)
-    window.partlist_data_model.AddEntry.assert_not_called()
+    window.partlist_data_model.ReplaceAll.assert_not_called()
 
 
 def test_removing_a_part_number_refreshes_its_correction_cell(

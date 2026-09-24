@@ -123,10 +123,8 @@ def test_populate_footprint_list_skips_stale_row_and_retains_live_row(monkeypatc
 
     JLCPCBTools.populate_footprint_list(window)
 
-    added_references = [
-        invocation.args[0][0]
-        for invocation in window.partlist_data_model.AddEntry.call_args_list
-    ]
+    entries = window.partlist_data_model.ReplaceAll.call_args.args[0]
+    added_references = [row[0] for row, _part, _pending in entries]
     assert added_references == ["R2"]
 
 

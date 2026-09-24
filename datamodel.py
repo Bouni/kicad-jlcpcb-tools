@@ -187,9 +187,19 @@ class PartListDataModel(_StockDataModel):
         if (index := self.find_index(reference)) is None:
             return
         row = self.data[index]
+        if self._store_assembly_metadata(row, part, pending=pending):
+            # Cocoa interprets ValueChanged's index as a displayed column. Std's
+            # retained model index exceeds the displayed count without Enrichment.
+            self.ItemChanged(self.ObjectToItem(row))
+
+    def _store_assembly_metadata(
+        self, row: list[Any], part: Mapping[str, object], *, pending: bool
+    ) -> bool:
+        """Record metadata and status for a row, returning whether either changed."""
+        reference = row[self.columns["REF_COL"]]
         lcsc = str(row[self.columns["LCSC_COL"]] or "").strip().upper()
         if "lcsc" in part and str(part["lcsc"] or "").strip().upper() != lcsc:
-            return
+            return False
         metadata = (
             _AssemblyMetadata(
                 lcsc=lcsc,
@@ -212,10 +222,7 @@ class PartListDataModel(_StockDataModel):
             status = "Done" if metadata.classification is not None else "Class missing"
         old_status = row[self.columns["ENRICH_COL"]]
         row[self.columns["ENRICH_COL"]] = status
-        if metadata != previous or old_status != status:
-            # Cocoa interprets ValueChanged's index as a displayed column. Std's
-            # retained model index exceeds the displayed count without Enrichment.
-            self.ItemChanged(self.ObjectToItem(row))
+        return metadata != previous or old_status != status
 
     def get_assembly_tooltip(self, item: Any) -> str:
         """Explain precise classification, assembly process, and lookup status."""
@@ -410,8 +417,8 @@ class PartListDataModel(_StockDataModel):
         """Get the display label for a layer number."""
         return "TOP" if side == "0" else "BOT"
 
-    def AddEntry(self, data: list):
-        """Add a new entry to the data model."""
+    def _prepare_entry(self, data: list) -> list:
+        """Fill the display columns of a raw board row in place."""
         if len(data) <= self.columns["PRICE_COL"]:
             data.append("")
         if len(data) <= self.columns["TRAILING_SPACER_COL"]:
@@ -437,16 +444,34 @@ class PartListDataModel(_StockDataModel):
             footprint=str(data[self.columns["FP_COL"]] or ""),
             params=str(data[self.columns["PARAMS_COL"]] or ""),
         )
-        self.data.append(data)
+        return data
+
+    def AddEntry(self, data: list):
+        """Add a new entry to the data model."""
+        self.data.append(self._prepare_entry(data))
         self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
 
-    def RemoveAll(self) -> None:
-        """Remove all entries from the data model."""
+    def ReplaceAll(
+        self, entries: Iterable[tuple[list, Mapping[str, object], bool]]
+    ) -> None:
+        """Replace every row, with its store part and pending flag, in one reset.
+
+        wxOSX reloads and re-sorts the whole list on every ItemAdded, which
+        makes a row-by-row fill quadratic; one Cleared() reloads it once.
+        """
         self.data.clear()
         self.standard_only_refs.clear()
         self._assembly_metadata.clear()
         self.stock_concern_refs.clear()
+        for data, part, pending in entries:
+            row = self._prepare_entry(data)
+            self.data.append(row)
+            self._store_assembly_metadata(row, part, pending=pending)
         self.Cleared()
+
+    def RemoveAll(self) -> None:
+        """Remove all entries from the data model."""
+        self.ReplaceAll(())
 
     def get_all(self):
         """Get tall items."""
@@ -639,10 +664,14 @@ class PartSelectorDataModel(_StockDataModel):
         self.data.append(data)
         self.ItemAdded(dv.NullDataViewItem, self.ObjectToItem(data))
 
+    def ReplaceAll(self, rows: Iterable[list]) -> None:
+        """Replace every row in one reset rather than an ItemAdded per row."""
+        self.data[:] = rows
+        self.Cleared()
+
     def RemoveAll(self):
         """Remove all entries from the data model."""
-        self.data.clear()
-        self.Cleared()
+        self.ReplaceAll(())
 
     def get_all(self):
         """Get tall items."""
