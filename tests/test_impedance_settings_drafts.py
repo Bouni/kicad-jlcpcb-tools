@@ -274,7 +274,7 @@ def test_cancel_retains_obsolete_saved_layer_and_original_dimensions(
     dialog.kind.SetSelection(1)
     dialog.kind.emit(api.wx.EVT_CHOICE)
     dialog.spacing.SetValue("0.2")
-    dialog.EndModal(api.wx.ID_CANCEL)
+    dialog.emit(api.wx.EVT_BUTTON, api.wx.ID_CANCEL)
     assert dialog.specification is None
     assert api.model.Config(specifications=(source,)).to_dict() == before
     assert tuple(item.layer for item in source.layer_settings) == (
@@ -347,14 +347,13 @@ def test_apply_unchanged_settings_retains_existing_approval_without_restamping(
     assert len(dialog.review_tracking.layers) == 1
     _apply(api, dialog)
     assert dialog.modal_result == api.wx.ID_OK
-    reopened = api.dialog.SpecificationDialog(
-        None,
+    reopened = api.create_dialog(
         snapshot,
         dialog.specification,
-        preview=api.preview,
         review_tracking=dialog.review_tracking,
     )
     api.finish_preparation(reopened)
+    assert reopened._layer_drafts["F.Cu"].confirmed is True
     before = reopened.review_tracking
 
     def unexpected_timestamp() -> str:

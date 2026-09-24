@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 from threading import Event
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 
@@ -73,15 +73,20 @@ def _main(
     saves: list[tuple[int, Any]],
     *,
     saved: Any = None,
+    refresh_snapshot: Optional[Callable[[], Any]] = None,
 ) -> Any:
     """Open the complete controlled-impedance dialog with an unrouted board."""
-    snapshot = native.model.BoardSnapshot(("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"), ())
+    snapshot = (
+        refresh_snapshot()
+        if refresh_snapshot is not None
+        else native.model.BoardSnapshot(("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"), ())
+    )
     return native.dialog.ImpedanceDialog(
         frame,
         native.model.Config(stackup=saved),
         snapshot,
         preview=lambda *_args: pytest.fail("An unrouted board needs no capture"),
-        refresh_snapshot=lambda: snapshot,
+        refresh_snapshot=refresh_snapshot or (lambda: snapshot),
         load_stackup_catalog=lambda _count: cache,
         save_stackup_catalog=lambda count, value: saves.append((count, value)),
         fetch_stackup_catalog=fetch,
@@ -369,7 +374,17 @@ def test_native_board_layer_count_refresh_replaces_catalog_owner_safely(
             old_returned.set()
             return (old_choice,)
 
-        main = _main(native, frame, native.cache.CatalogCache(), fetch, saves)
+        board_state = [
+            native.model.BoardSnapshot(("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"), ())
+        ]
+        main = _main(
+            native,
+            frame,
+            native.cache.CatalogCache(),
+            fetch,
+            saves,
+            refresh_snapshot=lambda: board_state[0],
+        )
         main.Show()
         wait_until(wx, old_started.is_set)
         old_controller = main._catalog_controller
@@ -382,7 +397,8 @@ def test_native_board_layer_count_refresh_replaces_catalog_owner_safely(
             ("F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "In4.Cu", "B.Cu"), ()
         )
         try:
-            assert main._refresh_rows(replacement)
+            board_state[0] = replacement
+            assert main._refresh_rows()
             current = main._catalog_controller
             assert current is not old_controller
             assert current.layer_count == 6

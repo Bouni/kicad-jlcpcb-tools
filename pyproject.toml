@@ -21,6 +21,7 @@ dependencies = [
     "click>=8.0",
     "humanize>=4.0",
     "requests>=2.28",
+    "websockets>=15.0.1,<16",
     "openpyxl==3.1.5",
     "et-xmlfile==2.0.0",
     "packaging>=20.0",
@@ -44,7 +45,7 @@ Repository = "https://github.com/bouni/kicad-jlcpcb-tools.git"
 Issues = "https://github.com/bouni/kicad-jlcpcb-tools/issues"
 
 [tool.setuptools]
-packages = ["db_build", "common", "impedance", "impedance._vendor"]
+packages = ["db_build", "common", "grid_helpers", "impedance", "impedance._vendor"]
 
 [tool.setuptools.package-data]
 impedance = ["resources/*.xlsx", "resources/*.svg", "resources/*-LICENSE.txt"]
@@ -154,6 +155,7 @@ testpaths = ["tests", "common", "dblib"]
 markers = [
     "native_wx: real wx controls, enabled with KICAD_JLCPCB_NATIVE_TESTS=1",
     "native_kicad: real KiCad bindings and disposable boards",
+    "kicad10_impedance: generated/saved impedance fixtures and CLI capture/DRC integration required in the KiCad 10 lane",
     "kicad_variants: needs KiCad's design-variant API; skipped on a KiCad without it",
     "kicad_standalone_drc: runs KiCad's DRC outside KiCad; skipped on KiCad 10, where that crashes",
     "kicad_golden: compares outputs with tests/golden; skipped on a KiCad with none recorded",

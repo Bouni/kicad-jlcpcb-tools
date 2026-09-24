@@ -322,9 +322,17 @@ def layer_fingerprint(
     width_results: Sequence["WidthResult"] = (),
 ) -> str:
     """Bind an approval to normalized intent and the exact row set on this layer."""
-    from .matching import CAPTURE_POLICY_REVISION
+    from .matching import (
+        ALGORITHM_VERSION,
+        CAPTURE_POLICY_REVISION,
+        COVERED_STUB_POLICY_REVISION,
+    )
     from .model import positive_decimal, resolved_layer_settings
-    from .stackup_model import stackup_fingerprint, width_results_fingerprint
+    from .stackup_model import (
+        CALCULATION_REVISION,
+        stackup_fingerprint,
+        width_results_fingerprint,
+    )
 
     _digest_value(source_digest, "source fingerprint")
     settings = resolved_layer_settings(spec, layer)
@@ -353,7 +361,10 @@ def layer_fingerprint(
                 for section in sorted(sections, key=lambda item: item.section_id)
                 if section.layer == layer and section.spec_id == spec.spec_id
             ],
+            "algorithm_version": ALGORITHM_VERSION,
             "capture_policy_revision": CAPTURE_POLICY_REVISION,
+            "covered_stub_policy_revision": COVERED_STUB_POLICY_REVISION,
+            "calculation_revision": CALCULATION_REVISION,
         }
     )
 
@@ -440,6 +451,8 @@ def layer_approval_current(
     required_section_ids: Optional[set[str]] = None,
 ) -> bool:
     """Return whether this layer's explicit approval still matches current settings and rows."""
+    from .model import EXCLUSION_COVERED_STUB
+
     approved = find_layer(tracking, spec.spec_id, layer)
     if approved is None:
         return False
@@ -449,6 +462,14 @@ def layer_approval_current(
         if section.spec_id == spec.spec_id and section.layer == layer
     )
     if not layer_sections:
+        return False
+    if capture_digests is not None and any(
+        section.section_id in capture_digests
+        and capture_digests[section.section_id] is None
+        for section in layer_sections
+    ):
+        # An unchecked optional image has no entry. An explicit failure must
+        # remain pending even if its image was not part of the saved approval.
         return False
     digest = layer_fingerprint(
         source_digest,
@@ -474,11 +495,13 @@ def layer_approval_current(
             and capture_digests[section_id] != capture_digest
         ):
             return False
-    required = (
-        current_ids
-        if required_section_ids is None
-        else current_ids & required_section_ids
-    )
+    required = {
+        section.section_id
+        for section in layer_sections
+        if section.exclusion_reason != EXCLUSION_COVERED_STUB
+    }
+    if required_section_ids is not None:
+        required = current_ids & required_section_ids
     return required <= approved_ids
 
 

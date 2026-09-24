@@ -238,9 +238,11 @@ def test_review_cache_releases_renderer_before_replacing_variant_board(
 
     def change_and_refresh(dialog: Any) -> None:
         section = harness.matching.analyze(dialog.config, dialog.snapshot).sections[0]
+        assert dialog.appearance_context() == (harness.palette, "A")
         dialog.guarded_preview(section)
         first_owner = state.owners[-1]
         state.session.output_variant = "B"
+        assert dialog.appearance_context() == (harness.palette, "B")
         current = dialog.refresh_snapshot()
         assert current != dialog.snapshot
         assert first_owner.closed

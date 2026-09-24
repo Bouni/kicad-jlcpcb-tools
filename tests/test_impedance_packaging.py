@@ -28,6 +28,7 @@ def test_setuptools_includes_impedance_package_and_vendor_resource() -> None:
     """Installed package data must resolve the writer's exact workbook resource."""
     assert "impedance" in _toml_array("tool.setuptools", "packages")
     assert "impedance._vendor" in _toml_array("tool.setuptools", "packages")
+    assert "grid_helpers" in _toml_array("tool.setuptools", "packages")
     patterns = _toml_array("tool.setuptools.package-data", "impedance")
     package_root = _ROOT / "impedance"
     declared_resources = {

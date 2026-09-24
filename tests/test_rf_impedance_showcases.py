@@ -311,6 +311,7 @@ def test_reference_probe_excludes_only_known_via_antipads() -> None:
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 @pytest.mark.parametrize("name", NAMES)
 def test_native_showcase_fill_drc_and_reference_copper(
     name: str, tmp_path: Path
