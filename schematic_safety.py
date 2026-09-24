@@ -18,8 +18,11 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-# One token of a KiCad S-expression: a bracket, a quoted string or an atom.
-_SEXPR_TOKEN_RX = re.compile(r'\(|\)|"(?:[^"\\]|\\.)*"|[^\s()"]+')
+# A KiCad full-line comment, or a bracket, quoted string or atom.
+_SEXPR_TOKEN_RX = re.compile(
+    r'(?P<comment>^[ \t\0]*\#[^\r\n]*)|\(|\)|"(?:[^"\\]|\\.)*"|[^\s()"]+',
+    re.MULTILINE,
+)
 
 # KiCad writes "Sheetfile" and still reads the older "Sheet file".
 _SHEET_FILE_PROPERTIES = ("sheetfile", "sheet file")
@@ -322,6 +325,8 @@ def _sheet_file_names(content: str) -> list[str]:
     strings: list[list[str]] = []
     names: list[str] = []
     for match in _SEXPR_TOKEN_RX.finditer(content):
+        if match.group("comment") is not None:
+            continue
         token = match.group()
         if token == "(":
             heads.append(None)

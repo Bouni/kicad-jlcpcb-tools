@@ -2,6 +2,7 @@
 
 from collections.abc import Collection, Iterable, Mapping
 from functools import cached_property
+from io import StringIO
 import logging
 import os
 import os.path
@@ -11,6 +12,7 @@ from typing import Any, Optional
 from pcbnew import GetBuildVersion  # pylint: disable=import-error
 
 from .core.version import is_version7
+from .schematic_fields import update_assignment_fields
 from .schematic_safety import (
     SchematicLockedError,
     assert_schematics_not_locked,
@@ -20,6 +22,7 @@ from .schematic_safety import (
     matching_project_names,
     project_schematic_path,
 )
+from .schematic_snapshot import DefaultSchematicSnapshot, capture_board
 
 __all__ = [
     "SchematicExport",
@@ -95,7 +98,7 @@ class SchematicExport:
         return None
 
     def _resolved_bom(
-        self, refs: set[str], store_parts: tuple[dict[str, Any], ...]
+        self, refs: set[str], store_parts: tuple[Mapping[str, Any], ...]
     ) -> Optional[bool]:  # noqa: UP045
         """Return a shared exclude-from-BOM state, or None when it is unsafe."""
         matched = {
@@ -123,7 +126,7 @@ class SchematicExport:
     def _bom_updates(
         self,
         lines: list[str],
-        store_parts: tuple[dict[str, Any], ...],
+        store_parts: tuple[Mapping[str, Any], ...],
     ) -> dict[int, str]:
         """Return in_bom line updates that are safe for every symbol instance."""
         symbols = []
@@ -206,9 +209,9 @@ class SchematicExport:
         approved_locks: Collection[str] = (),
         *,
         variant_name: str = "",
-        parts: Optional[Iterable[Mapping[str, Any]]] = None,  # noqa: UP045
+        snapshot: Optional[DefaultSchematicSnapshot] = None,
     ) -> None:
-        """Export one validated Default snapshot using the existing base writer.
+        """Export one captured Default board state without consulting cached mappings.
 
         Every sheet under the given schematics is exported once. Nothing is
         written if a sheet file is missing, unreadable or read-only, or
@@ -218,68 +221,73 @@ class SchematicExport:
         a sheet that cannot be processed stops the export before any write;
         a sheet that cannot be replaced still leaves the sheets before it
         exported.
-
-        Matrix callers supply an explicit Default snapshot. The legacy fallback
-        accepts only a Default store view and reads it once for the whole export.
-        Neither the focused matrix cell nor the native editor selection changes
-        the meaning of this source.
         """
         self._require_default(variant_name)
-        if parts is None:
-            store = self.parent.store
-            self._require_default(getattr(store, "variant_name", ""))
-            parts = store.read_all()
-        store_parts = tuple(dict(part) for part in parts)
-        for part in store_parts:
-            self._require_default(part.get("variant_name", ""))
-            # Check required source keys before any format branch opens a file.
-            if not {"reference", "lcsc", "exclude_from_bom"}.issubset(part):
-                raise ValueError(
-                    "Default schematic export requires reference, LCSC, and BOM data."
+        if snapshot is None:
+            snapshot = capture_board(self.parent.pcbnew.GetBoard())
+        if not isinstance(snapshot, DefaultSchematicSnapshot):
+            raise TypeError("Schematic export requires a captured Default snapshot.")
+
+        warnings = list(snapshot.warnings)
+        version7 = is_version7(GetBuildVersion())
+        try:
+            # Every name a sheet is reached by is checked for a lock, because
+            # KiCad locks the path it opened; each file is then written once.
+            encountered = list(
+                dict.fromkeys(
+                    hp for p in paths for hp in collect_schematic_hierarchy(p)
                 )
+            )
+            # KiCad locks the project's own schematic whenever the project is
+            # open, even when that file is not one of the sheets written here.
+            project_schematic = project_schematic_path(
+                getattr(self.parent, "project_path", None),
+                getattr(self.parent, "board_name", None),
+                self._project_name,
+            )
+            lock_paths = list(encountered)
+            if project_schematic and project_schematic not in lock_paths:
+                lock_paths.append(project_schematic)
+            assert_schematics_not_locked(lock_paths, approved_locks)
+            assert_schematics_writable(encountered)
 
-        # Every name a sheet is reached by is checked for a lock, because
-        # KiCad locks the path it opened; each file is then written once.
-        encountered = list(
-            dict.fromkeys(hp for p in paths for hp in collect_schematic_hierarchy(p))
-        )
-        # KiCad locks the project's own schematic whenever the project is
-        # open, even when that file is not one of the sheets written here.
-        project_schematic = project_schematic_path(
-            getattr(self.parent, "project_path", None),
-            getattr(self.parent, "board_name", None),
-            self._project_name,
-        )
-        lock_paths = list(encountered)
-        if project_schematic and project_schematic not in lock_paths:
-            lock_paths.append(project_schematic)
-        assert_schematics_not_locked(lock_paths, approved_locks)
-        assert_schematics_writable(encountered)
+            rendered = [
+                (
+                    path,
+                    "".join(
+                        self._prepare_schematic(
+                            path, snapshot, version7=version7, warnings=warnings
+                        )
+                    ),
+                )
+                for path in encountered
+            ]
 
-        if is_version7(GetBuildVersion()):
-            self.logger.info("Kicad 7...")
-            render = self._render_schematic7
-        else:
-            self.logger.info("Kicad 8+...")
-            render = self._render_schematic
-        rendered = [(path, render(path, store_parts)) for path in encountered]
-
-        # A name that already refers to a file this export wrote, through a
-        # symlink or as another spelling of one directory entry, is not
-        # written again, or its backup would hold the first export's output.
-        # Writing replaces a directory entry, so a hard link to an exported
-        # file still refers to the original and is written under its own name.
-        written: set[tuple[int, int]] = set()
-        for path, content in rendered:
-            identity = _file_identity(path)
-            if identity is not None and identity in written:
-                self.logger.info("%s is another name for a sheet already written", path)
-                continue
-            atomic_write_schematic(path, content)
-            self.logger.info("Added LCSC's to %s (maybe?)", path)
-            identity = _file_identity(path)
-            if identity is not None:
-                written.add(identity)
+            # A name that already refers to a file this export wrote, through a
+            # symlink or as another spelling of one directory entry, is not
+            # written again, or its backup would hold the first export's output.
+            # Writing replaces a directory entry, so a hard link to an exported
+            # file still refers to the original and is written under its own name.
+            written: set[tuple[int, int]] = set()
+            for path, content in rendered:
+                identity = _file_identity(path)
+                if identity is not None and identity in written:
+                    self.logger.info(
+                        "%s is another name for a sheet already written", path
+                    )
+                    continue
+                atomic_write_schematic(path, content)
+                self.logger.info("Updated part assignments in %s", path)
+                identity = _file_identity(path)
+                if identity is not None:
+                    written.add(identity)
+        finally:
+            if warnings:
+                self.logger.warning(
+                    "Preserved unresolved schematic assignments: %s. "
+                    "Resolve the affected Default part fields and export again.",
+                    "; ".join(dict.fromkeys(warnings)),
+                )
 
     @staticmethod
     def _require_default(variant_name: str) -> None:
@@ -293,156 +301,25 @@ class SchematicExport:
                 "base schematic fields."
             )
 
-    def _render_schematic7(
-        self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> str:
-        """Return a KiCad V7 schematic's text with its LCSC and BOM fields updated."""
+    def _prepare_schematic(
+        self,
+        path: str,
+        snapshot: DefaultSchematicSnapshot,
+        *,
+        version7: bool,
+        warnings: list[str],
+    ) -> list[str]:
+        """Render assignment and BOM changes using physical file-line boundaries."""
         self.logger.info("Reading %s...", path)
-        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
-        # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile(
-            '\\(property\\s\\"(.*)\\"\\s\\"(.*)\\"\\s\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)'
-        )
-        pinRx = re.compile('\\(pin\\s\\"(.*)\\"\\s\\(')
-
-        lastLoc = ""
-        lastLcsc = ""
-        newLcsc = ""
-        lastRef = ""
-
-        lines = []
-        newlines = []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        for index, desired in self._bom_updates(lines, store_parts).items():
+        with open(path, encoding="utf-8") as source:
+            updated = update_assignment_fields(
+                source.read(),
+                snapshot.assignments,
+                version7=version7,
+                project_name=lambda: self._project_name,
+                warnings=warnings,
+            )
+        lines = StringIO(updated).readlines()
+        for index, desired in self._bom_updates(lines, snapshot.bom_parts).items():
             lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-
-        partSection = False
-
-        for line in lines:
-            inLine = line.rstrip()
-            outLine = inLine
-            if "(symbol (lib_id" in inLine:  # skip library section
-                partSection = True
-            m = propRx.search(inLine)
-            if m and partSection:
-                key = m.group(1)
-                value = m.group(2)
-
-                # found a LCSC property, so update it if needed
-                if key == "LCSC":
-                    lastLcsc = value
-                    if newLcsc not in (lastLcsc, ""):
-                        self.logger.info("Updating %s on %s", newLcsc, lastRef)
-                        outLine = outLine.replace(
-                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
-                        )
-                        lastLcsc = newLcsc
-
-                if key == "Reference":
-                    lastLoc = m.group(3)
-                    lastRef = value
-                    for part in store_parts:
-                        if value == part["reference"]:
-                            newLcsc = part["lcsc"]
-                            break
-            # if we hit the pin section without finding a LCSC property, add it
-            m = pinRx.search(inLine)
-            if m:
-                if lastLcsc == "" and newLcsc != "" and lastLoc != "":
-                    self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'    (property "LCSC" "{newLcsc}" (at {lastLoc} 0)'
-                    newlines.append(newTxt)
-                    newlines.append("      (effects (font (size 1.27 1.27)) hide)")
-                    newlines.append("    )")
-                lastLoc = ""
-                lastLcsc = ""
-                newLcsc = ""
-                lastRef = ""
-            newlines.append(outLine)
-
-        return "\n".join(newlines) + "\n"
-
-    def _render_schematic(
-        self, path: str, store_parts: tuple[dict[str, Any], ...]
-    ) -> str:
-        """Return a KiCad V8+ schematic's text with its LCSC and BOM fields updated."""
-        self.logger.info("Reading %s...", path)
-        # Regex to look through schematic property, if we hit the pin section without finding a LCSC property, add it
-        # keep track of property ids and Reference property location to use with new LCSC property
-        propRx = re.compile('\\(property\\s\\"(.*)\\"\\s"(.*)\\"')
-        atRx = re.compile("\\(at\\s(-?\\d+(?:.\\d+)?\\s-?\\d+(?:.\\d+)?)\\s\\d+\\)")
-        pinRx = re.compile('\\(pin\\s\\"(.*)\\"')
-
-        lastLoc = ""
-        lastLcsc = ""
-        newLcsc = ""
-        lastRef = ""
-
-        lines = []
-        newlines = []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        for index, desired in self._bom_updates(lines, store_parts).items():
-            lines[index] = self._IN_BOM_RX.sub(rf"\1(in_bom {desired})", lines[index])
-
-        partSection = False
-
-        for i in range(0, len(lines) - 1):
-            inLine = lines[i].rstrip()
-            inLine2 = lines[i + 1].rstrip()
-            outLine = inLine
-
-            if "(symbol" in inLine and "(lib_id" in inLine2:  # skip library section
-                partSection = True
-
-            # self.logger.info("line %d", i)
-            m = propRx.search(inLine)
-            m2 = atRx.search(inLine2)
-            if m and m2 and partSection:
-                key = m.group(1)
-                # self.logger.info("key %s", key)
-                # found a LCSC property, so update it if needed
-                if key in {"LCSC", "LCSC_PN", "JLC_PN"}:
-                    value = m.group(2)
-                    lastLcsc = value
-                    if newLcsc not in (lastLcsc, ""):
-                        self.logger.info(
-                            "Updating %s on %s in %s", newLcsc, lastRef, path
-                        )
-                        outLine = outLine.replace(
-                            '"' + lastLcsc + '"', '"' + newLcsc + '"'
-                        )
-                        lastLcsc = newLcsc
-
-                if key == "Reference":
-                    lastLoc = m2.group(1)
-                    value = m.group(2)
-                    # self.logger.info("value %s", value)
-                    lastRef = value
-                    for part in store_parts:
-                        if value == part["reference"]:
-                            newLcsc = part["lcsc"]
-                            break
-
-            # if we hit the pin section without finding a LCSC property, add it
-            m3 = pinRx.search(inLine)
-            if m3 and partSection:
-                if lastLcsc == "" and newLcsc != "" and lastLoc != "":
-                    self.logger.info("added %s to %s", newLcsc, lastRef)
-                    newTxt = f'\t\t(property "LCSC" "{newLcsc}"\n\t\t\t(at {lastLoc} 0)'
-                    newlines.append(newTxt)
-                    newlines.append(
-                        "\t\t\t(effects\n\t\t\t\t(font\n\t\t\t\t\t(size 1.27 1.27)\n\t\t\t\t)\n\t\t\t\t(hide yes)"
-                    )
-                    newlines.append("\t\t\t)")
-                    newlines.append("\t\t)")
-                lastLoc = ""
-                lastLcsc = ""
-                newLcsc = ""
-                lastRef = ""
-            newlines.append(outLine)
-        newlines.append(lines[len(lines) - 1].rstrip())
-        return "\n".join(newlines) + "\n"
+        return lines

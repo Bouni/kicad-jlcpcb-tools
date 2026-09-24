@@ -306,11 +306,11 @@ def test_saved_preferences_are_validated_before_application(
 
 
 @pytest.mark.parametrize("preference", [None, "Z999", "C999"])
-def test_supplier_metadata_skip_is_reported_only_for_a_usable_preference(
+def test_unrelated_supplier_metadata_does_not_block_usable_preference(
     make_window: Callable[..., Any],
     preference: Any,
 ) -> None:
-    """The conservative raw-field guard explains actual blocked autofill choices."""
+    """Supplier metadata stays intact while a usable preference fills the part field."""
     window = make_window(
         footprints=[Footprint(fields={"JLC Rotation": "90"})],
         part_preferences={("R_0603", "10k"): preference}
@@ -322,9 +322,9 @@ def test_supplier_metadata_skip_is_reported_only_for_a_usable_preference(
     messages = info_messages(window)
     assert len(messages) == (1 if preference == "C999" else 0)
     if messages:
-        assert (
-            "R1" in messages[0]
-            and "JLC Rotation" in messages[0]
-            and "90" in messages[0]
-        )
-    assert window.store.get_part("R1")["lcsc"] == ""
+        assert "Filled 1 empty LCSC assignment(s)" in messages[0]
+    assert window.store.get_part("R1")["lcsc"] == (
+        "C999" if preference == "C999" else ""
+    )
+    fields = window.pcbnew.GetBoard().footprints["R1"].fields
+    assert fields["JLC Rotation"].GetText() == "90"

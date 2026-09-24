@@ -475,9 +475,7 @@ def test_explicit_assignment_and_clear_keep_all_aliases_consistent(
     assert window.test_rows["R1"]["lcsc"] == ""
 
 
-@pytest.mark.parametrize(
-    "alias", ["LCSC", "JLC_PN", "LCSC P/N", "JLCPCB Part #", "LCSC custom code"]
-)
+@pytest.mark.parametrize("alias", ["LCSC", "JLC_PN", "LCSC P/N", "JLCPCB Part #", ""])
 def test_assignment_preserves_other_supplier_fields_when_assigning_and_clearing(
     make_window: Callable[..., Any], alias: str
 ) -> None:
@@ -488,8 +486,10 @@ def test_assignment_preserves_other_supplier_fields_when_assigning_and_clearing(
         "JLCPCB Layer Override": "bottom",
         "LCSC URL": "https://example.test/component",
         "JLCPCB empty metadata": "",
+        "LCSC custom code": "C998",
+        "JLCPCB Customer ID": "C999",
     }
-    footprint = Footprint(fields={alias: "C100", **metadata})
+    footprint = Footprint(fields={**({alias: "C100"} if alias else {}), **metadata})
     window = make_window(
         footprints=[footprint],
         settings={"part_preferences": {"fill_empty_lcsc_assignments_on_open": False}},
@@ -499,7 +499,7 @@ def test_assignment_preserves_other_supplier_fields_when_assigning_and_clearing(
             SimpleNamespace(references=["R1"], lcsc=lcsc, type="Basic", stock=27)
         )
         assert {name: field.text for name, field in footprint.fields.items()} == {
-            alias: lcsc,
+            alias or "LCSC": lcsc,
             **metadata,
         }
         window = make_window(board=window.pcbnew.GetBoard(), settings=window.settings)
@@ -507,7 +507,7 @@ def test_assignment_preserves_other_supplier_fields_when_assigning_and_clearing(
         assert window.store.get_part("R1")["lcsc"] == lcsc
     window.remove_lcsc_number()
     assert {name: field.text for name, field in footprint.fields.items()} == {
-        alias: "",
+        alias or "LCSC": "",
         **metadata,
     }
     window.init_store()
