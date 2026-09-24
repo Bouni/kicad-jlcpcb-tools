@@ -6,6 +6,7 @@ from contextlib import closing, suppress
 from dataclasses import dataclass, replace
 import hashlib
 import json
+import logging
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -14,12 +15,16 @@ from typing import Any, Optional
 import wx
 
 from .board_copy import NativeBoardOwner
+from .calculator_config_cache import CalculatorConfigCache
 from .catalog_cache import CatalogCache
 from .database import DatabaseMigrationError, ImpedanceDatabase
 from .model import BoardSnapshot, Config, Section, ValidationError
 from .palette import read_stackup_copper_colors, read_theme_context
 from .repository import ImpedanceRepository
 from .service import CapturedImage, ExportPlan, prepare, validate_current
+from .stackup_model import WidthResult
+
+_LOG = logging.getLogger(__name__)
 
 
 class ImpedanceStorageError(RuntimeError):
@@ -346,9 +351,11 @@ class ImpedanceControls:
         count = len(self.config.included_section_ids)
         specs = len(self.config.specifications)
         if self.config.reviewed_digest and count:
-            label = f"{specs} specs · {count} sections with saved approval"
+            label = (
+                f"{specs} specs · {count} sections with saved approval - All reviewed"
+            )
         elif self.config.enabled or specs or self.config.stackup is not None:
-            label = f"{specs} specs · Needs review"
+            label = f"{specs} specs - Needs review"
         else:
             label = ""
         self.status.SetLabel(label)
@@ -541,6 +548,40 @@ class ImpedanceControls:
                     """Persist successful automatic checks, never the board selection."""
                     self._writable_repository().save_stackup_catalog(layer_count, cache)
 
+                def load_calculator_config() -> CalculatorConfigCache:
+                    """Read reusable calculator metadata without altering board intent."""
+                    self.check_board()
+                    if self.database is None:
+                        raise ValidationError("The project database is not ready.")
+                    return ImpedanceRepository.read_calculator_config(self.database)
+
+                def save_calculator_config(cache: CalculatorConfigCache) -> None:
+                    """Persist a successful calculator-config fetch."""
+                    self._writable_repository().save_calculator_config(cache)
+
+                def load_width_results() -> tuple[WidthResult, ...]:
+                    """Read this board's cached solves; an unregistered PCB has none."""
+                    self.check_board()
+                    if self.repository is None:
+                        return ()
+                    return self.repository.load_width_results()
+
+                def save_width_result(result: WidthResult) -> None:
+                    """Persist one settled solve as it arrives, without a config save.
+
+                    Workers call this per job. Board identity (a pcbnew call) and
+                    registration must stay on the GUI thread, so the write is
+                    marshalled there; it still lands before the batch completes.
+                    """
+
+                    def write() -> None:
+                        try:
+                            self._writable_repository().save_width_result(result)
+                        except Exception as exc:
+                            _LOG.info("JLCPCB width: cache write skipped (%s)", exc)
+
+                    wx.CallAfter(write)
+
                 dialog = ImpedanceDialog(
                     self.parent,
                     config,
@@ -551,10 +592,19 @@ class ImpedanceControls:
                     appearance_context=lambda: read_theme_context(self.parent.pcbnew),
                     load_stackup_catalog=load_stackup_catalog,
                     save_stackup_catalog=save_stackup_catalog,
+                    load_calculator_config=load_calculator_config,
+                    save_calculator_config=save_calculator_config,
                     load_stackup_colors=lambda: read_stackup_copper_colors(
                         self.parent.pcbnew
                     ),
                     save_config=self._save,
+                    load_width_results=load_width_results,
+                    save_width_result=save_width_result,
+                    skip_stub_review=lambda: bool(
+                        self.parent.settings.get("impedance", {}).get(
+                            "skip_stub_review", True
+                        )
+                    ),
                 )
                 try:
                     accepted = dialog.ShowModal() == wx.ID_OK

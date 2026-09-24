@@ -26,9 +26,13 @@ impedance, reference-plane continuity, differential spacing, or the chosen stack
    You can also choose images directly; unchanged images already viewed remain
    marked when switching layers within this dialog. **OK** follows the same
    pending-image/layer flow, then saves and closes once every layer is addressed.
-   Reopening a specification starts a fresh image review. Missing values and
-   unavailable previews are shown inline, without a popup for pending
-   layers. Switching layers retains drafts; **Cancel** does not save them.
+   That completed layer review marks the net class **Approved** in the parent
+   Review column. When every matched net class has current layer reviews, the
+   workbook is approved automatically—no separate Approve click is required for
+   that path. Reopening **Edit / Review…** restores viewed images and approved
+   layers when fingerprints still match; otherwise those rows need review again.
+   Missing values and unavailable previews are shown inline, without a popup for
+   pending layers. Switching layers retains drafts; **Cancel** does not save them.
    All actual widths are included;
    a width change at a neckdown or layer transition does not hide that copper.
    Matching is net-class-only; no width or net-name filter can silently hide
@@ -36,33 +40,62 @@ impedance, reference-plane continuity, differential spacing, or the chosen stack
    explicit **Reset settings** action, then recreation using
    net classes and fresh review; loading never broadens their selection.
 3. Workbook rows populate automatically when the main dialog opens and after
-   accepting specification changes. The first relevant row is selected for
-   preview; after adding or editing a specification, its rows are preferred.
+   accepting specification changes. The rows list uses most of the main pane
+   (about three-quarters of the width) as a multi-column table: include
+   checkbox, row number, signal layer, net class, target Ω, centerline length,
+   net names, width (or **Covered stub**), target width, and segment count.
+   When a current calculated target differs from the routed width by more than
+   0.01 mm, `!=` appears between the two widths; both values and the symbol turn
+   amber. Columns fit their headers and current values, resizing as rows refresh.
+   The **Row** column numbers every entry from 1, including unchecked rows and
+   covered stubs. Numbers stay the same when toggling inclusion or reopening an
+   unchanged board; they are recalculated when the matching entries change.
+   The remaining strip is a compact thumbnail preview; click it to open a large
+   image for inspection without changing export inclusion. The first relevant
+   row is selected for preview; after adding or editing a specification, its
+   rows are preferred.
    Select a candidate to preview the PCB image with its selected traces enclosed
-   by a yellow box. Check the sections that
-   belong in the report. Separate single-ended nets and disconnected components
-   remain separate rows. Each KiCad-recognized differential pair automatically
-   becomes one row and one yellow box per physical layer and actual width.
+   by a yellow box. Check the **Incl.** boxes for sections that belong in the
+   report. Single-ended regions grow around nearby pieces of each signal while
+   preserving readable detail. Redundant contained regions can share a row that
+   lists every represented net. Each KiCad-recognized differential pair
+   automatically becomes one row and one yellow box per physical layer and actual width.
    Multiple pairs in the same class remain separate; no manual combining is needed.
-4. Below the workbook rows, **Needs approval** accompanies **Approve N workbook
-   rows**, with the count reflecting the checked rows. Choose that button to
-   approve the report, then **Save and close**. A green check and **N workbook
-   rows approved** identify the completed review. Every specification needs at
-   least one included section. Approval is explicit; automatic population or
-   checking a row alone does not approve the report. The dialog checks the live
-   board again before accepting approval. If the board changed, it refreshes the
-   rows and requires another explicit approval instead of approving the changed
-   rows in that click.
+4. The specifications list includes a **Review** column: **Needs approval** for
+   net classes with matching copper that still need layer/image review,
+   **No matching rows** when the class has no matched copper, and **Approved**
+   after that class's specification dialog review is current. Pending Review
+   cells use white text on a darkish yellow background; **Approved** uses white
+   text on green. Use **Edit / Review…** to open the specification dialog for
+   the selected class. Below the workbook rows, **Needs approval** accompanies
+   **Approve N workbook rows** when include-set changes or a draft still needs
+   an explicit workbook stamp; completing **Edit / Review…** for every matched
+   class approves the workbook automatically. Choose **Approve N workbook rows**
+   after changing include checkboxes without reopening the specification editor,
+   then **Save and close**. While review is incomplete, the dialog labels that
+   action **Save draft and close** so it is clear generation still needs
+   approval. A green check and **N workbook rows approved** identify the
+   completed review. Every specification needs at least one included section.
+   The dialog checks the live board again before accepting approval. If the
+   board changed, it refreshes the rows and requires another review instead of
+   approving the changed rows in that click.
 5. Generate the fabrication files. When a fabrication layer count is selected,
-   it must match the PCB's complete copper stack.
+   it must match the PCB's complete copper stack. Generation prepares copper
+   zones before checking the saved review, matching **Configure…**. If approval
+   is missing or no longer current, Generate opens the configuration dialog so
+   you can scan and approve; it does not treat that recoverable state as a
+   fabrication-data failure. After you save a current approval, generation
+   continues; cancelling or leaving review incomplete stops export cleanly. Use
+   the **Review** column to see which net classes still need included rows.
 
-You can choose **Save and close** before completing report review, including
+You can choose **Save draft and close** before completing report review, including
 after selecting only a stackup. This saves the selected stackup and completed
 specifications in the existing board database so you can reopen **Configure…**
 and continue later. **Needs approval** is separate from the save action:
-saving does not approve the report or create review timestamps. If controlled
+saving a draft does not approve the report or create review timestamps. If controlled
 impedance is enabled, fabrication export remains blocked until review is complete;
-saving a draft never silently disables the report.
+saving a draft never silently disables the report. Closing the dialog cancels any
+in-flight width refresh; save does not wait on the calculator.
 
 Opening review does not save the PCB. **Cancel** discards unsaved impedance
 settings, but does not undo the in-memory refill. Image navigation and rendering
@@ -81,8 +114,8 @@ copper; empty zones are decided once in the export findings review.
 An unchanged, previously approved configuration restores its workbook rows,
 saved checked-row selection, and approval when reopened. Population preserves the
 selected row during harmless updates. The rows also update automatically after
-accepted specification additions, edits or removals and meaningful stackup
-changes. There is no manual **Rescan / reset review** step. If row
+accepted specification additions, edits or removals and meaningful stackup or
+calculation changes. There is no manual **Rescan / reset review** step. If row
 population fails, an inline explanation and contextual **Retry** replace an
 unexplained empty pane; an empty configuration instead prompts you to add a
 specification.
@@ -147,9 +180,11 @@ checklist can override these defaults. Manual choices are preserved on save and
 reopening; **Use adjacent layers** restores automatic selection. Changing signal
 layers restores each layer's independent draft.
 Adjacent copper is only a starting point, not proof of a ground plane.
-Reopening the specification editor retains saved values but marks included layers
-as needing review: stored dimensions alone are not evidence that the current
-capture has been visually approved. A failed or unavailable capture cannot be
+Reopening the specification editor retains saved values and restores
+**approved** / **viewed** markers when stored fingerprints still match the
+current board, settings, and captures. Stored dimensions alone are not evidence
+of current visual approval: a changed board, setting, or capture returns those
+layers and images to **needs review**. A failed or unavailable capture cannot be
 approved as though it had been shown.
 
 If a saved specification refers to layers removed from the enabled board stack,
@@ -166,20 +201,53 @@ both labeled dimensions when both apply. The supplied template's impedance
 heading retains its ±10% wording.
 
 Single-ended straight tracks and arcs are grouped by specification, physical
-layer, actual width, net, and shared endpoints. Disconnected routes become separate
-candidates. Differential matching uses KiCad's native `BOARD.DpCoupledNet`
+layer, actual width, and net. Nearby pieces can share a region even when their
+endpoints are separated by a pad. A whole nearby group is preferred when its
+strokes and gaps remain readable at the exported image scale; otherwise the
+algorithm grows smaller regions while limiting unrelated routing and pad/via
+clutter. Every native track belongs to exactly one resulting row.
+After growth, fully contained regions with compatible specification, layer, and
+width are consolidated, preserving all member tracks and net labels. A contained
+closeup remains when consolidation would make previously readable detail too
+small. Partially overlapping boxes remain separate.
+Differential matching uses KiCad's native `BOARD.DpCoupledNet`
 identity, not proximity or shared class membership. Both members must match the
 selection and have matching layer/width coverage. Missing mates, asymmetric
 coverage, or unavailable native identity require correction before approval;
 the plugin does not export a half-pair as a differential row. All matching copper
 of one pair on a layer at one width shares a row, including disconnected islands
 on that pair. Vias are context, not width matches or cross-layer grouping bridges.
-Branches and zero-length tracks produce review warnings. Native pair identity
-does not establish electrical coupling or validate the entered spacing.
+Branches and zero-length tracks produce review warnings that name the layer and
+net (never opaque section digests). Tracks whose copper lies entirely inside a
+same-net pad or via flash are listed as covered stubs: the Width column shows
+**Covered stub**, the Target width and Segments cells stay blank, the
+centerline length remains visible, the row stays previewable for review
+(click the thumbnail to enlarge), and the include checkbox cannot put that
+row in the JLCPCB workbook export. In the impedance specification dialog,
+preview dropdown and checklist entries for those sections are likewise labeled
+**Covered stub** (muted) so they are obvious as not default export candidates.
+By default, **Skip covered-stub images during impedance review** (plugin
+Settings) skips those entries during layer image approval; uncheck it to stop
+on each stub. Stubs remain listed for optional manual inspection in either
+mode.
+Mixed routes keep their
+uncovered copper as a normal row and split the covered segments into excluded
+rows. A short controlled-impedance run that is not fully under pad/via copper
+remains exportable; length alone never excludes a row. All workbook rows show
+centerline length so short stubs are obvious next to long runs. Native arcs remain
+exportable because their sampled centerlines do not prove containment of the
+actual copper curve. Routing also remains exportable when precise per-layer pad
+or via flash geometry is unavailable or coverage between separate flashes cannot
+be proven. Updates to this containment policy require a new review while retaining
+historical row identities and recorded review times. After upgrading to this
+policy, saved image views and layer approvals require fresh verification,
+including unchanged straight routes. Native pair
+identity does not establish electrical coupling or validate the entered spacing.
 
-Each connected matched segment remains whole, including routes spanning 100 mm,
-200 mm, or more. Length never causes splitting or rejection. Differential rows
-enclose both complete member routes together.
+Native tracks and arcs remain whole; a long route made of multiple tracks can
+receive several readable regions. An indivisible track that falls below the
+readability target remains listed with a warning. Length never causes copper
+to be discarded. Differential rows enclose both complete member routes together.
 
 The main view starts with the entire segment plus a margin of at least 2 mm or
 15% of its longest extent on each side, and a minimum of 15% of both board
@@ -211,12 +279,13 @@ segment with the same tighter framing and safe highlight fit. The scan and workb
 count limit; this does not limit route length. Use more specific net classes if
 a scan exceeds that count. Existing reviews from the former tiled capture policy
 require fresh approval of the automatically populated rows. Manual section
-combining is no longer stored: separate nets/components and native differential
+combining is no longer stored: readable signal regions and native differential
 pairs determine the rows automatically.
 
 The review digest also records the capture-policy revision. Approvals from before
-the updated framing and trace emphasis require approval of the newly populated rows, while
-saved targets, layer settings, exclusions and matching selections are retained.
+the region-growth or surrounding-copper emphasis changes require approval of
+the newly populated rows, while saved targets, layer settings, exclusions and
+matching selections are retained.
 
 Meaningful specification changes or changes to checked sections require approval
 again; repopulating unchanged rows does not. Board changes invalidate the saved review,
@@ -245,9 +314,9 @@ dash for images needing review, with an explicit current-image marker. Image
 view dates are intentionally absent from the review UI; the layer's **Layer
 approval** field can show **Approved at** or **Previous approval**. The settings
 form scrolls independently of its separated, fixed approval footer. Reopening
-the specification editor still starts a fresh image/layer review, distinct from
-restoring a current final report approval in the main dialog. Older configurations show **Not recorded**;
-loading them never invents a viewing or approval date.
+the specification editor restores current image/layer review when fingerprints
+still match; otherwise it starts a fresh review. Older configurations show
+**Not recorded**; loading them never invents a viewing or approval date.
 
 Each view is tied to its exact capture, including the source board, selection,
 rendering policy, and actual PNG bytes. Layer approvals additionally identify the
@@ -361,6 +430,8 @@ widths and applicable gaps in mm and mil. Its images and styles are embedded;
 it opens offline after extraction without any supporting files or scripts.
 Both reports remain usable after their temporary source images are deleted.
 A disabled export contains neither report, including after an enabled export.
+In the XLSX, Trace Width and Trace Spacing mil values are rounded to at most
+four digits after the decimal.
 
 The bundled resource is the exact supplied `Required_impedance_control-2.xlsx`,
 stored as `impedance/resources/Required_impedance_control.xlsx`. Its SHA-256 is
@@ -378,11 +449,13 @@ conversion. Excel, Numbers, and separately installed Python spreadsheet packages
 are not runtime requirements. Both writers consume the same immutable report rows
 and captured-image bytes; they do not independently reread source image paths.
 
-Preflight checks settings, current approval, layer count, template integrity, and
-report values before fabrication work starts. The board and configuration are
-checked again after pre-generation operations and after both reports are rendered. Missing
-matches, stale review, invalid values, unsupported templates, rendering errors,
-or workbook/HTML failures stop export rather than omitting either enabled report.
+Preflight prepares copper, then checks settings, current approval, layer count,
+template integrity, and report values before further fabrication work. When
+approval is missing or stale, Generate opens **Configure…** for review instead of
+failing with an error dialog. The board and configuration are checked again after
+pre-generation operations and after both reports are rendered. Missing matches,
+invalid values, unsupported templates, rendering errors, or workbook/HTML failures
+stop export rather than omitting either enabled report.
 
 Previews, SVG plots, and source PNGs use temporary directories that are cleaned up
 after success, cancellation, or failure. These standalone assets and the source
@@ -424,8 +497,10 @@ The feature is isolated in `impedance/`:
   `stackup_construction.py` displays the in-memory schematic cross-section;
   `palette.py` reads saved KiCad copper colors without changing settings.
   `stackup_text.py` formats the selected construction for explicit clipboard copy.
-  `width_checks.py` provides offline nominal dimensional comparisons from saved
-  results. See [Stackup selection and saved width results](stackup-width-checks.md).
+  `calculation_geometry.py` maps reviewed dimensions to provider models;
+  `jlcpcb_calculator.py` correlates asynchronous vendor results, and
+  `width_checks.py` provides nominal dimensional comparisons. See
+  [Stackup selection and width checks](stackup-width-checks.md).
 - `pcbnew_adapter.py` extracts the live board into plain records. `render.py`
   plots the native layers off-screen with `pcbnew.PLOT_CONTROLLER`, composites
   their native colors, adds the annotation, and rasterizes through KiCad's
@@ -460,13 +535,13 @@ repository's `myenv` for pytest and Ruff; do not substitute another Python envir
 
 Targeted automated checks exercise pure logic, simulated KiCad/wx adapters, SQLite,
 and actual workbook/HTML/archive output. Native rendering, event ordering and
-layout require the separate native checks; live catalog compatibility requires a
+layout require the separate native checks; live solver compatibility requires a
 provider check. Before release, exercise this native and end-to-end acceptance checklist:
 
 - Open a new, draft, and unchanged approved configuration: rows populate without
   a manual scan, the approved selection and approval return when still current,
   and a stackup-only draft has an explanatory empty state. Add, edit and remove
-  specifications and change stackup inputs: affected rows update
+  specifications and change stackup/calculation inputs: affected rows update
   automatically, the relevant preview is selected, and meaningful changes require
   explicit approval. An unchanged edit or metadata-only refresh retains approval.
   Harmless updates retain the selected row; deleted rows cannot leave a stale

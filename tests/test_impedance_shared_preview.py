@@ -107,6 +107,14 @@ class PreviewControl(Control):
         """Expose completed and pending row colours to assertions."""
         self.colours[index] = colour
 
+    def Select(self, index: int, on: bool = True) -> None:
+        """Retain ListCtrl selection for the displayed workbook image."""
+        self.selection = index if on else -1
+
+    def Focus(self, index: int) -> None:
+        """Retain the focused checklist row without claiming native focus."""
+        self.focused_index = index
+
     def EnsureVisible(self, index: int) -> None:
         """Record which checklist row native scrolling must reveal."""
         self.visible_index = index
@@ -175,6 +183,7 @@ def shared_preview_api() -> Iterator[SimpleNamespace]:
     wx = FakeWxModule(
         "wx",
         Panel=PreviewControl,
+        Dialog=PreviewControl,
         Choice=PreviewControl,
         Button=PreviewControl,
         StaticText=PreviewControl,
@@ -189,6 +198,18 @@ def shared_preview_api() -> Iterator[SimpleNamespace]:
         Image=decode,
         Bitmap=lambda image: image,
         LogNull=nullcontext,
+        NullCursor=object(),
+        Display=type(
+            "Display",
+            (),
+            {
+                "GetFromWindow": staticmethod(lambda _window: 0),
+                "__init__": lambda self, _index: None,
+                "GetClientArea": lambda self: SimpleNamespace(
+                    GetWidth=lambda: 1600, GetHeight=lambda: 1000
+                ),
+            },
+        ),
     )
     with temporary_modules(
         {package_name: package, "wx": wx}, namespaces=(package_name,)

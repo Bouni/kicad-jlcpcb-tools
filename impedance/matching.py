@@ -1,15 +1,22 @@
 """Pure native-net-class matching, route grouping, and review revision checking."""
 
+from collections import Counter
 from dataclasses import replace
+from decimal import ROUND_HALF_UP, Decimal
 import hashlib
 import json
+import math
 from typing import Any
 
 from .model import (
+    COPPER_FEATURE_SHAPES,
+    EXCLUSION_COVERED_STUB,
     KINDS,
+    UNIT_NM,
     Analysis,
     BoardSnapshot,
     Config,
+    CopperFeature,
     Section,
     Specification,
     Trace,
@@ -17,9 +24,20 @@ from .model import (
     format_length,
     validate_config,
 )
+from .regions import (
+    MAX_FOREIGN_LENGTH_RATIO,
+    MIN_GAP_PIXELS,
+    MIN_TRACE_PIXELS,
+    region_quality,
+    signal_regions,
+    trace_bounds,
+)
 from .stackup_model import stackup_fingerprint, width_results_fingerprint
 
 MAX_SECTIONS = 1000
+# Advance when route selection or grouping changes, retaining surviving row IDs
+# while requiring explicit review of the new document policy.
+ALGORITHM_VERSION = 9
 # Bump this independent review revision whenever capture composition, framing,
 # or annotation policy materially changes. Revision 8 boosts represented native
 # stroke RGB with the higher-contrast 30% white/black mix and dims
@@ -29,6 +47,13 @@ MAX_SECTIONS = 1000
 # opaque #FFFF00 boxes, and whole-region fit.
 # Keep it pure: matching must not import the native renderer or alter DB schemas.
 CAPTURE_POLICY_REVISION = 8
+# Changing the exclusion proof requires a new review, even when row IDs and
+# source geometry stay the same. Keep this separate from capture composition.
+COVERED_STUB_POLICY_REVISION = 2
+_COVERED_STUB_STATUS = (
+    "Covered stubs (⊘) are fully under same-net pad or via copper; "
+    "review them in the list — they are not exported."
+)
 
 
 def _check_section_count(count: int) -> None:
@@ -57,6 +82,16 @@ def _validate_snapshot(snapshot: BoardSnapshot) -> None:
     """Reject malformed adapter records before matching or hashing geometry."""
     if not isinstance(snapshot, BoardSnapshot):
         raise ValidationError("Invalid board snapshot.")
+    if snapshot.board_bounds is not None and (
+        not isinstance(snapshot.board_bounds, tuple)
+        or len(snapshot.board_bounds) != 4
+        or any(type(value) is not int for value in snapshot.board_bounds)
+        or snapshot.board_bounds[2] <= snapshot.board_bounds[0]
+        or snapshot.board_bounds[3] <= snapshot.board_bounds[1]
+    ):
+        raise ValidationError(
+            "Board outline bounds must enclose a valid physical rectangle."
+        )
     if not isinstance(snapshot.layers, tuple) or not all(
         isinstance(layer, str) and layer.strip() for layer in snapshot.layers
     ):
@@ -93,9 +128,49 @@ def _validate_snapshot(snapshot: BoardSnapshot) -> None:
                 or any(type(value) is not int for value in point)
             ):
                 raise ValidationError("Trace points must be integer nanometre pairs.")
+    if not isinstance(snapshot.copper_features, tuple):
+        raise ValidationError("Board copper features must be an immutable collection.")
+    feature_ids: set[str] = set()
+    for feature in snapshot.copper_features:
+        if not isinstance(feature, CopperFeature):
+            raise ValidationError("Every copper feature must be a CopperFeature.")
+        if (
+            not isinstance(feature.feature_id, str)
+            or not feature.feature_id.strip()
+            or feature.feature_id in feature_ids
+        ):
+            raise ValidationError("Copper feature IDs must be nonempty and unique.")
+        feature_ids.add(feature.feature_id)
+        if feature.layer not in snapshot.layers or not isinstance(feature.net, str):
+            raise ValidationError("Copper feature layer or net name is invalid.")
+        if feature.kind not in ("pad", "via"):
+            raise ValidationError("Copper feature kind must be pad or via.")
+        if feature.shape not in COPPER_FEATURE_SHAPES:
+            raise ValidationError("Copper feature shape is unsupported.")
+        if (
+            type(feature.size_x_nm) is not int
+            or type(feature.size_y_nm) is not int
+            or feature.size_x_nm <= 0
+            or feature.size_y_nm <= 0
+        ):
+            raise ValidationError("Copper feature sizes must be positive nanometres.")
+        if (
+            not isinstance(feature.center, tuple)
+            or len(feature.center) != 2
+            or any(type(value) is not int for value in feature.center)
+        ):
+            raise ValidationError(
+                "Copper feature centers must be integer nanometre pairs."
+            )
+        if type(feature.rotation_deg) not in (int, float) or not math.isfinite(
+            float(feature.rotation_deg)
+        ):
+            raise ValidationError("Copper feature rotation must be a finite angle.")
 
 
-def _section(spec_id: str, traces: tuple[Trace, ...]) -> Section:
+def _section(
+    spec_id: str, traces: tuple[Trace, ...], *, exclusion_reason: str = ""
+) -> Section:
     """Build a deterministic section and its copper-inclusive bounds."""
     traces = tuple(sorted(traces, key=lambda trace: trace.trace_id))
     first = traces[0]
@@ -116,7 +191,147 @@ def _section(spec_id: str, traces: tuple[Trace, ...]) -> Section:
         traces=traces,
         bounds=bounds,
         net_names=tuple(sorted({trace.net for trace in traces})),
+        exclusion_reason=exclusion_reason,
     )
+
+
+def trace_length_nm(trace: Trace) -> int:
+    """Return the centerline length of one track in nanometres."""
+    total = 0.0
+    for start, end in zip(trace.points, trace.points[1:]):
+        total += math.hypot(end[0] - start[0], end[1] - start[1])
+    return int(round(total))
+
+
+def section_length_nm(section: Section) -> int:
+    """Return the summed centerline length of a section's tracks."""
+    return sum(trace_length_nm(trace) for trace in section.traces)
+
+
+def workbook_row_cells(
+    section: Section,
+    spec: Specification,
+    *,
+    target_width: str = "",
+) -> tuple[str, str, str, str, str, str, str, str]:
+    """Return the eight text columns for one workbook ListCtrl row.
+
+    Order: layer, net class, target Ω, length, net, width-or-covered-stub,
+    target width, segments.
+    """
+    length_mm = Decimal(section_length_nm(section)) / Decimal(UNIT_NM["mm"])
+    length = f"{length_mm.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)} mm"
+    nets = ", ".join(section.net_names)
+    if section.exclusion_reason == EXCLUSION_COVERED_STUB:
+        width_or_stub = "Covered stub"
+        segments = ""
+        target_width = ""
+    else:
+        width_or_stub = f"{format_length(section.width_nm)} mm"
+        segments = str(len(section.traces))
+    return (
+        section.layer,
+        spec.net_class,
+        spec.target_ohms,
+        length,
+        nets,
+        width_or_stub,
+        target_width,
+        segments,
+    )
+
+
+def _local_point(
+    x: int, y: int, center: tuple[int, int], rotation_deg: float
+) -> tuple[float, float]:
+    """Rotate a board point into the feature's local frame."""
+    dx = float(x - center[0])
+    dy = float(y - center[1])
+    if not rotation_deg:
+        return dx, dy
+    angle = math.radians(float(rotation_deg))
+    cosine, sine = math.cos(angle), math.sin(angle)
+    # KiCad's positive native rotation maps local +x toward board -y.
+    # Apply its inverse to recover the unrotated flash coordinates.
+    return dx * cosine - dy * sine, dx * sine + dy * cosine
+
+
+def _point_inside_feature(
+    x: int, y: int, radius_nm: int, feature: CopperFeature
+) -> bool:
+    """Return whether a disc of radius_nm around (x, y) fits in the feature copper."""
+    local_x, local_y = _local_point(x, y, feature.center, feature.rotation_deg)
+    half_x = feature.size_x_nm / 2.0
+    half_y = feature.size_y_nm / 2.0
+    radius = float(radius_nm)
+    if feature.shape == "circle":
+        return math.hypot(local_x, local_y) + radius <= half_x + 1e-6
+    if feature.shape == "rect":
+        return (
+            abs(local_x) + radius <= half_x + 1e-6
+            and abs(local_y) + radius <= half_y + 1e-6
+        )
+    # Oval / ellipse: require the clearance circle to fit inside the ellipse.
+    inner_x = half_x - radius
+    inner_y = half_y - radius
+    if inner_x <= 0 or inner_y <= 0:
+        return False
+    return (local_x / inner_x) ** 2 + (local_y / inner_y) ** 2 <= 1.0 + 1e-9
+
+
+def is_pad_via_stub(trace: Trace, features: tuple[CopperFeature, ...]) -> bool:
+    """Prove continuous containment of every copper capsule in same-net flashes.
+
+    Each supported containment primitive is convex. If both endpoint discs fit
+    inside the same primitive, their convex hull (the complete segment capsule)
+    fits too. Different features at isolated samples cannot establish coverage
+    between them. This deliberately keeps ambiguous union coverage exportable.
+    """
+    if not features or not trace.net or len(trace.points) < 2 or trace.is_native_arc:
+        return False
+    # Native arc samples approximate a circumcircle; KiCad may snap or clamp its
+    # actual center. Retain those routes until physical containment is proven.
+    radius = (trace.width_nm + 1) // 2
+    candidates = tuple(
+        feature
+        for feature in features
+        if feature.layer == trace.layer and feature.net == trace.net
+    )
+    if not candidates:
+        return False
+    return all(
+        any(
+            _point_inside_feature(*start, radius, feature)
+            and _point_inside_feature(*end, radius, feature)
+            for feature in candidates
+        )
+        for start, end in zip(trace.points, trace.points[1:])
+    )
+
+
+def _split_covered_stubs(
+    spec_id: str,
+    component: tuple[Trace, ...],
+    features: tuple[CopperFeature, ...],
+) -> tuple[list[Section], list[Section]]:
+    """Separate covered stubs from exportable copper within one endpoint component."""
+    stubs = tuple(trace for trace in component if is_pad_via_stub(trace, features))
+    keep = tuple(
+        trace
+        for trace in component
+        if trace.trace_id not in {item.trace_id for item in stubs}
+    )
+    exportable: list[Section] = []
+    excluded: list[Section] = []
+    if keep:
+        for group in _components(keep, limit_rows=False):
+            exportable.append(_section(spec_id, group))
+    if stubs:
+        for group in _components(stubs, limit_rows=False):
+            excluded.append(
+                _section(spec_id, group, exclusion_reason=EXCLUSION_COVERED_STUB)
+            )
+    return exportable, excluded
 
 
 def _components(
@@ -266,20 +481,23 @@ def _netclass_sections(
     for (layer, _width, net), traces in sorted(by_route.items()):
         for component in _components(
             tuple(sorted(traces, key=lambda trace: trace.trace_id)),
-            limit_rows=not spec.kind.startswith("differential"),
+            limit_rows=False,
         ):
-            section = _section(spec.spec_id, component)
-            sections.append(section)
-            if not spec.kind.startswith("differential"):
-                _check_section_count(len(sections))
-            if _is_branched(component):
-                warnings.append(
-                    f"{label}: branched route on {layer}, net {net}; review its complete extent."
-                )
-            if any(len(set(trace.points)) == 1 for trace in component):
-                warnings.append(
-                    f"{label}: zero-length track in section {section.section_id[:8]}."
-                )
+            exportable, excluded = _split_covered_stubs(
+                spec.spec_id, component, snapshot.copper_features
+            )
+            for section in (*exportable, *excluded):
+                sections.append(section)
+                if section.exclusion_reason:
+                    continue
+                if _is_branched(section.traces):
+                    warnings.append(
+                        f"{label}: branched route on {layer}, net {net}; review its complete extent."
+                    )
+                if any(len(set(trace.points)) == 1 for trace in section.traces):
+                    warnings.append(
+                        f"{label}: zero-length track on {layer}, net {net}."
+                    )
     return sections, warnings
 
 
@@ -343,6 +561,143 @@ def _paired_sections(
         result.append(_section(spec.spec_id, tuple(traces)))
         _check_section_count(len(result))
     return tuple(result)
+
+
+def _outermost_sections(
+    sections: tuple[Section, ...], snapshot: BoardSnapshot
+) -> tuple[Section, ...]:
+    """Consolidate redundant regions while preserving readable member detail."""
+    by_geometry: dict[tuple[str, str, int], list[Section]] = {}
+    for section in sections:
+        if not section.exclusion_reason:
+            key = (section.spec_id, section.layer, section.width_nm)
+            by_geometry.setdefault(key, []).append(section)
+    retained = [section for section in sections if section.exclusion_reason]
+    for group in by_geometry.values():
+        owners: list[Section] = []
+        for section in sorted(
+            group,
+            key=lambda item: (
+                -_area(item),
+                item.bounds,
+                item.net_names,
+                item.section_id,
+            ),
+        ):
+            containers = []
+            for index, other in enumerate(owners):
+                if not _contains(other.bounds, section.bounds):
+                    continue
+                merged = _section(other.spec_id, other.traces + section.traces)
+                quality = region_quality(merged.traces, snapshot)
+                # A containing crop can hide a narrow gap visible in a small
+                # closeup. Such a box supplies useful detail and is retained.
+                if quality.readable or all(
+                    quality.trace_pixels + 1e-9
+                    >= min(MIN_TRACE_PIXELS, previous.trace_pixels)
+                    and previous.gap_pixels
+                    * quality.trace_pixels
+                    / previous.trace_pixels
+                    + 1e-9
+                    >= min(MIN_GAP_PIXELS, previous.gap_pixels)
+                    and quality.foreign_ratio
+                    <= max(MAX_FOREIGN_LENGTH_RATIO, previous.foreign_ratio)
+                    for previous in (
+                        region_quality(other.traces, snapshot),
+                        region_quality(section.traces, snapshot),
+                    )
+                ):
+                    containers.append(index)
+            if containers:
+                index = min(
+                    containers,
+                    key=lambda candidate: (
+                        _area(owners[candidate]),
+                        owners[candidate].bounds,
+                        owners[candidate].section_id,
+                    ),
+                )
+                owner = owners[index]
+                owners[index] = _section(owner.spec_id, owner.traces + section.traces)
+            else:
+                owners.append(section)
+        retained.extend(owners)
+    return tuple(retained)
+
+
+def _area(section: Section) -> int:
+    """Compare physical region sizes without image padding or floating-point ties."""
+    left, top, right, bottom = section.bounds
+    return (right - left) * (bottom - top)
+
+
+def _contains(
+    outer: tuple[int, int, int, int], inner: tuple[int, int, int, int]
+) -> bool:
+    """Allow shared sides and equal boxes in board coordinates."""
+    return (
+        outer[0] <= inner[0]
+        and outer[1] <= inner[1]
+        and outer[2] >= inner[2]
+        and outer[3] >= inner[3]
+    )
+
+
+def _signal_regions(
+    sections: tuple[Section, ...], snapshot: BoardSnapshot
+) -> tuple[Section, ...]:
+    """Grow all compatible pieces of each signal before cross-signal pruning."""
+    by_signal: dict[tuple[str, str, int, str], list[Trace]] = {}
+    result = [section for section in sections if section.exclusion_reason]
+    for section in sections:
+        if not section.exclusion_reason:
+            key = (
+                section.spec_id,
+                section.layer,
+                section.width_nm,
+                section.net_names[0],
+            )
+            by_signal.setdefault(key, []).extend(section.traces)
+    for (spec_id, _layer, _width, _net), traces in sorted(by_signal.items()):
+        result.extend(
+            _section(spec_id, group)
+            for group in signal_regions(tuple(traces), snapshot)
+        )
+    return _outermost_sections(tuple(result), snapshot)
+
+
+def _validate_region_coverage(
+    source: tuple[Section, ...], regions: tuple[Section, ...]
+) -> None:
+    """Fail closed if layout loses, duplicates, relabels or crops eligible copper."""
+    expected = {
+        trace.trace_id: (trace, row.spec_id, row.exclusion_reason)
+        for row in source
+        for trace in row.traces
+    }
+    actual = Counter(trace.trace_id for row in regions for trace in row.traces)
+    if actual != Counter(dict.fromkeys(expected, 1)):
+        raise ValidationError(
+            "Impedance region coverage is incomplete or duplicates source tracks; review the board."
+        )
+    for row in regions:
+        if row.net_names != tuple(sorted({trace.net for trace in row.traces})):
+            raise ValidationError(
+                "Impedance region signal labels do not match their represented tracks."
+            )
+        for trace in row.traces:
+            original, spec_id, exclusion = expected[trace.trace_id]
+            if (
+                trace != original
+                or row.spec_id != spec_id
+                or row.exclusion_reason != exclusion
+                or row.layer != trace.layer
+                or row.width_nm != trace.width_nm
+                or not _contains(row.bounds, trace_bounds(trace))
+            ):
+                raise ValidationError(
+                    "Impedance region coverage changed or cropped a source track."
+                )
 
 
 def _ordered_sections(
@@ -417,7 +772,15 @@ def preview_sections(
     )
     rows = tuple(sections)
     if spec.kind.startswith("differential"):
-        rows = _paired_sections(spec, rows, _differential_mates(snapshot))
+        exportable = tuple(section for section in rows if not section.exclusion_reason)
+        excluded = tuple(section for section in rows if section.exclusion_reason)
+        rows = (
+            _paired_sections(spec, exportable, _differential_mates(snapshot)) + excluded
+        )
+    else:
+        rows = _signal_regions(rows, snapshot)
+    _validate_region_coverage(tuple(sections), rows)
+    _check_section_count(len(rows))
     return _ordered_sections(rows, snapshot.layers)
 
 
@@ -431,6 +794,7 @@ def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
     )
     mates = _differential_mates(snapshot) if uses_pairs else {}
     sections: list[Section] = []
+    source_sections: list[Section] = []
     warnings: list[str] = []
     claims: dict[str, str] = {}
     for spec in sorted(config.specifications, key=lambda spec: spec.spec_id):
@@ -443,14 +807,30 @@ def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
                         f"{claims[trace.trace_id]!r} and {spec.label or spec.spec_id!r}; assign each candidate only once."
                     )
                 claims[trace.trace_id] = spec.label or spec.spec_id
-        sections.extend(
-            _paired_sections(spec, tuple(matched), mates)
-            if spec.kind.startswith("differential")
-            else matched
-        )
+        source_sections.extend(matched)
+        if spec.kind.startswith("differential"):
+            exportable = tuple(
+                section for section in matched if not section.exclusion_reason
+            )
+            excluded = tuple(section for section in matched if section.exclusion_reason)
+            sections.extend(_paired_sections(spec, exportable, mates))
+            sections.extend(excluded)
+        else:
+            sections.extend(_signal_regions(tuple(matched), snapshot))
         warnings.extend(messages)
         _check_section_count(len(sections))
     ordered = _ordered_sections(tuple(sections), snapshot.layers)
+    _validate_region_coverage(tuple(source_sections), ordered)
+    for section in ordered:
+        if (
+            not section.exclusion_reason
+            and not region_quality(section.traces, snapshot).readable
+        ):
+            warnings.append(
+                f"{section.spec_id}: region on {section.layer}, nets {', '.join(section.net_names)} falls below the capture readability target; all source tracks are retained for review."
+            )
+    if any(section.exclusion_reason == EXCLUSION_COVERED_STUB for section in ordered):
+        warnings.append(_COVERED_STUB_STATUS)
     spec_records = config.to_dict()["specifications"]
     for record in spec_records:
         record["excluded_layers"].sort()
@@ -473,11 +853,16 @@ def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
         if uses_pairs
         else {}
     )
+    # Preserve section IDs so historical row approvals remain identifiable.
+    # A separate exclusion-policy revision invalidates current approval when
+    # corrected containment changes exportable rows without changing geometry.
     digest = _digest(
         {
-            "algorithm_version": 7,
+            "algorithm_version": ALGORITHM_VERSION,
             "capture_policy_revision": CAPTURE_POLICY_REVISION,
+            "covered_stub_policy_revision": COVERED_STUB_POLICY_REVISION,
             "layers": snapshot.layers,
+            "board_bounds": snapshot.board_bounds,
             "context_digest": snapshot.context_digest,
             "traces": sorted(_trace_record(trace) for trace in snapshot.traces),
             "native_arc_trace_ids": sorted(

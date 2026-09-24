@@ -69,6 +69,7 @@ def pcm_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "impedance/model.pyc",
         "impedance/model.pyo",
         "impedance/.DS_Store",
+        "lib/websockets/tests/fixture.json",
     ):
         artifact = source / relative
         artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -138,11 +139,14 @@ def test_pcm_archive_retains_runtime_resources_and_licenses(pcm_archive: Path) -
         "fabrication_archive.py",
         "kicad_backend/__init__.py",
         "kicad_backend/swig/read.py",
+        "impedance/jlcpcb_calculator.py",
         "impedance/_vendor/__init__.py",
         "impedance/workbook.py",
         _TEMPLATE,
         "impedance/resources/preferred-fire.svg",
         "impedance/resources/preferred-fire-LICENSE.txt",
+        "lib/websockets/sync/client.py",
+        "lib/websockets-15.0.1.dist-info/LICENSE",
         "lib/openpyxl/__init__.py",
         "lib/openpyxl-3.1.5.dist-info/LICENCE.rst",
         "lib/et_xmlfile/__init__.py",
@@ -171,10 +175,12 @@ def test_pcm_archive_retains_runtime_resources_and_licenses(pcm_archive: Path) -
         )
 
 
-def test_extracted_pcm_generates_workbook_without_host_dependencies(
-    pcm_archive: Path, tmp_path: Path
+@pytest.mark.parametrize("entry", ["direct", "plugin"])
+@pytest.mark.parametrize("conflict", ["absent", "on-path", "loaded"])
+def test_extracted_pcm_uses_its_runtime_without_replacing_host_dependencies(
+    pcm_archive: Path, tmp_path: Path, entry: str, conflict: str
 ) -> None:
-    """A fresh interpreter can use only the extracted vendor modules and template."""
+    """Real bootstraps support workbook PNGs and sockets despite other packages."""
     installed = tmp_path / "installed"
     with ZipFile(pcm_archive) as archive:
         archive.extractall(installed)
@@ -182,26 +188,87 @@ def test_extracted_pcm_generates_workbook_without_host_dependencies(
     capture = tmp_path / "capture.png"
     shutil.copy2(plugins / "icons/mdi-layers-triple-outline.png", capture)
     output = tmp_path / "sample-impedance.xlsx"
+    public = tmp_path / "public"
+    public.mkdir()
+    if conflict != "absent":
+        for name in ("websockets", "openpyxl", "et_xmlfile"):
+            package = public / name
+            package.mkdir()
+            (package / "__init__.py").write_text(
+                "__version__ = 'incompatible-public-package'\n", encoding="utf-8"
+            )
     script = """
+import importlib
+import importlib.util
 from pathlib import Path
 import sys
+import threading
+import types
+from typing import Any
 
-plugins, capture, output = map(Path, sys.argv[1:])
-sys.path[:0] = [str(plugins), str(plugins / "lib")]
-import et_xmlfile
-import openpyxl
+plugins, capture, output, public = map(Path, sys.argv[1:5])
+entry, conflict = sys.argv[5:]
+# Tests may expose the install root, but must leave lib resolution to the plugin.
+sys.path[:0] = [str(public), str(plugins)]
+names = ('websockets', 'openpyxl', 'et_xmlfile')
+if conflict == 'loaded':
+    for name in names:
+        importlib.import_module(name)
+before = {name: module for name, module in sys.modules.items()
+          if name.split('.')[0] in names}
+states = {name: vars(module).copy() for name, module in before.items()}
+if entry == 'plugin':
+    registered = []
+    class ActionPlugin:
+        def __init__(self) -> None:
+            self.defaults()
+        def register(self) -> None:
+            registered.append(self)
+    pcbnew = types.ModuleType('pcbnew')
+    pcbnew.ActionPlugin = ActionPlugin
+    sys.modules['pcbnew'] = pcbnew
+    sys.modules['wx'] = types.ModuleType('wx')
+    spec = importlib.util.spec_from_file_location('_pcm_installed_plugin', plugins / '__init__.py')
+    plugin = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = plugin
+    spec.loader.exec_module(plugin)
+    assert len(registered) == 1
+    prefix = spec.name + '.impedance'
+else:
+    prefix = 'impedance'
+service = importlib.import_module(prefix + '.service')
+workbook = importlib.import_module(prefix + '.workbook')
+calculator = importlib.import_module(prefix + '.jlcpcb_calculator')
+openpyxl = importlib.import_module(prefix + '._vendor.openpyxl')
+et_xmlfile = importlib.import_module(prefix + '._vendor.et_xmlfile')
+websockets = importlib.import_module(prefix + '._vendor.websockets')
+serve = importlib.import_module(prefix + '._vendor.websockets.sync.server').serve
+connect = calculator._websocket_connector()
 import packaging
-from impedance.service import CapturedImage, ReportRow
-from impedance.workbook import write_workbook
 
-for dependency in (et_xmlfile, openpyxl, packaging):
+for dependency in (et_xmlfile, openpyxl, packaging, websockets):
     assert Path(dependency.__file__).is_relative_to(plugins / "lib")
-row = ReportRow(
+assert Path(sys.modules[connect.__module__].__file__).is_relative_to(plugins / 'lib')
+def echo(connection: Any) -> None:
+    connection.send(connection.recv(timeout=2))
+with serve(echo, '127.0.0.1', 0, close_timeout=0.5) as server:
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        port = server.socket.getsockname()[1]
+        with connect(f'ws://127.0.0.1:{port}', proxy=None, open_timeout=2, close_timeout=0.5) as client:
+            client.send('bundled PCM runtime')
+            assert client.recv(timeout=2) == 'bundled PCM runtime'
+    finally:
+        server.shutdown()
+        worker.join(timeout=3)
+        assert not worker.is_alive()
+row = service.ReportRow(
     "PCM sample", ("RF",), "RF", ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
     "F.Cu", ("In1.Cu",), "single_ended", 254000, None, "50",
-    CapturedImage.load(capture),
+    service.CapturedImage.load(capture),
 )
-assert write_workbook([row], output) == output
+assert workbook.write_workbook([row], output) == output
 report = openpyxl.load_workbook(output)
 try:
     assert report.active["A2"].value == "L1"
@@ -210,6 +277,13 @@ try:
     assert report.active["G2"].value == 50
 finally:
     report.close()
+after = {name: module for name, module in sys.modules.items()
+         if name.split('.')[0] in names}
+assert after == before
+assert all(vars(after[name]) == state for name, state in states.items())
+if conflict != 'absent':
+    for name in names:
+        assert importlib.import_module(name).__version__ == 'incompatible-public-package'
 assert "pytest" not in sys.modules
 """
     result = subprocess.run(
@@ -222,6 +296,9 @@ assert "pytest" not in sys.modules
             str(plugins),
             str(capture),
             str(output),
+            str(public),
+            entry,
+            conflict,
         ],
         cwd=tmp_path,
         check=False,

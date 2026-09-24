@@ -116,6 +116,50 @@ class ImpedanceDatabase:
             "layer_count INTEGER PRIMARY KEY NOT NULL CHECK(layer_count BETWEEN 2 AND 64), "
             "payload_json TEXT NOT NULL)"
         )
+        # JLCPCB calculator metadata (project-wide, single row).
+        #
+        # Why: before any nominal-width solve, JLCPCB's calculator frontend loads
+        # four static JSON envelopes -- impedance models with their default
+        # parameters (selectPageImpedancePicture), copper trace width/thickness
+        # rows (impedance-config/copper-trace-width/list), soldermask thicknesses
+        # (impedance-config/coverlay/list), and the W2 width bounds
+        # (selectImpedanceDefaultValue). These are identical for every board and
+        # change rarely, so a warm cache saves 4 HTTP round trips per width batch
+        # that JlcpcbCalculator._load_configuration would otherwise perform before
+        # its first WebSocket solve. The payload holds no solved widths and no
+        # board content: it is solver *input*, not results.
+        #
+        # Freshness: the payload records checked_at_utc. calculator_config_check_due
+        # treats the row as stale after CALCULATOR_CONFIG_CHECK_INTERVAL (7 days),
+        # or when the timestamp is missing, invalid, or in the future; the next
+        # batch then refetches and overwrites this row so it stays in sync with
+        # JLCPCB. Per-board solved widths live in impedance_width_cache below.
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS impedance_calculator_config ("
+            "id INTEGER PRIMARY KEY NOT NULL CHECK(id = 1), "
+            "payload_json TEXT NOT NULL)"
+        )
+        # Per-board nominal width results, written as each solve completes.
+        #
+        # Why: a WidthResult is otherwise held only in the dialog's in-memory
+        # working copy and written to board_feature_config on "Save and close".
+        # Cancel, closing the window, or quitting KiCad mid-batch discarded every
+        # completed solve, so the next open showed "waiting for JLCPCB" and
+        # re-ran identical WebSocket solves. Rows are keyed by input_digest (which
+        # already binds stackup, specification, layer, target, and gaps) so
+        # switching stackups does not evict the previous stackup's answers; the
+        # row count per board is bounded by MAX_WIDTH_RESULTS. Only stable
+        # statuses (success/unsupported) are stored; transient failures are not.
+        # This table never participates in the board_feature_config revision.
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS impedance_width_cache ("
+            "board_id TEXT NOT NULL REFERENCES boards(board_id), "
+            "input_digest TEXT NOT NULL, "
+            "spec_id TEXT NOT NULL, layer TEXT NOT NULL, "
+            "calculated_at_utc TEXT NOT NULL, "
+            "payload_json TEXT NOT NULL, "
+            "PRIMARY KEY (board_id, input_digest))"
+        )
 
     def _validate_tables(self, connection: sqlite3.Connection) -> None:
         """Reject damaged impedance tables without modifying unrelated schemas."""
@@ -137,7 +181,32 @@ class ImpedanceDatabase:
                 ("layer_count",),
             ),
         }
-        for table, (required, primary_key) in tables.items():
+        optional = {
+            "impedance_calculator_config": (
+                {"id", "payload_json"},
+                ("id",),
+            ),
+            "impedance_width_cache": (
+                {
+                    "board_id",
+                    "input_digest",
+                    "spec_id",
+                    "layer",
+                    "calculated_at_utc",
+                    "payload_json",
+                },
+                ("board_id", "input_digest"),
+            ),
+        }
+        present = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        for table, (required, primary_key) in {**tables, **optional}.items():
+            if table in optional and table not in present:
+                continue
             columns = connection.execute(f"PRAGMA table_info({table})").fetchall()
             actual_key = tuple(
                 row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5]
@@ -200,7 +269,8 @@ class ImpedanceDatabase:
         """Distinguish untouched legacy stores from valid impedance storage."""
         owned_schema = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE lower(name) IN "
-            "('boards', 'board_feature_config', 'impedance_stackup_catalog') LIMIT 1"
+            "('boards', 'board_feature_config', 'impedance_stackup_catalog', "
+            "'impedance_calculator_config', 'impedance_width_cache') LIMIT 1"
         ).fetchone()
         if owned_schema is None:
             return False
@@ -330,6 +400,153 @@ class ImpedanceDatabase:
                 "INSERT INTO impedance_stackup_catalog (layer_count, payload_json) VALUES (?, ?) "
                 "ON CONFLICT(layer_count) DO UPDATE SET payload_json = excluded.payload_json",
                 (layer_count, encoded),
+            )
+
+    def load_calculator_config(self) -> Optional[dict[str, Any]]:
+        """Read project-shared calculator metadata without touching board revisions."""
+        if not self.path.exists():
+            return None
+        try:
+            with self.connect() as connection:
+                if not self._validate_existing_tables(connection):
+                    return None
+                present = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                    "AND name = 'impedance_calculator_config'"
+                ).fetchone()
+                if present is None:
+                    return None
+                row = connection.execute(
+                    "SELECT payload_json FROM impedance_calculator_config WHERE id = 1"
+                ).fetchone()
+        except sqlite3.DatabaseError as error:
+            raise DatabaseMigrationError(
+                f"Cannot read controlled-impedance storage: {error}"
+            ) from error
+        if row is None:
+            return None
+        if not isinstance(row[0], str) or len(row[0].encode("utf-8")) > 32_000_000:
+            raise ValueError("Cached calculator configuration is invalid or too large.")
+        payload = json.loads(row[0])
+        if not isinstance(payload, dict):
+            raise ValueError("Cached calculator configuration must be an object.")  # noqa: TRY004
+        return payload
+
+    def save_calculator_config(self, payload: dict[str, Any]) -> None:
+        """Atomically replace calculator metadata and successful-check timestamp."""
+        if not isinstance(payload, dict):
+            raise ValueError("Cached calculator configuration must be an object.")  # noqa: TRY004
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, allow_nan=False
+        )
+        if len(encoded.encode("utf-8")) > 32_000_000:
+            raise ValueError(
+                "Cached calculator configuration exceeds its storage limit."
+            )
+        with self.connect(write=True) as connection:
+            self._create_tables(connection)
+            connection.execute(
+                "INSERT INTO impedance_calculator_config (id, payload_json) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json",
+                (encoded,),
+            )
+
+    def load_width_results(self, board_id: str) -> list[dict[str, Any]]:
+        """Read this board's cached nominal widths without touching its revision.
+
+        Rows that fail to decode are skipped rather than failing the whole read;
+        a damaged cache entry must never block the dialog from opening.
+        """
+        if not isinstance(board_id, str) or not board_id.strip():
+            raise ValueError("A board identity is required to read cached widths.")
+        if not self.path.exists():
+            return []
+        try:
+            with self.connect() as connection:
+                if not self._validate_existing_tables(connection):
+                    return []
+                present = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                    "AND name = 'impedance_width_cache'"
+                ).fetchone()
+                if present is None:
+                    return []
+                rows = connection.execute(
+                    "SELECT payload_json FROM impedance_width_cache "
+                    "WHERE board_id = ? ORDER BY calculated_at_utc DESC, input_digest",
+                    (board_id,),
+                ).fetchall()
+        except sqlite3.DatabaseError as error:
+            raise DatabaseMigrationError(
+                f"Cannot read controlled-impedance storage: {error}"
+            ) from error
+        payloads: list[dict[str, Any]] = []
+        for (encoded,) in rows:
+            if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > 65_536:
+                continue
+            try:
+                payload = json.loads(encoded)
+            except (ValueError, RecursionError):
+                continue
+            if isinstance(payload, dict):
+                payloads.append(payload)
+        return payloads
+
+    def save_width_result(
+        self,
+        board_id: str,
+        input_digest: str,
+        spec_id: str,
+        layer: str,
+        calculated_at_utc: str,
+        payload: dict[str, Any],
+        *,
+        max_rows: int,
+    ) -> None:
+        """Upsert one solved width and prune the oldest rows beyond ``max_rows``.
+
+        This is called from the calculator worker thread as each job finishes; it
+        opens its own short write transaction and never reads or bumps the board's
+        configuration revision.
+        """
+        for name, value in (
+            ("board identity", board_id),
+            ("input digest", input_digest),
+            ("specification ID", spec_id),
+            ("signal layer", layer),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"A cached width requires a {name}.")
+        if not isinstance(calculated_at_utc, str):
+            raise TypeError("A cached width requires a text calculation time.")
+        if not isinstance(payload, dict):
+            raise TypeError("A cached width payload must be a dictionary.")
+        if type(max_rows) is not int or max_rows <= 0:
+            raise ValueError("The cached width bound must be a positive integer.")
+        encoded = json.dumps(
+            payload, ensure_ascii=False, allow_nan=False, sort_keys=True
+        )
+        if len(encoded.encode("utf-8")) > 65_536:
+            raise ValueError("A cached width exceeds its storage limit.")
+        with self.connect(write=True) as connection:
+            self._create_tables(connection)
+            self._require_board(connection, board_id)
+            connection.execute(
+                "INSERT INTO impedance_width_cache "
+                "(board_id, input_digest, spec_id, layer, calculated_at_utc, payload_json) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(board_id, input_digest) DO UPDATE SET "
+                "spec_id = excluded.spec_id, layer = excluded.layer, "
+                "calculated_at_utc = excluded.calculated_at_utc, "
+                "payload_json = excluded.payload_json",
+                (board_id, input_digest, spec_id, layer, calculated_at_utc, encoded),
+            )
+            connection.execute(
+                "DELETE FROM impedance_width_cache WHERE board_id = ? "
+                "AND input_digest NOT IN ("
+                "SELECT input_digest FROM impedance_width_cache WHERE board_id = ? "
+                "ORDER BY calculated_at_utc DESC, input_digest LIMIT ?)",
+                (board_id, board_id, max_rows),
             )
 
     @staticmethod

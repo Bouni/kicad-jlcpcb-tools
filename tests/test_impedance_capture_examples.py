@@ -96,10 +96,10 @@ def _native_fixture_svg(traces: tuple[Trace, ...], color: str) -> str:
 
 
 @pytest.mark.parametrize("example", EXAMPLES, ids=lambda item: item.name)
-def test_gallery_routes_remain_complete_connected_sections(
+def test_gallery_regions_preserve_complete_signal_coverage(
     example: CaptureExample,
 ) -> None:
-    """Keep short, long and meandering nets whole, with atomic differential pairs."""
+    """Readable regions cover every native item exactly once and keep pairs atomic."""
     config = Config(
         enabled=True,
         specifications=(
@@ -134,11 +134,18 @@ def test_gallery_routes_remain_complete_connected_sections(
         ),
     )
     sections = analysis.sections
-    assert len(sections) == 1
-    assert {trace.trace_id for trace in sections[0].traces} == {
-        trace.trace_id for trace in example.traces()
-    }
-    assert sections[0].bounds == example.section().bounds
+    assert sections
+    if example.paired:
+        assert len(sections) == 1
+    identities = [trace.trace_id for section in sections for trace in section.traces]
+    assert len(identities) == len(set(identities))
+    assert set(identities) == {trace.trace_id for trace in example.traces()}
+    assert (
+        min(section.bounds[0] for section in sections),
+        min(section.bounds[1] for section in sections),
+        max(section.bounds[2] for section in sections),
+        max(section.bounds[3] for section in sections),
+    ) == example.section().bounds
 
 
 @pytest.mark.parametrize("example", EXAMPLES, ids=lambda item: item.name)
@@ -240,6 +247,7 @@ def test_gallery_exercises_required_lengths_and_stable_native_boards() -> None:
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 @pytest.mark.parametrize("example", EXAMPLES, ids=lambda item: item.name)
 def test_real_kicad_cli_plots_feed_production_capture(
     tmp_path: Path, example: CaptureExample
@@ -487,16 +495,28 @@ def test_rf_gallery_matches_actual_on_disk_board_and_pairs_each_layer(
         spec.target_ohms == ("90" if case.paired else "50")
         for spec in config.specifications
     )
-    assert len(sections) == len(case.signal_profiles)
     assert {(row.layer, row.width_nm) for row in sections} == {
         (profile.layer, profile.width_nm) for profile in case.signal_profiles
     }
     assert {section.spec_id for section in sections} == {
         spec.spec_id for spec in config.specifications
     }
-    assert {trace.trace_id for section in sections for trace in section.traces} == {
-        trace.trace_id for trace in case.traces()
-    }
+    identities = [trace.trace_id for section in sections for trace in section.traces]
+    assert len(identities) == len(set(identities))
+    assert set(identities) == {trace.trace_id for trace in case.traces()}
+    for profile in case.signal_profiles:
+        expected = {
+            trace.trace_id
+            for trace in case.traces()
+            if (trace.layer, trace.width_nm) == (profile.layer, profile.width_nm)
+        }
+        covered = {
+            trace.trace_id
+            for section in sections
+            if (section.layer, section.width_nm) == (profile.layer, profile.width_nm)
+            for trace in section.traces
+        }
+        assert covered == expected
     for section in sections:
         assert len(section.net_names) == (2 if case.paired else 1)
         assert len({trace.layer for trace in section.traces}) == 1
@@ -944,6 +964,7 @@ def native_capture_gallery(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 @pytest.mark.parametrize("example", EXAMPLES, ids=lambda item: item.name)
 def test_real_capture_png_is_opaque_visible_and_not_header_only(
     native_capture_gallery: Path, example: CaptureExample
@@ -973,6 +994,7 @@ def test_real_capture_png_is_opaque_visible_and_not_header_only(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 def test_native_custom_light_palette_preserves_native_copper_and_canvas(
     tmp_path: Path,
 ) -> None:
@@ -1079,6 +1101,7 @@ def native_rf_capture_gallery(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 @pytest.mark.parametrize("case_name", RF_NATIVE_CASES)
 def test_rf_native_pngs_have_full_color_context_and_complete_yellow_boxes(
     native_rf_capture_gallery: Path, case_name: str
@@ -1089,7 +1112,12 @@ def test_rf_native_pngs_have_full_color_context_and_complete_yellow_boxes(
     )
     records = [record for record in manifest if record["case"] == case_name]
     case = next(case for case in RF_CASES if case.name == case_name)
-    assert len(records) == len(case.signal_profiles)
+    assert {(record["layer"], record["width_nm"]) for record in records} == {
+        (profile.layer, profile.width_nm) for profile in case.signal_profiles
+    }
+    captured_ids = [identity for record in records for identity in record["trace_ids"]]
+    assert len(captured_ids) == len(set(captured_ids))
+    assert set(captured_ids) == {trace.trace_id for trace in case.traces()}
     for record in records:
         board = native_rf_capture_gallery / record["board"]
         _, sections = reviewed_sections(case, native_snapshot(board))

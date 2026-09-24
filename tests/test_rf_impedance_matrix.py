@@ -442,14 +442,35 @@ def test_complete_segments_pair_grouping_and_physical_layer_references(
     raw, plan = _prepare(case)
     profiles = {(trace.layer, trace.width_nm) for trace in case.traces()}
     assert {(row.layer, row.width_nm) for row in raw.sections} == profiles
-    assert len(raw.sections) == len(profiles) == len(plan.sections)
+    assert len(raw.sections) >= len(profiles)
+    assert raw.sections == plan.sections
     assert len(case.specifications()) == 1
-    assert all("branched" in warning for warning in raw.warnings)
-    if not case.paired:
-        assert not raw.warnings
-    assert {trace.trace_id for row in plan.sections for trace in row.traces} == {
+    assert all(
+        (case.paired and "branched" in warning)
+        or "capture readability target" in warning
+        for warning in raw.warnings
+    )
+    captured = tuple(trace for row in plan.sections for trace in row.traces)
+    assert Counter(trace.trace_id for trace in captured) == Counter(
         trace.trace_id for trace in case.traces()
+    )
+    assert {trace.trace_id: trace for trace in captured} == {
+        trace.trace_id: trace for trace in case.traces()
     }
+    for layer, width in profiles:
+        rows = tuple(
+            row for row in plan.sections if (row.layer, row.width_nm) == (layer, width)
+        )
+        source = tuple(
+            trace
+            for trace in case.traces()
+            if (trace.layer, trace.width_nm) == (layer, width)
+        )
+        assert _length(tuple(trace for row in rows for trace in row.traces)) == (
+            pytest.approx(_length(source), abs=1)
+        )
+        if case.paired:
+            assert len(rows) == 1, "Keep each native pair/profile atomic"
     spec = plan.config.specifications[0]
     assert spec.net_class == case.net_class
     assert spec.target_ohms == ("90" if case.paired else "50")
@@ -462,13 +483,24 @@ def test_complete_segments_pair_grouping_and_physical_layer_references(
         assert settings.spacing_nm == (203200 if case.paired else None)
         assert settings.ground_gap_nm == (200000 if case.coplanar else None)
         assert {trace.net for trace in row.traces} == set(case.net_names)
+        # Native tracks are indivisible. Insufficient stroke width or pair
+        # separation must be disclosed instead of dropping source geometry.
+        scale = section_viewport(row, 800, 420).width / 800
+        width = min(trace.width_nm for trace in row.traces)
+        too_thin = width / scale < 2
+        if too_thin or (case.paired and settings.spacing_nm / scale < 1):
+            assert any(
+                f"{row.spec_id}: region on {row.layer}," in warning
+                and "capture readability target" in warning
+                for warning in raw.warnings
+            )
 
 
 @pytest.mark.parametrize("case", RF_CASES, ids=lambda case: case.name)
-def test_rf_capture_contains_whole_routes_and_minimum_board_context(
+def test_rf_capture_contains_complete_assigned_regions_and_minimum_board_context(
     case: RFCase,
 ) -> None:
-    """Prevent any layer or impedance kind from reverting to clipped trace tiles."""
+    """Every native track assigned to a region fits completely in its capture."""
     _, plan = _prepare(case)
     for section in plan.sections:
         viewport = section_viewport(section, 800, 420, board_bounds=BOARD_BOUNDS)
@@ -1184,8 +1216,14 @@ def test_temporary_matrix_manifest_tracks_actual_profiles_and_core_lengths(
             for net in case.net_names
         }
         profiles = {(trace.layer, trace.width_nm) for trace in case.traces()}
-        assert record["expected_reviewed_rows"] == len(profiles)
-        assert record["expected_raw_sections"] == len(profiles)
+        # Readability can split a profile into several regions; the manifest
+        # advertises current output, while completeness is checked above.
+        analysis = analyze(
+            Config(enabled=True, specifications=case.specifications()), case.snapshot()
+        )
+        assert record["expected_reviewed_rows"] == len(analysis.sections)
+        assert record["expected_raw_sections"] == len(analysis.sections)
+        assert len(profiles) <= len(analysis.sections) <= len(case.traces())
         assert {
             (item["signal_layer"], round(item["width_mm"] * 1000000))
             for item in record["legs"]

@@ -3,6 +3,7 @@
 Run with Python that can import KiCad and wxGTK, under Xvfb. Every stage runs in a
 fresh process; unsupported bindings, crashes and timeouts are failures, not skips.
 Only fresh artifact directories and copies of checked-in boards are writable.
+The Generate stage exercises the actual plugin constructor and toolbar workflow.
 """
 
 import argparse
@@ -34,7 +35,7 @@ CASES = (
     "single-ended-50-ohm",
     "usb-differential-90-ohm",
 )
-STAGES = ("prerequisites", *CASES, "custom-palette", "dialogs", "workflow")
+STAGES = ("prerequisites", *CASES, "custom-palette", "dialogs", "workflow", "generate")
 
 
 def require(condition: Any, message: str) -> None:
@@ -134,7 +135,7 @@ def run(output: Path, timeout: int = 240) -> int:
             "schema_version": 1,
             "status": "FAIL" if failed else "PASS",
             "stages": records,
-            "scope": "native pcbnew/GTK, layer reviews, workbook/HTML reports and board-scoped persistence",
+            "scope": "native pcbnew/GTK, Configure/calculation/review/Save/reopen/Generate, real fabrication reports and publication",
         },
     )
     return int(failed)
@@ -364,8 +365,8 @@ def loaded_fixture(
 
 def class_plan(case: Any, board: Any, pcbnew: Any) -> Any:
     """Use actual native memberships/pairs and actual widths, never fixture snapshots."""
-    from impedance.matching import analyze
-    from impedance.model import Config
+    from impedance.matching import analyze, is_pad_via_stub
+    from impedance.model import EXCLUSION_COVERED_STUB, Config
     from impedance.pcbnew_adapter import snapshot_board
     from impedance.service import prepare
 
@@ -403,6 +404,19 @@ def class_plan(case: Any, board: Any, pcbnew: Any) -> Any:
         set(actual) == expected and len(actual) == len(expected),
         "Native rows lost, duplicated or widened signal selection",
     )
+    exportable = tuple(
+        section for section in analysis.sections if not section.exclusion_reason
+    )
+    for section in analysis.sections:
+        if section.exclusion_reason:
+            require(
+                section.exclusion_reason == EXCLUSION_COVERED_STUB
+                and all(
+                    is_pad_via_stub(trace, snapshot.copper_features)
+                    for trace in section.traces
+                ),
+                "Native covered-stub audit row lacks same-net copper coverage proof",
+            )
     if case.paired:
         pairs = {tuple(sorted(circuit.net_names)) for circuit in case.circuits}
         require(
@@ -410,16 +424,13 @@ def class_plan(case: Any, board: Any, pcbnew: Any) -> Any:
             "Native differential mate lookup failed",
         )
         require(
-            all(
-                tuple(sorted(section.net_names)) in pairs
-                for section in analysis.sections
-            ),
+            all(tuple(sorted(section.net_names)) in pairs for section in exportable),
             "A differential workbook row omitted a mate",
         )
     config = replace(
         config,
         reviewed_digest=analysis.digest,
-        included_section_ids=tuple(section.section_id for section in analysis.sections),
+        included_section_ids=tuple(section.section_id for section in exportable),
     )
     plan = prepare(config, snapshot, len(snapshot.layers))
     require(
@@ -609,13 +620,30 @@ def stock_button(dialog: Any, identity: int) -> Any:
 
 
 def event(wx: Any, control: Any, binder: Any, selection: Optional[int] = None) -> None:
-    """Dispatch a real native command event through the existing bound handler."""
-    if selection is not None:
-        control.SetSelection(selection)
-    command = wx.CommandEvent(binder.typeId, control.GetId())
+    """Dispatch the native event type expected by the existing bound handler."""
+    import wx.dataview as dv
+
+    if (
+        binder.typeId == dv.EVT_DATAVIEW_SELECTION_CHANGED.typeId
+        and selection is not None
+    ):
+        control.SelectRow(selection)
+        item = control.RowToItem(selection)
+        control.EnsureVisible(item)
+        command = dv.DataViewEvent(binder.typeId, control, item)
+    elif binder.typeId == wx.EVT_LIST_ITEM_SELECTED.typeId and selection is not None:
+        control.Select(selection)
+        control.Focus(selection)
+        control.EnsureVisible(selection)
+        command = wx.ListEvent(binder.typeId, control.GetId())
+        command.SetIndex(selection)
+    else:
+        if selection is not None:
+            control.SetSelection(selection)
+        command = wx.CommandEvent(binder.typeId, control.GetId())
+        if selection is not None:
+            command.SetInt(selection)
     command.SetEventObject(control)
-    if selection is not None:
-        command.SetInt(selection)
     require(
         control.GetEventHandler().ProcessEvent(command),
         "Native control event was not handled",
@@ -742,7 +770,7 @@ def dialogs(
             wait_for_preview(app, main.preview_pane)
             for handler in (main._on_add, main._on_edit):
                 before = main.session.config
-                main.specifications.Select(0)
+                main.specifications.SelectRow(0)
                 errors = []
 
                 def cancel_child(errors: list[BaseException] = errors) -> None:
@@ -781,8 +809,10 @@ def dialogs(
                     "Add/Edit Cancel changed parent intent",
                 )
             require(main.session.analysis is not None, "Automatic workbook rows lost")
+            import wx.dataview as dv
+
             for index in range(len(main.session.analysis.sections)):
-                event(wx, main.sections, wx.EVT_LISTBOX, index)
+                event(wx, main.sections, dv.EVT_DATAVIEW_SELECTION_CHANGED, index)
                 wait_for_preview(app, main.preview_pane)
             main.SetSize((980, 620))
             app.Yield()
@@ -1128,7 +1158,7 @@ def workflow(plan: Any, board: Any, pcbnew: Any, output: Path) -> dict[str, Any]
         "Explicit impedance reset failed, created an archive, or changed another board",
     )
     return {
-        "scope": "real service.export_reports/Excel/HTML and board-scoped SQLite",
+        "scope": "real service.export_reports/Excel/HTML and board-scoped SQLite; Generate/fabrication is exercised separately",
         "rows": len(plan.sections),
         "boards": [first_id, second_id, copied_id, renamed_id],
         "new_filenames_start_fresh": True,
@@ -1152,7 +1182,7 @@ def worker(stage: str, output: Path) -> int:
         if stage != "prerequisites":
             name = (
                 "usb-differential-90-ohm"
-                if stage in ("dialogs", "workflow")
+                if stage in ("dialogs", "workflow", "generate")
                 else ("single-ended-50-ohm" if stage == "custom-palette" else stage)
             )
             with loaded_fixture(name, output, pcbnew) as (case, board, path):
@@ -1161,6 +1191,10 @@ def worker(stage: str, output: Path) -> int:
                     evidence = dialogs(plan, board, pcbnew, wx, app, output)
                 elif stage == "workflow":
                     evidence = workflow(plan, board, pcbnew, output)
+                elif stage == "generate":
+                    from scripts.native_impedance_workflow import generate_workflow
+
+                    evidence = generate_workflow(plan, board, pcbnew, wx, app, output)
                 else:
                     evidence = {
                         "captures": render_rows(

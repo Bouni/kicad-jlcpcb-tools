@@ -2,9 +2,25 @@
 
 from typing import Any, Optional, Protocol
 
+from .calculator_config_cache import (
+    CalculatorConfigCache,
+    calculator_config_from_payload,
+    calculator_config_to_payload,
+)
 from .catalog_cache import CatalogCache, parse_catalog_checked_at
 from .model import Config, ValidationError, validate_config
-from .stackup_model import Stackup, stackup_from_dict, stackup_to_dict, validate_stackup
+from .review_tracking import utc_now
+from .stackup_model import (
+    MAX_WIDTH_RESULTS,
+    Stackup,
+    WidthResult,
+    stackup_from_dict,
+    stackup_to_dict,
+    validate_stackup,
+    validate_width_result,
+    width_result_from_dict,
+    width_result_to_dict,
+)
 
 # ImpedanceDatabase versions its storage envelope independently of the payload.
 # Payload upgrades remain read-only until an explicit save; they do not migrate
@@ -52,6 +68,38 @@ class ConfigDatabase(Protocol):
     def save_stackup_catalog(self, layer_count: int, payload: dict[str, Any]) -> None:
         """Save reusable catalog data independently from board edit revisions."""
         ...
+
+    def load_calculator_config(self) -> Optional[dict[str, Any]]:
+        """Return the project-shared calculator metadata cache, if present."""
+        ...
+
+    def save_calculator_config(self, payload: dict[str, Any]) -> None:
+        """Save calculator metadata independently from board edit revisions."""
+        ...
+
+    def load_width_results(self, board_id: str) -> list[dict[str, Any]]:
+        """Return this board's cached solved widths, skipping undecodable rows."""
+        ...
+
+    def save_width_result(
+        self,
+        board_id: str,
+        input_digest: str,
+        spec_id: str,
+        layer: str,
+        calculated_at_utc: str,
+        payload: dict[str, Any],
+        *,
+        max_rows: int,
+    ) -> None:
+        """Upsert one solved width independently from board edit revisions."""
+        ...
+
+
+# Only settled outcomes are worth caching: a success is the answer for these exact
+# inputs, and an unsupported/rejected construction cannot become supported without
+# changing the inputs (and therefore the digest). Transient failures are not stored.
+CACHEABLE_WIDTH_STATUSES = frozenset(("success", "unsupported"))
 
 
 class ImpedanceRepository:
@@ -195,4 +243,59 @@ class ImpedanceRepository:
                 "stackups": [stackup_to_dict(stackup) for stackup in cache.stackups],
                 "checked_at_utc": cache.checked_at_utc,
             },
+        )
+
+    def load_calculator_config(self) -> CalculatorConfigCache:
+        """Load provider calculator metadata without writing a migration."""
+        return self.read_calculator_config(self.database)
+
+    @classmethod
+    def read_calculator_config(cls, database: ConfigDatabase) -> CalculatorConfigCache:
+        """Read the project-shared calculator cache without requiring a PCB."""
+        payload = database.load_calculator_config()
+        if payload is None:
+            return CalculatorConfigCache()
+        try:
+            return calculator_config_from_payload(payload)
+        except ValueError as error:
+            raise ValidationError(
+                f"Cached calculator configuration is invalid; a new fetch is needed: {error}"
+            ) from error
+
+    def save_calculator_config(self, cache: CalculatorConfigCache) -> None:
+        """Atomically cache a successful calculator-config check."""
+        try:
+            payload = calculator_config_to_payload(cache)
+        except ValueError as error:
+            raise ValidationError(str(error)) from error
+        self.database.save_calculator_config(payload)
+
+    def load_width_results(self) -> tuple[WidthResult, ...]:
+        """Read this board's cached solved widths; malformed rows are skipped."""
+        results: list[WidthResult] = []
+        for payload in self.database.load_width_results(self.board_id):
+            try:
+                result = width_result_from_dict(payload)
+                validate_width_result(result)
+            except (ValueError, TypeError):
+                continue
+            if result.status in CACHEABLE_WIDTH_STATUSES:
+                results.append(result)
+        return tuple(results)
+
+    def save_width_result(self, result: WidthResult) -> None:
+        """Cache one settled solve as soon as it arrives, without a config save."""
+        validate_width_result(result)
+        if result.status not in CACHEABLE_WIDTH_STATUSES:
+            raise ValidationError("Only settled width results are cached.")
+        # Rejections carry no solve time; stamp them so the newest-rows bound
+        # does not evict every rejection ahead of older successes.
+        self.database.save_width_result(
+            self.board_id,
+            result.input_digest,
+            result.spec_id,
+            result.layer,
+            result.calculated_at_utc or utc_now(),
+            width_result_to_dict(result),
+            max_rows=MAX_WIDTH_RESULTS,
         )

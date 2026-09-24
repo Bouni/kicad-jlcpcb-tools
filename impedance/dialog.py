@@ -3,18 +3,30 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from decimal import InvalidOperation
+import logging
+from threading import Event, Thread
+import time
 from typing import Optional
 from uuid import uuid4
 from weakref import ReferenceType, ref
 
 import wx
+import wx.adv
+import wx.dataview as dv
 
 from . import review_tracking as tracking
+from .calculator_config_cache import (
+    CalculatorConfigCache,
+    calculator_config_check_due,
+    calculator_config_checked_at,
+)
 from .catalog_cache import CatalogCache
 from .catalog_controller import CatalogController, CatalogState, compatible_stackup
-from .matching import analyze, preview_sections, validate_review
+from .jlcpcb_calculator import ProviderConfiguration
+from .matching import analyze, preview_sections, validate_review, workbook_row_cells
 from .model import (
     Analysis,
     BoardSnapshot,
@@ -32,6 +44,8 @@ from .model import (
 )
 from .service import CapturedImage
 
+_LOG = logging.getLogger(__name__)
+
 KIND_CHOICES = (
     ("single_ended", "Single Ended (Non coplanar)"),
     ("differential", "Differential Pair (Non coplanar)"),
@@ -40,6 +54,261 @@ KIND_CHOICES = (
 )
 
 REFERENCE_HELP = "Verify that the selected copper layers are ground reference planes."
+WIDTH_REFRESH_RETRY_MS = 3 * 60 * 1000
+WIDTH_REFRESH_SLOW_MS = 15 * 1000
+WIDTH_REFRESH_SLOW_PER_JOB_MS = 10 * 1000
+DRAFT_WIDTH_CALC_DEBOUNCE_MS = 500
+DRAFT_WIDTH_CALC_RETRY_MS = 60 * 1000
+CALCULATOR_LINK_LABEL = "JLCPCB Impedance calculator"
+CALCULATOR_URL = "https://jlcpcb.com/pcb-impedance-calculator"
+INACTIVE_DIMENSION_PLACEHOLDER = "N/A"
+# Results worth persisting the moment they arrive: the answer for these exact
+# inputs, or a construction the calculator deterministically refuses. Transient
+# failures ("unavailable"/"error") are retried instead of cached.
+SETTLED_WIDTH_STATUSES = frozenset(("success", "unsupported"))
+SPEC_REVIEW_APPROVED = "Approved"
+SPEC_REVIEW_NEEDS_APPROVAL = "Needs approval"
+SPEC_REVIEW_NO_MATCHING_ROWS = "No matching rows"
+# Review column only: white text on coloured backgrounds via DataViewItemAttr.
+# Always applied for every status so Cocoa cannot retain a cleared background.
+SPEC_REVIEW_APPROVED_BACKGROUND = (35, 135, 60)
+SPEC_REVIEW_PENDING_BACKGROUND = (160, 90, 16)
+SPEC_REVIEW_TEXT_COLOUR = (255, 255, 255)
+_SPECIFICATION_COLUMNS = (
+    ("Review", 120),
+    ("Net class", 180),
+    ("Signal layers", 110),
+    ("Ω", 65),
+    ("Type", 170),
+    ("Label", 150),
+    ("Width (mm)", 110),
+    ("References", 150),
+)
+_WORKBOOK_WIDTH_COLUMN = 7
+_WORKBOOK_COMPARISON_COLUMN = 8
+_WORKBOOK_TARGET_WIDTH_COLUMN = 9
+_WORKBOOK_COLUMNS = (
+    "Incl.",
+    "Row",
+    "Layer",
+    "Net class",
+    "Target Ω",
+    "Length",
+    "Net",
+    "Width",
+    "",
+    "Target width",
+    "Segments",
+)
+
+
+def specification_review_label(
+    spec_id: str,
+    *,
+    approved: bool,
+    analysis: Optional[Analysis],
+    included: Iterable[str],
+    layer_review_current: bool = False,
+) -> str:
+    """Return the Review-column status for one net-class specification.
+
+    Completing the specification dialog's layer/image review marks the class
+    Approved. A legacy workbook approval that still includes the class also
+    counts. Unmatched classes are called out separately.
+    """
+    if analysis is None:
+        return SPEC_REVIEW_NO_MATCHING_ROWS
+    sections = tuple(
+        section for section in analysis.sections if section.spec_id == spec_id
+    )
+    if not sections:
+        return SPEC_REVIEW_NO_MATCHING_ROWS
+    if layer_review_current:
+        return SPEC_REVIEW_APPROVED
+    included_ids = set(included)
+    represented = any(section.section_id in included_ids for section in sections)
+    if approved and represented:
+        return SPEC_REVIEW_APPROVED
+    return SPEC_REVIEW_NEEDS_APPROVAL
+
+
+def specification_review_cell_style(
+    label: str,
+) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """Return (background, foreground) for a Review-column status label."""
+    background = (
+        SPEC_REVIEW_APPROVED_BACKGROUND
+        if label == SPEC_REVIEW_APPROVED
+        else SPEC_REVIEW_PENDING_BACKGROUND
+    )
+    return background, SPEC_REVIEW_TEXT_COLOUR
+
+
+def apply_specification_review_cell_style(
+    label: str, attr: dv.DataViewItemAttr
+) -> bool:
+    """Paint Review-column white text on the status background."""
+    background, foreground = specification_review_cell_style(label)
+    attr.SetBackgroundColour(wx.Colour(*background))
+    attr.SetColour(wx.Colour(*foreground))
+    return True
+
+
+class _SpecificationListStore(dv.DataViewListStore):
+    """Apply Review-column cell colours without tinting other columns."""
+
+    def GetAttrByRow(self, row: int, col: int, attr: dv.DataViewItemAttr) -> bool:
+        if col != 0:
+            return False
+        return apply_specification_review_cell_style(self.GetValueByRow(row, col), attr)
+
+
+class _WorkbookListStore(dv.DataViewListStore):
+    """Highlight mismatching dimensions while keeping other row text neutral."""
+
+    def GetAttrByRow(self, row: int, col: int, attr: dv.DataViewItemAttr) -> bool:
+        from .width_checks import COVERED_STUB_COLOUR, WIDTH_MISMATCH_COLOUR
+
+        if self.GetValueByRow(row, _WORKBOOK_WIDTH_COLUMN) == "Covered stub":
+            attr.SetColour(wx.Colour(*COVERED_STUB_COLOUR))
+            return True
+        if (
+            col
+            in {
+                _WORKBOOK_WIDTH_COLUMN,
+                _WORKBOOK_COMPARISON_COLUMN,
+                _WORKBOOK_TARGET_WIDTH_COLUMN,
+            }
+            and self.GetValueByRow(row, _WORKBOOK_COMPARISON_COLUMN) == "!="
+        ):
+            attr.SetColour(wx.Colour(*WIDTH_MISMATCH_COLOUR))
+            return True
+        return False
+
+
+def _save_calculator_configuration(
+    save: Callable[[CalculatorConfigCache], None],
+    cache: CalculatorConfigCache,
+    context: str,
+) -> None:
+    """Persist completed metadata on GUI even if its originating dialog has closed."""
+    try:
+        save(cache)
+    except Exception as error:
+        _LOG.info(
+            "JLCPCB width: %s provider-config cache write skipped (%s)",
+            context,
+            error,
+        )
+
+
+def _calculator_configuration_handoff(
+    load: Optional[Callable[[], CalculatorConfigCache]],
+    save: Optional[Callable[[CalculatorConfigCache], None]],
+    *,
+    context: str,
+) -> tuple[
+    Optional[ProviderConfiguration],
+    Optional[Callable[[ProviderConfiguration], None]],
+]:
+    """Read on GUI and give the worker copied metadata and a queued publication hook."""
+    configuration = None
+    if load is not None:
+        try:
+            cache = load()
+            if not calculator_config_check_due(cache):
+                configuration = deepcopy(
+                    ProviderConfiguration(
+                        cache.models, cache.copper, cache.coating, cache.limits
+                    )
+                )
+        except Exception as error:
+            _LOG.info(
+                "JLCPCB width: %s provider-config cache unused (%s)", context, error
+            )
+    _LOG.info(
+        "JLCPCB width: %s %s",
+        context,
+        "using cached provider configuration"
+        if configuration is not None
+        else "will fetch provider configuration from JLCPCB",
+    )
+    if save is None:
+        return configuration, None
+
+    def publish(provider: ProviderConfiguration) -> None:
+        """Queue detached completed metadata without consulting the native owner."""
+        cache = deepcopy(
+            CalculatorConfigCache(
+                models=provider.models,
+                copper=provider.copper,
+                coating=provider.coating,
+                limits=provider.limits,
+                checked_at_utc=calculator_config_checked_at(),
+            )
+        )
+        wx.CallAfter(_save_calculator_configuration, save, cache, context)
+
+    return configuration, publish
+
+
+def _deliver_draft_width_result(
+    owner: ReferenceType[SpecificationDialog],
+    generation: int,
+    digest: str,
+    result: Optional[WidthResult],
+    failure: str,
+) -> None:
+    """Resolve the native owner only after GUI dispatch; its handler rejects stale work."""
+    dialog = owner()
+    if dialog is not None:
+        dialog._finish_draft_calculation(generation, digest, result, failure)
+
+
+def _deliver_width_results(
+    owner: ReferenceType[ImpedanceDialog],
+    generation: int,
+    key: tuple[object, ...],
+    results: tuple[WidthResult, ...],
+    failure: str,
+) -> None:
+    """Resolve the batch owner only on GUI, retaining its lifecycle and generation checks."""
+    dialog = owner()
+    if dialog is not None:
+        dialog._finish_calculation(generation, key, results, failure)
+
+
+def _persist_width_result(
+    save: Optional[Callable[[WidthResult], None]],
+    result: WidthResult,
+    *,
+    context: str,
+) -> None:
+    """Cache one settled solve from a worker thread without failing the batch.
+
+    Persistence failures must never discard a usable in-memory result, so any
+    exception is logged and swallowed here, mirroring the calculator-config path.
+    """
+    if save is None or result.status not in SETTLED_WIDTH_STATUSES:
+        return
+    try:
+        save(result)
+    except Exception as error:
+        _LOG.info(
+            "JLCPCB width: %s cache write skipped for %s/%s: %s",
+            context,
+            result.spec_id,
+            result.layer,
+            error,
+        )
+    else:
+        _LOG.info(
+            "JLCPCB width: %s cached %s/%s status=%s",
+            context,
+            result.spec_id,
+            result.layer,
+            result.status,
+        )
 
 
 def parse_distance(value: str, units: str) -> int:
@@ -117,6 +386,11 @@ def dimension_fields_for_kind(kind: str) -> tuple[bool, bool]:
     if kind not in dict(KIND_CHOICES):
         raise ValueError("Choose a supported impedance type.")
     return kind.startswith("differential"), kind.endswith("_coplanar")
+
+
+def _is_inactive_dimension(value: str) -> bool:
+    """Recognize the disabled-field placeholder without treating it as user input."""
+    return value.strip().casefold() == INACTIVE_DIMENSION_PLACEHOLDER.casefold()
 
 
 def _begin_main_catalog(owner: ReferenceType[ImpedanceDialog], epoch: int) -> None:
@@ -212,13 +486,19 @@ class ReviewSession:
             self.capture_digests.clear()
             self.invalidate_review()
             raise
-        available = {section.section_id for section in result.sections}
+        all_ids = {section.section_id for section in result.sections}
+        # Covered stubs stay unchecked by default; an explicit check is preserved.
+        default_included = {
+            section.section_id
+            for section in result.sections
+            if not section.exclusion_reason
+        }
         if previous is not None and previous.digest == result.digest:
-            self.included &= available
+            self.included &= all_ids
         elif self.config.reviewed_digest == result.digest:
-            self.included = set(self.config.included_section_ids) & available
+            self.included = set(self.config.included_section_ids) & all_ids
         else:
-            self.included = available
+            self.included = default_included
         self.analysis = result
         if previous is not None and previous.digest != result.digest:
             self.capture_digests.clear()
@@ -233,9 +513,12 @@ class ReviewSession:
         """Validate the selected rows and invalidate review when selection changes."""
         if self.analysis is None:
             raise ValueError("Workbook rows are not available.")
-        included = set(section_ids)
-        if not included <= {section.section_id for section in self.analysis.sections}:
+        all_ids = {section.section_id for section in self.analysis.sections}
+        requested = set(section_ids)
+        if not requested <= all_ids:
             raise ValueError("A selected section is no longer present.")
+        # Covered stubs stay unchecked by default, but an explicit check is kept.
+        included = requested
         if included != self.included:
             self.invalidate_review()
         self.included = included
@@ -268,6 +551,34 @@ class ReviewSession:
         )
         validate_review(candidate, self.analysis)
         self.config = candidate
+
+    def approve_if_layer_reviews_complete(self) -> bool:
+        """Approve the workbook when every matched class has current layer reviews."""
+        if self.approved:
+            return True
+        if self.analysis is None or not self.included:
+            return False
+        source_digest = tracking.source_fingerprint(self.snapshot)
+        for spec in self.config.specifications:
+            if not any(
+                section.spec_id == spec.spec_id for section in self.analysis.sections
+            ):
+                continue
+            if not tracking.specification_layer_review_current(
+                self.config.review_tracking,
+                source_digest,
+                spec,
+                self.analysis.sections,
+                stackup=self.config.stackup,
+                width_results=self.config.width_results,
+                capture_digests=self.capture_digests,
+            ):
+                return False
+        try:
+            self.approve()
+        except ValueError:
+            return False
+        return True
 
     def save_result(self, snapshot: Optional[BoardSnapshot] = None) -> Config:
         """Save valid intent independently of whether report review is complete."""
@@ -314,6 +625,13 @@ class SpecificationDialog(wx.Dialog):
         review_tracking: tracking.ReviewTracking = tracking.ReviewTracking(),
         stackup: Optional[Stackup] = None,
         width_results: tuple[WidthResult, ...] = (),
+        calculate_width: Optional[Callable[..., WidthResult]] = None,
+        load_calculator_config: Optional[Callable[[], CalculatorConfigCache]] = None,
+        save_calculator_config: Optional[
+            Callable[[CalculatorConfigCache], None]
+        ] = None,
+        save_width_result: Optional[Callable[[WidthResult], None]] = None,
+        skip_stub_review: Optional[Callable[[], bool]] = None,
     ) -> None:
         if specification is not None:
             try:
@@ -328,14 +646,28 @@ class SpecificationDialog(wx.Dialog):
         super().__init__(
             parent,
             title="Impedance specification",
-            size=(1040, 700),
+            size=(1248, 740),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
         self.snapshot = snapshot
         self.verify_snapshot = verify_snapshot
+        self.preview_callback = preview
+        self.skip_stub_review = skip_stub_review or (lambda: True)
         self.original = specification
         self.stackup = stackup
         self.width_results = width_results
+        self.calculate_width_callback = calculate_width
+        self.load_calculator_config = load_calculator_config
+        self.save_calculator_config = save_calculator_config
+        self.save_width_result = save_width_result
+        self._draft_calc_generation = 0
+        self._draft_calc_cancel: Optional[Event] = None
+        self._draft_calc_timer = wx.Timer(self)
+        self._draft_slow_timer = wx.Timer(self)
+        self._draft_retry_timer = wx.Timer(self)
+        self._draft_calc_alert = ""
+        self._draft_calc_inflight = False
+        self._draft_calc_started_at = 0.0
         self.specification: Optional[Specification] = None
         self._spec_id = (
             specification.spec_id if specification is not None else str(uuid4())
@@ -360,10 +692,13 @@ class SpecificationDialog(wx.Dialog):
         self._field_indicator_states: dict[str, str] = {}
         root = wx.BoxSizer(wx.VERTICAL)
         content = wx.BoxSizer(wx.HORIZONTAL)
+        left_panel = wx.Panel(self)
         left = wx.BoxSizer(wx.VERTICAL)
-        self.scroll_hint = wx.StaticText(self, label="Settings — scroll for more ↓")
+        self.scroll_hint = wx.StaticText(
+            left_panel, label="Settings — scroll for more ↓"
+        )
         left.Add(self.scroll_hint, 0, wx.BOTTOM, 6)
-        self.form = wx.ScrolledWindow(self, style=wx.VSCROLL | wx.BORDER_SIMPLE)
+        self.form = wx.ScrolledWindow(left_panel, style=wx.VSCROLL | wx.BORDER_SIMPLE)
         self.form.SetScrollRate(0, 12)
         fields = wx.FlexGridSizer(cols=2, vgap=8, hgap=12)
         fields.AddGrowableCol(1, 1)
@@ -373,7 +708,6 @@ class SpecificationDialog(wx.Dialog):
         )
         self.net_class.SetSelection(0)
         self.class_hint = wx.StaticText(self.form, label="")
-        self.class_hint.Wrap(250)
         self.label = wx.TextCtrl(self.form)
         self.target = wx.TextCtrl(self.form)
         self.target.SetValue("50")
@@ -389,18 +723,20 @@ class SpecificationDialog(wx.Dialog):
         )
         self.include_layer.SetValue(True)
         self.layer_hint = wx.StaticText(self.form, label="")
-        self.layer_hint.Wrap(250)
+        self.width_comparison = wx.Panel(self.form)
+        width_comparison_layout = wx.BoxSizer(wx.VERTICAL)
+        self.width_rows = wx.FlexGridSizer(cols=3, vgap=2, hgap=8)
+        width_comparison_layout.Add(self.width_rows, 0, wx.EXPAND)
         self.width_hint = wx.StaticText(
-            self.form, label="Select a net class and signal layer."
+            self.width_comparison, label="Select a net class and signal layer."
         )
-        self.width_hint.Wrap(250)
+        width_comparison_layout.Add(self.width_hint, 0, wx.EXPAND | wx.TOP, 4)
+        self.width_comparison.SetSizer(width_comparison_layout)
         self.approval_hint = wx.StaticText(self.form, label="Not recorded")
-        self.approval_hint.Wrap(250)
         self.references = wx.CheckListBox(self.form, choices=list(self.layers))
         self.references.SetMinSize((-1, 104))
         self.adjacent_button = wx.Button(self.form, label="Use adjacent layers")
         self.reference_hint = wx.StaticText(self.form, label=REFERENCE_HELP)
-        self.reference_hint.Wrap(250)
         reference_fields = wx.BoxSizer(wx.VERTICAL)
         reference_fields.Add(self.references, 0, wx.EXPAND)
         reference_fields.Add(self.adjacent_button, 0, wx.TOP, 6)
@@ -421,7 +757,7 @@ class SpecificationDialog(wx.Dialog):
             ("include_layer", "Layer selection", self.include_layer),
             ("references", "Reference copper layers (B)", reference_fields),
             ("units", "Dimension units", self.units),
-            ("width_hint", "Width comparison", self.width_hint),
+            ("width_hint", "Width comparison", self.width_comparison),
             ("spacing", self.spacing_label, self.spacing),
             ("ground_gap", self.ground_gap_label, self.ground_gap),
         ):
@@ -435,7 +771,19 @@ class SpecificationDialog(wx.Dialog):
                 field_label.GetLabel(),
                 field_label.GetForegroundColour(),
             )
-            fields.Add(field_label, 0, wx.ALIGN_CENTER_VERTICAL)
+            # Multi-line width comparisons must top-align or they paint over the
+            # spacing and ground-gap rows once the label grows.
+            align = (
+                wx.ALIGN_TOP | wx.TOP
+                if name in ("width_hint", "class_hint", "layer_hint", "references")
+                else wx.ALIGN_CENTER_VERTICAL
+            )
+            top = (
+                3
+                if name in ("width_hint", "class_hint", "layer_hint", "references")
+                else 0
+            )
+            fields.Add(field_label, 0, align, top)
             fields.Add(control, 1, wx.EXPAND)
         self.spacing.SetToolTip(
             "Edge-to-edge spacing between the differential pair's traces."
@@ -450,7 +798,7 @@ class SpecificationDialog(wx.Dialog):
         form_layout.Add(fields, 0, wx.ALL | wx.EXPAND, 10)
         self.form.SetSizer(form_layout)
         left.Add(self.form, 1, wx.EXPAND)
-        self.footer = wx.Panel(self)
+        self.footer = wx.Panel(left_panel)
         self.footer.SetBackgroundColour(
             wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE)
         )
@@ -463,13 +811,20 @@ class SpecificationDialog(wx.Dialog):
             self.active_layer_status, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 8
         )
         self.validation_message = wx.StaticText(self.footer, label="")
-        self.validation_message.Wrap(470)
         footer_layout.Add(self.validation_message, 0, wx.ALL | wx.EXPAND, 8)
+        self.calculator_link = wx.adv.HyperlinkCtrl(
+            self.footer, wx.ID_ANY, CALCULATOR_LINK_LABEL, CALCULATOR_URL
+        )
+        self.calculator_link.Hide()
+        footer_layout.Add(self.calculator_link, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         self.approve_layer = wx.Button(self.footer, label="Approve layer")
         footer_layout.Add(self.approve_layer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         self.footer.SetSizer(footer_layout)
         left.Add(self.footer, 0, wx.TOP | wx.EXPAND, 8)
-        content.Add(left, 1, wx.RIGHT | wx.EXPAND, 12)
+        left_panel.SetSizer(left)
+        left_panel.SetMinSize((480, -1))
+        self.left_panel = left_panel
+        content.Add(left_panel, 3, wx.RIGHT | wx.EXPAND, 12)
         from .dialog_preview import WorkbookPreview
 
         self.preview_pane = WorkbookPreview(
@@ -480,12 +835,14 @@ class SpecificationDialog(wx.Dialog):
             appearance_changed=self._invalidate_layer_approvals,
             review_failed=self._invalidate_current_layer_approval,
             image_viewed=self._on_image_viewed,
+            skip_stub_review=skip_stub_review,
         )
+        self.preview_pane.window.SetMinSize((420, -1))
         content.Add(self.preview_pane.window, 1, wx.EXPAND)
         root.Add(content, 1, wx.ALL | wx.EXPAND, 12)
         root.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALL | wx.EXPAND, 12)
         self.SetSizer(root)
-        self.SetMinSize((980, 620))
+        self.SetMinSize((1176, 680))
         self.net_class.Bind(wx.EVT_CHOICE, self._on_class)
         self.include_layer.Bind(wx.EVT_CHECKBOX, self._on_include_layer)
         self.approve_layer.Bind(wx.EVT_BUTTON, self._on_approve_layer)
@@ -497,8 +854,15 @@ class SpecificationDialog(wx.Dialog):
         self.adjacent_button.Bind(wx.EVT_BUTTON, self._on_adjacent)
         self.kind.Bind(wx.EVT_CHOICE, self._on_kind)
         self.units.Bind(wx.EVT_CHOICE, self._on_units)
+        left_panel.Bind(wx.EVT_SIZE, self._on_left_panel_size)
         self.Bind(wx.EVT_BUTTON, self._on_save, id=wx.ID_OK)
+        self.Bind(wx.EVT_BUTTON, self._on_spec_cancel, id=wx.ID_CANCEL)
+        self.Bind(wx.EVT_CLOSE, self._on_spec_cancel)
+        self.Bind(wx.EVT_WINDOW_DESTROY, self._on_spec_destroy)
         self.Bind(wx.EVT_SHOW, self._on_show)
+        self.Bind(wx.EVT_TIMER, self._on_draft_calc_timer, self._draft_calc_timer)
+        self.Bind(wx.EVT_TIMER, self._on_draft_slow_timer, self._draft_slow_timer)
+        self.Bind(wx.EVT_TIMER, self._on_draft_retry_timer, self._draft_retry_timer)
         self.reference_selection = ReferenceLayerSelection(self.layers, self.layers[0])
         self._populate_references()
         if specification is not None:
@@ -507,13 +871,53 @@ class SpecificationDialog(wx.Dialog):
             self._update_controls()
         self._on_kind(None)
         self._update_field_indicators()
+        self._rewrap_form_value_texts()
         self.Layout()
         self.CentreOnParent()
+
+    def _form_value_wrap_width(self) -> int:
+        """Return a wrap budget for text in the form's value column."""
+        client = self.form.GetClientSize()
+        width = client.GetWidth() if hasattr(client, "GetWidth") else int(client[0])
+        return max(200, width - 175 - 12 - 20)
+
+    def _wrap_form_value_text(self, control: wx.Window) -> None:
+        """Wrap one form/footer StaticText to the current value-column width."""
+        control.Wrap(self._form_value_wrap_width())
+
+    def _rewrap_form_value_texts(self) -> None:
+        """Keep long membership, width, and validation copy inside the left column."""
+        for control in (
+            self.class_hint,
+            self.layer_hint,
+            self.approval_hint,
+            self.reference_hint,
+            self.width_hint,
+            self.validation_message,
+        ):
+            self._wrap_form_value_text(control)
+
+    def _on_left_panel_size(self, event: wx.SizeEvent) -> None:
+        """Rewrap form value text when the left column width changes."""
+        self._rewrap_form_value_texts()
+        event.Skip()
 
     def _on_show(self, event: wx.ShowEvent) -> None:
         """Resume a preview whose initial queued capture ran before native show."""
         if event.GetEventObject() is self and event.IsShown():
             wx.CallAfter(self.preview_pane.show_selected)
+            wx.CallAfter(self._schedule_draft_width_calculation)
+        event.Skip()
+
+    def _on_spec_cancel(self, event: wx.Event) -> None:
+        """Discard draft calculation before native cancel/close completes."""
+        self._cancel_draft_calculation()
+        event.Skip()
+
+    def _on_spec_destroy(self, event: wx.WindowDestroyEvent) -> None:
+        """Stop owned draft calculation if destruction bypasses Cancel."""
+        if event.GetEventObject() is self:
+            self._cancel_draft_calculation()
         event.Skip()
 
     def _load(self, specification: Specification) -> None:
@@ -539,7 +943,7 @@ class SpecificationDialog(wx.Dialog):
         self._refresh_class_layers()
 
     def _load_layer_settings(self, specification: Specification) -> None:
-        """Retain saved dimensions but never infer current approval from persistence."""
+        """Restore saved dimensions and current layer approvals from matching fingerprints."""
         self._layer_drafts = {
             settings.layer: _LayerDraft(
                 references=settings.reference_layers,
@@ -559,6 +963,66 @@ class SpecificationDialog(wx.Dialog):
                 included=False,
                 confirmed=True,
             )
+        for settings in specification.layer_settings:
+            try:
+                sections = preview_sections(
+                    specification, self.snapshot, settings.layer
+                )
+            except (InvalidOperation, ValueError):
+                continue
+            if tracking.layer_approval_current(
+                self.review_tracking,
+                self._source_digest,
+                specification,
+                settings.layer,
+                sections,
+                stackup=self.stackup,
+                width_results=self.width_results,
+            ) and self._saved_layer_captures_match(specification, sections):
+                self._layer_drafts[settings.layer] = replace(
+                    self._layer_drafts[settings.layer], confirmed=True
+                )
+
+    def _saved_layer_captures_match(
+        self, specification: Specification, sections: tuple[Section, ...]
+    ) -> bool:
+        """Verify restored pixels through the cache without recording a view."""
+        from .model import EXCLUSION_COVERED_STUB
+
+        if self.preview_callback is None:
+            return False
+        try:
+            for section in sections:
+                if (
+                    self.skip_stub_review()
+                    and section.exclusion_reason == EXCLUSION_COVERED_STUB
+                ):
+                    continue
+                capture = self.preview_callback(section, refresh=False)
+                record = tracking.find_image(
+                    self.review_tracking,
+                    self._spec_id,
+                    section.layer,
+                    section.section_id,
+                )
+                approved = tracking.find_layer(
+                    self.review_tracking, self._spec_id, section.layer
+                )
+                digest = tracking.capture_fingerprint(
+                    self._source_digest, specification, section, capture.sha256
+                )
+                if (
+                    record is None
+                    or record.capture_digest != digest
+                    or approved is None
+                    or dict(approved.captures).get(section.section_id) != digest
+                ):
+                    return False
+            if self.verify_snapshot is not None:
+                self.verify_snapshot(self.snapshot)
+        except Exception:
+            return False
+        return True
 
     def _signal_layer(self) -> str:
         """Keep annotated dropdown labels separate from canonical copper-layer names."""
@@ -601,7 +1065,7 @@ class SpecificationDialog(wx.Dialog):
         if self.approval_hint.GetLabel() == message:
             return
         self.approval_hint.SetLabel(message)
-        self.approval_hint.Wrap(250)
+        self._wrap_form_value_text(self.approval_hint)
         self.form.Layout()
         self.form.FitInside()
 
@@ -669,11 +1133,25 @@ class SpecificationDialog(wx.Dialog):
 
     def _capture_draft(self, confirmed: bool = False) -> _LayerDraft:
         """Keep raw invalid input safely, independently of the newly selected layer."""
+        pair, ground = dimension_fields_for_kind(
+            KIND_CHOICES[self.kind.GetSelection()][0]
+        )
+        previous = self._layer_drafts.get(self._active_layer)
+        spacing = self.spacing.GetValue()
+        ground_gap = self.ground_gap.GetValue()
+        if not pair or _is_inactive_dimension(spacing):
+            spacing = previous.spacing if previous is not None else ""
+            if _is_inactive_dimension(spacing):
+                spacing = ""
+        if not ground or _is_inactive_dimension(ground_gap):
+            ground_gap = previous.ground_gap if previous is not None else ""
+            if _is_inactive_dimension(ground_gap):
+                ground_gap = ""
         return _LayerDraft(
             self.reference_selection.selected,
             automatic=self.reference_selection.automatic,
-            spacing=self.spacing.GetValue(),
-            ground_gap=self.ground_gap.GetValue(),
+            spacing=spacing,
+            ground_gap=ground_gap,
             units=self.units.GetStringSelection(),
             included=bool(self.include_layer.GetValue()),
             confirmed=confirmed,
@@ -788,9 +1266,9 @@ class SpecificationDialog(wx.Dialog):
                 "\n".join(summaries) or "No routed named nets belong to this class."
             )
         self.class_hint.SetLabel(hint)
-        self.class_hint.Wrap(250)
+        self._wrap_form_value_text(self.class_hint)
         self.layer_hint.SetLabel(summary)
-        self.layer_hint.Wrap(250)
+        self._wrap_form_value_text(self.layer_hint)
         self._update_layer_labels()
         self._on_kind(None)
         self._refresh_preview()
@@ -832,6 +1310,8 @@ class SpecificationDialog(wx.Dialog):
         ):
             if not required:
                 continue
+            if _is_inactive_dimension(value):
+                value = ""
             if not value.strip():
                 errors[name] = "Required"
                 continue
@@ -881,7 +1361,7 @@ class SpecificationDialog(wx.Dialog):
         self._validation_control = self.preview_pane.rows
         if self.preview_pane.advance_to_unreviewed():
             self.validation_message.SetLabel(REVIEW_INSTRUCTION)
-            self.validation_message.Wrap(470)
+            self._wrap_form_value_text(self.validation_message)
             self.Layout()
             return False
         self.preview_pane.ensure_reviewed()
@@ -899,16 +1379,20 @@ class SpecificationDialog(wx.Dialog):
         draft = self._capture_draft()
         if draft.included:
             settings = self._draft_settings(self._active_layer, draft)
-            if not self._review_current_images():
-                return False
             previous = self._layer_drafts.get(self._active_layer)
             unchanged = (
                 previous is not None and replace(previous, confirmed=False) == draft
             )
+            already_confirmed = bool(previous and previous.confirmed and unchanged)
+            selection = replace(
+                self._selection_specification(), layer_settings=(settings,)
+            )
+            if not self._review_current_images():
+                return False
             self._record_layer_approval(
-                replace(self._selection_specification(), layer_settings=(settings,)),
+                selection,
                 self._active_layer,
-                already_confirmed=bool(previous and previous.confirmed and unchanged),
+                already_confirmed=already_confirmed,
             )
         draft.confirmed = True
         self._layer_drafts[self._active_layer] = draft
@@ -932,7 +1416,7 @@ class SpecificationDialog(wx.Dialog):
         self.validation_message.SetLabel(
             f"Review {next_layer}, then approve or exclude it."
         )
-        self.validation_message.Wrap(470)
+        self._wrap_form_value_text(self.validation_message)
         self.Layout()
         return True
 
@@ -947,7 +1431,7 @@ class SpecificationDialog(wx.Dialog):
                 self.validation_message.SetLabel(
                     "All signal layers are approved or excluded. Choose OK to save."
                 )
-                self.validation_message.Wrap(470)
+                self._wrap_form_value_text(self.validation_message)
                 self.Layout()
         except (InvalidOperation, ValueError) as error:
             self._show_validation(str(error))
@@ -967,39 +1451,51 @@ class SpecificationDialog(wx.Dialog):
                 self._clear_validation()
                 self._update_field_indicators()
 
-    def _update_width_comparison(self) -> None:
-        """Compare routed widths with current nominal results without changing copper."""
-        from .width_checks import format_width_delta_nm, format_width_nm, width_check
-
-        widths = sorted(
-            {
-                trace.width_nm
-                for trace in self._class_traces()
-                if trace.layer == self._active_layer
-            }
+    def _update_width_comparison(self, *, schedule: bool = True) -> None:
+        """Compare one actual width for the active draft layer with its nominal."""
+        from .width_checks import (
+            WidthComparisonRow,
+            format_width_nm,
+            select_comparison_width_nm,
+            width_check,
+            width_comparison_rows,
         )
-        if not widths:
-            self.width_hint.SetLabel("No routed widths on the selected signal layer.")
+
+        layer_widths = [
+            trace.width_nm
+            for trace in self._class_traces()
+            if trace.layer == self._active_layer
+        ]
+        distinct = sorted(set(layer_widths))
+        if not distinct:
+            self._set_width_comparison(
+                message="No routed widths on the selected signal layer."
+            )
+            self._set_calculator_link_visible(False)
             return
         if not self.include_layer.GetValue():
-            self.width_hint.SetLabel(
-                "Actual: "
-                + ", ".join(format_width_nm(width) for width in widths)
-                + "\nExcluded from the workbook and nominal-width calculation."
+            self._set_width_comparison(
+                message=(
+                    "Actual: "
+                    + ", ".join(format_width_nm(width) for width in distinct)
+                    + "\nExcluded from the workbook and nominal-width calculation."
+                )
             )
-            self.width_hint.Wrap(250)
+            self._set_calculator_link_visible(False)
             return
         spec = self._selection_specification()
         settings, errors = self._validated_fields(
             self._active_layer, self._capture_draft()
         )
         if errors or settings is None:
-            self.width_hint.SetLabel(
-                "Actual: "
-                + ", ".join(format_width_nm(width) for width in widths)
-                + "\nComplete this layer's settings to compare calculated widths."
+            self._set_width_comparison(
+                message=(
+                    "Actual: "
+                    + ", ".join(format_width_nm(width) for width in distinct)
+                    + "\nComplete this layer's settings to compare calculated widths."
+                )
             )
-            self.width_hint.Wrap(250)
+            self._set_calculator_link_visible(False)
             return
         spec = replace(spec, layer_settings=(settings,))
         config = Config(
@@ -1007,26 +1503,340 @@ class SpecificationDialog(wx.Dialog):
             stackup=self.stackup,
             width_results=self.width_results,
         )
-        lines = []
-        details: list[str] = []
-        for width in widths:
-            check = width_check(config, spec, self._active_layer, width)
-            if (
-                check.result_current
-                and check.target_width_nm is not None
-                and check.delta_nm is not None
-            ):
-                lines.append(
-                    f"Actual {format_width_nm(width)}; nominal {format_width_nm(check.target_width_nm)}; "
-                    f"difference {format_width_delta_nm(check.delta_nm)}."
+        # Learn the current nominal without publishing one comparison per neckdown.
+        probe = width_check(config, spec, self._active_layer, distinct[0])
+        target = (
+            probe.target_width_nm
+            if probe.result_current and probe.target_width_nm is not None
+            else None
+        )
+        actual = select_comparison_width_nm(layer_widths, target)
+        check = width_check(config, spec, self._active_layer, actual)
+        rows: list[WidthComparisonRow] = []
+        messages: list[str] = []
+        if (
+            check.result_current
+            and check.target_width_nm is not None
+            and check.delta_nm is not None
+        ):
+            rows.extend(
+                width_comparison_rows(actual, check.target_width_nm, check.delta_nm)
+            )
+            difference_delta_nm = check.delta_nm
+        else:
+            messages.append(
+                "Actual: "
+                + ", ".join(format_width_nm(width) for width in distinct)
+                + "\n"
+                + check.message
+            )
+            difference_delta_nm = None
+        others = [width for width in distinct if width != actual]
+        if others:
+            messages.append(
+                "Other actual widths on this layer: "
+                + ", ".join(format_width_nm(width) for width in others)
+                + "."
+            )
+        if check.model:
+            messages.append("Calculation model: " + check.model)
+            messages.extend(check.assumptions)
+        if self._draft_calc_alert and self._draft_calc_alert not in messages:
+            messages.append(self._draft_calc_alert)
+        self._set_width_comparison(
+            rows=rows,
+            message="\n\n".join(messages),
+            difference_delta_nm=difference_delta_nm,
+        )
+        self._set_calculator_link_visible(bool(self._draft_calc_alert))
+        if schedule:
+            self._schedule_draft_width_calculation()
+
+    def _set_width_comparison(
+        self,
+        *,
+        rows: Optional[list] = None,
+        message: str = "",
+        difference_delta_nm: Optional[int] = None,
+    ) -> None:
+        """Publish comparison columns and grow the form so later fields stay visible."""
+        from .width_checks import WidthComparisonRow, difference_text_colour
+
+        self.width_rows.Clear(True)
+        for row in rows or ():
+            if not isinstance(row, WidthComparisonRow):
+                continue
+            label = wx.StaticText(self.width_comparison, label=row.label)
+            millimetres = wx.StaticText(self.width_comparison, label=row.millimetres)
+            mils = wx.StaticText(self.width_comparison, label=row.mils)
+            if row.label.startswith("Difference") and difference_delta_nm is not None:
+                colour = wx.Colour(*difference_text_colour(difference_delta_nm))
+                millimetres.SetForegroundColour(colour)
+                mils.SetForegroundColour(colour)
+            self.width_rows.Add(label, 0, wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL)
+            self.width_rows.Add(
+                millimetres, 0, wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL
+            )
+            self.width_rows.Add(mils, 0, wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
+        self.width_hint.SetLabel(message)
+        self.width_hint.Show(bool(message))
+        self._wrap_form_value_text(self.width_hint)
+        if hasattr(self.width_hint, "InvalidateBestSize"):
+            self.width_hint.InvalidateBestSize()
+        self.width_comparison.Layout()
+        self.form.Layout()
+        self.form.FitInside()
+        self.Layout()
+
+    def _cancel_draft_calculation(self) -> None:
+        """Invalidate queued draft-width work without waiting for the worker."""
+        self._draft_calc_generation += 1
+        self._draft_calc_timer.Stop()
+        self._draft_slow_timer.Stop()
+        self._draft_retry_timer.Stop()
+        self._draft_calc_inflight = False
+        self._draft_calc_alert = ""
+        if self._draft_calc_cancel is not None:
+            self._draft_calc_cancel.set()
+            self._draft_calc_cancel = None
+        if getattr(self, "calculator_link", None) is not None:
+            self._set_calculator_link_visible(False)
+
+    def _set_calculator_link_visible(self, visible: bool) -> None:
+        """Show the vendor calculator only when a delay or failure needs an escape hatch."""
+        if visible == self.calculator_link.IsShown():
+            return
+        self.calculator_link.Show(visible)
+        self.footer.Layout()
+        self.Layout()
+
+    def _schedule_draft_width_calculation(self) -> None:
+        """Debounce a quiet solve for the active draft layer when inputs are ready."""
+        if not self or self.stackup is None or not self.stackup.calculator_id:
+            return
+        if not self._active_layer or not self.include_layer.GetValue():
+            return
+        settings, errors = self._validated_fields(
+            self._active_layer, self._capture_draft()
+        )
+        if errors or settings is None:
+            return
+        from .stackup_model import calculation_fingerprint, find_width_result
+
+        spec = replace(self._selection_specification(), layer_settings=(settings,))
+        try:
+            digest = calculation_fingerprint(self.stackup, spec, self._active_layer)
+        except Exception:
+            return
+        existing = find_width_result(
+            self.width_results, spec.spec_id, self._active_layer, digest
+        )
+        if existing is not None and existing.status in ("success", "unsupported"):
+            return
+        self._draft_retry_timer.Stop()
+        self._draft_calc_timer.StartOnce(DRAFT_WIDTH_CALC_DEBOUNCE_MS)
+
+    def _on_draft_retry_timer(self, event: wx.TimerEvent) -> None:
+        """Continue automatic recovery after a calculator delay or failure."""
+        if self:
+            self._schedule_draft_width_calculation()
+
+    def _on_draft_slow_timer(self, event: wx.TimerEvent) -> None:
+        """Offer the vendor calculator when a draft solve is still outstanding."""
+        if not self or not self._draft_calc_inflight:
+            return
+        elapsed = (
+            time.monotonic() - self._draft_calc_started_at
+            if self._draft_calc_started_at
+            else 0.0
+        )
+        _LOG.info(
+            "JLCPCB width: draft still in flight after %.1fs (layer=%s generation=%s)",
+            elapsed,
+            self._active_layer,
+            self._draft_calc_generation,
+        )
+        if not self._draft_calc_alert:
+            self._draft_calc_alert = (
+                "Nominal widths are taking longer than expected from JLCPCB's calculator. "
+                "Comparisons will update automatically when results arrive."
+            )
+            self._set_calculator_link_visible(True)
+            self._update_width_comparison(schedule=False)
+
+    def _on_draft_calc_timer(self, event: wx.TimerEvent) -> None:
+        """Start one background solve for the current draft fingerprint."""
+        if not self:
+            return
+        if self.stackup is None or not self.stackup.calculator_id:
+            return
+        if not self._active_layer or not self.include_layer.GetValue():
+            return
+        settings, errors = self._validated_fields(
+            self._active_layer, self._capture_draft()
+        )
+        if errors or settings is None:
+            return
+        from .stackup_model import calculation_fingerprint, find_width_result
+
+        stackup = self.stackup
+        layer = self._active_layer
+        spec = replace(self._selection_specification(), layer_settings=(settings,))
+        try:
+            digest = calculation_fingerprint(stackup, spec, layer)
+        except Exception:
+            return
+        existing = find_width_result(self.width_results, spec.spec_id, layer, digest)
+        if existing is not None and existing.status in ("success", "unsupported"):
+            return
+        if self._draft_calc_cancel is not None:
+            self._draft_calc_generation += 1
+            self._draft_calc_cancel.set()
+            self._draft_calc_cancel = None
+        self._draft_calc_generation += 1
+        generation = self._draft_calc_generation
+        cancel = Event()
+        self._draft_calc_cancel = cancel
+        self._draft_calc_inflight = True
+        self._draft_calc_started_at = time.monotonic()
+        self._draft_retry_timer.Stop()
+        self._draft_slow_timer.StartOnce(WIDTH_REFRESH_SLOW_MS)
+        callback = self.calculate_width_callback
+        configuration, save_configuration = _calculator_configuration_handoff(
+            self.load_calculator_config, self.save_calculator_config, context="draft"
+        )
+        save_result = self.save_width_result
+        owner = ref(self)
+        _LOG.info(
+            "JLCPCB width: draft start stackup=%s layer=%s kind=%s target=%sΩ generation=%s cached_config=%s",
+            stackup.stackup_id,
+            layer,
+            spec.kind,
+            spec.target_ohms,
+            generation,
+            configuration is not None,
+        )
+
+        def work() -> None:
+            failure = ""
+            result: Optional[WidthResult] = None
+            started = time.monotonic()
+            try:
+                from .jlcpcb_calculator import JlcpcbCalculator
+
+                calculate = (
+                    callback
+                    if callback is not None
+                    else JlcpcbCalculator(
+                        configuration=configuration,
+                        save_configuration=save_configuration,
+                    ).calculate_width
                 )
-            else:
-                lines.append(f"Actual {format_width_nm(width)}. {check.message}")
-            if check.model and not details:
-                details.append("Calculation model: " + check.model)
-                details.extend(check.assumptions)
-        self.width_hint.SetLabel("\n".join(lines + details))
-        self.width_hint.Wrap(250)
+                if not cancel.is_set():
+                    result = calculate(stackup, spec, layer, cancel=cancel)
+                    # Persist before marshalling to wx: a Cancel or window close
+                    # after this point must not lose a completed solve.
+                    _persist_width_result(save_result, result, context="draft")
+            except Exception as error:
+                failure = str(error) or "The nominal-width calculation failed."
+            elapsed = time.monotonic() - started
+            if failure:
+                _LOG.info(
+                    "JLCPCB width: draft failed after %.1fs layer=%s: %s",
+                    elapsed,
+                    layer,
+                    failure,
+                )
+            elif result is not None:
+                _LOG.info(
+                    "JLCPCB width: draft finished in %.1fs layer=%s status=%s",
+                    elapsed,
+                    layer,
+                    result.status,
+                )
+            if not cancel.is_set():
+                try:
+                    wx.CallAfter(
+                        _deliver_draft_width_result,
+                        owner,
+                        generation,
+                        digest,
+                        result,
+                        failure,
+                    )
+                except RuntimeError:
+                    return
+
+        Thread(target=work, name="jlcpcb-impedance-draft-width", daemon=True).start()
+
+    def _finish_draft_calculation(
+        self,
+        generation: int,
+        digest: str,
+        result: Optional[WidthResult],
+        failure: str,
+    ) -> None:
+        """Apply one draft-layer result while the editor inputs remain current."""
+        if not self or generation != self._draft_calc_generation:
+            return
+        self._draft_calc_cancel = None
+        self._draft_calc_inflight = False
+        self._draft_slow_timer.Stop()
+        if failure or result is None or result.status not in ("success", "unsupported"):
+            reason = (
+                failure
+                or (result.message if result is not None else "")
+                or "JLCPCB's calculator did not return a usable result."
+            )
+            _LOG.info(
+                "JLCPCB width: draft apply skipped generation=%s reason=%s",
+                generation,
+                reason,
+            )
+            self._draft_calc_alert = f"Nominal width unavailable: {reason}"
+            self._set_calculator_link_visible(True)
+            self._update_width_comparison(schedule=False)
+            self._draft_retry_timer.StartOnce(DRAFT_WIDTH_CALC_RETRY_MS)
+            return
+        if result.input_digest != digest:
+            _LOG.info(
+                "JLCPCB width: draft result outdated; rescheduling (layer=%s)",
+                result.layer,
+            )
+            self._schedule_draft_width_calculation()
+            return
+        from .stackup_model import calculation_fingerprint
+
+        settings, errors = self._validated_fields(
+            self._active_layer, self._capture_draft()
+        )
+        if (
+            errors
+            or settings is None
+            or self.stackup is None
+            or result.layer != self._active_layer
+        ):
+            return
+        spec = replace(self._selection_specification(), layer_settings=(settings,))
+        try:
+            if calculation_fingerprint(self.stackup, spec, result.layer) != digest:
+                return
+        except Exception:
+            return
+        if result.spec_id != spec.spec_id:
+            return
+        self._draft_calc_alert = ""
+        self._set_calculator_link_visible(False)
+        self._draft_retry_timer.Stop()
+        from .stackup_model import merge_width_results
+
+        self.width_results = merge_width_results(self.width_results, (result,))
+        _LOG.info(
+            "JLCPCB width: draft applied layer=%s status=%s",
+            result.layer,
+            result.status,
+        )
+        self._update_width_comparison(schedule=True)
 
     def _read_dimension(self, value: str, units: str) -> int:
         """Retain exact board dimensions behind recurring mm-to-mil decimals."""
@@ -1060,7 +1870,7 @@ class SpecificationDialog(wx.Dialog):
         else:
             message = "Using your selected reference layers. " + REFERENCE_HELP
         self.reference_hint.SetLabel(message)
-        self.reference_hint.Wrap(250)
+        self._wrap_form_value_text(self.reference_hint)
         self.Layout()
 
     def _on_references(self, event: wx.CommandEvent) -> None:
@@ -1094,10 +1904,19 @@ class SpecificationDialog(wx.Dialog):
                 for layer, draft in self._layer_drafts.items()
             }
         included = bool(self._active_layer) and bool(self.include_layer.GetValue())
-        self.spacing.Enable(pair and included)
-        self.spacing_label.Enable(pair and included)
-        self.ground_gap.Enable(ground and included)
-        self.ground_gap_label.Enable(ground and included)
+        self._setting_fields = True
+        try:
+            self._set_dimension_field(
+                self.spacing, self.spacing_label, pair and included, "spacing"
+            )
+            self._set_dimension_field(
+                self.ground_gap,
+                self.ground_gap_label,
+                ground and included,
+                "ground_gap",
+            )
+        finally:
+            self._setting_fields = False
         if getattr(self, "_target_automatic", False):
             self._setting_target = True
             try:
@@ -1108,6 +1927,32 @@ class SpecificationDialog(wx.Dialog):
             self._update_controls()
         self._update_field_indicators()
 
+    def _set_dimension_field(
+        self,
+        control: wx.TextCtrl,
+        label: wx.StaticText,
+        active: bool,
+        field: str,
+    ) -> None:
+        """Show N/A in disabled dimension fields without discarding stored drafts."""
+        if active:
+            if _is_inactive_dimension(control.GetValue()):
+                draft = self._layer_drafts.get(self._active_layer)
+                restored = getattr(draft, field, "") if draft is not None else ""
+                if _is_inactive_dimension(restored):
+                    restored = ""
+                control.SetValue(restored)
+            control.Enable(True)
+            label.Enable(True)
+            return
+        current = control.GetValue()
+        if self._active_layer and not _is_inactive_dimension(current):
+            draft = self._layer_drafts[self._active_layer]
+            self._layer_drafts[self._active_layer] = replace(draft, **{field: current})
+        control.SetValue(INACTIVE_DIMENSION_PLACEHOLDER)
+        control.Enable(False)
+        label.Enable(False)
+
     def _selection_specification(self) -> Specification:
         """Describe actual matching intent without inventing missing fabrication dimensions."""
         return Specification(
@@ -1117,6 +1962,22 @@ class SpecificationDialog(wx.Dialog):
             KIND_CHOICES[self.kind.GetSelection()][0],
             self._active_class,
         )
+
+    def _restore_viewed_captures(self, spec: Specification, layer: str) -> None:
+        """Mark captures viewed when persisted fingerprints still match current pixels."""
+
+        def matches(section: Section, image_sha256: str) -> bool:
+            record = tracking.find_image(
+                self.review_tracking, self._spec_id, layer, section.section_id
+            )
+            if record is None:
+                return False
+            digest = tracking.capture_fingerprint(
+                self._source_digest, spec, section, image_sha256
+            )
+            return record.capture_digest == digest
+
+        self.preview_pane.restore_viewed(matches)
 
     def _refresh_preview(self) -> None:
         """Show exactly the workbook candidate geometry, independently of missing gap fields."""
@@ -1151,6 +2012,7 @@ class SpecificationDialog(wx.Dialog):
                 layer,
             )
             self.preview_pane.set_sections(sections, context)
+            self._restore_viewed_captures(spec, layer)
         except (ValueError, InvalidOperation) as error:
             message = str(error)
             if spec is not None:
@@ -1245,7 +2107,7 @@ class SpecificationDialog(wx.Dialog):
     def _show_validation(self, message: str) -> None:
         """Display errors in place and focus the field that needs attention."""
         self.validation_message.SetLabel(message)
-        self.validation_message.Wrap(470)
+        self._wrap_form_value_text(self.validation_message)
         if self._validation_control is not None:
             self._validation_control.SetFocus()
         self._update_field_indicators()
@@ -1288,16 +2150,33 @@ class SpecificationDialog(wx.Dialog):
         """Convert entered dimensions when the display unit changes."""
         units = self.units.GetStringSelection()
         changes = []
+        draft_updates: dict[str, str] = {}
         pair, ground = dimension_fields_for_kind(
             KIND_CHOICES[self.kind.GetSelection()][0]
         )
         controls = (
-            (self.spacing, pair),
-            (self.ground_gap, ground),
+            (self.spacing, pair, "spacing"),
+            (self.ground_gap, ground, "ground_gap"),
         )
         try:
-            for control, required in controls:
+            for control, required, field in controls:
                 value = control.GetValue().strip()
+                if _is_inactive_dimension(value):
+                    previous = self._layer_drafts.get(self._active_layer)
+                    draft_value = (
+                        getattr(previous, field, "") if previous is not None else ""
+                    )
+                    if draft_value and not _is_inactive_dimension(draft_value):
+                        try:
+                            dimension = self._read_dimension(
+                                draft_value, self._width_units
+                            )
+                        except ValueError:
+                            continue
+                        text = format_distance(dimension, units)
+                        draft_updates[field] = text
+                        self._exact_dimensions[text, units] = dimension
+                    continue
                 if value:
                     try:
                         dimension = self._read_dimension(value, self._width_units)
@@ -1313,11 +2192,24 @@ class SpecificationDialog(wx.Dialog):
             self._validation_control = control
             self._show_validation("Enter valid dimensions before changing units.")
             return
+        included = bool(self._active_layer) and bool(self.include_layer.GetValue())
         self._setting_fields = True
         try:
             for control, dimension, text in changes:
                 control.SetValue(text)
                 self._exact_dimensions[text, units] = dimension
+            if self._active_layer and draft_updates:
+                draft = self._layer_drafts[self._active_layer]
+                self._layer_drafts[self._active_layer] = replace(draft, **draft_updates)
+            self._set_dimension_field(
+                self.spacing, self.spacing_label, pair and included, "spacing"
+            )
+            self._set_dimension_field(
+                self.ground_gap,
+                self.ground_gap_label,
+                ground and included,
+                "ground_gap",
+            )
         finally:
             self._setting_fields = False
         self._width_units = units
@@ -1417,6 +2309,7 @@ class SpecificationDialog(wx.Dialog):
             ),
         )
         self.specification = candidate
+        self._cancel_draft_calculation()
         self.EndModal(wx.ID_OK)
 
 
@@ -1434,20 +2327,31 @@ class ImpedanceDialog(wx.Dialog):
         appearance_context: Optional[Callable[[], object]] = None,
         load_stackup_catalog: Optional[Callable[[int], CatalogCache]] = None,
         save_stackup_catalog: Optional[Callable[[int, CatalogCache], None]] = None,
+        load_calculator_config: Optional[Callable[[], CalculatorConfigCache]] = None,
+        save_calculator_config: Optional[
+            Callable[[CalculatorConfigCache], None]
+        ] = None,
+        calculate_width: Optional[Callable[..., WidthResult]] = None,
         fetch_stackup_catalog: Optional[Callable[..., tuple[Stackup, ...]]] = None,
         load_stackup_colors: Optional[
             Callable[[], dict[str, tuple[int, int, int, int]]]
         ] = None,
         save_config: Optional[Callable[[Config], None]] = None,
+        load_width_results: Optional[Callable[[], tuple[WidthResult, ...]]] = None,
+        save_width_result: Optional[Callable[[WidthResult], None]] = None,
+        skip_stub_review: Optional[Callable[[], bool]] = None,
     ) -> None:
         super().__init__(
             parent,
             title="JLCPCB controlled impedance",
-            size=(1040, 740),
+            size=(1248, 740),
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
         )
         self.config = config
         self.session = ReviewSession(config, snapshot)
+        self.save_width_result = save_width_result
+        self.skip_stub_review = skip_stub_review
+        self._seed_width_results_from_cache(load_width_results)
         self.preview_callback = preview
         self.verify_snapshot = verify_snapshot
         self.appearance_context = appearance_context
@@ -1455,14 +2359,26 @@ class ImpedanceDialog(wx.Dialog):
         self.save_config = save_config
         self.load_stackup_catalog = load_stackup_catalog
         self.save_stackup_catalog = save_stackup_catalog
+        self.load_calculator_config = load_calculator_config
+        self.save_calculator_config = save_calculator_config
         self.fetch_stackup_catalog = fetch_stackup_catalog
         self.load_stackup_colors = load_stackup_colors
         self._catalog_controller: Optional[CatalogController] = None
         self._catalog_unsubscribe: Optional[Callable[[], None]] = None
         self._catalog_epoch = 0
         self._catalog_check_scheduled = False
+        self.calculate_width_callback = calculate_width
+        self._calculation_generation = 0
+        self._calculation_cancel: Optional[Event] = None
+        self._width_refresh_alert = ""
+        self._width_refresh_started_at = 0.0
+        self._width_refresh_timer = wx.Timer(self)
+        self._width_slow_timer = wx.Timer(self)
         self._closing = False
         self._child_dialog_open = False
+        self._updating_sections = False
+        self._workbook_fit_queued = False
+        self._workbook_has_spacer = wx.Platform in ("__WXGTK__", "__WXMAC__")
         self._row_ids: tuple[str, ...] = ()
         self._rows_error = ""
         root = wx.BoxSizer(wx.VERTICAL)
@@ -1472,7 +2388,7 @@ class ImpedanceDialog(wx.Dialog):
         stackup_row.Add(self.stackup_summary, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
         self.stackup_button = wx.Button(self, label="Select stackup…")
         self.stackup_button.Bind(wx.EVT_BUTTON, self._on_stackup)
-        stackup_row.Add(self.stackup_button, 0, wx.RIGHT, 8)
+        stackup_row.Add(self.stackup_button)
         root.Add(stackup_row, 0, wx.ALL | wx.EXPAND, 12)
         self.catalog_status = wx.TextCtrl(
             self,
@@ -1481,37 +2397,25 @@ class ImpedanceDialog(wx.Dialog):
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.BORDER_NONE,
         )
         root.Add(self.catalog_status, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 8)
-        self.summary_tabs = wx.Notebook(self)
-        specification_page = wx.Panel(self.summary_tabs)
-        width_page = wx.Panel(self.summary_tabs)
-        self.summary_tabs.AddPage(specification_page, "Specifications")
-        self.summary_tabs.AddPage(width_page, "Width comparisons")
-        self.specifications = wx.ListCtrl(
-            specification_page, style=wx.LC_REPORT | wx.LC_SINGLE_SEL
+        self.specifications = dv.DataViewListCtrl(
+            self,
+            style=dv.DV_SINGLE | dv.DV_ROW_LINES | dv.DV_VERT_RULES,
         )
-        for index, (title, width) in enumerate(
-            (
-                ("Label", 150),
-                ("Type", 170),
-                ("Ω", 65),
-                ("Signal layers", 110),
-                ("Width (mm)", 110),
-                ("References", 150),
-                ("Net class", 200),
+        self.specifications.AssociateModel(_SpecificationListStore())
+        for title, width in _SPECIFICATION_COLUMNS:
+            self.specifications.AppendTextColumn(
+                title,
+                width=width,
+                mode=dv.DATAVIEW_CELL_INERT,
             )
-        ):
-            self.specifications.InsertColumn(index, title, width=width)
         self.specifications.SetMinSize((-1, 105))
-        specification_layout = wx.BoxSizer(wx.VERTICAL)
-        specification_layout.Add(self.specifications, 1, wx.EXPAND)
-        specification_page.SetSizer(specification_layout)
-        self.summary_tabs.SetMinSize((-1, 125))
-        root.Add(self.summary_tabs, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 12)
+        self._review_row_labels: list[str] = []
+        root.Add(self.specifications, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 12)
         spec_buttons = wx.BoxSizer(wx.HORIZONTAL)
         self._selection_buttons: list[wx.Button] = []
         for label, handler in (
             ("Add…", self._on_add),
-            ("Edit…", self._on_edit),
+            ("Edit / Review…", self._on_edit),
             ("Remove", self._on_remove),
         ):
             button = wx.Button(self, label=label)
@@ -1519,26 +2423,10 @@ class ImpedanceDialog(wx.Dialog):
             spec_buttons.Add(button, 0, wx.RIGHT, 8)
             if label != "Add…":
                 self._selection_buttons.append(button)
-        self.summary_tabs.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self._on_summary_page)
-        root.Add(spec_buttons, 0, wx.ALL | wx.EXPAND, 12)
-        self.width_comparisons = wx.ListCtrl(
-            width_page, style=wx.LC_REPORT | wx.LC_SINGLE_SEL
+        self.specifications.Bind(
+            dv.EVT_DATAVIEW_SELECTION_CHANGED, self._on_specification_selection
         )
-        for index, (title, width) in enumerate(
-            (
-                ("Class / layer", 170),
-                ("Target Ω", 65),
-                ("Actual width", 170),
-                ("Nominal calculated width", 180),
-                ("Actual − nominal", 170),
-                ("Calculation status", 240),
-            )
-        ):
-            self.width_comparisons.InsertColumn(index, title, width=width)
-        self.width_comparisons.SetMinSize((-1, 105))
-        width_layout = wx.BoxSizer(wx.VERTICAL)
-        width_layout.Add(self.width_comparisons, 1, wx.EXPAND)
-        width_page.SetSizer(width_layout)
+        root.Add(spec_buttons, 0, wx.ALL | wx.EXPAND, 12)
         content = wx.BoxSizer(wx.HORIZONTAL)
         left = wx.BoxSizer(wx.VERTICAL)
         left.Add(
@@ -1547,10 +2435,42 @@ class ImpedanceDialog(wx.Dialog):
             wx.BOTTOM,
             6,
         )
-        self.sections = wx.CheckListBox(self, style=wx.LB_SINGLE)
-        self.sections.SetMinSize((350, 130))
-        self.sections.Bind(wx.EVT_CHECKLISTBOX, self._on_include)
-        self.sections.Bind(wx.EVT_LISTBOX, self._on_preview)
+        self.sections = dv.DataViewListCtrl(self, style=dv.DV_SINGLE | dv.DV_ROW_LINES)
+        self.sections.AssociateModel(_WorkbookListStore())
+        self.sections.AppendToggleColumn(
+            _WORKBOOK_COLUMNS[0],
+            width=wx.COL_WIDTH_AUTOSIZE,
+            mode=dv.DATAVIEW_CELL_ACTIVATABLE,
+        )
+        for index, title in enumerate(_WORKBOOK_COLUMNS[1:], start=1):
+            self.sections.AppendTextColumn(
+                title,
+                width=wx.COL_WIDTH_AUTOSIZE,
+                mode=dv.DATAVIEW_CELL_INERT,
+                align=(
+                    wx.ALIGN_CENTER
+                    if index == _WORKBOOK_COMPARISON_COLUMN
+                    else wx.ALIGN_LEFT
+                ),
+            )
+        if self._workbook_has_spacer:
+            # GTK and Cocoa assign spare viewport width to their last column.
+            # Keep that space outside the data columns, including native layout
+            # work that runs after the queued content fit.
+            spacer = self.sections.AppendTextColumn(
+                "",
+                width=0,
+                mode=dv.DATAVIEW_CELL_INERT,
+                # AppKit skips non-resizable columns when distributing spare
+                # width, so this column needs its native autoresizing mask.
+                flags=dv.DATAVIEW_COL_RESIZABLE if wx.Platform == "__WXMAC__" else 0,
+            )
+            spacer.SetMinWidth(0)
+            spacer.SetWidth(0)
+        self.sections.SetMinSize((720, 160))
+        self.sections.Bind(dv.EVT_DATAVIEW_ITEM_VALUE_CHANGED, self._on_include)
+        self.sections.Bind(dv.EVT_DATAVIEW_SELECTION_CHANGED, self._on_preview)
+        self.sections.Bind(wx.EVT_SIZE, self._on_workbook_size)
         left.Add(self.sections, 1, wx.EXPAND)
         self.review_status = wx.StaticText(self, label="")
         self._review_text_colour = self.review_status.GetForegroundColour()
@@ -1562,7 +2482,7 @@ class ImpedanceDialog(wx.Dialog):
         self.retry_button.Bind(wx.EVT_BUTTON, self._on_retry_rows)
         self.retry_button.Hide()
         left.Add(self.retry_button, 0, wx.TOP | wx.EXPAND, 8)
-        content.Add(left, 4, wx.RIGHT | wx.EXPAND, 12)
+        content.Add(left, 3, wx.RIGHT | wx.EXPAND, 12)
         from .dialog_preview import WorkbookPreview
 
         self.preview_pane = WorkbookPreview(
@@ -1578,8 +2498,9 @@ class ImpedanceDialog(wx.Dialog):
             and not self._child_dialog_open,
             hide_navigation=True,
             state_changed=self._populate_review_status,
+            skip_stub_review=skip_stub_review,
         )
-        content.Add(self.preview_pane.window, 6, wx.EXPAND)
+        content.Add(self.preview_pane.window, 1, wx.EXPAND)
         root.Add(content, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
         self.status = wx.TextCtrl(
             self,
@@ -1587,22 +2508,31 @@ class ImpedanceDialog(wx.Dialog):
             size=(-1, 44),
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.BORDER_NONE,
         )
-        root.Add(self.status, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+        self.calculator_link = wx.adv.HyperlinkCtrl(
+            self, wx.ID_ANY, CALCULATOR_LINK_LABEL, CALCULATOR_URL
+        )
+        self.calculator_link.Hide()
+        status_column = wx.BoxSizer(wx.VERTICAL)
+        status_column.Add(self.status, 0, wx.EXPAND)
+        status_column.Add(self.calculator_link, 0, wx.TOP, 4)
+        root.Add(status_column, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
         buttons = wx.BoxSizer(wx.HORIZONTAL)
         buttons.AddStretchSpacer()
         buttons.Add(
             self.CreateButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALIGN_CENTER_VERTICAL
         )
-        self.FindWindow(wx.ID_OK).SetLabel("Save and close")
+        self.FindWindow(wx.ID_OK).SetLabel("Save draft and close")
         root.Add(buttons, 0, wx.ALL | wx.EXPAND, 12)
         self.Bind(wx.EVT_BUTTON, self._on_save, id=wx.ID_OK)
         self.Bind(wx.EVT_BUTTON, self._on_cancel, id=wx.ID_CANCEL)
         self.Bind(wx.EVT_CLOSE, self._on_close)
         self.Bind(wx.EVT_SHOW, self._on_main_show)
         self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
-        self.specifications.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._on_edit)
+        self.Bind(wx.EVT_TIMER, self._on_width_refresh_timer, self._width_refresh_timer)
+        self.Bind(wx.EVT_TIMER, self._on_width_slow_timer, self._width_slow_timer)
+        self.specifications.Bind(dv.EVT_DATAVIEW_ITEM_ACTIVATED, self._on_edit)
         self.SetSizer(root)
-        self.SetMinSize((980, 680))
+        self.SetMinSize((1176, 680))
         self._populate_specifications()
         self._refresh_rows(snapshot)
         self._verify_restored_capture_review()
@@ -1647,6 +2577,78 @@ class ImpedanceDialog(wx.Dialog):
                 break
         self._populate_review_status()
 
+    def _seed_width_results_from_cache(
+        self, load: Optional[Callable[[], tuple[WidthResult, ...]]]
+    ) -> None:
+        """Adopt persisted solves whose digest matches the current inputs.
+
+        The saved configuration only carries results the user committed with
+        "Save and close"; the per-board cache holds every settled solve as it
+        arrived. Merging digest-current rows here lets the first paint show
+        Differs/matches instead of "waiting for JLCPCB" and lets the show-time
+        refresh skip those jobs entirely. Rows for other inputs are ignored so a
+        stale or foreign result can never suppress a needed refresh.
+        """
+        if load is None:
+            return
+        try:
+            cached = tuple(load())
+        except Exception as error:
+            _LOG.info("JLCPCB width: cache unavailable on open (%s)", error)
+            return
+        if not cached:
+            return
+        from .stackup_model import (
+            calculation_fingerprint,
+            merge_width_results,
+            width_results_fingerprint,
+        )
+
+        config = self.session.config
+        if config.stackup is None:
+            return
+        wanted: dict[tuple[str, str, str], bool] = {}
+        for spec in config.specifications:
+            for settings in spec.layer_settings:
+                try:
+                    digest = calculation_fingerprint(
+                        config.stackup, spec, settings.layer
+                    )
+                except Exception:
+                    continue
+                wanted[(spec.spec_id, settings.layer, digest)] = True
+        # The saved config is authoritative for any digest it already settled:
+        # a saved approval must not be revoked by a cache row for the same
+        # inputs. The cache only fills digests that are missing or transient.
+        settled_saved = {
+            result.input_digest
+            for result in config.width_results
+            if result.status in SETTLED_WIDTH_STATUSES
+        }
+        adopted = tuple(
+            result
+            for result in cached
+            if result.status in SETTLED_WIDTH_STATUSES
+            and result.input_digest not in settled_saved
+            and (result.spec_id, result.layer, result.input_digest) in wanted
+        )
+        if not adopted:
+            return
+        try:
+            merged = merge_width_results(config.width_results, adopted)
+            candidate = replace(config, width_results=merged)
+            validate_config(candidate, self.session.snapshot.layers)
+        except Exception as error:
+            _LOG.info("JLCPCB width: cached results not adopted (%s)", error)
+            return
+        if width_results_fingerprint(config.width_results) == width_results_fingerprint(
+            merged
+        ):
+            return
+        _LOG.info("JLCPCB width: seeded %s cached result(s) on open", len(adopted))
+        # Same review invalidation the live refresh performs when nominals change.
+        self.session.replace_calculation_context(config.stackup, merged)
+
     def _on_main_show(self, event: wx.ShowEvent) -> None:
         """Start the catalog and selected capture only after the dialog is visible."""
         if (
@@ -1659,7 +2661,10 @@ class ImpedanceDialog(wx.Dialog):
             wx.CallAfter(_begin_main_catalog, ref(self), self._catalog_epoch)
         if event.GetEventObject() is self and event.IsShown() and not self._closing:
             # EVT_SHOW can precede actual native visibility on some platforms.
+            wx.CallAfter(self._fit_workbook_columns)
             wx.CallAfter(self._queue_selected_preview)
+            wx.CallAfter(self._ensure_width_refresh_timer)
+            wx.CallAfter(self._schedule_width_refresh)
         event.Skip()
 
     def _ensure_catalog_started(
@@ -1772,55 +2777,6 @@ class ImpedanceDialog(wx.Dialog):
         self.stackup_summary.SetLabel(text)
         self.stackup_summary.Wrap(630)
 
-    def _populate_width_comparisons(self) -> None:
-        """Show actual-minus-nominal dimensions using the report's shared semantics."""
-        from .width_checks import format_width_delta_nm, format_width_nm, width_check
-
-        self.width_comparisons.DeleteAllItems()
-        config = self.session.config
-        snapshot = self.session.snapshot
-        for spec in config.specifications:
-            nets = {
-                net
-                for net, classes in snapshot.net_class_memberships
-                if net and spec.net_class in classes
-            }
-            for settings in spec.layer_settings:
-                widths = sorted(
-                    {
-                        trace.width_nm
-                        for trace in snapshot.traces
-                        if trace.net in nets and trace.layer == settings.layer
-                    }
-                )
-                for actual in widths:
-                    check = width_check(config, spec, settings.layer, actual)
-                    nominal = (
-                        format_width_nm(check.target_width_nm)
-                        if check.result_current and check.target_width_nm is not None
-                        else "Not calculated"
-                    )
-                    delta = (
-                        format_width_delta_nm(check.delta_nm)
-                        if check.delta_nm is not None
-                        else "—"
-                    )
-                    index = self.width_comparisons.InsertItem(
-                        self.width_comparisons.GetItemCount(),
-                        f"{spec.net_class} / {settings.layer}",
-                    )
-                    for column, value in enumerate(
-                        (
-                            spec.target_ohms,
-                            format_width_nm(actual),
-                            nominal,
-                            delta,
-                            check.message,
-                        ),
-                        start=1,
-                    ):
-                        self.width_comparisons.SetItem(index, column, value)
-
     def _on_stackup(self, event: wx.CommandEvent) -> None:
         """Select explicit board intent independently of automatic catalog checks."""
         from .stackup_dialog import StackupDialog
@@ -1854,6 +2810,7 @@ class ImpedanceDialog(wx.Dialog):
                     dialog.stackup
                 )
                 if changed:
+                    self._clear_width_refresh_alert()
                     self.session.replace_calculation_context(
                         dialog.stackup, current.width_results
                     )
@@ -1862,8 +2819,9 @@ class ImpedanceDialog(wx.Dialog):
                 refreshed = self._refresh_rows(snapshot)
                 if changed and refreshed:
                     self._error(
-                        "Stackup changed. Review width comparisons and approve the updated workbook rows."
+                        "Stackup changed. Review Target width and approve the updated workbook rows."
                     )
+                self._schedule_width_refresh()
             finally:
                 self._child_dialog_open = False
                 dialog.Destroy()
@@ -1871,16 +2829,467 @@ class ImpedanceDialog(wx.Dialog):
         except Exception as error:
             self._error(str(error))
 
+    def _calculation_key(
+        self, config: Config, snapshot: BoardSnapshot
+    ) -> tuple[object, ...]:
+        """Exclude view timestamps while retaining every immutable calculation input."""
+        return (snapshot, config.stackup, config.specifications)
+
+    def _verify_calculation_snapshot(self) -> None:
+        """Guard async boundaries even when the optional native verifier is absent."""
+        try:
+            self._verify_review_snapshot()
+        except _RowsRefreshed:
+            raise
+        except Exception as error:
+            self._invalidate_visual_review()
+            raise ValueError(
+                str(error)
+                or "The current board could not be verified. Retry when it is available."
+            ) from error
+
+    def _width_refresh_jobs(
+        self, config: Config
+    ) -> Optional[tuple[tuple[Specification, str], ...]]:
+        """Return fingerprint-ready jobs, or None when inputs are incomplete."""
+        from .stackup_model import calculation_fingerprint
+
+        if config.stackup is None or not config.stackup.calculator_id:
+            return None
+        jobs = tuple(
+            (spec, settings.layer)
+            for spec in config.specifications
+            for settings in spec.layer_settings
+        )
+        if not jobs:
+            return None
+        try:
+            for spec, layer in jobs:
+                calculation_fingerprint(config.stackup, spec, layer)
+        except Exception:
+            return None
+        return jobs
+
+    def _width_results_current(
+        self, config: Config, jobs: tuple[tuple[Specification, str], ...]
+    ) -> bool:
+        """Return whether every job has a current success or unsupported result."""
+        return not self._width_jobs_needing_refresh(config, jobs)
+
+    def _width_jobs_needing_refresh(
+        self, config: Config, jobs: tuple[tuple[Specification, str], ...]
+    ) -> tuple[tuple[Specification, str], ...]:
+        """Return only jobs whose current-digest result is missing or not usable."""
+        from .stackup_model import calculation_fingerprint, find_width_result
+
+        if config.stackup is None:
+            return jobs
+        needing = []
+        for spec, layer in jobs:
+            digest = calculation_fingerprint(config.stackup, spec, layer)
+            result = find_width_result(
+                config.width_results, spec.spec_id, layer, digest
+            )
+            if result is None:
+                stale = find_width_result(config.width_results, spec.spec_id, layer)
+                reason = "digest_mismatch" if stale is not None else "missing"
+                _LOG.info(
+                    "JLCPCB width: needs refresh %s/%s reason=%s",
+                    spec.spec_id,
+                    layer,
+                    reason,
+                )
+                needing.append((spec, layer))
+            elif result.status not in ("success", "unsupported"):
+                _LOG.info(
+                    "JLCPCB width: needs refresh %s/%s reason=status_%s",
+                    spec.spec_id,
+                    layer,
+                    result.status,
+                )
+                needing.append((spec, layer))
+        return tuple(needing)
+
+    def _ensure_width_refresh_timer(self) -> None:
+        """Keep a quiet retry timer alive while the dialog remains open."""
+        if self._closing or not self:
+            return
+        if not self._width_refresh_timer.IsRunning():
+            self._width_refresh_timer.Start(WIDTH_REFRESH_RETRY_MS)
+
+    def _on_width_refresh_timer(self, event: wx.TimerEvent) -> None:
+        """Retry missing or failed nominal widths without user action."""
+        if not self._closing and self:
+            self._schedule_width_refresh()
+
+    def _on_width_slow_timer(self, event: wx.TimerEvent) -> None:
+        """Alert once when a needed refresh has not produced current results."""
+        if self._closing or not self:
+            return
+        jobs = self._width_refresh_jobs(self.session.config)
+        elapsed = (
+            time.monotonic() - self._width_refresh_started_at
+            if self._width_refresh_started_at
+            else 0.0
+        )
+        in_flight = self._calculation_cancel is not None
+        if jobs is None or self._width_results_current(self.session.config, jobs):
+            _LOG.info(
+                "JLCPCB width: slow timer fired after %.1fs but results are current",
+                elapsed,
+            )
+            self._width_refresh_alert = ""
+            self._populate_sections()
+            return
+        pending = ", ".join(f"{spec.spec_id}/{layer}" for spec, layer in jobs)
+        _LOG.info(
+            "JLCPCB width: still waiting after %.1fs in_flight=%s generation=%s jobs=[%s]",
+            elapsed,
+            in_flight,
+            self._calculation_generation,
+            pending,
+        )
+        if not self._width_refresh_alert:
+            self._width_refresh_alert = (
+                "Nominal widths are taking longer than expected from JLCPCB's calculator. "
+                "Target widths will update automatically when results arrive."
+            )
+            self._populate_sections()
+
+    def _clear_width_refresh_alert(self) -> None:
+        """Drop a slow-update notice once current results exist or work is cancelled."""
+        self._width_slow_timer.Stop()
+        if self._width_refresh_alert:
+            self._width_refresh_alert = ""
+
+    def _set_main_calculator_link_visible(self, visible: bool) -> None:
+        """Show the vendor calculator when width refresh is slow or failed."""
+        if visible == self.calculator_link.IsShown():
+            return
+        self.calculator_link.Show(visible)
+        self.Layout()
+
+    def _schedule_width_refresh(self, *, force: bool = False) -> None:
+        """Quietly refresh nominal widths when committed inputs need them."""
+        if self._closing or not self:
+            return
+        try:
+            self._verify_calculation_snapshot()
+            config = self.session.config
+            snapshot = self.session.snapshot
+            validate_config(config, snapshot.layers)
+            jobs = self._width_refresh_jobs(config)
+            if jobs is None:
+                self._clear_width_refresh_alert()
+                self._populate_sections()
+                return
+            pending = jobs if force else self._width_jobs_needing_refresh(config, jobs)
+            if not pending:
+                _LOG.info(
+                    "JLCPCB width: refresh skipped; cached results are current (%s jobs)",
+                    len(jobs),
+                )
+                self._clear_width_refresh_alert()
+                # Re-assert Target width so show-time cannot leave stale Pending copy.
+                self._populate_sections()
+                return
+            key = self._calculation_key(config, snapshot)
+            if self._calculation_cancel is not None:
+                # Supersede any in-flight batch for newer committed inputs.
+                _LOG.info(
+                    "JLCPCB width: cancelling in-flight batch generation=%s",
+                    self._calculation_generation,
+                )
+                self._calculation_generation += 1
+                self._calculation_cancel.set()
+                self._calculation_cancel = None
+            stackup = config.stackup
+            assert stackup is not None
+            self._calculation_generation += 1
+            generation = self._calculation_generation
+            cancel = Event()
+            self._calculation_cancel = cancel
+            # Drop stale failure text so pending refreshes do not look like a new rejection.
+            self._clear_width_refresh_alert()
+            callback = self.calculate_width_callback
+            configuration, save_configuration = _calculator_configuration_handoff(
+                self.load_calculator_config,
+                self.save_calculator_config,
+                context="batch",
+            )
+            save_result = self.save_width_result
+            owner = ref(self)
+            self._width_refresh_started_at = time.monotonic()
+            slow_ms = WIDTH_REFRESH_SLOW_MS + max(0, len(pending) - 1) * (
+                WIDTH_REFRESH_SLOW_PER_JOB_MS
+            )
+            self._width_slow_timer.StartOnce(slow_ms)
+            job_summary = ", ".join(
+                f"{spec.spec_id}/{layer}/{spec.kind}/{spec.target_ohms}Ω"
+                for spec, layer in pending
+            )
+            cached = len(jobs) - len(pending)
+            _LOG.info(
+                "JLCPCB width: batch start stackup=%s force=%s generation=%s "
+                "cached=%s slow_after=%.1fs jobs=[%s]",
+                stackup.stackup_id,
+                force,
+                generation,
+                cached,
+                slow_ms / 1000.0,
+                job_summary,
+            )
+
+            def work() -> None:
+                """Use only immutable model data; marshal completion back to wx."""
+                results: list[WidthResult] = []
+                failure = ""
+                started = time.monotonic()
+                try:
+                    from .jlcpcb_calculator import JlcpcbCalculator
+
+                    calculate = (
+                        callback
+                        if callback is not None
+                        else JlcpcbCalculator(
+                            configuration=configuration,
+                            save_configuration=save_configuration,
+                        ).calculate_width
+                    )
+                    for index, (spec, layer) in enumerate(pending, start=1):
+                        if cancel.is_set():
+                            _LOG.info(
+                                "JLCPCB width: batch cancelled after %s/%s jobs (%.1fs)",
+                                index - 1,
+                                len(pending),
+                                time.monotonic() - started,
+                            )
+                            return
+                        job_started = time.monotonic()
+                        _LOG.info(
+                            "JLCPCB width: job %s/%s start %s/%s",
+                            index,
+                            len(pending),
+                            spec.spec_id,
+                            layer,
+                        )
+                        result = calculate(stackup, spec, layer, cancel=cancel)
+                        results.append(result)
+                        # Persist per job, not per batch: a close mid-batch keeps
+                        # every solve that already completed.
+                        _persist_width_result(save_result, result, context="batch")
+                        _LOG.info(
+                            "JLCPCB width: job %s/%s done in %.1fs status=%s",
+                            index,
+                            len(pending),
+                            time.monotonic() - job_started,
+                            result.status,
+                        )
+                except Exception as error:
+                    failure = str(error) or "The nominal-width calculation failed."
+                    _LOG.info(
+                        "JLCPCB width: batch failed after %.1fs: %s",
+                        time.monotonic() - started,
+                        failure,
+                    )
+                else:
+                    _LOG.info(
+                        "JLCPCB width: batch worker finished in %.1fs (%s results)",
+                        time.monotonic() - started,
+                        len(results),
+                    )
+                if not cancel.is_set():
+                    try:
+                        wx.CallAfter(
+                            _deliver_width_results,
+                            owner,
+                            generation,
+                            key,
+                            tuple(results),
+                            failure,
+                        )
+                    except RuntimeError:
+                        return
+
+            Thread(target=work, name="jlcpcb-impedance-widths", daemon=True).start()
+        except _RowsRefreshed:
+            return
+        except Exception as error:
+            # Incomplete board/config readiness is explained by width comparisons.
+            _LOG.info("JLCPCB width: refresh not started (%s)", error)
+            self._clear_width_refresh_alert()
+
+    def _finish_calculation(
+        self,
+        generation: int,
+        key: tuple[object, ...],
+        results: tuple[WidthResult, ...],
+        failure: str,
+    ) -> None:
+        """Apply current valid results; wholly failed refreshes retain approval."""
+        if self._closing or not self or generation != self._calculation_generation:
+            _LOG.info(
+                "JLCPCB width: ignoring stale batch generation=%s current=%s",
+                generation,
+                self._calculation_generation if self else None,
+            )
+            return
+        self._calculation_cancel = None
+        elapsed = (
+            time.monotonic() - self._width_refresh_started_at
+            if self._width_refresh_started_at
+            else 0.0
+        )
+        try:
+            self._verify_calculation_snapshot()
+            if self._calculation_key(self.session.config, self.session.snapshot) != key:
+                _LOG.info(
+                    "JLCPCB width: inputs changed during batch (%.1fs); rescheduling",
+                    elapsed,
+                )
+                self._schedule_width_refresh()
+                return
+            if failure:
+                raise ValueError(failure)
+            from .stackup_model import (
+                calculation_fingerprint,
+                merge_width_results,
+                width_results_fingerprint,
+            )
+
+            config = self.session.config
+            if config.stackup is None:
+                raise ValueError(
+                    "Nominal widths unavailable: the selected stackup changed."
+                )
+            if not results:
+                raise ValueError(
+                    "Nominal widths unavailable: JLCPCB returned an incomplete or mismatched batch."
+                )
+            current_jobs = {
+                (spec.spec_id, settings.layer): calculation_fingerprint(
+                    config.stackup, spec, settings.layer
+                )
+                for spec in config.specifications
+                for settings in spec.layer_settings
+            }
+            delivered = {
+                (result.spec_id, result.layer): result.input_digest
+                for result in results
+            }
+            if len(delivered) != len(results) or any(
+                key not in current_jobs or delivered[key] != current_jobs[key]
+                for key in delivered
+            ):
+                raise ValueError(
+                    "Nominal widths unavailable: JLCPCB returned an incomplete or mismatched batch."
+                )
+            failed = [
+                result
+                for result in results
+                if result.status not in ("success", "unsupported")
+            ]
+            if failed:
+                reason = failed[0].message or "No usable result was returned."
+                alert = f"Nominal width unavailable for {failed[0].layer}: {reason}"
+                successes = tuple(
+                    result
+                    for result in results
+                    if result.status in ("success", "unsupported")
+                )
+                if not successes and self.session.approved:
+                    # Keep an approved workbook untouched when every job failed.
+                    raise ValueError(alert)
+                merged = merge_width_results(config.width_results, results)
+                candidate = replace(config, width_results=merged)
+                validate_config(candidate, self.session.snapshot.layers)
+                changed = width_results_fingerprint(
+                    config.width_results
+                ) != width_results_fingerprint(merged)
+                _LOG.info(
+                    "JLCPCB width: batch apply retained failure after %.1fs "
+                    "changed=%s successes=%s failures=%s: %s",
+                    elapsed,
+                    changed,
+                    len(successes),
+                    len(failed),
+                    alert,
+                )
+                # Cache successful layers from a mixed batch so the next open can
+                # paint Differs/matches immediately. Fingerprint changes still
+                # clear export approval because review digests bind nominals.
+                if changed:
+                    self.session.replace_calculation_context(config.stackup, merged)
+                else:
+                    self.session.config = candidate
+                self._width_refresh_alert = alert
+                if not self._refresh_rows(self.session.snapshot):
+                    return
+                self._populate_sections()
+                return
+            merged = merge_width_results(config.width_results, results)
+            candidate = replace(config, width_results=merged)
+            validate_config(candidate, self.session.snapshot.layers)
+            changed = width_results_fingerprint(
+                config.width_results
+            ) != width_results_fingerprint(merged)
+            if changed:
+                self.session.replace_calculation_context(config.stackup, merged)
+            else:
+                self.session.config = candidate
+            self._clear_width_refresh_alert()
+            _LOG.info(
+                "JLCPCB width: batch applied in %.1fs changed=%s results=%s",
+                elapsed,
+                changed,
+                len(results),
+            )
+            if not self._refresh_rows(self.session.snapshot):
+                return
+            if changed:
+                self._error(
+                    "Nominal widths updated. Review Target width and approve the workbook rows."
+                )
+        except _RowsRefreshed:
+            _LOG.info(
+                "JLCPCB width: board changed during apply (%.1fs); rescheduling",
+                elapsed,
+            )
+            self._schedule_width_refresh()
+        except Exception as error:
+            _LOG.info(
+                "JLCPCB width: batch apply failed after %.1fs: %s",
+                elapsed,
+                error,
+            )
+            self._width_refresh_alert = str(error)
+            self._populate_stackup()
+            self._populate_sections()
+
+    def _cancel_calculation(self) -> None:
+        """Invalidate queued callbacks without waiting for a network worker."""
+        self._calculation_generation += 1
+        if self._calculation_cancel is not None:
+            self._calculation_cancel.set()
+            self._calculation_cancel = None
+        self._width_refresh_timer.Stop()
+        self._clear_width_refresh_alert()
+        if not self._closing:
+            self._populate_stackup()
+            self._populate_sections()
+
     def _on_cancel(self, event: wx.CommandEvent) -> None:
-        """Discard local editing state through the normal Cancel event."""
+        """Discard local calculation and editing state through the normal Cancel event."""
         self._closing = True
         self._stop_catalog()
+        self._cancel_calculation()
         event.Skip()
 
     def _on_close(self, event: wx.CloseEvent) -> None:
         """Prevent worker completion from touching a closing native dialog."""
         self._closing = True
         self._stop_catalog()
+        self._cancel_calculation()
         event.Skip()
 
     def _on_destroy(self, event: wx.WindowDestroyEvent) -> None:
@@ -1888,38 +3297,80 @@ class ImpedanceDialog(wx.Dialog):
         if event.GetEventObject() is self:
             self._closing = True
             self._stop_catalog()
+            self._cancel_calculation()
         event.Skip()
 
     def _populate_specifications(self) -> None:
         """Refresh the specification summary without changing the edit state."""
+        from .width_checks import specification_nominal_summary
+
+        selected = self.specifications.GetSelectedRow()
         self.specifications.DeleteAllItems()
+        self._review_row_labels = []
         kinds = dict(KIND_CHOICES)
+        analysis = self.session.analysis
+        approved = self.session.approved
+        included = self.session.included
+        source_digest = (
+            tracking.source_fingerprint(self.session.snapshot)
+            if analysis is not None
+            else ""
+        )
         for specification in self.session.config.specifications:
-            index = self.specifications.InsertItem(
-                self.specifications.GetItemCount(), specification.label
+            layer_review_current = bool(
+                analysis is not None
+                and tracking.specification_layer_review_current(
+                    self.session.config.review_tracking,
+                    source_digest,
+                    specification,
+                    analysis.sections,
+                    stackup=self.session.config.stackup,
+                    width_results=self.session.config.width_results,
+                    capture_digests=self.session.capture_digests,
+                )
             )
-            for column, text in enumerate(
-                (
-                    kinds.get(specification.kind, specification.kind),
-                    specification.target_ohms,
+            review = specification_review_label(
+                specification.spec_id,
+                approved=approved,
+                analysis=analysis,
+                included=included,
+                layer_review_current=layer_review_current,
+            )
+            self._review_row_labels.append(review)
+            self.specifications.AppendItem(
+                [
+                    review,
+                    specification.net_class,
                     ", ".join(
                         settings.layer for settings in specification.layer_settings
                     ),
-                    "All actual widths",
+                    specification.target_ohms,
+                    kinds.get(specification.kind, specification.kind),
+                    specification.label,
+                    specification_nominal_summary(self.session.config, specification),
                     "; ".join(
                         f"{settings.layer}: {', '.join(settings.reference_layers)}"
                         for settings in specification.layer_settings
                     ),
-                    specification.net_class,
-                ),
-                start=1,
-            ):
-                self.specifications.SetItem(index, column, text)
+                ]
+            )
+        if 0 <= selected < self.specifications.GetItemCount():
+            self.specifications.SelectRow(selected)
+        self._update_selection_buttons()
 
-    def _on_summary_page(self, event: wx.BookCtrlEvent) -> None:
-        """Never apply edit/remove actions to a selection hidden in another tab."""
+    def _specification_selected(self) -> bool:
+        """Return whether a specification row is explicitly selected."""
+        return self.specifications.GetSelectedRow() != wx.NOT_FOUND
+
+    def _update_selection_buttons(self) -> None:
+        """Edit/Remove require a selected specification."""
+        enabled = self._specification_selected()
         for button in self._selection_buttons:
-            button.Enable(self.summary_tabs.GetSelection() == 0)
+            button.Enable(enabled)
+
+    def _on_specification_selection(self, event: dv.DataViewEvent) -> None:
+        """Follow list selection changes without waiting for another refresh."""
+        self._update_selection_buttons()
         event.Skip()
 
     def _refresh_rows(
@@ -1945,70 +3396,153 @@ class ImpedanceDialog(wx.Dialog):
             self.session.invalidate_review()
             self._rows_error = str(error) or "Workbook rows could not be populated."
         self._populate_stackup()
-        self._populate_width_comparisons()
+        self._populate_specifications()
         self._populate_sections(preferred_spec_id)
         return not self._rows_error
 
     def _on_retry_rows(self, event: wx.CommandEvent) -> None:
         if self._refresh_rows():
-            self.preview_pane.select(self.sections.GetSelection(), refresh=True)
+            # Width refresh can re-bind sections (and queue a non-refresh select).
+            # Force the failed image last so a fresh row analysis is not treated
+            # as evidence that the capture now renders.
+            self._schedule_width_refresh()
+            self.preview_pane.select(self.sections.GetSelectedRow(), refresh=True)
+
+    def _on_workbook_size(self, event: wx.SizeEvent) -> None:
+        """Refit after native layout without queueing every intermediate resize."""
+        event.Skip()
+        if self._closing or self._workbook_fit_queued:
+            return
+        self._workbook_fit_queued = True
+
+        def fit() -> None:
+            self._workbook_fit_queued = False
+            self._fit_workbook_columns()
+
+        wx.CallAfter(fit)
+
+    def _fit_workbook_columns(self) -> None:
+        """Fit current headers and values, including rows outside native samples."""
+        if self._closing or not self:
+            return
+        padding = self.sections.FromDIP(12)
+        count = self.sections.GetItemCount()
+        for index, title in enumerate(_WORKBOOK_COLUMNS):
+            width = self.sections.GetTextExtent(title)[0]
+            if index:
+                for row in range(count):
+                    width = max(
+                        width,
+                        self.sections.GetTextExtent(
+                            self.sections.GetTextValue(row, index)
+                        )[0],
+                    )
+            if index == _WORKBOOK_COMPARISON_COLUMN:
+                width = max(width, self.sections.GetTextExtent("!=")[0])
+            column = self.sections.GetColumn(index)
+            # Native autosizing supplies renderer/header geometry, but can sample
+            # large tables. This current-content floor keeps offscreen text visible
+            # and replaces the prior floor so shorter content can shrink again.
+            column.SetMinWidth(width + padding)
+            # GTK's AUTO width leaves its grow-only sizing policy unchanged;
+            # an explicit current-content width is needed for shrinking there.
+            column.SetWidth(
+                width + padding if wx.Platform == "__WXGTK__" else wx.COL_WIDTH_AUTOSIZE
+            )
 
     def _populate_sections(self, preferred_spec_id: Optional[str] = None) -> None:
         """Present the document while retaining the selected logical row."""
         analysis = self.session.analysis
-        old_index = self.sections.GetSelection()
+        old_index = self.sections.GetSelectedRow()
         selected_id = (
             self._row_ids[old_index] if 0 <= old_index < len(self._row_ids) else None
         )
         specifications = {
             spec.spec_id: spec for spec in self.session.config.specifications
         }
-        self.sections.Clear()
-        self._row_ids = (
-            tuple(section.section_id for section in analysis.sections)
-            if analysis
-            else ()
-        )
-        if analysis:
-            for index, section in enumerate(analysis.sections):
-                spec = specifications[section.spec_id]
-                self.sections.Append(
-                    f"{spec.label or spec.target_ohms + ' Ω'} · {section.layer} · {format_distance(section.width_nm)} mm · {', '.join(section.net_names)} · {len(section.traces)} segments"
-                )
-                self.sections.Check(index, section.section_id in self.session.included)
-            preferred = next(
-                (
-                    section.section_id
-                    for section in analysis.sections
-                    if section.spec_id == preferred_spec_id
-                ),
-                None,
+        # Ignore value/selection notifications while rebuilding the native model;
+        # handlers must never read a partially populated table or stale row IDs.
+        self._updating_sections = True
+        self.sections.Freeze()
+        try:
+            self.sections.DeleteAllItems()
+            self._row_ids = (
+                tuple(section.section_id for section in analysis.sections)
+                if analysis
+                else ()
             )
-            selected_id = preferred or selected_id
-            if self._row_ids:
-                index = (
-                    self._row_ids.index(selected_id)
-                    if selected_id in self._row_ids
-                    else next(
-                        (
-                            i
-                            for i, row in enumerate(self._row_ids)
-                            if row in self.session.included
-                        ),
-                        0,
+            if analysis:
+                from .width_checks import (
+                    target_width_cell_text,
+                    width_check,
+                    width_row_mismatch,
+                )
+
+                for index, section in enumerate(analysis.sections):
+                    spec = specifications[section.spec_id]
+                    check = width_check(
+                        self.session.config, spec, section.layer, section.width_nm
                     )
+                    cells = workbook_row_cells(
+                        section,
+                        spec,
+                        target_width=target_width_cell_text(check),
+                    )
+                    mismatch = (
+                        not section.exclusion_reason
+                        and check.result_current
+                        and check.target_width_nm is not None
+                        and width_row_mismatch(section.width_nm, check.target_width_nm)
+                    )
+                    values = [
+                        section.section_id in self.session.included,
+                        str(index + 1),
+                        *cells[:6],
+                        "!=" if mismatch else "",
+                        *cells[6:],
+                    ]
+                    if self._workbook_has_spacer:
+                        values.append("")
+                    self.sections.AppendItem(values)
+                preferred = next(
+                    (
+                        section.section_id
+                        for section in analysis.sections
+                        if section.spec_id == preferred_spec_id
+                    ),
+                    None,
                 )
-                self.sections.SetSelection(index)
-                selected_id = self._row_ids[index]
-            self.preview_pane.set_sections(
-                analysis.sections, self.session.snapshot, selected_id
-            )
-        else:
-            self.preview_pane.clear(
-                self._rows_error or "No workbook rows are available."
-            )
+                selected_id = preferred or selected_id
+                if self._row_ids:
+                    index = (
+                        self._row_ids.index(selected_id)
+                        if selected_id in self._row_ids
+                        else next(
+                            (
+                                i
+                                for i, row in enumerate(self._row_ids)
+                                if row in self.session.included
+                            ),
+                            0,
+                        )
+                    )
+                    self.sections.SelectRow(index)
+                    selected_id = self._row_ids[index]
+                self.preview_pane.set_sections(
+                    analysis.sections, self.session.snapshot, selected_id
+                )
+            else:
+                self.preview_pane.clear(
+                    self._rows_error or "No workbook rows are available."
+                )
+        finally:
+            self.sections.Thaw()
+            self._updating_sections = False
+        self._fit_workbook_columns()
         self.FindWindow(wx.ID_OK).Enable(True)
-        if self._rows_error:
+        if self._width_refresh_alert:
+            text = self._width_refresh_alert
+        elif self._rows_error:
             text = self._rows_error + " Settings can still be saved as a draft."
         elif self.preview_pane.failure:
             text = self.preview_pane.failure
@@ -2019,10 +3553,25 @@ class ImpedanceDialog(wx.Dialog):
         elif self.session.approved:
             text = "Workbook rows approved. Save and close when ready."
         else:
-            text = f"{len(analysis.sections)} workbook rows found; {len(self.session.included)} included. Review the rows, then approve them below the list."
+            exportable = sum(
+                1 for section in analysis.sections if not section.exclusion_reason
+            )
+            excluded = len(analysis.sections) - exportable
+            text = (
+                f"{exportable} workbook rows found"
+                + (
+                    f", {excluded} covered stubs (unchecked by default)"
+                    if excluded
+                    else ""
+                )
+                + f"; {len(self.session.included)} included. "
+                "Check the Review column for net classes that still need work, "
+                "then approve the workbook rows below the list."
+            )
             if analysis.warnings:
                 text += "\n" + "\n".join(str(warning) for warning in analysis.warnings)
         self.status.SetValue(text)
+        self._set_main_calculator_link_visible(bool(self._width_refresh_alert))
         self._populate_review_status()
         self.Layout()
 
@@ -2055,6 +3604,14 @@ class ImpedanceDialog(wx.Dialog):
         )
         self.retry_button.Show(bool(self._rows_error or self.preview_pane.failure))
         self.retry_button.Enable(True)
+        # Draft saves remain allowed; the label must not imply export readiness.
+        save = self.FindWindow(wx.ID_OK)
+        if save is not None:
+            save.SetLabel("Save and close" if reviewed else "Save draft and close")
+        # Keep the Review column in sync when inclusion or approval changes without
+        # a full specification-list rebuild from elsewhere.
+        if self.session.config.specifications:
+            self._populate_specifications()
 
     def _queue_selected_preview(self) -> None:
         """Resume the shared component after native show or a child dialog."""
@@ -2078,6 +3635,11 @@ class ImpedanceDialog(wx.Dialog):
                 review_tracking=self.session.config.review_tracking,
                 stackup=self.session.config.stackup,
                 width_results=self.session.config.width_results,
+                calculate_width=self.calculate_width_callback,
+                load_calculator_config=self.load_calculator_config,
+                save_calculator_config=self.save_calculator_config,
+                save_width_result=self.save_width_result,
+                skip_stub_review=self.skip_stub_review,
             )
         except Exception as error:
             self._error(str(error))
@@ -2092,6 +3654,8 @@ class ImpedanceDialog(wx.Dialog):
                 specifications[index] = dialog.specification
             changed = original != dialog.specification
             self.session.replace_specifications(tuple(specifications))
+            from .stackup_model import merge_width_results
+
             self.session.config = replace(
                 self.session.config,
                 review_tracking=tracking.merge_spec(
@@ -2099,11 +3663,18 @@ class ImpedanceDialog(wx.Dialog):
                     dialog.review_tracking,
                     dialog.specification.spec_id,
                 ),
+                width_results=merge_width_results(
+                    self.session.config.width_results, dialog.width_results
+                ),
             )
             self._populate_specifications()
             self._refresh_rows(
                 preferred_spec_id=dialog.specification.spec_id if changed else None
             )
+            if self.session.approve_if_layer_reviews_complete():
+                self._populate_specifications()
+                self._populate_review_status()
+            self._schedule_width_refresh()
         finally:
             self._child_dialog_open = False
             dialog.Destroy()
@@ -2113,39 +3684,43 @@ class ImpedanceDialog(wx.Dialog):
         """Add a specification after child-dialog acceptance."""
         self._edit_specification(None)
 
-    def _on_edit(self, event: wx.CommandEvent) -> None:
+    def _on_edit(self, event: wx.Event) -> None:
         """Edit the selected specification."""
-        if self.summary_tabs.GetSelection() != 0:
-            return
-        index = self.specifications.GetFirstSelected()
-        if index >= 0:
+        index = self.specifications.GetSelectedRow()
+        if index != wx.NOT_FOUND:
             self._edit_specification(index)
 
     def _on_remove(self, event: wx.CommandEvent) -> None:
         """Remove the selected rule and invalidate its scan."""
-        if self.summary_tabs.GetSelection() != 0:
-            return
-        index = self.specifications.GetFirstSelected()
-        if index >= 0:
+        index = self.specifications.GetSelectedRow()
+        if index != wx.NOT_FOUND:
             specifications = list(self.session.config.specifications)
             del specifications[index]
             self.session.replace_specifications(tuple(specifications))
             self._populate_specifications()
             self._refresh_rows()
+            self._schedule_width_refresh()
 
-    def _on_include(self, event: wx.CommandEvent) -> None:
+    def _on_include(self, event: dv.DataViewEvent) -> None:
         """Invalidate approval when a candidate checkbox changes."""
-        if self.session.analysis is None:
+        if (
+            self._updating_sections
+            or self.session.analysis is None
+            or event.GetColumn() != 0
+            or not event.GetItem().IsOk()
+        ):
             return
         self.session.set_included(
             section.section_id
             for index, section in enumerate(self.session.analysis.sections)
-            if self.sections.IsChecked(index)
+            if self.sections.GetToggleValue(index, 0)
         )
         self._populate_sections()
 
-    def _on_preview(self, event: wx.CommandEvent) -> None:
-        self.preview_pane.select(event.GetSelection())
+    def _on_preview(self, event: dv.DataViewEvent) -> None:
+        """Preview the selected logical row after native selection completes."""
+        if not self._updating_sections and event.GetItem().IsOk():
+            self.preview_pane.select(self.sections.ItemToRow(event.GetItem()))
 
     def _on_main_image_viewed(
         self, section: Section, image_sha256: str, viewed_at: str
@@ -2250,6 +3825,7 @@ class ImpedanceDialog(wx.Dialog):
             self.session.config = candidate
             self._closing = True
             self._stop_catalog()
+            self._cancel_calculation()
             self.EndModal(wx.ID_OK)
         except Exception as error:
             self._populate_sections()

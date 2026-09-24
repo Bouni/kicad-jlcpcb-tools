@@ -318,7 +318,7 @@ def layer_fingerprint(
     width_results: Sequence["WidthResult"] = (),
 ) -> str:
     """Bind an approval to normalized intent and the exact row set on this layer."""
-    from .matching import CAPTURE_POLICY_REVISION
+    from .matching import ALGORITHM_VERSION, CAPTURE_POLICY_REVISION
     from .model import positive_decimal, resolved_layer_settings
     from .stackup_model import stackup_fingerprint, width_results_fingerprint
 
@@ -349,6 +349,7 @@ def layer_fingerprint(
                 for section in sorted(sections, key=lambda item: item.section_id)
                 if section.layer == layer and section.spec_id == spec.spec_id
             ],
+            "algorithm_version": ALGORITHM_VERSION,
             "capture_policy_revision": CAPTURE_POLICY_REVISION,
         }
     )
@@ -395,6 +396,8 @@ def layer_approval_current(
     capture_digests: Optional[Mapping[str, Optional[str]]] = None,
 ) -> bool:
     """Return whether this layer's explicit approval still matches current settings and rows."""
+    from .model import EXCLUSION_COVERED_STUB
+
     approved = find_layer(tracking, spec.spec_id, layer)
     if approved is None:
         return False
@@ -429,7 +432,12 @@ def layer_approval_current(
             and capture_digests[section_id] != capture_digest
         ):
             return False
-    return current_ids <= approved_ids
+    required = {
+        section.section_id
+        for section in layer_sections
+        if section.exclusion_reason != EXCLUSION_COVERED_STUB
+    }
+    return required <= approved_ids
 
 
 def specification_layer_review_current(

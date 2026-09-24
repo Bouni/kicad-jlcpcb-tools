@@ -208,8 +208,8 @@ def test_revoking_approval_keeps_local_draft_save_available(
             replace(dialog.session.snapshot, context_digest="changed board text")
         )
     elif boundary == "include":
-        dialog.sections.Check(0, False)
-        dialog.sections.emit(api.wx.EVT_CHECKLISTBOX)
+        dialog.sections.SetToggleValue(False, 0, 0)
+        dialog.sections.emit(api.dv.EVT_DATAVIEW_ITEM_VALUE_CHANGED, row=0)
     elif boundary == "save":
         dialog.refresh_snapshot = changed_board
         dialog.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)

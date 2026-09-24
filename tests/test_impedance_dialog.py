@@ -35,11 +35,27 @@ def review_api() -> Iterator[SimpleNamespace]:
     wx = ModuleType("wx")
     wx.Dialog = object
     adv = ModuleType("wx.adv")
+    dataview = ModuleType("wx.dataview")
+
+    class _DataViewItemAttr:
+        def SetBackgroundColour(self, _colour: object) -> None:
+            return None
+
+        def SetColour(self, _colour: object) -> None:
+            return None
+
+    class _DataViewListStore:
+        pass
+
+    dataview.DataViewItemAttr = _DataViewItemAttr
+    dataview.DataViewListStore = _DataViewListStore
     patch = pytest.MonkeyPatch()
     patch.setitem(sys.modules, package_name, package)
     patch.setitem(sys.modules, "wx", wx)
     patch.setitem(sys.modules, "wx.adv", adv)
+    patch.setitem(sys.modules, "wx.dataview", dataview)
     wx.adv = adv
+    wx.dataview = dataview
     try:
         model = importlib.import_module(f"{package_name}.model")
         matching = importlib.import_module(f"{package_name}.matching")
@@ -179,12 +195,18 @@ class _DimensionControl:
 class _LayoutDouble:
     """Accept constructor layout calls without claiming native sizing behavior."""
 
+    instances: list[_LayoutDouble] = []
+
     def __init__(self, *_arguments: object, **_options: object) -> None:
         self.items: list[object] = []
+        self.proportions: list[int] = []
+        _LayoutDouble.instances.append(self)
 
     def Add(self, item: object, *_arguments: object) -> None:
         """Retain controls inserted into the layout."""
         self.items.append(item)
+        if _arguments and isinstance(_arguments[0], int):
+            self.proportions.append(_arguments[0])
 
     def Clear(self, delete_windows: bool = False) -> None:
         """Drop retained children, matching wx.Sizer.Clear(delete_windows)."""
@@ -203,10 +225,59 @@ class _LayoutDouble:
         self.items.append("stretch")
 
 
+class _DataViewColumn:
+    """Model requested and resolved column widths using deterministic metrics."""
+
+    def __init__(
+        self, owner: _ConstructedControl, index: int, width: int, flags: int = 1
+    ) -> None:
+        self.owner = owner
+        self.index = index
+        self.flags = flags
+        self.minimum_width = 0
+        self.width = width
+        self.width_requests: list[int] = []
+        self.SetWidth(width)
+
+    def GetTitle(self) -> str:
+        """Return the same title retained by the legacy tuple interface."""
+        return self.owner.columns[self.index][0]
+
+    def SetMinWidth(self, width: int) -> None:
+        """Replace the minimum so later short content can shrink again."""
+        self.minimum_width = width
+
+    def GetMinWidth(self) -> int:
+        """Read the current floor independently of the resolved width."""
+        return self.minimum_width
+
+    def SetWidth(self, width: int) -> None:
+        """Resolve autosize against a limited sample, as native views may do."""
+        self.width_requests.append(width)
+        if width == -2:
+            values = [self.GetTitle()]
+            # Deliberately sample only initial rows: product code must ensure
+            # later offscreen content also fits, without native wx assumptions.
+            for row in self.owner.table_rows[:16]:
+                if self.index not in self.owner.toggle_columns:
+                    values.append(str(row[self.index]))
+            width = max(self.owner.GetTextExtent(value)[0] for value in values) + 12
+            if self.index in self.owner.toggle_columns:
+                width = max(width, 18 + 12)
+        self.width = max(self.minimum_width, width)
+        self.owner.columns[self.index] = (self.GetTitle(), self.width)
+
+    def GetWidth(self) -> int:
+        """Read the resolved width rather than the autosize sentinel."""
+        return self.width
+
+
 class _ConstructedControl(_DimensionControl):
     """Model choice/checklist state and explicit user events for real constructors."""
 
     standard_button_ids: tuple[int, ...] = ()
+    list_checked_event: Optional[int] = None
+    list_unchecked_event: Optional[int] = None
 
     def __init__(
         self,
@@ -219,12 +290,16 @@ class _ConstructedControl(_DimensionControl):
         super().__init__(str(_options.get("value", label)))
         self.label = label
         self.window_id = _options.get("id")
+        self.size = _options.get("size")
         self.parent = _parent
         self.children: list[object] = []
         if hasattr(_parent, "children"):
             _parent.children.append(self)
         self.columns: list[tuple[str, int]] = []
-        self.table_rows: list[list[str]] = []
+        self.dataview_columns: list[_DataViewColumn] = []
+        self.measured_text: list[str] = []
+        self.table_rows: list[list[object]] = []
+        self.toggle_columns: list[int] = []
         self.id_controls: dict[int, _ConstructedControl] = {}
         self.items = list(choices or ())
         self.selection = -1
@@ -237,6 +312,9 @@ class _ConstructedControl(_DimensionControl):
         self.on_screen = False
         self.drawn: list[object] = []
         self.row_colours: dict[int, object] = {}
+        self.cell_colours: dict[tuple[int, int], tuple[object, object]] = {}
+        self.item_images: dict[tuple[int, int], int] = {}
+        self.image_list: Optional[object] = None
 
     def __bool__(self) -> bool:
         return self.alive
@@ -293,6 +371,128 @@ class _ConstructedControl(_DimensionControl):
     def GetFirstSelected(self) -> int:
         return self.selection
 
+    def GetSelectedRow(self) -> int:
+        """DataViewListCtrl selection; wx.NOT_FOUND when nothing is selected."""
+        return self.selection if self.selection >= 0 else -1
+
+    def SelectRow(self, index: int) -> None:
+        """Select one DataViewListCtrl row without synthesizing an event."""
+        self.selection = index
+
+    def RowToItem(self, row: int) -> SimpleNamespace:
+        """Represent valid and invalid DataView row identities explicitly."""
+        return SimpleNamespace(row=row, IsOk=lambda: 0 <= row < len(self.table_rows))
+
+    def ItemToRow(self, item: SimpleNamespace) -> int:
+        """Resolve a DataView identity without conflating it with selection."""
+        return item.row if item.IsOk() else -1
+
+    def Select(self, index: int, on: bool = True) -> None:
+        """Update ListCtrl selection without synthesizing a list event."""
+        self.selection = index if on else -1
+
+    def Focus(self, index: int) -> None:
+        """Retain the focused ListCtrl row."""
+        self.focused_index = index
+
+    def AssociateModel(self, model: object) -> None:
+        """Retain the DataView model used for attribute and value lookups."""
+        self.model = model
+
+    def GetModel(self) -> object:
+        """Return the associated DataView model."""
+        return getattr(self, "model", None)
+
+    def GetColumn(self, index: int) -> _DataViewColumn:
+        """Return a stateful DataView column with native-style sizing methods."""
+        return self.dataview_columns[index]
+
+    def GetColumnCount(self) -> int:
+        """Return the number of columns without depending on model row count."""
+        return len(self.dataview_columns)
+
+    def GetTextExtent(self, text: str) -> tuple[int, int]:
+        """Measure deterministic test glyphs; this does not emulate native fonts."""
+        assert isinstance(text, str)
+        self.measured_text.append(text)
+        return len(text) * 7, 14
+
+    def FromDIP(self, value: int) -> int:
+        """Use one test pixel per device-independent unit for predictable floors."""
+        return value
+
+    def AppendTextColumn(
+        self,
+        title: str,
+        width: int = -1,
+        mode: int = 0,
+        flags: int = 1,
+        **_options: object,
+    ) -> _DataViewColumn:
+        """Retain DataViewListCtrl column titles and widths."""
+        self.columns.append((title, width))
+        column = _DataViewColumn(self, len(self.columns) - 1, width, flags)
+        self.dataview_columns.append(column)
+        return column
+
+    def AppendToggleColumn(
+        self, title: str, width: int = -1, **_options: object
+    ) -> _DataViewColumn:
+        """Retain the boolean column used by native inclusion checkboxes."""
+        self.toggle_columns.append(len(self.columns))
+        self.columns.append((title, width))
+        column = _DataViewColumn(self, len(self.columns) - 1, width)
+        self.dataview_columns.append(column)
+        return column
+
+    def GetToggleValue(self, row: int, col: int) -> bool:
+        """Read checkbox state from the same model updated by its setter."""
+        return bool(self.table_rows[row][col])
+
+    def SetToggleValue(self, value: bool, row: int, col: int) -> None:
+        """Update a DataView toggle without synthesizing a user event."""
+        self.table_rows[row][col] = value
+
+    def GetTextValue(self, row: int, col: int) -> str:
+        """Read a native text cell by row and column."""
+        return str(self.table_rows[row][col])
+
+    def AppendItem(self, values: list[object]) -> None:
+        """Append one DataViewListCtrl row into the control and associated store."""
+        row = list(values)
+        self.table_rows.append(row)
+        self.items.append(row[0])
+        model = getattr(self, "model", None)
+        if model is not None and hasattr(model, "rows"):
+            model.rows.append(row)
+
+    def EnableCheckBoxes(self, enable: bool = True) -> None:
+        """Record that report-style checkboxes were requested."""
+        self.checkboxes_enabled = enable
+
+    def CheckItem(self, index: int, checked: bool = True) -> None:
+        """Change a ListCtrl checkbox and fire CHECKED/UNCHECKED like native wx."""
+        previous = self.IsChecked(index)
+        self.Check(index, checked)
+        if previous == checked:
+            return
+        code = self.list_checked_event if checked else self.list_unchecked_event
+        if code is None:
+            return
+        handler = self.bindings.get((code, -1))
+        if handler is not None:
+            handler(SimpleNamespace(GetIndex=lambda: index, GetSelection=lambda: index))
+
+    def IsItemChecked(self, index: int) -> bool:
+        """Read ListCtrl checkbox state retained by CheckItem or Check."""
+        return self.IsChecked(index)
+
+    def Freeze(self) -> None:
+        """Accept Freeze during programmatic list rebuilds."""
+
+    def Thaw(self) -> None:
+        """Accept Thaw after programmatic list rebuilds."""
+
     def GetForegroundColour(self) -> object:
         """Read the colour retained by the actual native setter contract."""
         return self.foreground
@@ -308,7 +508,7 @@ class _ConstructedControl(_DimensionControl):
     def SetSelection(self, index: int) -> None:
         """Update selected choice and readable text without synthesizing an event."""
         self.selection = index
-        self.value = self.items[index] if index >= 0 else ""
+        self.value = self.items[index] if 0 <= index < len(self.items) else ""
 
     def GetSelection(self) -> int:
         """Return the selected choice index."""
@@ -343,10 +543,24 @@ class _ConstructedControl(_DimensionControl):
         """Capture the handler that the real constructor binds to an event."""
         self.bindings[event, id] = handler
 
-    def emit(self, event: int, control_id: int = -1) -> None:
+    def emit(
+        self,
+        event: int,
+        control_id: int = -1,
+        *,
+        row: Optional[int] = None,
+        column: int = 0,
+    ) -> None:
         """Dispatch a user event after the test has updated the actual control state."""
         self.bindings[event, control_id](
-            SimpleNamespace(GetSelection=self.GetSelection)
+            SimpleNamespace(
+                GetSelection=self.GetSelection,
+                GetIndex=lambda: self.selection,
+                GetItem=lambda: self.RowToItem(self.selection if row is None else row),
+                GetColumn=lambda: column,
+                GetEventObject=lambda: self,
+                Skip=lambda: None,
+            )
         )
 
     def SetLabel(self, label: str) -> None:
@@ -373,6 +587,14 @@ class _ConstructedControl(_DimensionControl):
     def SetMinSize(self, size: tuple[int, int]) -> None:
         """Accept minimum sizing without emulating platform layout."""
         self.minimum_size = size
+
+    def SetMaxSize(self, size: tuple[int, int]) -> None:
+        """Accept maximum sizing without emulating platform layout."""
+        self.maximum_size = size
+
+    def SetCursor(self, cursor: object) -> None:
+        """Retain the cursor assigned for clickable captures."""
+        self.cursor = cursor
 
     def Wrap(self, width: int) -> None:
         """Accept text wrapping without claiming native measurement."""
@@ -447,23 +669,78 @@ class _ConstructedControl(_DimensionControl):
     def DeleteAllItems(self) -> None:
         """Clear report rows before rebuilding a specification summary."""
         self.table_rows.clear()
+        self.items.clear()
+        self.checked.clear()
         self.selection = -1
         self.row_colours.clear()
+        self.cell_colours.clear()
+        self.item_images.clear()
+        model = getattr(self, "model", None)
+        if model is not None and hasattr(model, "rows"):
+            model.rows.clear()
 
-    def InsertItem(self, index: int, value: str) -> int:
-        """Insert and retain a native report row."""
+    def AssignImageList(self, images: object, _which: int) -> None:
+        """Retain the Review status chip list."""
+        self.image_list = images
+
+    def SetItemColumnImage(self, row: int, column: int, image: int) -> None:
+        """Record a per-column ListCtrl image index."""
+        self.item_images[(row, column)] = image
+
+    def InsertItem(self, index: int, value: str, image_index: int = -1) -> int:
+        """Insert and retain a native report row, optionally with a chip image."""
         self.table_rows.insert(index, [value])
+        self.items.insert(index, value)
+        if image_index >= 0:
+            self.item_images[(index, 0)] = image_index
         return index
 
     def GetItemCount(self) -> int:
         """Read the current report row count."""
         return len(self.table_rows)
 
-    def SetItem(self, row: int, column: int, value: str) -> None:
-        """Retain the displayed specification summary cell."""
+    def GetItem(self, row: int, column: int = 0) -> SimpleNamespace:
+        """Return a mutable ListItem stand-in for one report cell."""
         while len(self.table_rows[row]) <= column:
             self.table_rows[row].append("")
-        self.table_rows[row][column] = value
+        text = self.table_rows[row][column]
+        background, foreground = self.cell_colours.get((row, column), (None, None))
+        item = SimpleNamespace(
+            row=row,
+            column=column,
+            text=text,
+            background=background,
+            foreground=foreground,
+        )
+        item.GetId = lambda: item.row
+        item.GetColumn = lambda: item.column
+        item.GetText = lambda: item.text
+        item.SetText = lambda value: setattr(item, "text", value)
+        item.SetTextColour = lambda colour: setattr(item, "foreground", colour)
+        item.SetBackgroundColour = lambda colour: setattr(item, "background", colour)
+        item.GetTextColour = lambda: item.foreground
+        item.GetBackgroundColour = lambda: item.background
+        return item
+
+    def SetItem(self, row: object, column: object = None, value: str = "") -> None:
+        """Retain cell text, or apply ListItem colours for one column."""
+        if column is None:
+            item = row
+            row_index = int(item.GetId())
+            column_index = int(item.GetColumn())
+            while len(self.table_rows[row_index]) <= column_index:
+                self.table_rows[row_index].append("")
+            self.table_rows[row_index][column_index] = str(item.GetText())
+            self.cell_colours[(row_index, column_index)] = (
+                item.GetBackgroundColour(),
+                item.GetTextColour(),
+            )
+            return
+        row_index = int(row)
+        column_index = int(column)
+        while len(self.table_rows[row_index]) <= column_index:
+            self.table_rows[row_index].append("")
+        self.table_rows[row_index][column_index] = value
 
     def FindWindow(self, control_id: int) -> Optional[_ConstructedControl]:
         """Search existing descendants, without inventing a missing standard button."""
@@ -555,6 +832,33 @@ class _HarnessTimer:
         return self.running
 
 
+class _DataViewItemAttr:
+    """Record DataView cell colours without native Cocoa rendering."""
+
+    def __init__(self) -> None:
+        self.background: Optional[object] = None
+        self.colour: Optional[object] = None
+
+    def SetBackgroundColour(self, colour: object) -> None:
+        self.background = colour
+
+    def SetColour(self, colour: object) -> None:
+        self.colour = colour
+
+
+class _DataViewListStore:
+    """Hold DataViewListCtrl rows for GetValueByRow / GetAttrByRow."""
+
+    def __init__(self) -> None:
+        self.rows: list[list[object]] = []
+
+    def GetValueByRow(self, row: int, col: int) -> object:
+        return self.rows[row][col]
+
+    def GetAttrByRow(self, row: int, col: int, attr: _DataViewItemAttr) -> bool:
+        return False
+
+
 @pytest.fixture
 def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     """Load an isolated dialog using stateful controls and the real constructor."""
@@ -564,6 +868,7 @@ def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace
     errors: list[str] = []
     preview_calls: list[object] = []
     queued: list[tuple[Callable[..., object], tuple[object, ...]]] = []
+    _LayoutDouble.instances = []
 
     def queue(callback: Callable[..., object], *arguments: object) -> None:
         queued.append((callback, arguments))
@@ -594,6 +899,70 @@ def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace
         """Capture validation failures without opening a native message box."""
         errors.append(message)
 
+    class _Bitmap:
+        """Accept size-based chip construction and image-based preview bitmaps."""
+
+        def __init__(
+            self, width_or_image: object, height: Optional[int] = None
+        ) -> None:
+            if height is None:
+                self.source = width_or_image
+                self.width = getattr(width_or_image, "width", None)
+                self.height = getattr(width_or_image, "height", None)
+            else:
+                self.source = None
+                self.width = int(width_or_image)  # type: ignore[arg-type]
+                self.height = height
+            self.drawn_label: Optional[str] = None
+            self.chip_bg: Optional[object] = None
+            self.text_colour: Optional[object] = None
+
+        def IsOk(self) -> bool:
+            return True
+
+    class _MemoryDC:
+        """Record chip drawing without requiring a native graphics context."""
+
+        def __init__(self, bitmap: Optional[_Bitmap] = None) -> None:
+            self.bitmap = bitmap
+            self._bg: Optional[object] = None
+            self._fg: Optional[object] = None
+
+        def SetBackground(self, brush: object) -> None:
+            self._bg = brush
+            if self.bitmap is not None:
+                self.bitmap.chip_bg = brush
+
+        def Clear(self) -> None:
+            return None
+
+        def SetTextForeground(self, colour: object) -> None:
+            self._fg = colour
+
+        def SetFont(self, font: object) -> None:
+            self.font = font
+
+        def DrawText(self, text: str, _x: int, _y: int) -> None:
+            if self.bitmap is not None:
+                self.bitmap.drawn_label = text
+                self.bitmap.text_colour = self._fg
+
+        def SelectObject(self, bitmap: object) -> None:
+            self.bitmap = None if bitmap is null_bitmap else bitmap
+
+    class _ImageList:
+        """Retain Review chip bitmaps in insertion order."""
+
+        def __init__(self, width: int, height: int) -> None:
+            self.width = width
+            self.height = height
+            self.bitmaps: list[_Bitmap] = []
+
+        def Add(self, bitmap: _Bitmap) -> int:
+            self.bitmaps.append(bitmap)
+            return len(self.bitmaps) - 1
+
+    null_bitmap = object()
     wx = FakeWxModule(
         "wx",
         Dialog=_ConstructedControl,
@@ -611,8 +980,15 @@ def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace
         Image=lambda source, _kind: PreviewImage(
             struct.unpack_from(">II", source.getvalue(), 16)
         ),
-        Bitmap=lambda image: image,
-        NullBitmap=object(),
+        Bitmap=_Bitmap,
+        NullBitmap=null_bitmap,
+        MemoryDC=_MemoryDC,
+        ImageList=_ImageList,
+        IMAGE_LIST_SMALL=1,
+        Font=lambda *_args, **_kwargs: object(),
+        FONTFAMILY_DEFAULT=70,
+        FONTSTYLE_NORMAL=90,
+        FONTWEIGHT_NORMAL=90,
         LogNull=nullcontext,
         Button=_ConstructedControl,
         Timer=_HarnessTimer,
@@ -624,17 +1000,33 @@ def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace
         AutoBufferedPaintDC=PaintDC,
         Brush=lambda colour: colour,
         CallAfter=queue,
+        NullCursor=object(),
+        NOT_FOUND=-1,
+        COL_WIDTH_AUTOSIZE=-2,
+        Platform="__WXMAC__",
     )
     adv = FakeWxModule("wx.adv", HyperlinkCtrl=_HyperlinkControl)
+    dataview = FakeWxModule(
+        "wx.dataview",
+        DataViewListCtrl=_ConstructedControl,
+        DataViewListStore=_DataViewListStore,
+        DataViewItemAttr=_DataViewItemAttr,
+        DATAVIEW_CELL_INERT=1,
+        DATAVIEW_COL_RESIZABLE=1,
+    )
     wx.adv = adv
+    wx.dataview = dataview
     wx.__path__ = []
     _ConstructedTextControl.text_event = wx.EVT_TEXT
+    _ConstructedControl.list_checked_event = wx.EVT_LIST_ITEM_CHECKED
+    _ConstructedControl.list_unchecked_event = wx.EVT_LIST_ITEM_UNCHECKED
     monkeypatch.setattr(
         _ConstructedControl, "standard_button_ids", (wx.ID_OK, wx.ID_CANCEL)
     )
     monkeypatch.setitem(sys.modules, package_name, package)
     monkeypatch.setitem(sys.modules, "wx", wx)
     monkeypatch.setitem(sys.modules, "wx.adv", adv)
+    monkeypatch.setitem(sys.modules, "wx.dataview", dataview)
     try:
         model = importlib.import_module(f"{package_name}.model")
         dialog = importlib.import_module(f"{package_name}.dialog")
@@ -653,10 +1045,14 @@ def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace
             specification: Optional[Specification] = None,
             *,
             render: Optional[Callable[..., CapturedImage]] = preview,
+            review_tracking: object = None,
         ) -> SpecificationDialog:
             """Construct the actual dialog with a stateful native-image decoder double."""
+            kwargs = {}
+            if review_tracking is not None:
+                kwargs["review_tracking"] = review_tracking
             result = dialog.SpecificationDialog(
-                None, snapshot, specification, preview=render
+                None, snapshot, specification, preview=render, **kwargs
             )
             result.on_screen = True
             drain()
@@ -667,6 +1063,7 @@ def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace
             model=model,
             dialog=dialog,
             wx=wx,
+            dv=dataview,
             errors=errors,
             preview=preview,
             preview_calls=preview_calls,
@@ -972,19 +1369,30 @@ def test_each_specification_requires_an_included_section(
 
 
 @pytest.mark.parametrize("kind", ["single_ended", "differential"])
-def test_complete_200mm_routes_are_atomic_with_differential_pairs_together(
+def test_long_route_review_keeps_track_coverage_and_native_pair_identity(
     review_api: SimpleNamespace, kind: str
 ) -> None:
-    """Preserve entire long routes and one highlight for each native differential pair."""
+    """Review closer single-ended views while preserving complete native pair rows."""
     session = _long_route_session(review_api, kind=kind)
     rows = session.refresh().sections
-    assert len(rows) == (1 if kind == "differential" else 2)
-    assert {trace for row in rows for trace in row.traces} == set(
-        session.snapshot.traces
+    assert sorted(trace.trace_id for row in rows for trace in row.traces) == sorted(
+        trace.trace_id for trace in session.snapshot.traces
     )
-    assert all(row.bounds[2] - row.bounds[0] >= 200_000_000 for row in rows)
     if kind == "differential":
+        assert len(rows) == 1
         assert set(rows[0].net_names) == {"CLK_P", "CLK_N"}
+        assert rows[0].bounds[2] - rows[0].bounds[0] >= 200_000_000
+    else:
+        # Joining either pair of 100 mm / 0.15 mm tracks into a 200 mm view
+        # would make the selected copper less than one pixel wide at export.
+        # Individual source track IDs stay whole, so each needs its own view.
+        assert all(len(row.traces) == 1 for row in rows)
+        assert {row.net_names for row in rows} == {("CLK_P",), ("CLK_N",)}
+        for net in ("CLK_P", "CLK_N"):
+            signal_rows = [row for row in rows if row.net_names == (net,)]
+            assert len(signal_rows) == 2
+            assert min(row.bounds[0] for row in signal_rows) == -75_000
+            assert max(row.bounds[2] for row in signal_rows) == 200_075_000
     session.approve()
     assert session.save_result().included_section_ids == tuple(
         row.section_id for row in rows

@@ -13,7 +13,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.mark.parametrize("entry", ["direct", "plugin"])
 @pytest.mark.parametrize("conflict", ["absent", "on-path", "loaded"])
-@pytest.mark.parametrize("component", ["workbook"])
+@pytest.mark.parametrize("component", ["calculator", "workbook"])
 def test_runtime_uses_bundled_dependencies_without_replacing_public_modules(
     tmp_path: Path, entry: str, conflict: str, component: str
 ) -> None:
@@ -21,7 +21,7 @@ def test_runtime_uses_bundled_dependencies_without_replacing_public_modules(
     public = tmp_path / "public"
     public.mkdir()
     if conflict != "absent":
-        for name in ("openpyxl", "et_xmlfile"):
+        for name in ("websockets", "openpyxl", "et_xmlfile"):
             package = public / name
             package.mkdir()
             (package / "__init__.py").write_text(
@@ -37,7 +37,7 @@ import types
 root, public = map(Path, sys.argv[1:3])
 entry, conflict, component = sys.argv[3:]
 sys.path[:0] = [str(public), str(root)]
-names = ('openpyxl', 'et_xmlfile')
+names = ('websockets', 'openpyxl', 'et_xmlfile')
 if conflict == 'loaded':
     for name in names:
         importlib.import_module(name)
@@ -103,7 +103,7 @@ if conflict != 'absent':
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("dependency", ["openpyxl"])
+@pytest.mark.parametrize("dependency", ["websockets", "openpyxl"])
 @pytest.mark.parametrize(
     "layout",
     ["standalone", "missing-installed", "incompatible-installed", "damaged-bundle"],
@@ -126,7 +126,7 @@ def test_standalone_installs_find_sources_without_trusting_public_module_cache(
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     public = tmp_path / "public"
-    for name in ("openpyxl", "et_xmlfile"):
+    for name in ("websockets", "openpyxl", "et_xmlfile"):
         package = public / name
         package.mkdir(parents=True)
         (package / "__init__.py").write_text(
@@ -150,10 +150,10 @@ import sys
 install, site, public = map(Path, sys.argv[1:4])
 dependency, layout = sys.argv[4:]
 sys.path.insert(0, str(public))
-for name in ('openpyxl', 'et_xmlfile'):
+for name in ('websockets', 'openpyxl', 'et_xmlfile'):
     importlib.import_module(name)
 before = {name: module for name, module in sys.modules.items()
-          if name.split('.')[0] in ('openpyxl', 'et_xmlfile')}
+          if name.split('.')[0] in ('websockets', 'openpyxl', 'et_xmlfile')}
 states = {name: vars(module).copy() for name, module in before.items()}
 sys.path[0:1] = [str(site), str(install)]
 try:
@@ -169,7 +169,7 @@ else:
     assert layout == 'standalone', 'Broken installation unexpectedly used public dependencies'
     assert Path(sys.modules[function.__module__].__file__).is_relative_to(site)
 after = {name: module for name, module in sys.modules.items()
-         if name.split('.')[0] in ('openpyxl', 'et_xmlfile')}
+         if name.split('.')[0] in ('websockets', 'openpyxl', 'et_xmlfile')}
 assert after == before
 assert all(vars(after[name]) == state for name, state in states.items())
 assert all(module.__version__ == 'old-already-imported-package' for module in before.values())
@@ -199,6 +199,12 @@ assert all(module.__version__ == 'old-already-imported-package' for module in be
 @pytest.mark.parametrize(
     ("name", "version", "supported"),
     [
+        ("websockets", "15.1", True),
+        ("websockets", "15.0.1.post1", True),
+        ("websockets", "15.0.1+vendor", True),
+        ("websockets", "15.0.0", False),
+        ("websockets", "16.0", False),
+        ("websockets", "unknown", False),
         ("openpyxl", "3.1.5+vendor", True),
         ("openpyxl", "3.1.6", False),
         ("et_xmlfile", "2.0.0+vendor", True),
@@ -218,3 +224,59 @@ def test_standalone_version_validation_matches_project_requirements(
     else:
         with pytest.raises(ImportError, match="Install or update"):
             _check_installed_version(module, name)
+
+
+def test_private_vendor_first_import_is_thread_safe_and_keeps_lazy_imports_private(
+    tmp_path: Path,
+) -> None:
+    """Worker first use must retain standard import locking and nested imports."""
+    script = r"""
+import builtins
+from concurrent.futures import ThreadPoolExecutor
+import importlib
+from pathlib import Path
+import sys
+import threading
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+import impedance
+original_import = builtins.__import__
+original_path = list(sys.path)
+barrier = threading.Barrier(8)
+def load(_index: int) -> tuple[object, object, object]:
+    barrier.wait(timeout=5)
+    spreadsheet = importlib.import_module('impedance._vendor.openpyxl')
+    # This is a module-level __getattr__ import, not an eager import statement.
+    sockets = importlib.import_module('impedance._vendor.websockets')
+    lazy_connect = sockets.connect
+    client = importlib.import_module('impedance._vendor.websockets.sync.client')
+    writer = importlib.import_module('impedance._vendor.et_xmlfile')
+    book = spreadsheet.Workbook()
+    book.active['A1'] = 'worker import'
+    assert book.active['A1'].value == 'worker import'
+    assert lazy_connect.__module__.startswith('impedance._vendor.')
+    return spreadsheet, client.connect, writer
+with ThreadPoolExecutor(max_workers=8) as executor:
+    results = list(executor.map(load, range(8)))
+assert all(all(a is b for a, b in zip(result, results[0])) for result in results)
+assert builtins.__import__ is original_import
+assert sys.path == original_path
+vendor = importlib.import_module('impedance._vendor')
+for _ in range(2):
+    importlib.reload(vendor)
+assert sum(getattr(finder, '_jlcpcb_vendor_prefix', None) == vendor.__name__ + '.'
+           for finder in sys.meta_path) == 1
+assert importlib.import_module('impedance._vendor.websockets.sync.client').connect is results[0][1]
+assert not any(name.split('.')[0] in {'websockets', 'openpyxl', 'et_xmlfile'}
+               for name in sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(_ROOT)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

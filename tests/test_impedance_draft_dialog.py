@@ -196,7 +196,7 @@ def test_stackup_only_can_be_saved_and_reopened_without_report_approval(
 
     button = dialog.FindWindow(api.wx.ID_OK)
     assert button.enabled is True
-    assert button.GetLabel() == "Save and close"
+    assert button.GetLabel() == "Save draft and close"
     assert dialog.review_status.GetLabel() == "No workbook rows to approve"
     dialog.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)
 
@@ -285,6 +285,39 @@ def test_cancel_discards_session_without_calling_persistence(
     assert dialog.config is original
     assert skipped == [True]
     assert dialog._closing is True
+
+
+def test_opening_sections_ignores_value_events_during_model_population(
+    draft_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Injected model notifications cannot read a half-rebuilt workbook table."""
+    api = draft_api
+    seen_updating: list[bool] = []
+    real = api.dialog.ImpedanceDialog._on_include
+    append = _ConstructedControl.AppendItem
+
+    def append_and_notify(control: _ConstructedControl, values: list[object]) -> None:
+        """Stress the rebuild guard without claiming native event ordering."""
+        append(control, values)
+        notification = api.dv.EVT_DATAVIEW_ITEM_VALUE_CHANGED
+        if (notification, -1) in control.bindings:
+            control.emit(notification, row=control.GetItemCount() - 1)
+
+    def tracking(self: ImpedanceDialog, event: object) -> None:
+        seen_updating.append(self._updating_sections)
+        return real(self, event)
+
+    monkeypatch.setattr(api.dialog.ImpedanceDialog, "_on_include", tracking)
+    monkeypatch.setattr(_ConstructedControl, "AppendItem", append_and_notify)
+    dialog = _open(api, _intent(api), _board(api))
+    assert dialog.sections.GetItemCount() >= 1 or dialog._row_ids == ()
+    assert seen_updating
+    assert all(seen_updating), seen_updating
+    seen_updating.clear()
+    dialog._populate_sections()
+    assert seen_updating
+    assert all(flag is True for flag in seen_updating)
 
 
 def test_busy_calculation_does_not_block_save(
@@ -479,7 +512,7 @@ def test_edit_and_remove_require_a_selected_specification(
     dialog = _open(api, _intent(api), _board(api))
     edit, remove = dialog._selection_buttons
     assert dialog.specifications.GetItemCount() == 1
-    assert dialog.specifications.GetFirstSelected() < 0
+    assert dialog.specifications.GetSelectedRow() < 0
     assert edit.enabled is False
     assert remove.enabled is False
 
@@ -495,7 +528,5 @@ def test_edit_and_remove_require_a_selected_specification(
 
     dialog.specifications.selection = 0
     dialog._update_selection_buttons()
-    dialog.summary_tabs.selection = 1
-    dialog._update_selection_buttons()
-    assert edit.enabled is False
-    assert remove.enabled is False
+    assert edit.enabled is True
+    assert remove.enabled is True

@@ -80,10 +80,12 @@ def test_checklist_identifies_current_image_before_capture_finishes(
         api.section, section_id="row-b", net_names=("LONG_NET_NAME_" * 20,)
     )
     pane.set_sections((api.section, second), "board")
-    assert pane.checklist.cells[0, 1].startswith("Current · ")
-    assert not pane.checklist.cells[1, 1].startswith("Current · ")
+    assert pane.checklist.selection == 0
+    assert "Current · " not in pane.checklist.cells[0, 1]
+    assert "Current · " not in pane.checklist.cells[1, 1]
     pane.select(1)
-    assert not pane.checklist.cells[0, 1].startswith("Current · ")
-    assert pane.checklist.cells[1, 1].startswith("Current · ")
+    assert pane.checklist.selection == 1
+    assert "Current · " not in pane.checklist.cells[0, 1]
+    assert "Current · " not in pane.checklist.cells[1, 1]
     assert pane.checklist.cells[1, 0] == "—"
     assert not pane.ready

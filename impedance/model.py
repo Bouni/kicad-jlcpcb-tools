@@ -63,7 +63,7 @@ class Specification:
 
 @dataclass(frozen=True)
 class Trace:
-    """A track centerline in nanometres; arcs are represented by sampled points."""
+    """A nanometre centerline; native arc samples do not prove copper containment."""
 
     trace_id: str
     layer: str
@@ -71,6 +71,26 @@ class Trace:
     width_nm: int
     points: tuple[Point, ...]
     is_native_arc: bool = False
+
+
+# Machine-stable exclusion codes. Empty means the section is exportable.
+EXCLUSION_COVERED_STUB = "covered_stub"
+COPPER_FEATURE_SHAPES = ("circle", "oval", "rect")
+
+
+@dataclass(frozen=True)
+class CopperFeature:
+    """Pad or via copper flash used to detect covered stubs (nanometres)."""
+
+    feature_id: str
+    net: str
+    layer: str
+    kind: str
+    shape: str
+    center: Point
+    size_x_nm: int
+    size_y_nm: int
+    rotation_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -86,11 +106,13 @@ class BoardSnapshot:
     net_class_error: str = ""
     differential_pairs: tuple[tuple[str, str], ...] = ()
     differential_pair_error: str = ""
+    copper_features: tuple[CopperFeature, ...] = ()
+    board_bounds: Optional[Bounds] = None
 
 
 @dataclass(frozen=True)
 class Section:
-    """One form row containing complete connected routes and their copper bounds."""
+    """One form region owning complete native tracks and their copper bounds."""
 
     section_id: str
     spec_id: str
@@ -99,6 +121,7 @@ class Section:
     traces: tuple[Trace, ...]
     bounds: Bounds
     net_names: tuple[str, ...]
+    exclusion_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -462,13 +485,13 @@ def validate_config(config: Config, layers: Optional[tuple[str, ...]] = None) ->
         or len(config.width_results) > MAX_WIDTH_RESULTS
     ):
         raise ValidationError("Width results must be a bounded immutable collection.")
-    result_keys: set[tuple[str, str]] = set()
+    result_keys: set[tuple[str, str, str]] = set()
     for result in config.width_results:
         validate_width_result(result)
-        key = (result.spec_id, result.layer)
+        key = (result.spec_id, result.layer, result.input_digest)
         if key in result_keys:
             raise ValidationError(
-                "Width results cannot repeat a specification/layer key."
+                "Width results cannot repeat a specification/layer/input fingerprint."
             )
         result_keys.add(key)
     seen_ids: set[str] = set()

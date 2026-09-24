@@ -12,6 +12,9 @@ bottom 2 mm and 120 mm controlled cores, plus a 150 mm three-layer route.
 Lengths describe controlled cores; connector launches add electrical length.
 Every circuit has unique nets; both members of each USB pair share one
 highlight. Separate noncoplanar/CPWG net classes are visible in Board Setup.
+Single-ended routes may use several capture regions to keep local traces
+readable. Region counts in the manifest include all connector-launch copper;
+native tracks remain intact and every track is represented exactly once.
 USB controlled-run edge spacing is 8 mil (0.2032 mm).
 
 Open the PCB, **Fill All Zones** (B), and select F.Cu, In2.Cu or B.Cu.

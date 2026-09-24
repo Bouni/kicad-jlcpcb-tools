@@ -318,6 +318,7 @@ def test_native_connector_capture_uses_the_running_test_interpreter(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad10_impedance
 @pytest.mark.parametrize("showcase", CONNECTOR_SHOWCASES, ids=lambda item: item.name)
 def test_native_connector_gallery_preserves_sources_and_generates_real_color_pngs(
     tmp_path: Path, showcase: Any

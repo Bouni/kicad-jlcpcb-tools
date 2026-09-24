@@ -8,9 +8,10 @@ from typing import Optional
 
 import wx
 
-from .model import Section, format_length
+from .model import EXCLUSION_COVERED_STUB, Section, format_length
 from .review_tracking import utc_now
 from .service import CapturedImage
+from .width_checks import COVERED_STUB_COLOUR
 
 REVIEW_INSTRUCTION = (
     "All workbook images must be viewed before this signal layer's settings can "
@@ -31,11 +32,14 @@ class PreviewCanvas(wx.Panel):
         displayed: Callable[[], None],
         failed: Callable[[str], None],
         active: Callable[[], bool],
+        *,
+        max_scale: float = 1.0,
     ) -> None:
         super().__init__(parent)
         self.SetMinSize((420, 180))
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
         self._displayed, self._failed, self._active = displayed, failed, active
+        self._max_scale = max(1.0, float(max_scale))
         self._image: Optional[wx.Image] = None
         self._bitmap: Optional[wx.Bitmap] = None
         self._dimensions = (0, 0)
@@ -44,6 +48,12 @@ class PreviewCanvas(wx.Panel):
         self._pending = False
         self.Bind(wx.EVT_PAINT, self._paint)
         self.Bind(wx.EVT_SIZE, self._resize)
+        self.Bind(wx.EVT_LEFT_UP, self._on_click)
+        self._enlarge: Optional[Callable[[], None]] = None
+
+    def set_enlarge_handler(self, handler: Optional[Callable[[], None]]) -> None:
+        """Open a larger review window when the thumbnail is clicked."""
+        self._enlarge = handler
 
     def clear(self) -> None:
         """Invalidate queued display events and discard presentation state."""
@@ -51,6 +61,7 @@ class PreviewCanvas(wx.Panel):
         self._image = self._bitmap = None
         self._dimensions = (0, 0)
         self._recorded = self._pending = False
+        self.SetCursor(wx.NullCursor)
         self.Refresh()
 
     def set_capture(self, capture: CapturedImage) -> None:
@@ -64,7 +75,17 @@ class PreviewCanvas(wx.Panel):
         ):
             raise ValueError("The captured PCB image could not be displayed.")
         self._image = image
+        cursor = getattr(wx, "Cursor", None)
+        hand = getattr(wx, "CURSOR_HAND", None)
+        if cursor is not None and hand is not None:
+            self.SetCursor(cursor(hand))
         self.Refresh()
+
+    def _on_click(self, event: wx.MouseEvent) -> None:
+        """Open the enlarged review dialog when a capture is visible."""
+        if self._image is not None and self._enlarge is not None:
+            self._enlarge()
+        event.Skip()
 
     def _paint(self, _event: wx.PaintEvent) -> None:
         """Draw into a fixed layout footprint, retaining full-image context."""
@@ -79,7 +100,11 @@ class PreviewCanvas(wx.Panel):
             if width <= 0 or height <= 0:
                 return
             source = self._image
-            scale = min(width / source.GetWidth(), height / source.GetHeight(), 1.0)
+            scale = min(
+                width / source.GetWidth(),
+                height / source.GetHeight(),
+                self._max_scale,
+            )
             dimensions = (
                 max(1, round(source.GetWidth() * scale)),
                 max(1, round(source.GetHeight() * scale)),
@@ -136,6 +161,51 @@ class PreviewCanvas(wx.Panel):
         event.Skip()
 
 
+def _display_client_bounds(parent: wx.Window) -> tuple[int, int]:
+    """Return a usable on-screen work area for sizing the enlarge dialog."""
+    try:
+        index = wx.Display.GetFromWindow(parent)
+        index = max(index, 0)
+        area = wx.Display(index).GetClientArea()
+        return int(area.GetWidth()), int(area.GetHeight())
+    except Exception:
+        return 1280, 800
+
+
+class EnlargedCaptureDialog(wx.Dialog):
+    """Show one workbook capture large enough for careful review."""
+
+    def __init__(self, parent: wx.Window, capture: CapturedImage, title: str) -> None:
+        super().__init__(
+            parent,
+            title=title,
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+        max_width, max_height = _display_client_bounds(parent)
+        max_width = max(320, int(max_width * 0.9))
+        max_height = max(240, int(max_height * 0.9) - 80)
+        if capture.width <= max_width and capture.height <= max_height:
+            width, height = capture.width, capture.height
+        else:
+            scale = min(max_width / capture.width, max_height / capture.height)
+            width = max(1, int(round(capture.width * scale)))
+            height = max(1, int(round(capture.height * scale)))
+        canvas = PreviewCanvas(
+            self,
+            lambda: None,
+            lambda _message: None,
+            lambda: True,
+        )
+        canvas.SetMinSize((width, height))
+        canvas.set_capture(capture)
+        layout = wx.BoxSizer(wx.VERTICAL)
+        layout.Add(canvas, 1, wx.EXPAND | wx.ALL, 8)
+        buttons = self.CreateButtonSizer(wx.OK)
+        if buttons is not None:
+            layout.Add(buttons, 0, wx.EXPAND | wx.ALL, 8)
+        self.SetSizerAndFit(layout)
+
+
 class WorkbookPreview:
     """Present row captures; share display and view evidence across both UIs."""
 
@@ -152,6 +222,7 @@ class WorkbookPreview:
         active: Optional[Callable[[], bool]] = None,
         hide_navigation: bool = False,
         state_changed: Optional[Callable[[], None]] = None,
+        skip_stub_review: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._preview, self._verify_current = preview, verify_current
         self._appearance_context, self._appearance_changed = (
@@ -161,6 +232,7 @@ class WorkbookPreview:
         self._review_failed, self._image_viewed = review_failed, image_viewed
         self._active = active or (lambda: True)
         self._state_changed = state_changed or (lambda: None)
+        self._skip_stub_review = skip_stub_review or (lambda: True)
         self._sections: tuple[Section, ...] = ()
         self._context_key: object = None
         self._appearance_key: object = None
@@ -183,6 +255,7 @@ class WorkbookPreview:
         self.canvas = PreviewCanvas(
             self.window, self._record_display, self._report_failure, self._active
         )
+        self.canvas.set_enlarge_handler(self._open_enlarged_capture)
         layout.Add(self.canvas, 1, wx.EXPAND)
         self.checklist = wx.ListCtrl(
             self.window, style=wx.LC_REPORT | wx.LC_NO_HEADER | wx.LC_SINGLE_SEL
@@ -231,6 +304,28 @@ class WorkbookPreview:
     def _key(self, index: int) -> tuple[object, object, Section]:
         return self._context_key, self._appearance_key, self._sections[index]
 
+    def _requires_review(self, index: int) -> bool:
+        """Return whether this preview row must be viewed before layer approval."""
+        if not 0 <= index < len(self._sections):
+            return False
+        if (
+            self._skip_stub_review()
+            and self._sections[index].exclusion_reason == EXCLUSION_COVERED_STUB
+        ):
+            return False
+        return True
+
+    def _default_section_index(self, selected_id: Optional[str]) -> int:
+        """Prefer an explicit id, otherwise the first row that still needs review."""
+        if selected_id is not None:
+            for index, section in enumerate(self._sections):
+                if section.section_id == selected_id:
+                    return index
+        for index in range(len(self._sections)):
+            if self._requires_review(index):
+                return index
+        return 0
+
     def image_digest(self, section: Section) -> Optional[str]:
         """Return a loaded or previously viewed capture hash in this context."""
         key = self._context_key, self._appearance_key, section
@@ -266,16 +361,7 @@ class WorkbookPreview:
         """Bind rows without rendering hidden dialogs or stamping a view."""
         if sections == self._sections and context_key == self._context_key:
             if selected_id is not None:
-                self.select(
-                    next(
-                        (
-                            i
-                            for i, section in enumerate(sections)
-                            if section.section_id == selected_id
-                        ),
-                        0,
-                    )
-                )
+                self.select(self._default_section_index(selected_id))
             return
         self.clear("Preparing workbook image…", preserve_review=True)
         self._sections, self._context_key = sections, context_key
@@ -284,16 +370,7 @@ class WorkbookPreview:
         self.refresh_button.Enable(bool(sections) and self._preview is not None)
         self.refresh_review_labels()
         if sections:
-            self.select(
-                next(
-                    (
-                        i
-                        for i, section in enumerate(sections)
-                        if section.section_id == selected_id
-                    ),
-                    0,
-                )
-            )
+            self.select(self._default_section_index(selected_id))
         else:
             self.status.SetValue("No matching routed sections to preview.")
 
@@ -433,19 +510,31 @@ class WorkbookPreview:
         for index, section in enumerate(self._sections):
             viewed = self._key(index) in self._viewed
             state = "viewed" if viewed else "needs review"
-            description = f"Image {index + 1} · {section.layer} · {', '.join(section.net_names)} · {format_length(section.width_nm)} mm"
+            width_or_stub = (
+                "Covered stub"
+                if section.exclusion_reason == EXCLUSION_COVERED_STUB
+                else f"{format_length(section.width_nm)} mm"
+            )
+            description = (
+                f"Image {index + 1} · {section.layer} · "
+                f"{', '.join(section.net_names)} · {width_or_stub}"
+            )
             self.rows.SetString(index, f"{description} — {state}")
             self.checklist.InsertItem(index, "☑" if viewed else "—")
-            current = "Current · " if index == self._index else ""
-            self.checklist.SetItem(index, 1, current + description + f" — {state}")
-            self.checklist.SetItemTextColour(
-                index,
-                wx.Colour(0, 150, 50)
-                if viewed
-                else wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT),
-            )
+            self.checklist.SetItem(index, 1, description + f" — {state}")
+            if section.exclusion_reason == EXCLUSION_COVERED_STUB:
+                colour = wx.Colour(*COVERED_STUB_COLOUR)
+            elif viewed:
+                colour = wx.Colour(0, 150, 50)
+            else:
+                colour = wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT)
+            self.checklist.SetItemTextColour(index, colour)
         if 0 <= self._index < len(self._sections):
             self.rows.SetSelection(self._index)
+            self.checklist.Select(self._index)
+            focus = getattr(self.checklist, "Focus", None)
+            if callable(focus):
+                focus(self._index)
             self.checklist.EnsureVisible(self._index)
 
     def ensure_reviewed(self) -> None:
@@ -458,7 +547,7 @@ class WorkbookPreview:
         missing = [
             str(index + 1)
             for index in range(len(self._sections))
-            if self._key(index) not in self._viewed
+            if self._requires_review(index) and self._key(index) not in self._viewed
         ]
         if missing:
             raise ValueError(
@@ -476,7 +565,7 @@ class WorkbookPreview:
         pending = [
             index
             for index in range(len(self._sections))
-            if self._key(index) not in self._viewed
+            if self._requires_review(index) and self._key(index) not in self._viewed
         ]
         if not pending:
             return False
@@ -495,10 +584,51 @@ class WorkbookPreview:
         return tuple(
             (section, self._viewed[self._key(index)])
             for index, section in enumerate(self._sections)
+            if self._requires_review(index)
         )
+
+    def restore_viewed(self, matches: Callable[[Section, str], bool]) -> None:
+        """Mark review-required rows viewed when matches(section, image_sha256)."""
+        if self._preview is None or not self._sections:
+            return
+        if self._appearance_context is not None:
+            try:
+                self.ensure_appearance_current()
+            except ValueError:
+                return
+        for index, section in enumerate(self._sections):
+            if not self._requires_review(index):
+                continue
+            key = self._key(index)
+            if key in self._viewed:
+                continue
+            try:
+                capture = self._preview(section, refresh=False)
+            except Exception:
+                continue
+            if matches(section, capture.sha256):
+                self._viewed[key] = capture.sha256
+        self.refresh_review_labels()
 
     def _on_choice(self, event: wx.CommandEvent) -> None:
         self.select(event.GetSelection())
 
     def _on_refresh(self, _event: wx.CommandEvent) -> None:
         self.select(self._index, refresh=True)
+
+    def _open_enlarged_capture(self) -> None:
+        """Open a large modal view of the currently displayed capture."""
+        capture = self._capture
+        if capture is None or not (0 <= self._index < len(self._sections)):
+            return
+        section = self._sections[self._index]
+        nets = ", ".join(section.net_names) or "(unnamed)"
+        dialog = EnlargedCaptureDialog(
+            self.window,
+            capture,
+            title=f"{section.layer} — {nets}",
+        )
+        try:
+            dialog.ShowModal()
+        finally:
+            dialog.Destroy()

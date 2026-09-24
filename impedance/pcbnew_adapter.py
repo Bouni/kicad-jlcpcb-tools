@@ -6,10 +6,10 @@ import json
 import math
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Optional
 
 from .board_copy import BoardCopyError, _record_tokens, empty_board
-from .model import BoardSnapshot, Trace
+from .model import BoardSnapshot, Bounds, CopperFeature, Trace
 from .net_metadata import netclass_context, pairing_context
 from .project_context import ProjectContextError, project_context_records
 from .text_context import TextContextError, text_context_records
@@ -18,6 +18,13 @@ Point = tuple[int, int]
 _FILL_CACHE_TOKEN = re.compile(r"\((filled_polygon|fill_segments|pcbplotparams)\b")
 _FILL_STATE_TOKEN = re.compile(r"\(fill\s+yes(?=[\s()])")
 _SEXPR_NAME = re.compile(r"\(\s*([\w_]+)")
+_FLASH_READ_ERRORS = (
+    AttributeError,
+    TypeError,
+    ValueError,
+    RuntimeError,
+    OverflowError,
+)
 
 
 class BoardSnapshotError(RuntimeError):
@@ -78,6 +85,130 @@ def _is_arc(item: Any, pcbnew_module: Any) -> bool:
     return hasattr(item, "GetMid") or (
         callable(class_getter) and str(class_getter()).upper() == "PCB_ARC"
     )
+
+
+def _feature_id(item: Any, data: tuple[Any, ...]) -> str:
+    """Stable identity for one pad/via copper flash on one layer."""
+    uuid = getattr(item, "m_Uuid", None)
+    if uuid is not None and hasattr(uuid, "AsString"):
+        # One physical item can flash multiple copper layers; bind the layer in.
+        layer = data[1] if len(data) > 1 else ""
+        return f"{uuid.AsString()}:{layer}"
+    serialized = json.dumps(data, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(serialized.encode("ascii")).hexdigest()
+
+
+def _pad_shape_name(shape: Any, pcbnew_module: Any) -> str:
+    """Map a KiCad pad shape onto the matching containment primitives."""
+    circle = getattr(pcbnew_module, "PAD_SHAPE_CIRCLE", None)
+    oval = getattr(pcbnew_module, "PAD_SHAPE_OVAL", None)
+    if circle is not None and shape == circle:
+        return "circle"
+    if oval is not None and shape == oval:
+        return "oval"
+    return "rect"
+
+
+def _pad_rotation_deg(pad: Any) -> float:
+    """Read pad orientation in degrees for local-frame containment."""
+    getter = getattr(pad, "GetOrientationDegrees", None)
+    if callable(getter):
+        return float(getter())
+    orientation = getattr(pad, "GetOrientation", None)
+    if callable(orientation):
+        value = orientation()
+        as_degrees = getattr(value, "AsDegrees", None)
+        if callable(as_degrees):
+            return float(as_degrees())
+    raise BoardSnapshotError(
+        "KiCad cannot read the pad orientation for copper coverage."
+    )
+
+
+def _item_on_layer(item: Any, layer_id: int) -> bool:
+    """Require an actual native flash; layer membership alone cannot prove copper."""
+    flash = getattr(item, "FlashLayer", None)
+    if callable(flash):
+        try:
+            return bool(flash(layer_id))
+        except _FLASH_READ_ERRORS:
+            return False
+    return False
+
+
+def _copper_features(
+    board: Any, pcbnew_module: Any, layers: dict[str, int]
+) -> tuple[CopperFeature, ...]:
+    """Collect pad and via copper flashes for covered-stub detection."""
+    features: list[CopperFeature] = []
+    for item in board.GetTracks():
+        if not _is_via(item, pcbnew_module):
+            continue
+        net = str(item.GetNetname()) if hasattr(item, "GetNetname") else ""
+        for layer_name, layer_id in layers.items():
+            if not _item_on_layer(item, layer_id):
+                continue
+            try:
+                # KiCad 10 padstacks may have different diameters on each layer.
+                # The inherited no-argument width is not physical-layer evidence.
+                width = int(item.GetWidth(layer_id))
+                center = _point(item.GetPosition())
+            except _FLASH_READ_ERRORS:
+                continue
+            if width <= 0:
+                continue
+            feature_id = _feature_id(item, ("via", layer_name, net, width, center))
+            features.append(
+                CopperFeature(
+                    feature_id=feature_id,
+                    net=net,
+                    layer=layer_name,
+                    kind="via",
+                    shape="circle",
+                    center=center,
+                    size_x_nm=width,
+                    size_y_nm=width,
+                )
+            )
+    footprints = board.GetFootprints() if hasattr(board, "GetFootprints") else ()
+    for footprint in footprints:
+        pads = footprint.Pads() if hasattr(footprint, "Pads") else ()
+        for pad in pads:
+            net = str(pad.GetNetname()) if hasattr(pad, "GetNetname") else ""
+            for layer_name, layer_id in layers.items():
+                if not _item_on_layer(pad, layer_id):
+                    continue
+                try:
+                    # No-argument size/shape are F.Cu compatibility getters.
+                    # ShapePos includes the native layer offset and its rotation.
+                    size = pad.GetSize(layer_id)
+                    size_x, size_y = int(size.x), int(size.y)
+                    center = _point(pad.ShapePos(layer_id))
+                    shape = _pad_shape_name(pad.GetShape(layer_id), pcbnew_module)
+                    rotation = _pad_rotation_deg(pad)
+                except _FLASH_READ_ERRORS:
+                    # Missing precise APIs cannot justify excluding any route.
+                    continue
+                if size_x <= 0 or size_y <= 0 or not math.isfinite(rotation):
+                    continue
+                feature_id = _feature_id(
+                    pad,
+                    ("pad", layer_name, net, shape, size_x, size_y, center, rotation),
+                )
+                features.append(
+                    CopperFeature(
+                        feature_id=feature_id,
+                        net=net,
+                        layer=layer_name,
+                        kind="pad",
+                        shape=shape,
+                        center=center,
+                        size_x_nm=size_x,
+                        size_y_nm=size_y,
+                        rotation_deg=rotation,
+                    )
+                )
+    return tuple(sorted(features, key=lambda feature: feature.feature_id))
 
 
 def sample_arc(
@@ -378,6 +509,17 @@ def _context_digest(board: Any, pcbnew_module: Any, vias: Iterable[Any]) -> str:
     ).hexdigest()
 
 
+def _board_bounds(board: Any) -> Optional[Bounds]:
+    """Read the same physical outline used to frame native capture images."""
+    getter = getattr(board, "GetBoardEdgesBoundingBox", None)
+    if not callable(getter):
+        return None
+    box = getter()
+    left, top = int(box.GetX()), int(box.GetY())
+    right, bottom = left + int(box.GetWidth()), top + int(box.GetHeight())
+    return (left, top, right, bottom) if right > left and bottom > top else None
+
+
 def snapshot_board(
     board: Any, pcbnew_module: Any, *, netclass_source: Any = None
 ) -> BoardSnapshot:
@@ -435,4 +577,6 @@ def snapshot_board(
         net_classes.error,
         differential_pairs.pairs,
         differential_pairs.error,
+        _copper_features(board, pcbnew_module, layers),
+        _board_bounds(board),
     )
