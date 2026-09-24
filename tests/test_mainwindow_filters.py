@@ -1,6 +1,6 @@
 """Selection-independent table filters through real constructor and event handlers."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from copy import deepcopy
 from pathlib import Path
 import sqlite3
@@ -129,9 +129,10 @@ def open_window(
             selections[:] = references
             selection_handler(MagicMock())
 
-        def clear_rows() -> None:
+        def replace_rows(entries: Sequence[tuple[list[Any], Any, bool]] = ()) -> None:
             had_selection = bool(selections)
             rows.clear()
+            rows.update({row[0]: row for row, _part, _pending in entries})
             selections.clear()
             # Native model reset may clear selection without notifying the handler.
             if had_selection and request.param:
@@ -146,8 +147,8 @@ def open_window(
                 SimpleNamespace(IsChecked=lambda: tool.checked)
             )
 
-        model.RemoveAll.side_effect = clear_rows
-        model.AddEntry.side_effect = lambda row: rows.update({row[0]: row})
+        model.RemoveAll.side_effect = replace_rows
+        model.ReplaceAll.side_effect = replace_rows
         model.get_reference.side_effect = lambda item: item
         window.populate_footprint_list()
         return SimpleNamespace(

@@ -872,6 +872,7 @@ class PartSelectorDialog(wx.Dialog):
         if parts is None:
             return
         limit_text = " (limited)" if len(parts) >= 1000 else ""
+        rows = []
         for p in parts:
             db_row = {field: str(value) for field, value in zip(DB_FIELDS, p)}
             price = round(self.get_price(len(self.parts), db_row.get("Price", "")), 3)
@@ -897,7 +898,8 @@ class PartSelectorDialog(wx.Dialog):
                     item.append(db_row.get(column.db_field, ""))
                 else:
                     item.append("")
-            self.part_list_model.AddEntry(item)
+            rows.append(item)
+        self.part_list_model.ReplaceAll(rows)
         render_duration = time.time() - start
         render_duration_text = _format_duration(render_duration)
         result_count_label = (

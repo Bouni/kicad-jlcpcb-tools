@@ -1759,6 +1759,7 @@ class JLCPCBTools(wx.Frame):
         snapshot = self.library.read_correction_data()
         self.update_correction_status(snapshot)
         corrections = snapshot.corrections
+        entries = []
         for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
             if fp is None:
@@ -1773,33 +1774,28 @@ class JLCPCBTools(wx.Frame):
             if self.hide_pos_parts and part["exclude_from_pos"]:
                 continue
             enrichment_status = self._get_enrichment_status_label(part)
-            self.partlist_data_model.AddEntry(
-                [
-                    part["reference"],
-                    part["value"],
-                    part["footprint"],
-                    part["lcsc"],
-                    details.get("type", ""),  # type
-                    details.get("stock", ""),  # stock
-                    part["exclude_from_bom"],
-                    part["exclude_from_pos"],
-                    int(is_dnp),
-                    (
-                        str(self.get_correction(part, corrections))
-                        if corrections is not None
-                        else "Unresolved"
-                    ),
-                    str(fp.GetLayer()),
-                    params_for_part(details),
-                    enrichment_status,
-                    "",  # bom price label
-                ]
-            )
-            self.partlist_data_model.set_assembly_metadata(
+            row = [
                 part["reference"],
-                part,
-                pending=enrichment_status == "Pending",
-            )
+                part["value"],
+                part["footprint"],
+                part["lcsc"],
+                details.get("type", ""),  # type
+                details.get("stock", ""),  # stock
+                part["exclude_from_bom"],
+                part["exclude_from_pos"],
+                int(is_dnp),
+                (
+                    str(self.get_correction(part, corrections))
+                    if corrections is not None
+                    else "Unresolved"
+                ),
+                str(fp.GetLayer()),
+                params_for_part(details),
+                enrichment_status,
+                "",  # bom price label
+            ]
+            entries.append((row, part, enrichment_status == "Pending"))
+        self.partlist_data_model.ReplaceAll(entries)
         wx.PostEvent(self, BomDataChangedEvent(source="populate_footprint_list"))
 
     def OnBomHide(self, *_):

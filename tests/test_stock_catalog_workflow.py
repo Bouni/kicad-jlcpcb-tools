@@ -178,6 +178,32 @@ def test_warmed_catalog_is_shared_across_real_estimate_concerns_and_bom_events(
     assert window.library.get_part_details.call_count == 2
 
 
+def test_population_reaches_the_view_as_resets_only(
+    workflow: types.SimpleNamespace,
+    catalog_window: Callable[..., Any],
+) -> None:
+    """A refresh empties the list and refills it with one Cleared(), never per row."""
+    window = catalog_window(
+        [part("R1"), part("R2"), part("U1", "C2", exclude_from_pos=True)],
+        {"C1": details(99), "C2": details(1000)},
+    )
+    model = window.partlist_data_model
+    for hide_pos, cold_cache, references in (
+        (False, True, ["R1", "R2", "U1"]),
+        (True, False, ["R1", "R2"]),
+        (False, True, ["R1", "R2", "U1"]),
+    ):
+        window.hide_pos_parts = hide_pos
+        if cold_cache:
+            # Catalog lookups must not refresh rows that are about to be replaced.
+            window._invalidate_catalog_details()
+        model.notifications.clear()
+        window.populate_footprint_list()
+        assert model.notifications == [("cleared", ()), ("cleared", ())]
+        assert [row[0] for row in model.data] == references
+        workflow.drain()
+
+
 def test_new_and_equivalently_spelled_lcsc_numbers_share_one_lookup(
     workflow: types.SimpleNamespace,
     catalog_window: Callable[..., Any],

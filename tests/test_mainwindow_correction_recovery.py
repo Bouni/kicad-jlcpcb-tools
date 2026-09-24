@@ -161,7 +161,7 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
     assert _displayed_corrections(window) == ["Unresolved", "Unresolved"]
     _write_sql(library.correctionsdb_file, "DROP TRIGGER reject_insert")
     install_manager_controls(runtime.modules, library, monkeypatch)
-    window.partlist_data_model.AddEntry.reset_mock()
+    window.partlist_data_model.ReplaceAll.reset_mock()
 
     if entrypoint == "toolbar":
         window.manage_corrections()
@@ -206,11 +206,9 @@ def _generation_window(runtime: SimpleNamespace) -> tuple[SimpleNamespace, list[
 
 
 def _displayed_corrections(window: Any) -> list[str]:
-    """Return the correction cells most recently added to the model."""
-    return [
-        invocation.args[0][9]
-        for invocation in window.partlist_data_model.AddEntry.call_args_list
-    ]
+    """Return the correction cells of the model's latest replacement."""
+    entries = window.partlist_data_model.ReplaceAll.call_args.args[0]
+    return [row[9] for row, _part, _pending in entries]
 
 
 def _write_sql(path: str, sql: str) -> None:
@@ -302,7 +300,7 @@ def test_refresh_remains_nonmodal_and_only_complete_repair_clears_status(
     rows = runtime.library.read_correction_data().rows
     runtime.library.save_correction_data("C1", 180, (0.5, -0.25), rowid=rows[0].rowid)
     window.library = fresh_library(runtime.library)
-    window.partlist_data_model.AddEntry.reset_mock()
+    window.partlist_data_model.ReplaceAll.reset_mock()
 
     window.populate_footprint_list()
 
@@ -310,7 +308,7 @@ def test_refresh_remains_nonmodal_and_only_complete_repair_clears_status(
     assert _displayed_corrections(window) == ["Unresolved", "Unresolved"]
     runtime.library.save_correction_data("C2", -90, (1.25, 2.5), rowid=rows[1].rowid)
     window.library = fresh_library(runtime.library)
-    window.partlist_data_model.AddEntry.reset_mock()
+    window.partlist_data_model.ReplaceAll.reset_mock()
 
     window.populate_footprint_list()
 
