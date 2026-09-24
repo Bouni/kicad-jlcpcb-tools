@@ -6,6 +6,29 @@ on:  # yamllint disable-line rule:truthy
       - main
   pull_request:
 jobs:
+  actionlint:
+    name: Validate GitHub Actions workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Check workflow syntax and expressions
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          actionlint_dir="$RUNNER_TEMP/actionlint"
+          mkdir -p "$actionlint_dir"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            --connect-timeout 15 --max-time 60 \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}" \
+            --output "$actionlint_dir/$archive"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$actionlint_dir/$archive" | sha256sum --check --strict
+          tar -xzf "$actionlint_dir/$archive" -C "$actionlint_dir" actionlint
+          "$actionlint_dir/actionlint" -color -shellcheck= -pyflakes=
   markdownlint:
     runs-on: ubuntu-latest
     steps:
@@ -26,14 +49,14 @@ jobs:
         uses: chartboost/ruff-action@v1
         with:
           version: 0.11.4
-          args: check 
+          args: check
           src: "."
   deadcode:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.11
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"

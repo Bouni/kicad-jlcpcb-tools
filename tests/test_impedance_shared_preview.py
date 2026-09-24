@@ -21,6 +21,7 @@ import zlib
 
 import pytest
 
+from tests.test_impedance_dialog import _HarnessTimer
 from tests.test_impedance_dialog_preview import Control, Image, Sizer
 from tests.wx_harness import FakeWxModule, temporary_modules
 
@@ -107,6 +108,14 @@ class PreviewControl(Control):
         """Expose completed and pending row colours to assertions."""
         self.colours[index] = colour
 
+    def Select(self, index: int, on: bool = True) -> None:
+        """Retain ListCtrl selection for the displayed workbook image."""
+        self.selection = index if on else -1
+
+    def Focus(self, index: int) -> None:
+        """Retain the focused checklist row without claiming native focus."""
+        self.focused_index = index
+
     def EnsureVisible(self, index: int) -> None:
         """Record which checklist row native scrolling must reveal."""
         self.visible_index = index
@@ -175,12 +184,14 @@ def shared_preview_api() -> Iterator[SimpleNamespace]:
     wx = FakeWxModule(
         "wx",
         Panel=PreviewControl,
+        Dialog=PreviewControl,
         Choice=PreviewControl,
         Button=PreviewControl,
         StaticText=PreviewControl,
         ListCtrl=PreviewControl,
         TextCtrl=PreviewControl,
         BoxSizer=Sizer,
+        Timer=_HarnessTimer,
         CallAfter=call_after,
         AutoBufferedPaintDC=PaintDC,
         Brush=lambda colour: colour,
@@ -189,6 +200,18 @@ def shared_preview_api() -> Iterator[SimpleNamespace]:
         Image=decode,
         Bitmap=lambda image: image,
         LogNull=nullcontext,
+        NullCursor=object(),
+        Display=type(
+            "Display",
+            (),
+            {
+                "GetFromWindow": staticmethod(lambda _window: 0),
+                "__init__": lambda self, _index: None,
+                "GetClientArea": lambda self: SimpleNamespace(
+                    GetWidth=lambda: 1600, GetHeight=lambda: 1000
+                ),
+            },
+        ),
     )
     with temporary_modules(
         {package_name: package, "wx": wx}, namespaces=(package_name,)
@@ -263,6 +286,7 @@ def _open_preview(api: SimpleNamespace) -> SimpleNamespace:
         image_viewed=viewed,
         active=lambda: state.active,
         state_changed=changed,
+        image_list=PreviewControl(root),
     )
     return SimpleNamespace(root=root, pane=pane, state=state)
 

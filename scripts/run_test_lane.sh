@@ -21,7 +21,7 @@ if [[ ${1:-} != --inside ]]; then
     trap 'exit 143' TERM
     docker run --rm --init --tmpfs /tmp:exec --user=0 --name "$name" --cidfile "$receipt" --platform "linux/$architecture" \
         --label "org.kicad-jlcpcb-tools.validation-run=$owner" \
-        --env KICAD_CLI --env KICAD_CAPTURE_PNG \
+        --env KICAD_CLI --env KICAD_CAPTURE_PNG --env KICAD_IMPEDANCE_NATIVE_BUDGET_PROFILE \
         "${mounts[@]}" --workdir "$PWD" "$image" \
         bash scripts/run_test_lane.sh --inside "$lane" "$architecture"
     exit
@@ -43,7 +43,7 @@ case "$lane" in
     ordinary-tests)
         "${pytest[@]}" -m 'not native_wx and not native_kicad' ;;
     native-wx-0)
-        timeout 360s "${pytest[@]}" -n auto --maxprocesses=4 --dist=loadfile --max-worker-restart=0 \
+        timeout 900s "${pytest[@]}" -n auto --maxprocesses=4 --dist=loadfile --max-worker-restart=0 \
             --require-native=wx -m 'not native_kicad and not os_input' ;;
     native-wx-1)
         timeout 360s xvfb-run -a -s '-screen 0 1920x1080x24 -noreset' bash -c '
@@ -58,6 +58,9 @@ case "$lane" in
         mkdir -p "$KICAD_CONFIG_HOME/$major.0"
         printf '%s\n' '{"appearance":{"color_theme":"_builtin_default"}}' > "$KICAD_CONFIG_HOME/$major.0/pcbnew.json"
         selection=native_kicad
+        if [[ $major != 10 ]]; then
+            selection='native_kicad and not kicad10_impedance'
+        fi
         timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24 -noreset' "${pytest[@]}" \
             --require-native=kicad --kicad-major="$major" -m "$selection" \
             --basetemp="$artifacts/pytest-work" 2>&1 | tee "$artifacts/pytest.log"

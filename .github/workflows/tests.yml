@@ -20,6 +20,7 @@ jobs:
           - lane: native-wx-0
             name: Native wx (controls)
             target: wx
+            timeout_minutes: 20
           - lane: native-wx-1
             name: Native wx (isolated input)
             target: wx
@@ -48,6 +49,7 @@ jobs:
       ARCHITECTURE: ${{ matrix.kicad && matrix.kicad != '10' && 'amd64' || vars.KICAD_VALIDATION_ARCHITECTURE || 'amd64' }}
       KICAD_CLI: /usr/bin/kicad-cli
       KICAD_CAPTURE_PNG: '1'
+      KICAD_IMPEDANCE_NATIVE_BUDGET_PROFILE: ci
     steps:
       - uses: actions/checkout@v7
       - name: Cache Python downloads

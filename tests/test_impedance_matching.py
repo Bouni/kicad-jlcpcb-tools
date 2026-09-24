@@ -7,10 +7,17 @@ from typing import Any, Optional
 
 import pytest
 
-from impedance.matching import analyze, validate_review
+from impedance.matching import (
+    analyze,
+    section_length_nm,
+    validate_review,
+    workbook_row_cells,
+)
 from impedance.model import (
+    EXCLUSION_COVERED_STUB,
     BoardSnapshot,
     Config,
+    CopperFeature,
     LayerSettings,
     Specification,
     Trace,
@@ -55,7 +62,11 @@ def _trace(
     return Trace(trace_id, layer, net, width_nm, points)
 
 
-def _snapshot(*traces: Trace, context_digest: str = "board-context") -> BoardSnapshot:
+def _snapshot(
+    *traces: Trace,
+    context_digest: str = "board-context",
+    copper_features: tuple = (),
+) -> BoardSnapshot:
     """Return complete native class metadata for every named routed net."""
     return BoardSnapshot(
         ("F.Cu", "B.Cu"),
@@ -67,6 +78,7 @@ def _snapshot(*traces: Trace, context_digest: str = "board-context") -> BoardSna
             for net in sorted({trace.net for trace in traces if trace.net})
         ),
         net_class_context_digest="class-settings",
+        copper_features=copper_features,
     )
 
 
@@ -137,7 +149,7 @@ def test_config_round_trip_preserves_specs_and_review_state() -> None:
         included_section_ids=("section-a", "section-b"),
     )
     payload = original.to_dict()
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] == 8
     assert Config.from_dict(payload) == original
 
 
@@ -387,12 +399,14 @@ def test_connected_lines_and_sampled_arc_form_one_section() -> None:
     assert result.sections[0].bounds == (-75000, -75000, 2075000, 1075000)
 
 
-def test_disconnected_same_net_routes_are_separate_sections() -> None:
-    """Separate board regions produce separately reviewable document rows."""
+def test_nearby_disconnected_same_net_routes_share_one_readable_section() -> None:
+    """A small endpoint gap does not require separate images of the same signal."""
     first = _trace("a", ((0, 0), (1000000, 0)))
     second = _trace("b", ((3000000, 0), (4000000, 0)))
     result = analyze(_config(), _snapshot(first, second))
-    assert len(result.sections) == 2
+    assert len(result.sections) == 1
+    assert result.sections[0].traces == (first, second)
+    assert result.sections[0].bounds == (-75000, -75000, 4075000, 75000)
     assert {section.net_names for section in result.sections} == {("CLK",)}
 
 
@@ -408,12 +422,13 @@ def test_touching_different_nets_are_never_connected() -> None:
     }
 
 
-def test_crossing_routes_do_not_join_at_midpoints() -> None:
-    """A geometric crossing without shared endpoints is not connectivity."""
+def test_crossing_same_signal_pieces_share_a_readable_visual_region() -> None:
+    """A visual region can include the same net without endpoint connectivity."""
     horizontal = _trace("a", ((-1000000, 0), (1000000, 0)))
     vertical = _trace("b", ((0, -1000000), (0, 1000000)))
     result = analyze(_config(), _snapshot(horizontal, vertical))
-    assert len(result.sections) == 2
+    assert len(result.sections) == 1
+    assert result.sections[0].traces == (horizontal, vertical)
 
 
 def test_branched_route_emits_review_warning() -> None:
@@ -548,7 +563,12 @@ def test_zero_length_track_has_bounded_section_and_warning() -> None:
     """Degenerate KiCad geometry remains visible in review without a crash."""
     result = analyze(_config(), _snapshot(_trace("a", ((0, 0), (0, 0)))))
     assert result.sections[0].bounds == (-75000, -75000, 75000, 75000)
-    assert any("zero-length" in warning for warning in result.warnings)
+    assert any(
+        "zero-length track on F.Cu, net CLK" in warning for warning in result.warnings
+    )
+    assert all(
+        result.sections[0].section_id[:8] not in warning for warning in result.warnings
+    )
 
 
 @pytest.mark.parametrize(
@@ -692,10 +712,10 @@ def _route_points(span_nm: int, shape: str) -> tuple[tuple[int, int], ...]:
 @pytest.mark.parametrize(
     "shape", ["horizontal", "vertical", "diagonal", "meander", "arc"]
 )
-def test_connected_route_stays_complete_at_every_length_and_shape(
+def test_indivisible_trace_stays_complete_at_every_length_and_shape(
     span_nm: int, shape: str
 ) -> None:
-    """Each connected route contributes one complete row regardless of its extent."""
+    """Readability partitioning never invents pieces of an indivisible track ID."""
     points = _route_points(span_nm, shape)
     trace = _trace("complete-route", points, width_nm=100000)
     config = _config(_spec())
@@ -722,8 +742,10 @@ def test_thin_two_hundred_mm_route_has_one_full_board_extent() -> None:
     assert result.sections[0].traces == (trace,)
 
 
-def test_long_connected_chain_keeps_every_segment_in_one_section() -> None:
-    """A routed chain is documented in full across all its constituent track UUIDs."""
+def test_long_connected_chain_splits_into_readable_regions_without_losing_segments() -> (
+    None
+):
+    """A 200 mm route of 0.1 mm copper needs closer views with complete ID coverage."""
     traces = tuple(
         _trace(
             f"segment-{index:02d}",
@@ -734,16 +756,23 @@ def test_long_connected_chain_keeps_every_segment_in_one_section() -> None:
     )
     config = _config(_spec())
     result = analyze(config, _snapshot(*traces))
-    assert len(result.sections) == 1
-    assert result.sections[0].traces == traces
-    assert result.sections[0].bounds == (-50000, -50000, 200050000, 50000)
+    assert len(result.sections) > 1
+    assert sorted(
+        trace.trace_id for section in result.sections for trace in section.traces
+    ) == sorted(trace.trace_id for trace in traces)
+    assert min(section.bounds[0] for section in result.sections) == -50000
+    assert max(section.bounds[2] for section in result.sections) == 200050000
 
 
-@pytest.mark.parametrize("span_nm", [1, 100000000, 200000000, 1000000000000])
-def test_disconnected_route_count_is_independent_of_physical_length(
+@pytest.mark.parametrize(
+    ("span_nm", "expected_rows"),
+    [(1, 1), (100000000, 3), (200000000, 3), (1000000000000, 3)],
+)
+def test_disconnected_same_signal_regions_combine_only_when_joint_extent_is_readable(
     span_nm: int,
+    expected_rows: int,
 ) -> None:
-    """Only connectivity determines the number of candidates, even for huge extents."""
+    """Nearby tiny pieces fit together; already thin long tracks stay indivisible."""
     traces = tuple(
         _trace(
             str(index),
@@ -754,10 +783,10 @@ def test_disconnected_route_count_is_independent_of_physical_length(
     )
     config = _config(_spec())
     result = analyze(config, _snapshot(*traces))
-    assert len(result.sections) == 3
-    assert {section.traces for section in result.sections} == {
-        (trace,) for trace in traces
-    }
+    assert len(result.sections) == expected_rows
+    assert sorted(
+        trace.trace_id for section in result.sections for trace in section.traces
+    ) == sorted(trace.trace_id for trace in traces)
 
 
 def test_complete_long_differential_pair_groups_into_one_row() -> None:
@@ -805,7 +834,7 @@ def test_distant_single_ended_routes_remain_independent_rows() -> None:
 
 
 def test_long_route_analysis_is_stable_across_input_order() -> None:
-    """Container ordering cannot change complete-route IDs or persisted review references."""
+    """Container ordering cannot change indivisible-track regions or review references."""
     config = _config(_spec())
     traces = (
         _trace("first", ((0, 0), (100000000, 0)), width_nm=100000),
@@ -814,14 +843,21 @@ def test_long_route_analysis_is_stable_across_input_order() -> None:
     first = analyze(config, _snapshot(*traces))
     second = analyze(config, _snapshot(*reversed(traces)))
     assert first == second
-    assert len(first.sections) == 1
-    assert first.sections[0].traces == traces
+    assert len(first.sections) == 2
+    assert sorted(
+        trace.trace_id for section in first.sections for trace in section.traces
+    ) == ["first", "second"]
 
 
 def test_candidate_count_limit_allows_one_thousand_tiny_components() -> None:
-    """The resource bound counts actual disconnected candidates without using length."""
+    """One thousand different signals with disjoint boxes meet the review bound."""
     traces = tuple(
-        _trace(str(index), ((index * 3, 0), (index * 3 + 1, 0)), width_nm=1)
+        _trace(
+            str(index),
+            ((index * 3, 0), (index * 3 + 1, 0)),
+            net=f"signal-{index}",
+            width_nm=1,
+        )
         for index in range(1000)
     )
     config = _config(_spec())
@@ -832,7 +868,12 @@ def test_candidate_count_limit_allows_one_thousand_tiny_components() -> None:
 def test_candidate_count_limit_rejects_one_thousand_and_one_components() -> None:
     """Too many distinct sections produce an actionable error before rendering."""
     traces = tuple(
-        _trace(str(index), ((index * 3, 0), (index * 3 + 1, 0)), width_nm=1)
+        _trace(
+            str(index),
+            ((index * 3, 0), (index * 3 + 1, 0)),
+            net=f"signal-{index}",
+            width_nm=1,
+        )
         for index in range(1001)
     )
     config = _config(_spec())
@@ -857,3 +898,207 @@ def test_one_huge_route_does_not_hit_candidate_count_limit() -> None:
         1000000000001,
         1000000000001,
     )
+
+
+def _pad(
+    feature_id: str,
+    *,
+    net: str = "CLK",
+    layer: str = "F.Cu",
+    center: tuple[int, int] = (0, 0),
+    size_nm: int = 1_000_000,
+    shape: str = "circle",
+    kind: str = "pad",
+) -> CopperFeature:
+    """Build a same-net copper flash large enough to cover short stubs."""
+    return CopperFeature(
+        feature_id=feature_id,
+        net=net,
+        layer=layer,
+        kind=kind,
+        shape=shape,
+        center=center,
+        size_x_nm=size_nm,
+        size_y_nm=size_nm,
+    )
+
+
+def test_track_fully_inside_same_net_pad_is_excluded_covered_stub() -> None:
+    """A stub entirely under its pad is listed unchecked by default but overrideable."""
+    stub = _trace("stub", ((0, 0), (100_000, 0)))
+    result = analyze(
+        _config(),
+        _snapshot(stub, copper_features=(_pad("pad-1"),)),
+    )
+    assert len(result.sections) == 1
+    assert result.sections[0].exclusion_reason == EXCLUSION_COVERED_STUB
+    assert result.sections[0].traces == (stub,)
+    assert any("Covered stubs" in warning for warning in result.warnings)
+    validate_review(
+        replace(
+            _config(),
+            reviewed_digest=result.digest,
+            included_section_ids=(result.sections[0].section_id,),
+        ),
+        result,
+    )
+
+
+def test_long_track_ending_at_pad_center_stays_exportable() -> None:
+    """Partial pad overlap at a launch does not exclude the controlled-impedance run."""
+    run = _trace("run", ((0, 0), (5_000_000, 0)))
+    result = analyze(
+        _config(),
+        _snapshot(run, copper_features=(_pad("pad-1"),)),
+    )
+    assert len(result.sections) == 1
+    assert result.sections[0].exclusion_reason == ""
+    assert result.sections[0].traces == (run,)
+    assert section_length_nm(result.sections[0]) == 5_000_000
+
+
+def test_mixed_component_strips_covered_stub_into_excluded_row() -> None:
+    """Option 1C: stubs leave the exportable route and become their own excluded row."""
+    stub = _trace("stub", ((0, 0), (100_000, 0)))
+    run = _trace("run", ((100_000, 0), (5_000_000, 0)))
+    result = analyze(
+        _config(),
+        _snapshot(stub, run, copper_features=(_pad("pad-1"),)),
+    )
+    by_reason = {section.exclusion_reason: section for section in result.sections}
+    assert set(by_reason) == {"", EXCLUSION_COVERED_STUB}
+    assert by_reason[""].traces == (run,)
+    assert by_reason[EXCLUSION_COVERED_STUB].traces == (stub,)
+
+
+def test_copper_features_alone_do_not_invalidate_stubless_review() -> None:
+    """Pad/via flashes must not churn the review digest when exportable rows are unchanged.
+
+    Fabrication preflight was failing after covered-stub work hashed copper
+    features into the digest (and bumped algorithm_version). Boards without
+    stubs kept the same section IDs but lost a previously saved approval.
+    """
+    run = _trace("run", ((0, 0), (5_000_000, 0)))
+    without_pads = analyze(_config(), _snapshot(run))
+    with_pads = analyze(
+        _config(),
+        _snapshot(run, copper_features=(_pad("pad-1"),)),
+    )
+    assert without_pads.digest == with_pads.digest
+    assert tuple(section.section_id for section in without_pads.sections) == tuple(
+        section.section_id for section in with_pads.sections
+    )
+    reviewed = replace(
+        _config(),
+        reviewed_digest=without_pads.digest,
+        included_section_ids=tuple(
+            section.section_id for section in without_pads.sections
+        ),
+    )
+    validate_review(reviewed, with_pads)
+
+
+def test_stub_split_rejects_stale_included_section_ids() -> None:
+    """When covered stubs split rows, prior included IDs must fail even if digests match."""
+    stub = _trace("stub", ((0, 0), (100_000, 0)))
+    run = _trace("run", ((100_000, 0), (5_000_000, 0)))
+    combined = analyze(_config(), _snapshot(stub, run))
+    assert len(combined.sections) == 1
+    reviewed = replace(
+        _config(),
+        reviewed_digest=combined.digest,
+        included_section_ids=(combined.sections[0].section_id,),
+    )
+    validate_review(reviewed, combined)
+    split = analyze(
+        _config(),
+        _snapshot(stub, run, copper_features=(_pad("pad-1"),)),
+    )
+    assert combined.digest == split.digest
+    assert combined.sections[0].section_id not in {
+        section.section_id for section in split.sections
+    }
+    with pytest.raises(ValidationError, match="included section changed"):
+        validate_review(reviewed, split)
+
+
+def test_short_open_run_without_covering_feature_stays_exportable() -> None:
+    """A legitimate 2 mm RF stub is not excluded by length alone."""
+    short = _trace("short", ((0, 0), (2_000_000, 0)))
+    result = analyze(_config(), _snapshot(short))
+    assert len(result.sections) == 1
+    assert result.sections[0].exclusion_reason == ""
+    assert section_length_nm(result.sections[0]) == 2_000_000
+
+
+def test_different_net_pad_does_not_cover_a_stub() -> None:
+    """Only same-net pad/via copper can intentionally exclude a track."""
+    stub = _trace("stub", ((0, 0), (100_000, 0)))
+    result = analyze(
+        _config(),
+        _snapshot(stub, copper_features=(_pad("gnd", net="GND"),)),
+    )
+    assert result.sections[0].exclusion_reason == ""
+
+
+def test_via_covered_stub_is_excluded() -> None:
+    """Via copper on the signal layer covers fanout stubs the same way pads do."""
+    stub = _trace("via-stub", ((0, 0), (80_000, 0)))
+    result = analyze(
+        _config(),
+        _snapshot(
+            stub,
+            copper_features=(_pad("via-1", size_nm=600_000, kind="via"),),
+        ),
+    )
+    assert result.sections[0].exclusion_reason == EXCLUSION_COVERED_STUB
+
+
+def test_whole_track_stub_reclassification_keeps_review_digest() -> None:
+    """Pad coverage may mark a row as a covered stub without churning the digest.
+
+    The same traces keep the same section_id; a prior inclusion still refers to
+    that copper. Mixed stub splits change section_ids and are rejected separately.
+    """
+    stub = _trace("stub", ((0, 0), (100_000, 0)))
+    bare = analyze(_config(), _snapshot(stub))
+    covered = analyze(
+        _config(),
+        _snapshot(stub, copper_features=(_pad("pad-1"),)),
+    )
+    assert bare.digest == covered.digest
+    assert bare.sections[0].section_id == covered.sections[0].section_id
+    assert bare.sections[0].exclusion_reason == ""
+    assert covered.sections[0].exclusion_reason == EXCLUSION_COVERED_STUB
+    reviewed = replace(
+        _config(),
+        reviewed_digest=bare.digest,
+        included_section_ids=(bare.sections[0].section_id,),
+    )
+    validate_review(reviewed, covered)
+
+
+def test_workbook_row_cells_show_length_width_and_covered_stub() -> None:
+    """List rows put length beside width or a Covered stub marker."""
+    stub = _trace("stub", ((0, 0), (100_000, 0)))
+    run = _trace("run", ((0, 0), (2_500_000, 0)))
+    covered = analyze(
+        _config(),
+        _snapshot(stub, copper_features=(_pad("pad-1"),)),
+    ).sections[0]
+    exportable = analyze(_config(), _snapshot(run)).sections[0]
+    spec = _spec()
+    covered_cells = workbook_row_cells(covered, spec, target_width="0.15")
+    exportable_cells = workbook_row_cells(exportable, spec, target_width="0.18")
+    assert covered_cells[0] == covered.layer
+    assert covered_cells[1] == spec.net_class
+    assert covered_cells[2] == spec.target_ohms
+    assert covered_cells[3] == "0.10 mm"
+    assert covered_cells[5] == "Covered stub"
+    assert covered_cells[6] == ""
+    assert covered_cells[7] == ""
+    assert exportable_cells[3] == "2.50 mm"
+    assert exportable_cells[5] == f"{format_length(exportable.width_nm)} mm"
+    assert exportable_cells[6] == "0.18"
+    assert exportable_cells[7] == "1"
+    assert "Covered stub" not in exportable_cells

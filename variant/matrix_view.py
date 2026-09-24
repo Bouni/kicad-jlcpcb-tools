@@ -15,6 +15,11 @@ import wx
 import wx.grid as gridlib
 
 from ..dataview_highlight import expand_footprint, expand_value, find_highlight_spans
+from ..grid_helpers.grid_sizing import (
+    grid_sizing_signature,
+    measure_grid_content_widths,
+)
+from ..grid_helpers.grid_style import alternating_row_background
 from ..helpers import loadBitmapScaled
 from .text_layout import (
     FittedText,
@@ -338,11 +343,8 @@ class MatrixCellRenderer(gridlib.GridCellRenderer):
         row_active = isSelected
         isSelected = grid.is_variant_selected(row, col)
         if row % 2:
-            dark_background = sum(background[index] for index in range(3)) < 3 * 128
-            background = _blend(
-                background,
-                (foreground[0], foreground[1], foreground[2]),
-                0.16 if dark_background else 0.10,
+            background = wx.Colour(
+                *alternating_row_background(background, foreground, row)
             )
         if row_active or isSelected:
             highlight = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
@@ -1843,11 +1845,7 @@ class VariantMatrixView(gridlib.Grid):
         self._resizing_columns = True
         self.BeginBatch()
         try:
-            signature = (
-                self.GetDefaultCellFont().GetNativeFontInfoDesc(),
-                self.GetLabelFont().GetNativeFontInfoDesc(),
-                self.FromDIP(100),
-            )
+            signature = grid_sizing_signature(self)
             if signature != self._sizing_signature:
                 self._auto_widths = None
                 self._flag_bitmaps.clear()
@@ -1856,17 +1854,7 @@ class VariantMatrixView(gridlib.Grid):
             if self._auto_widths is None:
                 self._measure_layout()
                 self._compact_text_widths = self._measure_compact_columns()
-                # Reset old minima before asking wx to measure: setAsMin=False
-                # still respects minima left by an earlier font or table.
-                for index in range(self.GetNumberCols()):
-                    self.SetColMinimalWidth(index, 1)
-                table = self.GetTable()
-                table.measuring_cells = True
-                try:
-                    if self.GetNumberRows():
-                        self.AutoSizeColumns(setAsMin=False)
-                finally:
-                    table.measuring_cells = False
+                content_widths = measure_grid_content_widths(self)
                 widths = {
                     _width_key(column): self._minimum_widths[column.key]
                     for column in self.model.columns
@@ -1878,7 +1866,7 @@ class VariantMatrixView(gridlib.Grid):
                         if column.key in _READ_ONLY_STATUS_FIELDS - {"standard"}:
                             continue
                         key = _width_key(column)
-                        content_width = self.GetColSize(index)
+                        content_width = content_widths[index]
                         if column.key == "side":
                             # Keep native content measurement, trimming only its
                             # standard outer padding for this one-letter field.

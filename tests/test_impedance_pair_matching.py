@@ -95,7 +95,7 @@ def test_stale_capture_approval_preserves_intent_until_explicit_reapproval(
     current, snapshot = _approved_capture(paired)
     original = replace(current, reviewed_digest="previous-capture-policy")
     payload = original.to_dict()
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] == 8
     reopened = model.Config.from_dict(payload)
     analysis = matching.analyze(reopened, snapshot)
     assert reopened == original
@@ -184,7 +184,7 @@ def test_native_pair_is_one_complete_row_for_every_design_layer_and_length(
     matching.validate_review(reopened, matching.analyze(reopened, snapshot))
 
 
-def test_multiple_pairs_never_merge_and_single_ended_components_stay_independent() -> (
+def test_multiple_pairs_never_merge_and_single_ended_regions_prune_equal_boxes() -> (
     None
 ):
     """The same class can hold multiple native pairs without one giant combined row."""
@@ -205,8 +205,14 @@ def test_multiple_pairs_never_merge_and_single_ended_components_stay_independent
         model.Config(True, (specification(kind="single_ended", target_ohms="50"),)),
         snapshot,
     )
-    assert len(single.sections) == 6
-    assert all(len(row.net_names) == 1 for row in single.sections)
+    assert len(single.sections) == 2
+    assert {row.net_names for row in single.sections} == {
+        ("A", "B", "C", "D"),
+        ("A", "B"),
+    }
+    assert sorted(
+        item.trace_id for row in single.sections for item in row.traces
+    ) == sorted(item.trace_id for item in snapshot.traces)
 
 
 def test_transition_and_neckdown_rows_follow_actual_widths_without_half_pairs() -> None:

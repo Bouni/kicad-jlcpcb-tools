@@ -1,5 +1,6 @@
 """Check runner safety and reporting, not native KiCad or GTK behavior."""
 
+from dataclasses import replace
 import importlib
 import json
 from pathlib import Path
@@ -33,7 +34,7 @@ def test_plan_covers_native_layers_connectors_dialogs_and_persistence() -> None:
     """Do not allow a CLI-only subset to masquerade as the whole smoke run."""
     stages = runner().STAGES
     assert stages[0] == "prerequisites"
-    assert {"dialogs", "workflow", "custom-palette"}.issubset(stages)
+    assert {"dialogs", "workflow", "generate", "custom-palette"}.issubset(stages)
     assert {"single-ended-50-ohm", "usb-differential-90-ohm"}.issubset(stages)
     for name in runner().CASES:
         case, source = runner().fixture(name)
@@ -68,6 +69,97 @@ def test_native_plan_uses_all_combined_circuits_and_keeps_each_pair_together(
     assert {
         tuple(sorted(section.net_names)) for section in plan.sections
     } == expected_nets
+
+
+def test_native_pair_plan_audits_via_covered_launches_without_exporting_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Actual 0.25 mm launch stubs fit a 0.6 mm via with 0.1 mm trace copper."""
+    from impedance import matching, pcbnew_adapter
+    from impedance.model import EXCLUSION_COVERED_STUB, Config, CopperFeature
+
+    case, _source = runner().fixture("usb-differential-90-ohm")
+    signal_vias = tuple(
+        via
+        for circuit in case.circuits
+        for via in circuit.vias()
+        if via.net in case.net_names
+    )
+    features = tuple(
+        CopperFeature(
+            f"native-signal-via-{index}:{layer}",
+            via.net,
+            layer,
+            "via",
+            "circle",
+            via.point,
+            via.diameter_nm,
+            via.diameter_nm,
+        )
+        for index, via in enumerate(signal_vias)
+        for layer in via.layers
+    )
+    snapshot = replace(case.snapshot(), copper_features=features)
+    # These physical launch capsules lie exactly within their same-net via:
+    # 0.25 mm centerline + 0.05 mm trace radius = 0.30 mm flash radius.
+    expected_covered = {
+        trace.trace_id
+        for trace in snapshot.traces
+        if trace.layer == "In2.Cu"
+        and trace.width_nm == 100_000
+        and trace.points[-1] == (trace.points[0][0] + 250_000, trace.points[0][1])
+        and any(
+            via.net == trace.net
+            and via.point == trace.points[0]
+            and via.diameter_nm == 600_000
+            for via in signal_vias
+        )
+    }
+    assert len(expected_covered) == 4
+    analysis = matching.analyze(Config(True, case.specifications()), snapshot)
+    assert {
+        trace.trace_id
+        for row in analysis.sections
+        if row.exclusion_reason == EXCLUSION_COVERED_STUB
+        for trace in row.traces
+    } == expected_covered
+    monkeypatch.setattr(pcbnew_adapter, "snapshot_board", lambda *_args: snapshot)
+
+    plan = runner().class_plan(case, object(), object())
+
+    assert {
+        trace.trace_id for row in plan.analysis.sections for trace in row.traces
+    } == {trace.trace_id for trace in snapshot.traces}
+    assert {trace.trace_id for row in plan.sections for trace in row.traces} == {
+        trace.trace_id for trace in snapshot.traces
+    } - expected_covered
+    assert all(not row.exclusion_reason for row in plan.sections)
+    pairs = {tuple(sorted(circuit.net_names)) for circuit in case.circuits}
+    assert all(tuple(sorted(row.net_names)) in pairs for row in plan.sections)
+
+
+def test_native_plan_rejects_unproven_covered_stub_exclusions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ignoring an audit row may never hide a real routed pair from native acceptance."""
+    from impedance import matching, pcbnew_adapter
+    from impedance.model import EXCLUSION_COVERED_STUB, Config
+
+    case, _source = runner().fixture("usb-differential-90-ohm")
+    snapshot = case.snapshot()
+    analysis = matching.analyze(Config(True, case.specifications()), snapshot)
+    invalid = replace(
+        analysis,
+        sections=(
+            replace(analysis.sections[0], exclusion_reason=EXCLUSION_COVERED_STUB),
+            *analysis.sections[1:],
+        ),
+    )
+    monkeypatch.setattr(pcbnew_adapter, "snapshot_board", lambda *_args: snapshot)
+    monkeypatch.setattr(matching, "analyze", lambda *_args: invalid)
+
+    with pytest.raises(RuntimeError, match="covered-stub.*proof"):
+        runner().class_plan(case, object(), object())
 
 
 def test_preview_waits_for_paint_and_display_callbacks() -> None:

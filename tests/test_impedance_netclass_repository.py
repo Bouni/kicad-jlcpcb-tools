@@ -59,7 +59,8 @@ def _netclass_payload(version: int = 5) -> dict[str, Any]:
 
 def _current_payload() -> dict[str, Any]:
     """Add current editing metadata while keeping historical fixtures exact."""
-    payload = _netclass_payload(6)
+    payload = _netclass_payload(8)
+    payload["reviewed_captures"] = []
     for spec in payload["specifications"]:
         spec.update(linked_layer_groups=[], independent_layers=[])
     return payload
@@ -170,7 +171,7 @@ def test_real_database_upgrade_reopen_and_conflict_preserve_other_board(
     assert first.save(changed, revision) == 2
     reopened = ImpedanceDatabase(database_path)
     assert reopened.load_config(first_id)["version"] == 1
-    assert reopened.load_config(first_id)["payload"]["schema_version"] == 6
+    assert reopened.load_config(first_id)["payload"]["schema_version"] == 8
     assert ImpedanceRepository(reopened, first_id).load() == (changed, 2)
     with pytest.raises(ConfigConflictError):
         ImpedanceRepository(reopened, first_id).save(stale_config, stale_revision)
@@ -227,7 +228,7 @@ def test_malformed_or_future_payloads_remain_untouched(corruption: str) -> None:
     """Strict decoding must never guess incomplete intent or discard stored fields."""
     payload = _netclass_payload()
     if corruption == "future_version":
-        payload["schema_version"] = 7
+        payload["schema_version"] = 9
     elif corruption == "retired_filter":
         payload["specifications"][0]["net_names"] = ["USB_P", "USB_N"]
     elif corruption == "missing_class":

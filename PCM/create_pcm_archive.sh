@@ -34,7 +34,7 @@ for file in VERSION LICENSE default_settings.json ./*.py ./*.png; do
 done
 
 echo "Copy directories"
-for dir in icons lib common dblib core bom_estimation enrichment variant kicad_backend impedance; do
+for dir in icons lib common dblib core bom_estimation enrichment variant kicad_backend impedance grid_helpers; do
 	cp -R "$dir" "$PLUGINS_DIR"
 done
 
