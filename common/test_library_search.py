@@ -100,18 +100,14 @@ def _search_ids(library, keyword, **filters):
 @pytest.mark.parametrize(
     ("keyword", "expected"),
     [
-        pytest.param(
-            "0Ω",
-            {"C17477", "C578805", "C578603", "C25077"},
-            id="zero-ohm-alone",
-        ),
+        pytest.param("0Ω", {"C17477", "C578805", "C578603"}, id="zero-ohm-alone"),
         pytest.param("0Ω 0805", {"C578805"}, id="zero-ohm-0805"),
-        pytest.param("0Ω 0402", {"C17477", "C25077"}, id="zero-ohm-0402"),
+        pytest.param("0Ω 0402", {"C17477"}, id="zero-ohm-0402"),
     ],
 )
 def test_zero_ohm_search_returns_parts(search_library, keyword, expected):
     """Both short-only and mixed-length queries must find zero-ohm parts."""
-    # Preserve substring search semantics: 0Ω also matches the 10Ω description.
+    # 0Ω is a value written with its unit, so it no longer finds the 10Ω part.
     assert _search_ids(search_library, keyword) == expected, (
         f"Issue #578 regression with SQLite {sqlite3.sqlite_version}"
     )
@@ -135,11 +131,11 @@ def test_two_digit_ohm_search_control(search_library, keyword):
 @pytest.mark.parametrize(
     ("filters", "expected"),
     [
-        pytest.param({"package": "0402"}, {"C17477", "C25077"}, id="package-0402"),
+        pytest.param({"package": "0402"}, {"C17477"}, id="package-0402"),
         pytest.param({"package": "0805"}, {"C578805"}, id="package-0805"),
         pytest.param(
             {"package": "0402", "category": "Resistors"},
-            {"C17477", "C25077"},
+            {"C17477"},
             id="resistor-category",
         ),
         pytest.param(
@@ -257,10 +253,96 @@ def test_the_prefill_settles_a_bare_prefix(search_library, board_value, expected
     assert _search_ids(search_library, keyword) == expected
 
 
-def test_the_case_pattern_is_bound_not_inlined(search_library, caplog):
+def test_the_value_pattern_is_bound_not_inlined(search_library, caplog):
     """The GLOB pattern reaches SQLite as a parameter, never as SQL text."""
     caplog.set_level(logging.DEBUG, logger=__name__)
     _search_ids(search_library, "10mΩ")
     (query,) = [r.args[0] for r in caplog.records if r.msg == "query '%s'"]
-    assert '"Description" GLOB ?' in query
-    assert "*10mΩ*" not in query
+    assert "GLOB ?" in query
+    assert "[^0-9.]" not in query
+
+
+# A value and the longer values that contain it, written where the catalog
+# writes them: at the start of the description, after a space, and after the
+# ideographic comma that separates a ferrite's impedances.  In a 717,025-part
+# snapshot 1kΩ found 7,129 parts, and only 2,412 of them were 1kΩ.
+_WHOLE_VALUE_PARTS = [
+    ("C200001", "0603", "1kΩ ±1% 100mW Chip Resistor", "Resistors"),
+    ("C200002", "0603", "5.1kΩ ±1% 100mW Chip Resistor", "Resistors"),
+    ("C200003", "0603", "51kΩ ±1% 100mW Chip Resistor", "Resistors"),
+    ("C200004", "0603", "0.1kΩ ±1% 100mW Chip Resistor", "Resistors"),
+    ("C200005", "0603", "±1% 1kΩ 100mW Thick Film Resistor", "Resistors"),
+    ("C200006", "0402", "60Ω@10MHz、1kΩ@100MHz Ferrite Bead", "Filters"),
+    ("C200007", "0805", "10uF 25V X5R Ceramic Capacitor", "Capacitors"),
+    ("C200008", "0805", "110uF 25V Ceramic Capacitor", "Capacitors"),
+    ("C200009", "0603", "15Ω ±1% 100mW Chip Resistor", "Resistors"),
+    ("C200010", "0603", "0.5Ω ±1% 100mW Chip Resistor", "Resistors"),
+]
+
+_ONE_KILOHM = {"C200001", "C200005", "C200006"}
+
+
+@pytest.mark.parametrize(
+    ("keyword", "expected"),
+    [
+        pytest.param("1kΩ", _ONE_KILOHM, id="kilohm"),
+        pytest.param("1KΩ", _ONE_KILOHM, id="upper-case-k"),
+        pytest.param("1k\u2126", _ONE_KILOHM, id="ohm-sign"),
+        pytest.param("1kΩ 0603", {"C200001", "C200005"}, id="with-package"),
+        pytest.param("5.1kΩ", {"C200002"}, id="fractional"),
+        pytest.param("51kΩ", {"C200003"}, id="two-digit"),
+        pytest.param(".1kΩ", {"C200004"}, id="leading-point"),
+        pytest.param("10uF", {"C200007"}, id="capacitance"),
+        pytest.param("10UF", {"C200007"}, id="upper-case-u"),
+        pytest.param("5Ω", {"C578005"}, id="short-term"),
+    ],
+)
+def test_a_value_with_its_unit_finds_only_that_value(search_library, keyword, expected):
+    """1kΩ finds 1kΩ parts, not the 5.1kΩ, 51kΩ and 0.1kΩ ones around it.
+
+    Short terms go through LIKE rather than the full-text index and are held to
+    the same rule: 5Ω finds neither 15Ω nor 0.5Ω.
+    """
+    _add_parts(search_library, _WHOLE_VALUE_PARTS)
+    assert _search_ids(search_library, keyword) == expected
+
+
+@pytest.mark.parametrize(
+    ("keyword", "expected"),
+    [
+        pytest.param(
+            "1k",
+            {"C200001", "C200002", "C200003", "C200004", "C200005", "C200006"},
+            id="no-unit",
+        ),
+        pytest.param("4k7", set(), id="rkm"),
+    ],
+)
+def test_a_value_without_its_unit_is_still_a_substring(
+    search_library, keyword, expected
+):
+    """A bare 1k names no unit, so it may be part of anything: 5.1kΩ, 1kHz."""
+    _add_parts(search_library, _WHOLE_VALUE_PARTS)
+    assert _search_ids(search_library, keyword) == expected
+
+
+def test_a_value_only_in_the_part_number_is_found(search_library):
+    """Some parts carry their value only in the part number, under no description.
+
+    Without the part number in the whole-value text, 4.7uH would no longer find
+    them, though the substring search always did.  Part numbers often write the
+    value in upper case, and a k, u, n, p, F or H means the same either way.
+    """
+    with closing(sqlite3.connect(search_library.partsdb_file)) as con, con:
+        con.executemany(
+            'INSERT INTO parts ("LCSC Part", "MFR.Part", "Package", "Description", '
+            '"First Category", "Library Type", "Stock") '
+            "VALUES (?, ?, 'SMD', '', 'Inductors, Coils, Chokes', 'Extended', '2400')",
+            [
+                ("C200011", "XRNR4020-4.7uH/M"),
+                ("C200012", "XRNR4020-14.7uH/M"),
+                ("C200013", "CYA1265-4.7UH"),
+                ("C200014", "CYA1265-14.7UH"),
+            ],
+        )
+    assert _search_ids(search_library, "4.7uH") == {"C200011", "C200013"}
