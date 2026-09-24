@@ -920,7 +920,14 @@ def test_main_form_controls_share_a_panel_and_follow_frame_layout(
     for factory, first_call in zip(factories, first_calls):
         calls = factory.call_args_list[first_call:]
         assert calls
-        assert all(call.args[0] is panel for call in calls)
+        # The impedance status is embedded in the panel's toolbar; other form
+        # controls remain direct panel children.
+        parents = (
+            (panel, window.upper_toolbar)
+            if factory is mainwindow.wx.StaticText
+            else (panel,)
+        )
+        assert all(any(call.args[0] is parent for parent in parents) for call in calls)
     assert window.footprint_list.GetClientSize()[0] == window.GetSize()[0] - 80
     panel.Layout.reset_mock()
     window._size = (3000, 2000)

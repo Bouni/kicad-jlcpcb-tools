@@ -15,3 +15,6 @@ saved in the printed results directory. Run with `--help` for output and cache
 options.
 
 Tests use tracked files with local edits; stage new files to include them.
+
+See [native impedance checks](linux-impedance-testing.md) for the KiCad 10 smoke
+workflow.

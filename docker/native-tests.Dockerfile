@@ -6,7 +6,7 @@ ARG DEPENDENCY_REVISION=1
 RUN test -n "$DEPENDENCY_REVISION" \
     && apt-get -o APT::Update::Error-Mode=any update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates git jq python3-pip python3-venv \
+       ca-certificates git jq python3-pip python3-venv zip unzip \
     && useradd --create-home --uid 1001 --shell /bin/bash runner \
     && rm -rf /var/lib/apt/lists/*
 FROM ordinary AS wx

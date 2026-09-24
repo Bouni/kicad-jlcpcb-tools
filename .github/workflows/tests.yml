@@ -8,7 +8,7 @@ jobs:
   tests:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.timeout_minutes || 15 }}
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -28,20 +28,26 @@ jobs:
             name: Native KiCad 7
             target: kicad
             kicad: '7'
+            timeout_minutes: 20
           - lane: native-kicad-8
             name: Native KiCad 8
             target: kicad
             kicad: '8'
+            timeout_minutes: 20
           - lane: native-kicad-9
             name: Native KiCad 9
             target: kicad
             kicad: '9'
+            timeout_minutes: 20
           - lane: native-kicad-10
             name: Native KiCad 10
             target: kicad
             kicad: '10'
+            timeout_minutes: 35
     env:
       ARCHITECTURE: ${{ matrix.kicad && matrix.kicad != '10' && 'amd64' || vars.KICAD_VALIDATION_ARCHITECTURE || 'amd64' }}
+      KICAD_CLI: /usr/bin/kicad-cli
+      KICAD_CAPTURE_PNG: '1'
     steps:
       - uses: actions/checkout@v7
       - name: Cache Python downloads

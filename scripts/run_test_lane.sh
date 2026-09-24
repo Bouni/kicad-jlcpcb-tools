@@ -13,11 +13,15 @@ if [[ ${1:-} != --inside ]]; then
     owner=${KICAD_VALIDATION_RUN_ID:-$(cat /proc/sys/kernel/random/uuid)}
     name="kicad-tests-$owner-$lane"
     receipt=".cache/native-tests/$lane/container-id"
-    trap 'if [[ -s $receipt ]]; then docker rm -f "$(cat "$receipt")" >/dev/null 2>&1 || true; fi' EXIT
+    trap 'if [[ -s $receipt ]]; then
+        docker stop --time 15 "$(cat "$receipt")" >/dev/null 2>&1 || true
+        docker rm -f "$(cat "$receipt")" >/dev/null 2>&1 || true
+    fi' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     docker run --rm --init --tmpfs /tmp:exec --user=0 --name "$name" --cidfile "$receipt" --platform "linux/$architecture" \
         --label "org.kicad-jlcpcb-tools.validation-run=$owner" \
+        --env KICAD_CLI --env KICAD_CAPTURE_PNG \
         "${mounts[@]}" --workdir "$PWD" "$image" \
         bash scripts/run_test_lane.sh --inside "$lane" "$architecture"
     exit
@@ -53,8 +57,38 @@ case "$lane" in
         export KICAD_CONFIG_HOME="$artifacts/config"
         mkdir -p "$KICAD_CONFIG_HOME/$major.0"
         printf '%s\n' '{"appearance":{"color_theme":"_builtin_default"}}' > "$KICAD_CONFIG_HOME/$major.0/pcbnew.json"
-        timeout 300s xvfb-run -a -s '-screen 0 1920x1080x24 -noreset' "${pytest[@]}" \
-            --require-native=kicad --kicad-major="$major" -m native_kicad \
-            --basetemp="$artifacts/pytest-work" 2>&1 | tee "$artifacts/pytest.log" ;;
+        selection=native_kicad
+        timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24 -noreset' "${pytest[@]}" \
+            --require-native=kicad --kicad-major="$major" -m "$selection" \
+            --basetemp="$artifacts/pytest-work" 2>&1 | tee "$artifacts/pytest.log"
+        if [[ $major == 10 ]]; then
+            # The smoke rejects checkout paths; retain its complete external output.
+            scratch=$(mktemp -d /tmp/native-impedance.XXXXXXXX)
+            trap 'status=$?
+                cp -a "$scratch/." "$artifacts/" || status=1
+                rm -rf "$scratch"
+                exit "$status"
+            ' EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24 -noreset' bash -eu -c '
+                artifacts=$1
+                shift
+                openbox >"$artifacts/openbox.log" 2>&1 &
+                manager=$!
+                trap "kill $manager 2>/dev/null || true" EXIT
+                for attempt in {1..50}; do
+                    kill -0 "$manager"
+                    if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id #"; then
+                        "$@"
+                        exit $?
+                    fi
+                    sleep 0.1
+                done
+                printf "Openbox did not become ready\n" >&2
+                exit 1
+            ' native-impedance "$scratch" .venv/bin/python scripts/linux_native_impedance_smoke.py \
+                --output "$scratch/impedance" --timeout 600 2>&1 | tee "$scratch/impedance.log"
+        fi ;;
     *) printf 'Unknown test lane: %s\n' "$lane" >&2; exit 2 ;;
 esac
