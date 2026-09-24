@@ -1,13 +1,14 @@
 """Exercise publication and bookkeeping through the real generation handler."""
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 import importlib
 from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 from zipfile import ZipFile
 
 import pytest
@@ -17,6 +18,7 @@ from .test_mainwindow_empty_zone_warning import (
     _make_window,
     mainwindow_module as handler_module,
 )
+from .test_mainwindow_impedance_flow import _reports, _reviewed_plan
 from .variant_data_support import _native_session
 
 modules = fabrication_modules
@@ -93,7 +95,7 @@ def generation(mainwindow_module: Any, modules: Any, tmp_path: Path) -> Generati
     session.refresh()
     session.set_output_variant("A")
 
-    window, _steps = _make_window([])
+    window, _steps = _make_window(window_module, [])
     window.store = store
     exporter = modules.fabrication.Fabrication(window, board)
     window.fabrication = exporter
@@ -446,4 +448,78 @@ def test_post_hook_failure_warns_after_committing_outputs(
     generation.assert_generated_outputs()
     assert generation.store.get_generation_count() == 2
     assert generation.hooks == ["pre", "post"]
+    generation.assert_released()
+
+
+@pytest.mark.parametrize("matching_review", [False, True])
+def test_impedance_reports_use_reviewed_output_variant_before_publication(
+    generation: Generation,
+    monkeypatch: pytest.MonkeyPatch,
+    matching_review: bool,
+) -> None:
+    """Only a reviewed output clone can accompany the variant's real ZIP and CSVs."""
+    plan = _reviewed_plan(generation.module)
+    report_board = object()
+    snapshot = plan.snapshot
+    if not matching_review:
+        snapshot = replace(snapshot, context_digest="different output variant text")
+    generation.window._impedance = SimpleNamespace(
+        preflight=MagicMock(return_value=plan),
+        verify_current=MagicMock(),
+        verify_disabled=MagicMock(),
+    )
+    monkeypatch.setattr(
+        generation.module, "ArchiveEntry", generation.archive.ArchiveEntry
+    )
+    monkeypatch.setattr(
+        generation.exporter,
+        "get_report_board",
+        MagicMock(return_value=report_board),
+        raising=False,
+    )
+    read_snapshot = MagicMock(return_value=snapshot)
+    monkeypatch.setattr(
+        generation.module,
+        "snapshot_impedance_board",
+        read_snapshot,
+        raising=False,
+    )
+    rendered_boards = []
+    scratch_paths = []
+
+    def export(_plan: Any, board: Any, _pcbnew: Any, scratch: Path) -> Any:
+        """Write real report members while observing the selected native boundary."""
+        rendered_boards.append(board)
+        scratch_paths.append(scratch)
+        return _reports(scratch)
+
+    monkeypatch.setattr(generation.module, "export_impedance_reports", export)
+    generation.run()
+
+    assert all(not path.exists() for path in scratch_paths)
+    if matching_review:
+        generation.wx.MessageBox.assert_not_called()
+        assert rendered_boards == [report_board]
+        generation.assert_generated_outputs()
+        with ZipFile(generation.paths["gerber_zip"]) as archive:
+            assert archive.read("Required_impedance_control.xlsx") == b"workbook"
+            assert (
+                archive.read("Required_impedance_control.html")
+                == b"<html>report</html>"
+            )
+        assert generation.store.get_generation_count() == 2
+        assert generation.hooks == ["pre", "post"]
+    else:
+        generation.wx.MessageBox.assert_called_once()
+        message = generation.wx.MessageBox.call_args.args[0]
+        assert "Validating controlled-impedance output variant" in message
+        assert rendered_boards == []
+        generation.assert_previous_outputs()
+        assert generation.store.get_generation_count() == 1
+        assert generation.hooks == ["pre"]
+    read_snapshot.assert_called_once_with(
+        report_board,
+        generation.window.pcbnew,
+        netclass_source=generation.window.pcbnew.GetBoard(),
+    )
     generation.assert_released()

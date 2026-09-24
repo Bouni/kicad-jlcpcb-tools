@@ -9,6 +9,9 @@ from collections.abc import Callable, Iterable, Sequence
 from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
+from functools import partial
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Optional
 import logging
 import os
@@ -63,6 +66,11 @@ from .events import (
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
+from .fabrication_archive import ArchiveEntry
+from .impedance.integration import ImpedanceControls
+from .impedance.pcbnew_adapter import snapshot_board as snapshot_impedance_board
+from .impedance.service import export_reports as export_impedance_reports
+from .impedance.service import validate_current as validate_impedance_current
 from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
@@ -317,6 +325,7 @@ class JLCPCBTools(wx.Frame):
         self.layer_selection.SetSelection(0)
 
         self.upper_toolbar.AddControl(self.layer_selection)
+        self._impedance = ImpedanceControls(self, self.upper_toolbar)
 
         self.upper_toolbar.AddStretchableSpace()
 
@@ -1188,6 +1197,7 @@ class JLCPCBTools(wx.Frame):
                     )
                 self.store = controller.cache
                 self._set_project_storage_error(None)
+                self._impedance.attach_store(self.store)
                 controller._update_enabled()
             except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
                 self._set_project_storage_error(error)
@@ -1209,6 +1219,7 @@ class JLCPCBTools(wx.Frame):
             self.assembly_lookup.invalidate()
             self.store = store_type(self, self.project_path, board)
             self._set_project_storage_error(None)
+            self._impedance.attach_store(self.store)
             if store_type is not Store:
                 from .variant.controller import VariantMainController
 
@@ -1252,6 +1263,10 @@ class JLCPCBTools(wx.Frame):
                 tooltip.dismiss()
             self.partlist_data_model.RemoveAll()
             self.assembly_lookup.invalidate()
+            impedance = getattr(self, "_impedance", None)
+            if impedance is not None:
+                impedance.checkbox.Enable(False)
+                impedance.configure_button.Enable(False)
         self.project_storage_status.SetLabel(
             "Part assignments are unavailable; assignment actions and generation are disabled.\n"
             "Check the log, close other windows using this project, then reopen. Settings remains available."
@@ -2530,6 +2545,48 @@ class JLCPCBTools(wx.Frame):
         )
         return False
 
+    def prepare_copper_zones(self, *, for_review: bool = False) -> bool:
+        """Share live-board filling and empty-pour confirmation with image review."""
+        refill = self.settings.get("gerber", {}).get("fill_zones", True)
+        board_args = (self.pcbnew.GetBoard(),) if for_review else ()
+        empty_pours = self.run_generation_step(
+            "Filling copper zones" if refill else "Checking copper zone fills",
+            self.fabrication.fill_zones,
+            *board_args,
+        )
+        if not empty_pours:
+            return True
+        operation = "review" if for_review else "export"
+        listed = "\n".join(f"  {pour}" for pour in empty_pours)
+        consequence = (
+            "Preview images will show the board without that copper."
+            if for_review
+            else "Plotting now ships the board without that copper."
+        )
+        dialog = wx.MessageDialog(
+            self,
+            f"These copper zones contain no filled copper:\n\n{listed}\n\n{consequence}",
+            "Empty copper zones",
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+        )
+        try:
+            dialog.SetYesNoLabels("Continue Anyway", f"Cancel {operation.title()}")
+            result = dialog.ShowModal()
+        finally:
+            dialog.Destroy()
+        self.logger.warning(
+            "Copper zones with no filled copper, user chose to %s %s:\n%s",
+            "continue" if result == wx.ID_YES else "stop",
+            operation,
+            listed,
+        )
+        if result != wx.ID_YES:
+            self.report_generation_step(
+                f"{operation.title()} stopped by empty copper zones"
+            )
+            return False
+        return True
+
     def generate_fabrication_data(self, *_: object) -> None:
         """Generate fabrication data."""
         if self._project_storage_unavailable:
@@ -2566,6 +2623,14 @@ class JLCPCBTools(wx.Frame):
             layer_selection = self.layer_selection.GetSelection()
             number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
             layer_count = int(number.group(0)) if number else None
+            impedance_controls = getattr(self, "_impedance", None)
+            impedance_plan = None
+            if impedance_controls is not None:
+                impedance_plan = self.run_generation_step(
+                    "Checking controlled-impedance configuration",
+                    impedance_controls.preflight,
+                    layer_count,
+                )
             warnings = self.run_generation_step(
                 "Checking part consistency",
                 self.fabrication.get_part_consistency_warnings,
@@ -2612,33 +2677,8 @@ class JLCPCBTools(wx.Frame):
                         )
                         return
 
-            refill = self.settings.get("gerber", {}).get("fill_zones", True)
-            empty_pours = self.run_generation_step(
-                "Filling copper zones" if refill else "Checking copper zone fills",
-                self.fabrication.fill_zones,
-            )
-            if empty_pours:
-                listed = "\n".join(f"  {pour}" for pour in empty_pours)
-                dialog = wx.MessageDialog(
-                    self,
-                    f"These copper zones contain no filled copper:\n\n{listed}\n\n"
-                    "Plotting now ships the board without that copper.",
-                    "Empty copper zones",
-                    wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
-                )
-                try:
-                    dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
-                    result = dialog.ShowModal()
-                finally:
-                    dialog.Destroy()
-                self.logger.warning(
-                    "Copper zones with no filled copper, user chose to %s export:\n%s",
-                    "continue" if result == wx.ID_YES else "stop",
-                    listed,
-                )
-                if result != wx.ID_YES:
-                    self.report_generation_step("Export stopped by empty copper zones")
-                    return
+            if not self.prepare_copper_zones():
+                return
 
             drc_ok = self.run_generation_step(
                 "Running pre-export DRC check",
@@ -2668,6 +2708,18 @@ class JLCPCBTools(wx.Frame):
                 return
 
             self.fabrication.validate_generation()
+            if impedance_plan is not None:
+                self.run_generation_step(
+                    "Validating controlled-impedance review after board preparation",
+                    impedance_controls.verify_current,
+                    impedance_plan,
+                    layer_count,
+                )
+            elif impedance_controls is not None:
+                self.run_generation_step(
+                    "Checking controlled impedance remains disabled after board preparation",
+                    impedance_controls.verify_disabled,
+                )
 
             self.run_generation_step(
                 "Plotting Gerbers",
@@ -2680,10 +2732,63 @@ class JLCPCBTools(wx.Frame):
                 self.fabrication.generate_excellon,
             )
 
-            self.run_generation_step(
-                "Creating Gerber archive (.zip)",
-                self.fabrication.zip_gerber_excellon,
-            )
+            if impedance_plan is not None:
+                report_board = self.pcbnew.GetBoard()
+                if getattr(self, "_variant_controller", None):
+                    report_board = self.run_generation_step(
+                        "Preparing controlled-impedance output board",
+                        self.fabrication.get_report_board,
+                    )
+                    report_snapshot = self.run_generation_step(
+                        "Reading controlled-impedance output board",
+                        partial(
+                            snapshot_impedance_board,
+                            netclass_source=self.pcbnew.GetBoard(),
+                        ),
+                        report_board,
+                        self.pcbnew,
+                    )
+                    self.run_generation_step(
+                        "Validating controlled-impedance output variant",
+                        validate_impedance_current,
+                        impedance_plan,
+                        impedance_plan.config,
+                        report_snapshot,
+                        layer_count,
+                    )
+                with TemporaryDirectory(prefix="jlcpcb-impedance-export-") as scratch:
+                    reports = self.run_generation_step(
+                        "Generating controlled-impedance workbook and HTML report",
+                        export_impedance_reports,
+                        impedance_plan,
+                        report_board,
+                        self.pcbnew,
+                        Path(scratch),
+                    )
+                    self.run_generation_step(
+                        "Validating controlled-impedance review after report rendering",
+                        impedance_controls.verify_current,
+                        impedance_plan,
+                        layer_count,
+                    )
+                    self.run_generation_step(
+                        "Creating Gerber archive (.zip)",
+                        self.fabrication.zip_gerber_excellon,
+                        (
+                            ArchiveEntry(reports.workbook, reports.workbook.name),
+                            ArchiveEntry(reports.html_report, reports.html_report.name),
+                        ),
+                    )
+            else:
+                if impedance_controls is not None:
+                    self.run_generation_step(
+                        "Checking controlled impedance remains disabled before Gerber archive",
+                        impedance_controls.verify_disabled,
+                    )
+                self.run_generation_step(
+                    "Creating Gerber archive (.zip)",
+                    self.fabrication.zip_gerber_excellon,
+                )
 
             self.run_generation_step(
                 "Generating placement file (CPL)",

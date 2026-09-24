@@ -1,6 +1,6 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 import csv
 from dataclasses import dataclass
@@ -49,6 +49,7 @@ from .correction_data import (
     resolve_shared_corrections,
 )
 from .fabrication_archive import (
+    ArchiveEntry,
     artifact_publication,
     build_archive,
     collect_gerber_entries,
@@ -564,6 +565,10 @@ class Fabrication:
             )
         )
 
+    def get_report_board(self) -> Any:
+        """Use the same explicit variant and board copy for reports and plotting."""
+        return self._get_plot_board()
+
     def _get_plot_board(self) -> Any:
         """Plot a serialized copy in the explicit variant without switching the editor."""
         self._require_output_snapshot()
@@ -599,13 +604,19 @@ class Fabrication:
             )
         return operation.plot_board
 
-    def fill_zones(self):
+    def fill_zones(self, board: Any = None) -> list[str]:
         """Refill copper zones, returning the zone layers that poured no copper."""
-        zones = self.board.Zones()
+        board = self.board if board is None else board
+        zones = board.Zones()
         # Refilling mutates the board, reporting does not, so only the refill is optional.
         if self.parent.settings.get("gerber", {}).get("fill_zones", True):
-            ZONE_FILLER(self.board).Fill(zones)
-            Refresh()
+            try:
+                if ZONE_FILLER(board).Fill(zones) is False:
+                    raise RuntimeError(
+                        "Copper zone filling failed. Refill zones and retry."
+                    )
+            finally:
+                Refresh()
 
         empty_pours = []
         for zone in zones:
@@ -619,7 +630,7 @@ class Fabrication:
                     continue
                 if zone.GetFilledPolysList(layer).Area() > 0:
                     continue
-                name = self.board.GetLayerName(layer)
+                name = board.GetLayerName(layer)
                 empty_pours.append(f"{zone.GetNetname() or 'no net'} on {name}")
         return empty_pours
 
@@ -894,12 +905,12 @@ class Fabrication:
             raise RuntimeError("Could not generate complete drill and map files")
         self.logger.info("Finished generating Excellon files")
 
-    def zip_gerber_excellon(self) -> Path:
+    def zip_gerber_excellon(self, extra_entries: Sequence[ArchiveEntry] = ()) -> Path:
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
         self._require_output_snapshot()
         self.validate_generation()
         zip_path = Path(self.get_staged_artifact_paths()["gerber_zip"])
-        entries = collect_gerber_entries(Path(self.gerberdir))
+        entries = collect_gerber_entries(Path(self.gerberdir)) + tuple(extra_entries)
         build_archive(zip_path, entries)
         self.logger.info("Finished generating ZIP file %s", zip_path)
         return zip_path

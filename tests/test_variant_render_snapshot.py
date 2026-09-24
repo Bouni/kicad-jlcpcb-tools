@@ -72,10 +72,10 @@ def test_initial_preparation_failure_keeps_correction_unknown_until_refresh(
 
 
 @pytest.mark.parametrize("database_state", ["absent", "legacy", "invalid"])
-def test_native_workflow_never_opens_project_database(
+def test_native_workflow_preserves_project_database(
     window_ui: Any, database_state: str
 ) -> None:
-    """With global corrections, native edits and supplier delivery preserve old project storage."""
+    """Only read-only impedance discovery may inspect old project storage."""
     path = window_ui.path / "jlcpcb" / "project.db"
     if database_state != "absent":
         path.parent.mkdir()
@@ -95,12 +95,30 @@ def test_native_workflow_never_opens_project_database(
     original_connect = sqlite3.connect
 
     def connect(database: Any, *args: Any, **kwargs: Any) -> sqlite3.Connection:
+        """Allow feature discovery without reading native state or changing storage."""
         name = str(database)
         actual = unquote(urlsplit(name).path) if name.startswith("file:") else name
-        assert Path(actual).resolve() != path.resolve(), (
-            "Variant workflow opened project SQLite"
-        )
-        return original_connect(database, *args, **kwargs)
+        is_project = Path(actual).resolve() == path.resolve()
+        if is_project:
+            assert kwargs.get("uri") and urlsplit(name).query == "mode=ro"
+        connection = original_connect(database, *args, **kwargs)
+        if is_project:
+
+            def authorize(
+                action: int, table: str, _column: str, _database: str, _source: str
+            ) -> int:
+                """Reject reads of parts, counters or other non-feature state."""
+                if action == sqlite3.SQLITE_READ and table not in {
+                    "sqlite_master",
+                    "boards",
+                    "board_feature_config",
+                    "impedance_stackup_catalog",
+                }:
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            connection.set_authorizer(authorize)
+        return connection
 
     footprint = window_ui.board.parts[0]
     footprint.SetField("LCSC", "C100")
@@ -112,6 +130,9 @@ def test_native_workflow_never_opens_project_database(
 
     def check(ui: Any) -> None:
         c = ui.controller
+        assert ui.dialog._impedance.checkbox.IsEnabled() is (
+            database_state != "invalid"
+        )
         corrections = Path(ui.catalog.correctionsdb_file)
         correction_bytes = corrections.read_bytes()
         assert Path(ui.cache.dbfile) == path

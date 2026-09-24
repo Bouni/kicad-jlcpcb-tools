@@ -18,6 +18,7 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 - Excellon files
 - BOM file
 - CPL file
+- JLCPCB controlled-impedance workbook and self-contained HTML companion, when enabled for the board
 
 Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
 
@@ -156,6 +157,20 @@ header to change the order to **Default**, **Premium**, **Economy**.
 
 ![Dragging Premium before Economy shows a translucent column preview and drop position, followed by the reordered variant columns.](images/design-variants-column-dragging.gif)
 
+### Controlled impedance
+
+Controlled impedance is an option that JLCPCB offers. To convey which traces should be impedance matched JLCPCB requires a `Required_impedance_control.xlsx` to be included in the design .zip file. If one is not included in your design package, JLCPCB will contact you and request that you provide this file.
+
+It can be somewhat time consuming and repetative to update this file each time your layout changes, but not any more. This plugin can automatically generate the complete `Required_impedance_control.xlsx` file, including target impedances, reference layers AND all of the highlighted nets from the layout.
+
+![Highlighted 50 ohm CPWG net](images/controlled_impedance_example.png)
+
+Generation also includes a self-contained `Required_impedance_control.html` companion in the board's Gerber ZIP for web viewing of the generated output.
+
+Review tracking records the latest workbook-preview view time and each signal layer's approval time in that same database. Image-view dates are hidden during review; the HTML companion shows UTC and distinguishes current from historical captures/settings. Older records show **Not recorded**. Timestamps are saved with the configuration, not on Cancel, and do not replace the required image/layer review.
+
+For inspection and regression testing, [two combined RF example boards](examples/impedance/README.md) cover short and long top/bottom/inner routes, single-ended and differential coplanar/noncoplanar designs, and layer transitions with different widths. These repository test assets are separate from production settings; their impedance dimensions are nominal, not solver-certified.
+
 ## Keyboard shortcuts
 
 Windows can be closed with ctrl-w/ctrl-q/command-w/command-w (OS dependent) and escape.
@@ -253,7 +268,7 @@ Generate all necessary assembly files for your board with a simple click.
 
 A new directory called `jlcpcb` is created, and in there, two separate folders are created, `gerber` and `production_files`.
 
-In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and zipped into the `production_files` folder, ready for upload to JLCPCB.
+In `gerber/<board-name>`, all necessary `*.gbr` and `*.drl` files are generated and zipped into the `production_files` folder, ready for upload to JLCPCB. Each board has a separate plotting directory.
 The zipfile is named `GERBER-<projectname>.zip`
 
 Also in the `production_files` folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.

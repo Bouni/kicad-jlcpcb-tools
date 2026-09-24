@@ -28,20 +28,23 @@ echo "Create folder structure for ZIP"
 mkdir -p "$PLUGINS_DIR" "$RESOURCES_DIR"
 
 echo "Copy top-level files"
-for file in VERSION default_settings.json ./*.py ./*.png; do
+for file in VERSION LICENSE default_settings.json ./*.py ./*.png; do
 	[ -e "$file" ] || continue
 	cp "$file" "$PLUGINS_DIR"
 done
 
 echo "Copy directories"
-for dir in icons lib common dblib core scripts bom_estimation enrichment variant; do
+for dir in icons lib common dblib core bom_estimation enrichment variant impedance; do
 	cp -R "$dir" "$PLUGINS_DIR"
 done
 
+echo "Copy supported helper scripts"
+mkdir -p "$PLUGINS_DIR/scripts"
+cp scripts/example_post_generate_git_checkpoint.sh "$PLUGINS_DIR/scripts"
+
 echo "Prune tests and caches from packaged plugin"
-find "$PLUGINS_DIR/common" "$PLUGINS_DIR/dblib" "$PLUGINS_DIR/core" -type f \( -name 'test_*.py' -o -name 'pytest.ini' \) -delete
-find "$PLUGINS_DIR" -type d -name '__pycache__' -prune -exec rm -rf {} +
-find "$PLUGINS_DIR" -type f -name '*.pyc' -delete
+find "$PLUGINS_DIR" -type d \( -name 'tests' -o -name 'test' -o -name '__pycache__' -o -name '.pytest_cache' -o -name '.ruff_cache' -o -name '.mypy_cache' \) -prune -exec rm -rf {} +
+find "$PLUGINS_DIR" -type f \( -name 'test_*.py' -o -name '*_test.py' -o -name 'conftest.py' -o -name 'pytest.ini' -o -name '*.pyc' -o -name '*.pyo' -o -name '.DS_Store' \) -delete
 
 cp PCM/icon.png "$RESOURCES_DIR"
 cp PCM/metadata.template.json "$METADATA_FILE"
@@ -78,4 +81,3 @@ else
 	echo "DOWNLOAD_URL=$DOWNLOAD_URL"
 	echo "INSTALL_SIZE=$INSTALL_SIZE"
 fi
-

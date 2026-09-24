@@ -194,7 +194,7 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
 
 def _generation_window(runtime: SimpleNamespace) -> tuple[SimpleNamespace, list[str]]:
     """Bind real preflight methods to the established generation test harness."""
-    window, steps = _make_window([])
+    window, steps = _make_window(runtime.mainwindow, [])
     window.library = fresh_library(runtime.library)
     window.correction_status = StatusLabel()
     window.Layout = MagicMock()
@@ -404,14 +404,18 @@ def test_startup_store_population_recovers_invalid_saved_corrections(
     }
     window.start_assembly_enrichment = MagicMock()
     window.recompute_bom_estimate = MagicMock()
+    window._impedance = SimpleNamespace(attach_store=MagicMock())
     board = window.pcbnew.GetBoard()
-    board.GetFileName = lambda: str(Path(window.project_path) / "board.kicad_pcb")
+    board_path = Path(window.project_path) / "board.kicad_pcb"
+    board_path.touch()
+    board.GetFileName = lambda: str(board_path)
     window.init_fabrication()
     window.store = None
 
     window.init_store()
 
     assert window.store is store
+    window._impedance.attach_store.assert_called_once_with(store)
     assert _displayed_corrections(window) == ["Unresolved", "Unresolved"]
     window.start_assembly_enrichment.assert_called_once_with()
     window.recompute_bom_estimate.assert_called_once_with()

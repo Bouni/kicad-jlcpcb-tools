@@ -1,5 +1,6 @@
 """Saved-board and catalog recovery contracts through actual plugin constructors."""
 
+from dataclasses import replace
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -101,6 +102,36 @@ def test_existing_project_database_cannot_abort_plugin_action(
     finally:
         if database_state == "read_only":
             database.chmod(0o644)
+
+
+def test_native_variant_reopening_restores_saved_impedance_without_writes(
+    window_ui: Any,
+) -> None:
+    """Real toolbar controls restore an enabled draft without modifying storage."""
+    saved: dict[str, Any] = {}
+
+    def configure(ui: Any) -> None:
+        controls = ui.dialog._impedance
+        assert not Path(ui.cache.dbfile).exists()
+        config = replace(controls.config, enabled=True)
+        controls._save(config)
+        controls._update_saved_status()
+        assert controls.checkbox.GetValue()
+        saved.update(
+            config=config,
+            revision=controls.revision,
+            contents=Path(ui.cache.dbfile).read_bytes(),
+        )
+
+    def reopened(ui: Any) -> None:
+        controls = ui.dialog._impedance
+        assert controls.checkbox.IsEnabled() and controls.checkbox.GetValue()
+        assert controls.config == saved["config"]
+        assert controls.revision == saved["revision"]
+        assert Path(ui.cache.dbfile).read_bytes() == saved["contents"]
+        assert ui.controller.session.reliable and not ui.messages
+
+    window_ui.run(configure, reopened)
 
 
 def test_startup_failure_stops_library_download(

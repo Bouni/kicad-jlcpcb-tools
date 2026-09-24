@@ -176,6 +176,17 @@ class Toolbar:
         self.enabled[tool] = enabled
 
 
+class FeatureControl:
+    """Retain the enabled state of the optional impedance toolbar controls."""
+
+    def __init__(self) -> None:
+        self.enabled = False
+
+    def Enable(self, enabled: bool) -> None:
+        """Apply startup and recovery availability without native wx widgets."""
+        self.enabled = enabled
+
+
 def seed_preferences(library: Any, preferences: dict[tuple[str, str], str]) -> None:
     """Install raw legacy rows, including identifiers new writes should reject."""
     with closing(sqlite3.connect(library.part_preferences_db_file)) as db, db:
@@ -236,6 +247,13 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         window.project_storage_status = MagicMock()
         window.right_toolbar = MagicMock()
         window.upper_toolbar = Toolbar()
+        window._impedance = types.SimpleNamespace(
+            attach_store=MagicMock(),
+            checkbox=FeatureControl(),
+            configure_button=FeatureControl(),
+            preflight=MagicMock(return_value=None),
+            verify_disabled=MagicMock(),
+        )
         window.Layout = MagicMock()
         window._project_storage_unavailable = False
         window._part_preferences_applied_on_open = False

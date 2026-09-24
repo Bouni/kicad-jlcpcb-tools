@@ -55,7 +55,10 @@ jobs:
   native-kicad:
     name: Native KiCad 10
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
+    env:
+      KICAD_CLI: /usr/bin/kicad-cli
+      KICAD_CAPTURE_PNG: '1'
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -63,12 +66,48 @@ jobs:
         run: |
           sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends 'kicad=10.*' python3-wxgtk4.0 python3-venv xvfb xauth
+          sudo apt-get install -y --no-install-recommends 'kicad=10.*' python3-wxgtk4.0 python3-venv xvfb xauth x11-utils openbox
           /usr/bin/python3 -m venv --system-site-packages .venv-kicad
       - name: Install test dependencies
         run: .venv-kicad/bin/python -m pip install '.[dev]'
+      - name: Prepare disposable native test preferences
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-kicad/config/10.0"
+          printf '%s\n' '{"appearance":{"color_theme":"_builtin_default"}}' > "$RUNNER_TEMP/native-kicad/config/10.0/pcbnew.json"
+          echo "KICAD_CONFIG_HOME=$RUNNER_TEMP/native-kicad/config" >> "$GITHUB_ENV"
       - name: Require native variant editing, windows, and fabrication checks
-        run: >-
-          timeout 300s xvfb-run -a -s '-screen 0 1920x1080x24'
-          .venv-kicad/bin/python -m pytest -rs
-          --require-native=kicad -m native_kicad
+        shell: bash
+        run: |
+          timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24' \
+          .venv-kicad/bin/python -m pytest -rs \
+          --require-native=kicad -m native_kicad \
+          --basetemp="$RUNNER_TEMP/native-kicad/pytest-work" \
+          --junitxml="$RUNNER_TEMP/native-kicad/pytest.xml" \
+          2>&1 | tee "$RUNNER_TEMP/native-kicad/pytest.log"
+      - name: Exercise native impedance review and reports
+        shell: bash
+        run: |
+          timeout 900s xvfb-run -a -s '-screen 0 1920x1080x24' sh -eu -c '
+            openbox >"$RUNNER_TEMP/native-kicad/openbox.log" 2>&1 &
+            window_manager=$!
+            trap "kill $window_manager 2>/dev/null || true" EXIT
+            for attempt in $(seq 1 50); do
+              kill -0 "$window_manager"
+              if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id #"; then
+                .venv-kicad/bin/python scripts/linux_native_impedance_smoke.py \
+                  --output "$RUNNER_TEMP/native-kicad/impedance" --timeout 600
+                exit $?
+              fi
+              sleep 0.1
+            done
+            echo "Openbox did not become ready" >&2
+            exit 1
+          ' 2>&1 | tee "$RUNNER_TEMP/native-kicad/impedance.log"
+      - name: Retain native workflow products and validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-kicad
+          path: ${{ runner.temp }}/native-kicad
+          if-no-files-found: error
+          retention-days: 14
