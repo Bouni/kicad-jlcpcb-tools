@@ -113,7 +113,14 @@ class PartSelectorDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(800, -1)),
             wx.TE_PROCESS_ENTER,
         )
-        self.keyword.SetHint("e.g. 10k 0603")
+        self.keyword.SetHint("e.g. 10kΩ 0603")
+        self.keyword.SetToolTip(
+            "Every word must appear in the part.\n"
+            "A value in Ω, F or H (10kΩ, 100nF, 4.7uH) finds only that value: "
+            "1kΩ won't find 5.1kΩ.\n"
+            "With the Ω written, m is milli and M is mega: 10mΩ is milliohms, "
+            "10MΩ megohms."
+        )
         # A prefilled box starts with the cursor at the end, where the Ω and µ
         # buttons have always added their symbol.
         self.keyword.SetInsertionPointEnd()
@@ -126,7 +133,9 @@ class PartSelectorDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(20, -1)),
             0,
         )
-        self.ohm_button.SetToolTip("Append the Ω symbol to the search string")
+        self.ohm_button.SetToolTip(
+            "Type Ω. After a value (10kΩ) it matches that exact value."
+        )
 
         self.micro_button = wx.Button(
             self,
@@ -136,7 +145,9 @@ class PartSelectorDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(20, -1)),
             0,
         )
-        self.micro_button.SetToolTip("Append the µ symbol to the search string")
+        self.micro_button.SetToolTip(
+            "Type µ. It searches as u, which is how the catalog writes it."
+        )
 
         manufacturer_label = wx.StaticText(
             self,
@@ -961,15 +972,28 @@ class PartSelectorDialog(wx.Dialog):
     def help(self, *_):
         """Show message box with help instructions."""
         title = "Help"
-        text = """
-        Use % as wildcard selector. \n
-        For example DS24% will match DS2411\n
-        %QFP% will match LQFP-64 as well as TQFP-32\n
-        The keyword search box is automatically post- and prefixed with wildcard operators.
-        The others are not by default.\n
-        The keyword search field is applied to "LCSC Part", "Description", "MFR.Part",
-        "Package" and "Manufacturer".\n
-        Searching occurs as input fields are changed.\n
-        The results are limited to 1000.
-        """
+        text = (
+            "Keywords\n"
+            "Every word you type must appear in the part, in any order. A word "
+            "also matches inside longer text: 0603 finds 0603WAF1002T5E. Case "
+            "doesn't matter. Words are searched in the LCSC number, part number, "
+            "description, package, manufacturer, category and library type. "
+            "Words of one or two characters search the description only.\n"
+            "\n"
+            "Values\n"
+            "A resistance, capacitance or inductance written with its unit (10kΩ, "
+            "100nF, 4.7uH) finds that value only: 1kΩ doesn't find 5.1kΩ or 51kΩ. "
+            "Without the unit, 1k finds any text that contains 1k, and other units "
+            "still match inside longer text: 50V also finds 150V.\n"
+            "With the Ω written, m is milli and M is mega: 10mΩ finds milliohm "
+            "parts such as shunts, 10MΩ finds megohm ones.\n"
+            "µ and u are the same: 10µF finds 10uF parts. The Ω and µ buttons "
+            "type those symbols at the cursor.\n"
+            "\n"
+            "The other fields each search their own column. With no keywords, "
+            "only Part number starts a search.\n"
+            "Results update as you type. At most 1000 parts are shown: the first "
+            "1000 in the current sort order. If you see 1000, add a word or a "
+            "filter."
+        )
         wx.MessageBox(text, title, style=wx.ICON_INFORMATION)
