@@ -2,12 +2,14 @@
 
 import re
 
-# No anchors, so the same pattern answers both questions below: matched in
-# full for "is this a part number", searched for in "is there one in this
-# text". The digits are spelled out as [0-9] rather than \d because \d also
-# admits digits from other scripts, which LCSC does not issue and which the
-# part-preference validator this module absorbs has always rejected.
-_PART_NUMBER = re.compile(r"C[0-9]+")
+# A C and a run of decimal digits from any script, so a number is always read
+# whole: "C123４" is one malformed token, never C123 with something after it.
+# LCSC issues ASCII digits only, and the part-preference validator this module
+# absorbs has always rejected the rest, so only an ASCII token is a part
+# number. No anchors, so the same pattern answers both questions below:
+# matched in full for "is this a part number", searched for in "is there one
+# in this text".
+_PART_NUMBER = re.compile(r"C\d+")
 
 
 def normalize_lcsc(value):
@@ -37,7 +39,8 @@ def is_lcsc_part(value):
     It is strict on purpose: the value has to be a part number and nothing
     else. Text that merely contains one is :func:`extract_lcsc`'s business.
     """
-    return bool(_PART_NUMBER.fullmatch(normalize_lcsc(value)))
+    value = normalize_lcsc(value)
+    return bool(_PART_NUMBER.fullmatch(value)) and value.isascii()
 
 
 def extract_lcsc(text):
@@ -56,9 +59,16 @@ def extract_lcsc(text):
     four digits, but shorter values are accepted everywhere else in the
     plugin and by the tests over this path, so no floor is applied here.
 
+    The run is read whole and then judged by :func:`is_lcsc_part`, so a run
+    with a digit from another script in it ("C12345６") yields nothing rather
+    than its ASCII prefix, which would name a different part. A superscript
+    is not a decimal digit and ends the run, so a footnote marker ("C123¹")
+    does not spoil the number before it.
+
     The result is canonical, so what is pasted and what is stored agree.
     """
     if not text:
         return ""
     match = _PART_NUMBER.search(str(text).upper())
-    return match.group(0) if match else ""
+    token = match.group(0) if match else ""
+    return token if is_lcsc_part(token) else ""

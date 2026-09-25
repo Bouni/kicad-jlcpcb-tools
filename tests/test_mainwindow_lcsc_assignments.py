@@ -5,7 +5,7 @@ from contextlib import closing
 from copy import deepcopy
 import sqlite3
 from types import MethodType, SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import MagicMock
 import weakref
 
@@ -105,6 +105,46 @@ def test_selected_deleted_footprint_is_skipped(
     assert window.store.get_part("R1")["lcsc"] == "C100"
     assert window.store.get_part("R2")["lcsc"] == "C200"
     window.start_assembly_enrichment.assert_called_once_with(["R2"])
+
+
+@pytest.mark.parametrize(
+    ("clipboard", "expected"),
+    [
+        ("C200６", None),
+        ("C２００", None),
+        ("https://www.lcsc.com/product-detail/C200.html", "C200"),
+        ("LCSC Part C200 in stock", "C200"),
+    ],
+)
+def test_paste_assigns_the_whole_number_or_leaves_everything_as_it_was(
+    clipboard: str,
+    expected: Optional[str],  # noqa: UP045
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A number spoiled by a foreign digit is refused, never cut to its prefix.
+
+    "C200６" cut short would be C200, a real part the person never named, and
+    the paste would carry it to the footprint, the project database and the
+    remembered preference. Refused, it changes nothing, like text that holds
+    no part number; a number in a URL or a sentence still pastes.
+    """
+    window = make_window(part_preferences={("R_0603", "10k"): "C300"})
+
+    act("paste", window, mainwindow, monkeypatch, clipboard_text=clipboard)
+
+    lcsc = expected or "C100"
+    fp = window.pcbnew.GetBoard().FindFootprintByReference("R1")
+    assert fp.field.text == lcsc
+    assert window.test_rows["R1"]["lcsc"] == lcsc
+    assert [row["lcsc"] for row in project_rows(window)] == [lcsc]
+    reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
+    assert reopened.get_part("R1")["lcsc"] == lcsc
+    assert window.library.get_part_preference("R_0603", "10k") == (expected or "C300")
+    if expected is None:
+        window.library.save_part_preferences.assert_not_called()
+        window.start_assembly_enrichment.assert_not_called()
 
 
 def _seed_enrichment(window: Any) -> None:

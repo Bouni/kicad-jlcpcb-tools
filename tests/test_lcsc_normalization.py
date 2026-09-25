@@ -90,15 +90,20 @@ class TestExtractLcsc:
         assert extract_lcsc(text) == ""
 
     @pytest.mark.parametrize(
-        ("text", "expected"), [("C１２３", ""), ("C123４", "C123")]
+        "text", ["C１２３", "C123４", "C12345６", "C12３45", "see C12345６ here"]
     )
-    def test_only_ascii_digits_are_part_of_the_number(self, text, expected):
-        """Pasting reads digits the way the footprint reader does.
+    def test_a_number_with_foreign_digits_is_refused_whole(self, text):
+        """A run holding a digit from another script yields nothing at all.
 
-        A number carried off in non-ASCII digits would be written to the field
-        and then read back from it as no part at all.
+        Pasting reads digits the way the footprint reader does, and it reads
+        the run whole: stopping at the first foreign digit would hand back the
+        ASCII prefix, a different part that looks entirely valid.
         """
-        assert extract_lcsc(text) == expected
+        assert extract_lcsc(text) == ""
+
+    def test_a_superscript_ends_the_number(self):
+        """A footnote marker is not a decimal digit, so the number stands."""
+        assert extract_lcsc("C123¹") == "C123"
 
     def test_it_is_more_lenient_than_is_lcsc_part(self):
         """The two answer different questions and are not interchangeable.
