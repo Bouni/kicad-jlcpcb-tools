@@ -940,3 +940,62 @@ def test_backup_schematics_follows_the_loaded_project(tmp_path: Path) -> None:
     )
 
     assert set(_backup_members(backup)) == {"power.kicad_sch"}
+
+
+def _sheet_reference(name: str) -> str:
+    """Return a Sheetfile property naming `name`, escaped as KiCad writes it."""
+    escaped = name.replace("\\", "\\\\")
+    return f'  (sheet (property "Sheetfile" "{escaped}"))\n'
+
+
+@pytest.mark.skipif(os.name == "nt", reason="backslash is a separator on Windows")
+def test_backup_member_names_never_split_a_posix_backslash(tmp_path: Path) -> None:
+    """A backslash in a POSIX file name is a character, not a way out of the backup."""
+    project = tmp_path / "board"
+    shared = tmp_path / "shared"
+    project.mkdir()
+    shared.mkdir()
+    crafted = "..\\" * 4 + "escaped.kicad_sch"
+    (project / crafted).write_text("(kicad_sch)\n", encoding="utf-8")
+    (shared / crafted).write_text("(kicad_sch)\n", encoding="utf-8")
+    (project / "board.kicad_sch").write_text(
+        "(kicad_sch\n"
+        + _sheet_reference(crafted)
+        + _sheet_reference(f"../shared/{crafted}")
+        + ")\n",
+        encoding="utf-8",
+    )
+
+    members = _backup_members(
+        backup_schematics(str(project), "board.kicad_pcb", "before.zip")
+    )
+
+    assert len(members) == 3
+    for name in members:
+        assert "\\" not in name
+        assert not name.startswith("/")
+        assert ".." not in name.split("/")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX absolute paths")
+def test_backup_schematics_refuses_two_sheets_under_one_name(tmp_path: Path) -> None:
+    """An in-project copy of outside-project/<path> would hide the outside sheet."""
+    project = tmp_path / "board"
+    shared = tmp_path / "shared"
+    shared.mkdir(parents=True)
+    outside = shared / "power.kicad_sch"
+    outside.write_text("(kicad_sch)\n", encoding="utf-8")
+    mirror = project.joinpath("outside-project", *outside.parts[1:])
+    mirror.parent.mkdir(parents=True)
+    mirror.write_text("(kicad_sch)\n", encoding="utf-8")
+    (project / "board.kicad_sch").write_text(
+        "(kicad_sch\n"
+        + _sheet_reference("../shared/power.kicad_sch")
+        + _sheet_reference(os.path.relpath(mirror, project))
+        + ")\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="same name"):
+        backup_schematics(str(project), "board.kicad_pcb", "before.zip")
+    assert not (project / "jlcpcb").exists()

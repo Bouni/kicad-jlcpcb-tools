@@ -520,22 +520,37 @@ def atomic_write_schematic(path: str, content: str) -> None:
         f.write(content)
 
 
+def _path_parts(path: str) -> list[str]:
+    """Split a path at this platform's own separators only.
+
+    A backslash is an ordinary character in a POSIX file name, so it does
+    not split a name there.
+    """
+    separators = "".join(re.escape(sep) for sep in (os.sep, os.altsep) if sep)
+    return [part for part in re.split(f"[{separators}]", path) if part]
+
+
 def _backup_member_name(path: str, project_path: str) -> str:
     """Name a sheet inside a backup by its place in the project.
 
     A sheet outside the project folder, such as one shared through `..`,
     goes under `outside-project/` with its absolute path, so no member name
-    climbs out of the folder the backup is extracted into.
+    climbs out of the folder the backup is extracted into. A backup is read
+    on any platform, so a backslash within a file name is written as
+    `%5C` rather than left for an extractor to take as a separator.
     """
     try:
-        relative = os.path.relpath(path, project_path)
+        parts = _path_parts(os.path.relpath(path, project_path))
     except ValueError:  # Another drive on Windows
-        relative = os.pardir
-    if relative != os.pardir and not relative.startswith(os.pardir + os.sep):
-        return relative.replace(os.sep, "/")
-    drive, tail = os.path.splitdrive(os.path.abspath(path))
-    parts = [drive.replace(":", "")] + re.split(r"[\\/]", tail)
-    return "/".join(["outside-project", *(part for part in parts if part)])
+        parts = [os.pardir]
+    if parts[:1] == [os.pardir]:
+        drive, tail = os.path.splitdrive(os.path.abspath(path))
+        parts = [
+            "outside-project",
+            *_path_parts(drive.replace(":", "")),
+            *_path_parts(tail),
+        ]
+    return "/".join(part.replace("\\", "%5C") for part in parts)
 
 
 def backup_schematics(
@@ -578,7 +593,8 @@ def backup_schematics(
 
     Raises:
         ValueError: If zip_name is not a plain file name ending in `.zip`,
-            or a sheet is not a KiCad schematic.
+            a sheet is not a KiCad schematic, or two sheets would be stored
+            under one name.
         FileExistsError: If a backup named zip_name already exists.
         SchematicLockedError: Naming every schematic with an unapproved lock.
         OSError: If a sheet cannot be read or the backup cannot be written.
@@ -598,6 +614,16 @@ def backup_schematics(
             sheet for root in roots for sheet in collect_schematic_hierarchy(root)
         )
     )
+    members: dict[str, str] = {}
+    for sheet in sheets:
+        name = _backup_member_name(sheet, project_path)
+        if name in members:
+            # An extractor would keep only one of the two
+            raise ValueError(
+                f"Sheets '{members[name]}' and '{sheet}' would be backed up "
+                f"under the same name '{name}'"
+            )
+        members[name] = sheet
     lock_paths = list(sheets)
     own_schematic = project_schematic_path(project_path, board_filename, project_name)
     if own_schematic and own_schematic not in lock_paths:
@@ -611,6 +637,6 @@ def backup_schematics(
             f, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False
         ) as archive,
     ):
-        for sheet in sheets:
-            archive.write(sheet, _backup_member_name(sheet, project_path))
+        for name, sheet in members.items():
+            archive.write(sheet, name)
     return zip_path
