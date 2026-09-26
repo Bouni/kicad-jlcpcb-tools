@@ -287,6 +287,29 @@ class SettingsDialog(wx.Dialog):
 
         self.lcsc_bom_cpl_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
+        ##### Manufacturer and MPN columns in the BOM #####
+
+        self.bom_manufacturer_columns_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Add manufacturer and MPN columns to BOM",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="gerber_bom_manufacturer_columns",
+        )
+
+        self.bom_manufacturer_columns_setting.SetToolTip(
+            wx.ToolTip(
+                "Whether the BOM gets Manufacturer and MPN columns, "
+                "looked up in the local parts catalog by LCSC number"
+            )
+        )
+
+        self.bom_manufacturer_columns_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
+
         ##### Check if order/serial number placeholder is present #####
 
         self.order_number_setting = wx.CheckBox(
@@ -710,6 +733,9 @@ class SettingsDialog(wx.Dialog):
         self._add_setting_row(
             settings_grid, self.order_number_image, self.order_number_setting
         )
+        self._add_setting_row(
+            settings_grid, None, self.bom_manufacturer_columns_setting
+        )
         self._add_setting_row(settings_grid, None, self.highlight_matches_setting)
         self._add_setting_row(settings_grid, None, self.simplify_stock_setting)
         self._add_setting_row(settings_grid, None, self.stock_concern_setting)
@@ -843,6 +869,10 @@ class SettingsDialog(wx.Dialog):
             loadBitmapScaled(icon, self.parent.scale_factor, static=True)
         )
 
+    def update_bom_manufacturer_columns(self, enabled):
+        """Update the BOM Manufacturer and MPN columns setting value."""
+        self.bom_manufacturer_columns_setting.SetValue(bool(enabled))
+
     def update_order_number(self, check):
         """Update settings dialog according to the settings."""
         self.order_number_setting.SetValue(check)
@@ -912,6 +942,11 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_lcsc_bom_cpl(
             self.parent.settings.get("gerber", {}).get("lcsc_bom_cpl", True)
+        )
+        self.update_bom_manufacturer_columns(
+            self.parent.settings.get("gerber", {}).get(
+                "bom_manufacturer_columns", False
+            )
         )
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)
