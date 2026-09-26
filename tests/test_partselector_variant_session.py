@@ -256,3 +256,77 @@ def test_cancel_dismisses_without_assignment_then_reopens_for_another_variant(
         assert not ui.messages
 
     window_ui.run(check)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_searched_unlisted_number_is_offered_and_assigned_in_one_click(
+    window_ui: Any, legacy: bool
+) -> None:
+    """The offer follows the search and assigns to the selector's captured target."""
+    unlisted = "C46551386"
+    if legacy:
+        window_ui.board.names = []
+        window_ui.board.current = ""
+
+    def check(ui: Any) -> None:
+        ui.catalog.parts[unlisted] = {}
+        context = assignment_context(ui, "R1", None if legacy else "B")
+        selector = open_selector(ui, {"R1": ""}, context)
+        offer = selector.typed_lcsc_button
+        assert not offer.IsShown()
+        selector.keyword.ChangeValue("C321")
+        selector.search()
+        assert not offer.IsShown()  # The exact number is among the results
+        selector.keyword.ChangeValue(unlisted)
+        selector.search()
+        assert offer.IsShown()
+        assert offer.GetLabel() == (
+            f"{unlisted} isn't in the JLC library. Assign it anyway"
+        )
+        button(ui.wx, offer)
+        wait_until(ui.wx, lambda: bool(ui.posted))
+        event = ui.posted[0]
+        assert (event.references, event.assignment_context, event.lcsc) == (
+            ("R1",),
+            context,
+            unlisted,
+        )
+        wait_until(ui.wx, lambda: not selector)
+        if legacy:
+            assert ui.board.parts[0].fields["LCSC"] == unlisted
+        else:
+            snapshot = ui.controller.session.snapshot
+            assert snapshot.get("component-1", "B").lcsc == unlisted
+            assert snapshot.get("component-1", "A").lcsc == "C1"
+        assert not ui.messages
+
+    window_ui.run(check)
+
+
+def test_searched_number_offer_sits_beside_the_result_count(window_ui: Any) -> None:
+    """The offer stays on the result row, whole, as the count text grows."""
+    window_ui.board.names = []
+    window_ui.board.current = ""
+
+    def check(ui: Any) -> None:
+        unlisted = "C46551386"
+        ui.catalog.parts[unlisted] = {}
+        selector = open_selector(ui, {"R1": ""})
+        selector.keyword.ChangeValue(unlisted)
+        one_row = ui.catalog._search({})
+        # The second search hits the 1000-row limit, so the count text widens
+        # while the offer's label stays the same.
+        for rows in (one_row, one_row * 1000):
+            ui.catalog.search.side_effect = lambda _parameters, rows=rows: rows
+            selector.search()
+            pump(ui.wx)
+            offer, count = selector.typed_lcsc_button.GetRect(), selector.result_count
+            row = count.GetRect()
+            assert offer.x >= row.GetRight(), count.GetLabel()
+            assert offer.y < row.GetBottom() and row.y < offer.GetBottom()
+            assert offer.GetRight() <= selector.GetClientSize().width
+            assert offer.width >= selector.typed_lcsc_button.GetBestSize().width
+        selector.Close()
+        wait_until(ui.wx, lambda: not selector)
+
+    window_ui.run(check)

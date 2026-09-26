@@ -1287,13 +1287,15 @@ class JLCPCBTools(wx.Frame):
             return controller.assign_parts(e)
         try:
             details = self._catalog_get_part_details(e.lcsc, strict=True)
+            # An unlisted number must stay a cached miss, or it reads as listed.
+            listed = bool(details)
             details.update(type=e.type, stock=e.stock)
             assigned = self._apply_lcsc_assignments(
                 dict.fromkeys(e.references, e.lcsc),
                 details={e.lcsc: details},
                 remember_part_preferences=True,
             )
-            if assigned:
+            if assigned and listed:
                 key = normalize_lcsc(e.lcsc)
                 self._catalog_details[key] = deepcopy(details)
                 self.partlist_data_model.set_catalog_details(
