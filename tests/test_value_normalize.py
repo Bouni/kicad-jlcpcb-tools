@@ -9,8 +9,9 @@ from value_normalize import (
     INDUCTANCE,
     RESISTANCE,
     canonicalize,
-    exact_case_resistance,
+    fold_signs,
     quantity_for_reference,
+    whole_value,
 )
 
 
@@ -535,6 +536,7 @@ def test_a_value_already_in_catalog_form_is_returned_unchanged():
 @pytest.mark.parametrize(
     ("term", "expected"),
     [
+        # Case is the whole meaning of an m or M on a resistance (issue #849).
         ("10mΩ", "10mΩ"),
         ("10MΩ", "10MΩ"),
         ("1.5mΩ", "1.5mΩ"),
@@ -543,45 +545,102 @@ def test_a_value_already_in_catalog_form_is_returned_unchanged():
         # U+2126 OHM SIGN is spelled as the Greek capital omega the catalog
         # writes: no description in a 717,025-part snapshot uses U+2126.
         ("10m\u2126", "10mΩ"),
+        ("1kΩ", "1kΩ"),
+        ("4.7kΩ", "4.7kΩ"),
+        ("100Ω", "100Ω"),
+        ("1Ω", "1Ω"),
+        ("100nF", "100nF"),
+        ("10uF", "10uF"),
+        ("22pF", "22pF"),
+        ("4.7uH", "4.7uH"),
+        ("10mH", "10mH"),
+        # Supercapacitors are written in whole farads.
+        ("1F", "1F"),
+        # The catalog writes the zero before a point, and the search refuses
+        # a digit or a point in front of the value, so it has to be there.
+        (".1uF", "0.1uF"),
+        (".47Ω", "0.47Ω"),
+        (".5mΩ", "0.5mΩ"),
+        # Where case means nothing, the catalog's is used: after a digit it
+        # writes no KΩ, UF, NF, PF, UH or NH at all.
+        ("1KΩ", "1kΩ"),
+        ("100NF", "100nF"),
+        ("10UF", "10uF"),
+        ("22PF", "22pF"),
+        ("4.7UH", "4.7uH"),
+        ("100nf", "100nF"),
+        ("100nh", "100nH"),
+        # Micro signs are read as the catalog's u.
+        ("10\u00b5F", "10uF"),
+        ("4.7\u03bcH", "4.7uH"),
     ],
 )
-def test_a_resistance_written_with_its_unit_keeps_its_prefix_case(term, expected):
-    """10mΩ and 10MΩ are nine orders of magnitude apart and one letter's case.
-
-    The catalog's full-text index folds case, so a search for either found both
-    (issue #849); these are the terms the search must match exactly.
-    """
-    assert exact_case_resistance(term) == expected
+def test_a_value_written_with_its_unit_is_matched_whole(term, expected):
+    """1kΩ is one value, so the search can refuse the 5.1kΩ that contains it."""
+    assert whole_value(term) == expected
 
 
 @pytest.mark.parametrize(
     "term",
     [
         # No unit: 10m could be a length, a current, or a megohm written in lower
-        # case, so its case says nothing.
+        # case, and 1k is part of 1kHz and 1kV as well as 1kΩ.
         "10m",
         "10M",
-        "1m",
-        # No m or M, so no case to keep.
-        "10Ω",
-        "4.7kΩ",
-        "10KΩ",
-        # Another quantity.
-        "10mF",
+        "1k",
+        "100n",
+        # Not how the catalog writes a value.
+        "4k7",
+        "1kR",
+        "10kohm",
+        "10mohm",
+        "10ω",
+        # A prefix the quantity has no rung for: there are no megahenries or
+        # microohms, and 1MF is an old way of writing microfarads.
+        "10MH",
+        "1MF",
+        "10uΩ",
+        # Another quantity, or not a value at all.
         "10MHz",
         "10mA",
-        # Not a bare value.  Nothing but digits, a point, the prefix and the ohm
-        # sign ever reaches a GLOB pattern, so none of * ? [ can.
+        "50V",
+        "2N3904",
+        "0603",
+        # Only ASCII digits: a fullwidth or Arabic-Indic one never appears in
+        # the catalog's values.
+        "\uff11k\u03a9",
+        "\u0663k\u03a9",
+        # Nothing but digits, a point, a prefix and a unit ever reaches a GLOB
+        # pattern, so none of * ? [ can.
         "1*mΩ",
         "1?MΩ",
         "[1]mΩ",
         "mΩ",
+        "kΩ",
         "10mΩ5",
         "x10mΩ",
-        "10mohm",
+        "1FF",
         "",
     ],
 )
-def test_anything_else_is_left_to_the_case_blind_search(term):
-    """Only a resistance spelled with its prefix and its Ω is matched exactly."""
-    assert exact_case_resistance(term) is None
+def test_anything_else_is_left_to_the_substring_search(term):
+    """Only a number, an optional prefix and Ω, F or H is matched whole."""
+    assert whole_value(term) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("10\u00b5F", "10uF"),
+        ("10\u03bcF", "10uF"),
+        ("4.7\u00b5", "4.7u"),
+        ("10uF", "10uF"),
+        ("LM358", "LM358"),
+        ("5\u2126", "5\u03a9"),
+        ("10m\u2126", "10m\u03a9"),
+        ("10MΩ", "10MΩ"),
+    ],
+)
+def test_micro_and_ohm_signs_are_spelled_as_the_catalog_writes_them(text, expected):
+    """Both micro signs are written u, and the ohm sign as the Greek omega."""
+    assert fold_signs(text) == expected
