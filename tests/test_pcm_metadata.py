@@ -14,6 +14,7 @@ _PRESERVED_FILES = [
     r"plugins/[^/]+/settings\.json$",
     r"plugins/[^/]+/jlcpcb/corrections\.db$",
     r"plugins/[^/]+/jlcpcb/mappings\.db$",
+    r"plugins/[^/]+/jlcpcb/global\.db$",
 ]
 
 
