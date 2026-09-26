@@ -1277,6 +1277,7 @@ class VariantMatrixView(gridlib.Grid):
             actions.extend(
                 (
                     ("paste", "Paste\tCmd/Ctrl+V"),
+                    ("enter_lcsc", "Enter LCSC…"),
                     ("copy_to", "Copy to variants…"),
                     ("remove", "Clear assignment"),
                     ("use_base", "Use base assignment"),
@@ -1288,6 +1289,7 @@ class VariantMatrixView(gridlib.Grid):
             item = menu.Append(wx.ID_ANY, label)
             if action in (
                 "paste",
+                "enter_lcsc",
                 "copy_to",
                 "remove",
                 "use_base",
