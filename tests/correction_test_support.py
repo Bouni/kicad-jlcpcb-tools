@@ -30,8 +30,9 @@ def make_library(
     library.datadir = str(global_dir)
     library.partsdb_file = str(global_dir / "parts.db")
     library.rotationsdb_file = str(global_dir / "rotations.db")
-    library.part_preferences_db_file = str(global_dir / "mappings.db")
-    library.globalcorrectionsdb_file = str(global_dir / "corrections.db")
+    library.global_db_file = str(global_dir / "global.db")
+    library.part_preferences_db_file = library.global_db_file
+    library.globalcorrectionsdb_file = library.global_db_file
     library.localcorrectionsdb_file = str(project_dir / "jlcpcb" / "project.db")
     library.correctionsdb_file = (
         library.localcorrectionsdb_file if local else library.globalcorrectionsdb_file
@@ -53,6 +54,7 @@ def fresh_library(library: Any) -> Any:
         "datadir",
         "partsdb_file",
         "rotationsdb_file",
+        "global_db_file",
         "part_preferences_db_file",
         "globalcorrectionsdb_file",
         "localcorrectionsdb_file",
