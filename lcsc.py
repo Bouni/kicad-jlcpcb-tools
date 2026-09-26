@@ -72,3 +72,31 @@ def extract_lcsc(text):
     match = _PART_NUMBER.search(str(text).upper())
     token = match.group(0) if match else ""
     return token if is_lcsc_part(token) else ""
+
+
+# Text typed or pasted into the Enter LCSC prompt names a part only where the
+# number stands alone: no letter or digit touches it, so the C0603 inside
+# RC0603FR or C0603C104K5RACTU is never read as a part, while the "_" or "/" a
+# product link puts before it is fine. As with _PART_NUMBER, the digit run is
+# read whole and then judged by is_lcsc_part.
+_STANDALONE_PART_NUMBER = re.compile(r"(?<![^\W_])C\d+(?![^\W_])", re.IGNORECASE)
+
+
+def parse_lcsc_entry(text):
+    """Return the one LCSC part number in typed or pasted text, or "".
+
+    The Enter LCSC prompt accepts a bare number and also a product link copied
+    from lcsc.com or jlcpcb.com, so the number is searched for rather than
+    matched against the whole text. It is stricter than :func:`extract_lcsc`
+    because the prompt shows what it read and waits for OK: the number has to
+    stand alone, and text naming two different numbers is ambiguous and yields
+    nothing, so the prompt never guesses which was meant.
+    """
+    found = {
+        normalize_lcsc(match)
+        for match in _STANDALONE_PART_NUMBER.findall(str(text or ""))
+    }
+    if len(found) != 1:
+        return ""
+    (lcsc,) = found
+    return lcsc if is_lcsc_part(lcsc) else ""

@@ -24,7 +24,7 @@ mainwindow = support.mainwindow
 make_window = support.make_window
 
 
-@pytest.mark.parametrize("action", ["picker", "paste", "apply"])
+@pytest.mark.parametrize("action", ["picker", "paste", "enter", "apply"])
 def test_assignment_syncs_board_store_model_and_survives_reopen(
     action: str,
     make_window: Callable[..., Any],
@@ -58,7 +58,7 @@ def test_assignment_syncs_board_store_model_and_survives_reopen(
         )
 
 
-@pytest.mark.parametrize("action", ["picker", "paste", "apply", "open"])
+@pytest.mark.parametrize("action", ["picker", "paste", "enter", "apply", "open"])
 def test_assignment_caches_missing_catalog_details_once_per_action(
     action: str,
     make_window: Callable[..., Any],
@@ -86,7 +86,7 @@ def test_assignment_caches_missing_catalog_details_once_per_action(
     window.start_assembly_enrichment.assert_called_once()
 
 
-@pytest.mark.parametrize("action", ["paste", "apply"])
+@pytest.mark.parametrize("action", ["paste", "enter", "apply"])
 def test_selected_deleted_footprint_is_skipped(
     action: str,
     make_window: Callable[..., Any],
@@ -159,7 +159,7 @@ def _seed_enrichment(window: Any) -> None:
     window.populate_footprint_list.reset_mock()
 
 
-@pytest.mark.parametrize("action", ["picker", "paste", "apply", "clear"])
+@pytest.mark.parametrize("action", ["picker", "paste", "enter", "apply", "clear"])
 @pytest.mark.parametrize("column", ["lcsc", "stock"])
 def test_later_project_failure_preserves_entire_action_and_emits_no_success(
     make_window: Callable[..., Any],
@@ -286,7 +286,7 @@ def test_success_log_counts_distinct_changed_preferences_and_skips_noop(
         assert "Settings > Part preferences" in messages[0]
 
 
-@pytest.mark.parametrize("action", ["picker", "paste", "apply"])
+@pytest.mark.parametrize("action", ["picker", "paste", "enter", "apply"])
 def test_optional_enrichment_read_failure_keeps_accepted_assignment_and_notifies(
     make_window: Callable[..., Any],
     mainwindow: Any,
