@@ -18,6 +18,7 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 - Excellon files
 - BOM file
 - CPL file
+- JLCPCB controlled-impedance workbook and self-contained HTML companion, when enabled for the board
 
 Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
 
@@ -156,6 +157,20 @@ header to change the order to **Default**, **Premium**, **Economy**.
 
 ![Dragging Premium before Economy shows a translucent column preview and drop position, followed by the reordered variant columns.](images/design-variants-column-dragging.gif)
 
+### Controlled impedance
+
+Controlled impedance is an option that JLCPCB offers. To convey which traces should be impedance matched JLCPCB requires a `Required_impedance_control.xlsx` to be included in the design .zip file. If one is not included in your design package, JLCPCB will contact you and request that you provide this file.
+
+It can be somewhat time consuming and repetative to update this file each time your layout changes, but not any more. This plugin can automatically generate the complete `Required_impedance_control.xlsx` file, including target impedances, reference layers AND all of the highlighted nets from the layout.
+
+![Highlighted 50 ohm CPWG net](images/controlled_impedance_example.png)
+
+Generation also includes a self-contained `Required_impedance_control.html` companion in the board's Gerber ZIP for web viewing of the generated output.
+
+Review tracking records the latest workbook-preview view time and each signal layer's approval time in that same database. Image-view dates are hidden during review; the HTML companion shows UTC and distinguishes current from historical captures/settings. Older records show **Not recorded**. Timestamps are saved with the configuration, not on Cancel, and do not replace the required image/layer review.
+
+For inspection and regression testing, [two combined RF example boards](examples/impedance/README.md) cover short and long top/bottom/inner routes, single-ended and differential coplanar/noncoplanar designs, and layer transitions with different widths. These repository test assets are separate from production settings; their impedance dimensions are nominal, not solver-certified.
+
 ## Keyboard shortcuts
 
 Windows can be closed with ctrl-w/ctrl-q/command-w/command-w (OS dependent) and escape.
@@ -173,12 +188,77 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
 
+### Automatic schematic saving
+
+Closing JLCPCB Tools saves its LCSC assignments and supported BOM settings to
+the project's schematics. The manual **Export to schematic** button has been
+removed. On boards with design variants, this always saves **Default**;
+selecting a named variant for fabrication does not change the schematic source.
+
+The plugin uses the project's associated schematics and preserves an `_old`
+backup for each file it writes. Projects without an associated schematic close
+without writing one. If a schematic is locked, the default **Cancel** keeps the
+plugin open so you can close Schematic Editor and retry. **Save Anyway** approves
+only the listed locks; **Close without saving** leaves the schematic unchanged.
+Save errors also let you keep the window open or close without saving the
+remaining changes. Earlier sheets may already have been saved if a later write
+fails. A forced application shutdown cannot wait for these prompts: locked or
+failed saves are logged and the window closes.
+
+This saves schematic files. Use KiCad's PCB save command to persist changes to
+the PCB itself. An already-open Schematic Editor does not reload exported files
+automatically and can overwrite them if you choose **Save Anyway**.
+
+### Where part assignments are stored
+
+The live KiCad board is the sole source of LCSC assignments, with or without
+named design variants. Selecting, pasting, or clearing a part updates the native
+footprint fields or the selected variant's fields. **Save the PCB in KiCad to
+persist these changes.** Refreshing the plugin reads the current board, including
+edits made outside the plugin.
+
+Both table modes recognize `LCSC`, `JLC`, and `JLCPCB` assignment fields,
+optionally followed by `Part`, `Part Number`, `Part Num`, `Part No`, `PN`,
+`Number`, `Code`, or `ID`; case, spaces, and punctuation are ignored. Conflicting
+or invalid assignments appear unassigned. Selecting or clearing a part updates
+all recognized assignment fields together. Other prefixed fields, such as
+`JLCPCB Rotation` or `LCSC custom code`, remain metadata; move part numbers from
+such fields into a recognized assignment field.
+
+Previously, ordinary boards used database or CSV assignments while boards with
+named variants read native fields. Editing or clearing Default, then removing
+the last named variant, could therefore restore an obsolete database assignment.
+Both modes now read and edit the board; the former schematic/database priority
+setting no longer applies.
+
+Older database and CSV assignments are not imported automatically. If an
+assignment existed only in that older storage, assign it to the board before
+relying on it for assembly output. After all associated schematics are saved
+successfully on close, the obsolete `part_info` table is removed from
+`jlcpcb/project.db`. Cancellation, skipped saves, and failed or partial saves
+retain the table. Invalid or conflicting native assignment fields block saving;
+correct those fields before retrying. Intentional clears are saved as blanks.
+
+Cleanup preserves generation counters, corrections, other tables, and legacy
+CSV files. The old database is shared by boards in the same directory, so a
+successful save of any board retires that shared obsolete table. A cleanup
+failure reports that the schematics were saved and offers a retry; the table is
+retained until cleanup succeeds. Opening or refreshing a board does not create
+the table or remove it.
+
+Supplier descriptions and other part details are cached in memory by LCSC
+number and fetched again as needed. Stock and pricing come from the currently
+selected parts catalog; they are not persisted as board assignments.
+
 ### Part preferences
 
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
 
 - **Remember my part preferences** remembers each successful part selection or pasted LCSC assignment. The latest explicit assignment replaces the preference; opening a board does not change preferences.
 - **Parts preferences fill in empty LCSC assignments** fills blank LCSC assignments once each time the plugin window opens. Existing assignments are preserved. DNP parts and parts excluded from BOM or POS are skipped.
+
+Applying part preferences, including automatic filling on opening, writes the
+native board fields. Save the PCB to keep those assignments.
 
 Clearing an LCSC assignment keeps its part preference, so an eligible blank assignment may fill again on the next opening. Exclude the part or disable automatic filling to keep it blank. The right-click actions **Save part preferences** and **Apply part preferences** remain available even when automation is disabled. Use **Part preferences** to delete, import, or export preferences. Deleting a preference does not remove assignments from your boards.
 
@@ -188,7 +268,7 @@ Generate all necessary assembly files for your board with a simple click.
 
 A new directory called `jlcpcb` is created, and in there, two separate folders are created, `gerber` and `production_files`.
 
-In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and zipped into the `production_files` folder, ready for upload to JLCPCB.
+In `gerber/<board-name>`, all necessary `*.gbr` and `*.drl` files are generated and zipped into the `production_files` folder, ready for upload to JLCPCB. Each board has a separate plotting directory.
 The zipfile is named `GERBER-<projectname>.zip`
 
 Also in the `production_files` folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.

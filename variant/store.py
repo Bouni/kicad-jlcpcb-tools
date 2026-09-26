@@ -161,6 +161,7 @@ class VariantStore:
                     "value": part.value,
                     "footprint": part.footprint,
                     "lcsc": part.lcsc,
+                    "assignment_status": part.assignment.status,
                     "variant_name": part.variant_name,
                     "pad_count": part.pad_count,
                     "has_tht": part.has_tht,

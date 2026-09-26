@@ -1,4 +1,4 @@
-"""Native dialog regressions; enable with KICAD_NATIVE_WX_TESTS=1 on a desktop."""
+"""Native dialog regressions selected by the required wx test lane."""
 
 from __future__ import annotations
 
@@ -11,10 +11,14 @@ import pytest
 
 from .wx_harness import load_siblings
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("KICAD_NATIVE_WX_TESTS") != "1",
-    reason="Native wx tests require KICAD_NATIVE_WX_TESTS=1 and a desktop session",
-)
+pytestmark = [
+    pytest.mark.native_wx,
+    pytest.mark.skipif(
+        os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1"
+        and os.environ.get("KICAD_NATIVE_WX_TESTS") != "1",
+        reason="Native wx tests require an enabled desktop session",
+    ),
+]
 
 
 @pytest.fixture

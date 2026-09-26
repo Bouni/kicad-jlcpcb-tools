@@ -556,61 +556,54 @@ def test_main_clipboard_actions_report_busy_clipboard_and_recover(
     window_ui.run(check)
 
 
-@pytest.mark.parametrize("outcome", ["cancel", "native_failure"])
-def test_schematic_file_selection_cancellation_and_native_failure_preserve_output(
-    window_ui: Any, outcome: str
+def test_schematic_autosave_native_failure_keeps_window_open_then_retries(
+    window_ui: Any,
 ) -> None:
+    """Failed reads veto actual window closure without changing the output variant."""
+
     def check(ui: Any) -> None:
-        output(ui, "")
-        path = ui.path / "custom.kicad_sch"
+        output(ui, "B")
+        path = ui.path / "board.kicad_sch"
         path.write_bytes(b"previous schematic")
         exporter = Mock()
         export_module = import_module(
             type(ui.controller).__module__.rsplit(".", 2)[0] + ".schematicexport"
         )
-        read = Mock(wraps=ui.controller.session.adapter.snapshot)
-
-        def choose(_dialog: Any) -> int:
-            read.side_effect = RuntimeError("PCB became unavailable during selection")
-            return ui.wx.ID_OK
-
         with (
             patch.object(export_module, "SchematicExport", exporter),
-            patch.object(ui.wx.FileDialog, "GetPaths", return_value=[str(path)]),
             patch.object(
-                ui.wx.FileDialog,
+                ui.wx.GenericMessageDialog,
                 "ShowModal",
-                choose
-                if outcome == "native_failure"
-                else lambda _dialog: ui.wx.ID_CANCEL,
+                return_value=ui.wx.ID_NO,
             ),
         ):
-            with patch.object(ui.controller.session.adapter, "snapshot", read):
-                ui.dialog.export_to_schematic()
+            with patch.object(
+                ui.controller.session.adapter,
+                "snapshot",
+                side_effect=RuntimeError("PCB became unavailable before saving"),
+            ):
+                assert ui.dialog.Close() is False
             exporter.assert_not_called()
             assert path.read_bytes() == b"previous schematic"
-            if outcome == "cancel":
-                read.assert_not_called()
-                assert not ui.messages
-            else:
-                assert ui.messages == ["PCB became unavailable during selection"]
-                assert (
-                    not ui.dialog.generate_button.IsEnabled()
-                    and not ui.controller.view._mutations_enabled
-                )
+            assert ui.dialog and not ui.dialog._closing
+            assert not ui.controller.closed and ui.controller.timer.IsRunning()
+            assert (
+                not ui.dialog.generate_button.IsEnabled()
+                and not ui.controller.view._mutations_enabled
+            )
             ui.controller.refresh()
             assert (
                 ui.controller.session.reliable and ui.dialog.generate_button.IsEnabled()
             )
-            with patch.object(
-                ui.wx.FileDialog, "ShowModal", lambda _dialog: ui.wx.ID_OK
-            ):
-                ui.dialog.export_to_schematic()
+            assert ui.dialog.Close() is True
+            exporter.assert_called_once_with(ui.dialog)
             args = exporter.return_value.load_schematic.call_args
             assert args.args == ([str(path)],)
             assert args.kwargs["variant_name"] == ""
             assert {part["variant_name"] for part in args.kwargs["parts"]} == {""}
-            assert ui.controller.session.output_variant == ""
+            assert ui.controller.session.output_variant == "B"
+            assert ui.controller.closed and not ui.controller.timer.IsRunning()
+            assert not ui.messages
 
     window_ui.run(check)
 

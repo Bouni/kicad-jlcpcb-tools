@@ -120,13 +120,13 @@ def test_open_selector_updates_with_main_setting_and_reopens_exact_stock(
 
 
 @pytest.mark.parametrize("simplified", [False, True])
-def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
+def test_selector_assignment_keeps_exact_stock_in_catalog_and_native_mapping(
     monkeypatch: pytest.MonkeyPatch,
     make_window: Callable[..., Any],
     mainwindow: Any,
     simplified: bool,
 ) -> None:
-    """The real selection event carries raw stock through durable assignment."""
+    """Selection retains exact catalog stock while the board owns the assignment."""
     with stock_modules() as modules:
         monkeypatch.setattr(
             layout_ui.partselector,
@@ -168,7 +168,8 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
         assert window._part_selector is None
         target.assign_parts(event)
 
-        assert storage.project_rows(window)[0]["stock"] == 22095
+        assert storage.project_rows(window)[0]["stock"] is None
+        assert window._catalog_get_part_details("C200")["stock"] == "22095"
         assert (
             window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
         )
@@ -180,7 +181,7 @@ def test_selector_assignment_keeps_exact_stock_in_board_model_and_database(
         reopened = mainwindow.Store(
             window, window.project_path, window.pcbnew.GetBoard()
         )
-        assert reopened.get_part("R1")["stock"] == 22095
+        assert reopened.get_part("R1")["stock"] is None
         assert reopened.get_part("R1")["lcsc"] == "C200"
         layout_ui._drain_callbacks()
 

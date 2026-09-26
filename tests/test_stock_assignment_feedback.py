@@ -59,9 +59,6 @@ def _watch_action(window: Any, mainwindow: Any) -> None:
         "update",
     ):
         setattr(window.library, name, MagicMock(wraps=getattr(window.library, name)))
-    window.store.set_lcsc_assignments = MagicMock(
-        wraps=window.store.set_lcsc_assignments
-    )
     window.logger.reset_mock()
     window.start_assembly_enrichment.reset_mock()
     mainwindow.wx.PostEvent.reset_mock()
@@ -70,7 +67,6 @@ def _watch_action(window: Any, mainwindow: Any) -> None:
 def _assert_refused(window: Any, library: Any, store: Any, before: Any) -> None:
     """Require one useful explanation and no assignment or catalog side effects."""
     assert _state(window, store) == before
-    store.set_lcsc_assignments.assert_not_called()
     for name in (
         "get_part_details",
         "get_part_preference",
@@ -199,13 +195,13 @@ def test_missing_catalog_explains_assignment_then_retry_survives_reopen(
     else:
         act(action, window, mainwindow, monkeypatch, "C200")
     assert window.store.get_part("R1")["lcsc"] == "C200"
-    assert window.store.get_part("R1")["stock"] == expected_stock
+    assert window.store.get_part("R1")["stock"] is None
     assert window.partlist_data_model.data[0][3] == "C200"
     assert window.partlist_data_model.data[0][5] == expected_stock
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
     reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
     assert reopened.get_part("R1")["lcsc"] == "C200"
-    assert reopened.get_part("R1")["stock"] == expected_stock
+    assert reopened.get_part("R1")["stock"] is None
     assert _warnings(window) == []
 
 
@@ -270,7 +266,6 @@ def test_late_assignment_with_no_library_explains_failure_before_optional_lookup
         "update",
     ):
         setattr(library, name, MagicMock(wraps=getattr(library, name)))
-    store.set_lcsc_assignments = MagicMock(wraps=store.set_lcsc_assignments)
     window.logger.reset_mock()
     window.start_assembly_enrichment.reset_mock()
     before = _state(window, store)
@@ -282,7 +277,6 @@ def test_late_assignment_with_no_library_explains_failure_before_optional_lookup
     library.get_part_details.assert_not_called()
     library.save_part_preferences.assert_not_called()
     library.update.assert_not_called()
-    store.set_lcsc_assignments.assert_not_called()
     messages = _warnings(window)
     assert len(messages) == 1
     assert any(
@@ -307,10 +301,9 @@ def test_automatic_empty_assignments_and_refresh_stay_quiet(
     assert _warnings(window) == []
     window.library.get_part_details.assert_not_called()
     window.library.get_part_preference.assert_not_called()
-    window.store.set_lcsc_assignments.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["catalog_read", "project_write"])
+@pytest.mark.parametrize("failure", ["catalog_read", "board_write"])
 @pytest.mark.parametrize("action", ["paste", "apply", "picker"])
 def test_real_assignment_storage_failure_keeps_single_original_warning(
     configuration_window: Callable[..., Any],
@@ -319,7 +312,7 @@ def test_real_assignment_storage_failure_keeps_single_original_warning(
     action: str,
     failure: str,
 ) -> None:
-    """Availability feedback must not double-report SQL failures from a ready catalog."""
+    """Ready-catalog actions report read or native assignment failures just once."""
     window = configuration_window(catalog_lcsc="C200")
     window.library.save_part_preferences([("R_0603", "10k", "C200")])
     if failure == "catalog_read":
@@ -329,11 +322,19 @@ def test_real_assignment_storage_failure_keeps_single_original_warning(
         ):
             connection.execute("DROP TABLE parts")
     else:
-        with closing(sqlite3.connect(window.store.dbfile)) as connection, connection:
-            connection.execute(
-                "CREATE TRIGGER reject_assignment BEFORE UPDATE OF lcsc ON part_info "
-                "BEGIN SELECT RAISE(ABORT, 'assignment write rejected'); END"
-            )
+        footprint = window.pcbnew.GetBoard().FindFootprintByReference("R1")
+        set_field = footprint.SetField
+        failed = False
+
+        def reject_assignment(name: str, value: str) -> None:
+            """Reject the requested edit once while allowing native rollback."""
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError("assignment write rejected")
+            set_field(name, value)
+
+        monkeypatch.setattr(footprint, "SetField", reject_assignment)
     _select_row(window)
     before = _state(window, window.store)
     window.logger.reset_mock()

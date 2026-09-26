@@ -1,6 +1,6 @@
 """Exercise stock concern through real model constructors and window handlers."""
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 import importlib
 import json
 from pathlib import Path
@@ -10,6 +10,8 @@ from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import pytest
+
+from bom_estimation.assembly_mode import classify_component_product_type
 
 from .stock_test_support import stock_modules
 from .test_settings_defaults import plugin_dir, shipped_defaults
@@ -28,10 +30,16 @@ class Footprint:
         bom: bool = False,
         pos: bool = False,
         dnp: bool = False,
+        reference: str = "R1",
     ) -> None:
         self.lcsc = lcsc
+        self.reference = reference
         self.attributes = (int(bom) << 3) | (int(pos) << 2)
         self.dnp = dnp
+
+    def GetReference(self) -> str:
+        """Return the identity used by the native edit batch."""
+        return self.reference
 
     def GetAttributes(self) -> int:
         """Read flags used by the real footprint helpers."""
@@ -69,38 +77,62 @@ class Footprint:
 
 
 class Store:
-    """Project rows with atomic assignment failures and stateful BOM updates."""
+    """Read component state from live footprints and retain static supplier facts."""
 
-    def __init__(self, records: list[dict[str, Any]]) -> None:
+    def __init__(self, records: list[dict[str, Any]], board: Any) -> None:
         self.parts = {record["reference"]: dict(record) for record in records}
-        self.fail_write = False
+        self.board = board
+        self._assembly_metadata: dict[str, dict[str, Any]] = {}
+        for record in records:
+            self.cache_lcsc_metadata(
+                record["lcsc"],
+                record.get("assembly_process"),
+                record.get("component_product_type"),
+            )
+
+    def cache_lcsc_metadata(
+        self,
+        lcsc: str,
+        assembly_process: Optional[str],
+        component_product_type: object,
+    ) -> None:
+        """Keep supplier responses keyed by code even if assignments have changed."""
+        code = lcsc.strip().upper()
+        if not code:
+            return
+        metadata = self._assembly_metadata.setdefault(code, {})
+        if assembly_process:
+            metadata["assembly_process"] = assembly_process
+        classification = classify_component_product_type(component_product_type)
+        if classification is not None:
+            metadata["component_product_type"] = int(classification)
 
     def read_all(self) -> list[dict[str, Any]]:
-        """Return fresh snapshots as the production database does."""
-        return [dict(record) for record in self.parts.values()]
+        """Join fixture metadata to live component assignments and assembly flags."""
+        return [
+            record
+            for reference in self.parts
+            if (record := self.get_part(reference)) is not None
+        ]
 
     def get_part(self, reference: str) -> Optional[dict[str, Any]]:
-        """Return a fresh snapshot of one row, or None for an unknown reference."""
+        """Observe native edits and removals without a second mapping authority."""
         record = self.parts.get(reference)
-        return None if record is None else dict(record)
-
-    def set_lcsc_assignments(
-        self, assignments: Iterable[tuple[str, str, Optional[int]]]
-    ) -> None:
-        """Commit every supplied assignment, or reject the entire transaction."""
-        pending = list(assignments)
-        if self.fail_write:
-            raise sqlite3.OperationalError("assignment write failed")
-        for reference, lcsc, stock in pending:
-            self.parts[reference].update(lcsc=lcsc, stock=stock)
-
-    def set_bom(self, reference: str, value: int) -> None:
-        """Persist the flag written by the real BOM toggle event handler."""
-        self.parts[reference]["exclude_from_bom"] = value
-
-    def set_pos(self, reference: str, value: int) -> None:
-        """Persist the placement flag without changing stock demand."""
-        self.parts[reference]["exclude_from_pos"] = value
+        footprint = self.board.FindFootprintByReference(reference)
+        if record is None or footprint is None:
+            return None
+        code = footprint.lcsc.strip().upper()
+        metadata = self._assembly_metadata.get(code, {})
+        return {
+            **record,
+            "lcsc": code,
+            "stock": None,
+            "assembly_process": metadata.get("assembly_process", ""),
+            "component_product_type": metadata.get("component_product_type"),
+            "exclude_from_bom": bool(footprint.GetAttributes() & (1 << 3)),
+            "exclude_from_pos": bool(footprint.GetAttributes() & (1 << 2)),
+            "is_dnp": footprint.IsDNP(),
+        }
 
 
 @pytest.fixture
@@ -134,7 +166,6 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             """Initialize the state surface consumed by actual window workflows."""
             window = object.__new__(mainwindow.JLCPCBTools)
             window.settings = {"part_preferences": {"remember_lcsc_assignments": False}}
-            window.store = Store(records)
             window.bom_estimator_board_count = 5
             window.footprints = (
                 live
@@ -145,13 +176,19 @@ def workflow() -> Iterator[types.SimpleNamespace]:
                         bom=bool(record["exclude_from_bom"]),
                         pos=bool(record["exclude_from_pos"]),
                         dnp=bool(record["is_dnp"]),
+                        reference=record["reference"],
                     )
                     for record in records
                 }
             )
+            for reference, footprint in window.footprints.items():
+                footprint.reference = reference
             board = types.SimpleNamespace(
-                FindFootprintByReference=window.footprints.get
+                FindFootprintByReference=window.footprints.get,
+                GetFootprints=lambda: list(window.footprints.values()),
+                GetFileName=lambda: "",
             )
+            window.store = Store(records, board)
             window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
             window.library = MagicMock()
@@ -171,6 +208,11 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             window._get_enrichment_status_label = MagicMock(return_value="")
             window.start_assembly_enrichment = MagicMock()
             window.logger = MagicMock()
+            window.assembly_lookup = mainwindow.AssemblyMetadataLookup(
+                window._apply_assembly_metadata,
+                window._refresh_bom_after_enrichment_update,
+                window.logger.warning,
+            )
             window.recompute_bom_estimate = MagicMock()
             window.footprint_list = MagicMock()
             window.footprint_list.GetSelections.return_value = []
@@ -247,7 +289,7 @@ def test_assignment_and_removal_update_old_and_new_siblings(
         types.SimpleNamespace(lcsc="C2", stock="75", type="Basic", references=["R2"])
     )
     workflow.drain()
-    assert window.store.parts["R2"]["lcsc"] == "C2"
+    assert window.store.get_part("R2")["lcsc"] == "C2"
     assert window.footprints["R2"].lcsc == "C2"
     assert window.partlist_data_model.stock_concern_refs == {"R2", "R3"}
 
@@ -256,20 +298,33 @@ def test_assignment_and_removal_update_old_and_new_siblings(
     ]
     window.remove_lcsc_number()
     workflow.drain()
-    assert window.store.parts["R2"]["lcsc"] == ""
+    assert window.store.get_part("R2")["lcsc"] == ""
     assert window.partlist_data_model.stock_concern_refs == set()
 
 
 @pytest.mark.parametrize("action", ["assignment", "removal"])
 def test_failed_assignment_transaction_preserves_existing_concerns(
     workflow: types.SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
     action: str,
 ) -> None:
     """A failed write cannot mutate rows, live assignments or concern state."""
     window = workflow.make_window([part("R1"), part("R2")], {"C1": 75, "C2": 500})
     window.populate_footprint_list()
     workflow.drain()
-    window.store.fail_write = True
+    footprint = window.footprints["R2"]
+    set_field = footprint.SetField
+    failed = False
+
+    def reject_assignment(name: str, value: str) -> None:
+        """Reject a native write once while permitting the edit batch to roll back."""
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise RuntimeError("assignment write failed")
+        set_field(name, value)
+
+    monkeypatch.setattr(footprint, "SetField", reject_assignment)
     if action == "assignment":
         window.assign_parts(
             types.SimpleNamespace(
@@ -282,7 +337,7 @@ def test_failed_assignment_transaction_preserves_existing_concerns(
         ]
         window.remove_lcsc_number()
     assert workflow.posted == []
-    assert window.store.parts["R2"]["lcsc"] == "C1"
+    assert window.store.get_part("R2")["lcsc"] == "C1"
     assert window.footprints["R2"].lcsc == "C1"
     assert window.partlist_data_model.data[1][3] == "C1"
     assert window.partlist_data_model.stock_concern_refs == {"R1", "R2"}

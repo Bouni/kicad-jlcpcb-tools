@@ -21,7 +21,7 @@ from .native_wx_support import pump, run_native, wait_until
 from .variant_native_support import Board, Footprint, Variant
 from .wx_harness import ROOT, module, package_stubs, temporary_modules
 
-__all__ = ["native_bindings", "window_ui"]
+__all__ = ["native_bindings", "plugin_action_host", "window_ui"]
 
 
 class _SelectedItem:
@@ -190,10 +190,55 @@ def modal_handler(
         raise failures[0]
 
 
+@contextmanager
+def plugin_action_host(ui: Any, host: Any) -> Iterator[Callable[[], None]]:
+    """Route production actions through real wx menus with a simulated KiCad host.
+
+    This fixture exercises native wx event routing, not KiCad's C++ undo stack.
+    The separate plugin action tests model that source-inspected transaction.
+    """
+    wx = ui.wx
+    plugin = ui.plugin.JLCPCBPlugin()
+    menu = wx.Menu()
+    command = menu.Append(wx.ID_ANY, plugin.name)
+    menubar = wx.MenuBar()
+    menubar.Append(menu, "Tools")
+    previous = host.GetMenuBar()
+    host.SetMenuBar(menubar)
+    running = False
+
+    def invoke() -> None:
+        nonlocal running
+        running = True
+        try:
+            plugin.Run()
+        finally:
+            running = False
+
+    def on_menu(event: Any) -> None:
+        invoke()
+
+    host.Bind(wx.EVT_MENU, on_menu, id=command.GetId())
+    try:
+        with (
+            patch.object(ui.plugin.pcbnew, "GetBoard", lambda: ui.board, create=True),
+            patch.object(
+                ui.plugin.pcbnew, "IsActionRunning", lambda: running, create=True
+            ),
+        ):
+            yield invoke
+    finally:
+        host.Unbind(wx.EVT_MENU, handler=on_menu, id=command.GetId())
+        host.SetMenuBar(previous)
+        menubar.Destroy()
+
+
 def run_frames(ui: Any, *checks: Callable[[Any], None]) -> None:
     """Exercise actual modeless plugin windows after their action has returned."""
 
-    def run_one(host: Any, wx: Any, check: Callable[[Any], None]) -> None:
+    def run_one(
+        host: Any, wx: Any, invoke: Callable[[], None], check: Callable[[Any], None]
+    ) -> None:
         errors: list[BaseException] = []
         frames: list[Any] = []
         completed = False
@@ -226,16 +271,16 @@ def run_frames(ui: Any, *checks: Callable[[Any], None]) -> None:
 
         factory = ui.mainwindow.JLCPCBTools
 
-        def constructor(parent: Any) -> Any:
+        def constructor(parent: Any, **kwargs: Any) -> Any:
             ui.defaults_path.write_text(json.dumps(ui.settings))
-            frame = factory(parent, ui.provider)
+            frame = factory(parent, ui.provider, **kwargs)
             frames.append(frame)
             return frame
 
         previous_loop = wx.EventLoopBase.GetActive()
         ui.mainwindow.JLCPCBTools = constructor
         try:
-            ui.plugin.JLCPCBPlugin().Run()
+            invoke()
         finally:
             ui.mainwindow.JLCPCBTools = factory
         assert len(frames) == 1, ui.messages
@@ -252,8 +297,9 @@ def run_frames(ui: Any, *checks: Callable[[Any], None]) -> None:
             raise errors[0]
 
     def exercise(host: Any, wx: Any) -> None:
-        for check in checks:
-            run_one(host, wx, check)
+        with plugin_action_host(ui, host) as invoke:
+            for check in checks:
+                run_one(host, wx, invoke, check)
 
     run_native(exercise)
 
@@ -282,6 +328,16 @@ def window_ui(
         board.SetFileName(str(tmp_path / "native-dialog.kicad_pcb"))
         assert pcbnew.SaveBoard(board.GetFileName(), board, True)
     else:
+
+        class ActionPlugin:
+            """Initialize defaults as KiCad's real Python base does."""
+
+            def __init__(self) -> None:
+                self.defaults()
+
+            def defaults(self) -> None:
+                """Permit the production action class to provide its defaults."""
+
         board = Board()
         board.parts = [_SelectableFootprint(board, "component-1")]
         board.Footprints = board.GetFootprints
@@ -309,7 +365,7 @@ def window_ui(
             Refresh=lambda: None,
             GetBuildVersion=lambda: "10.0-test",
             FOOTPRINT_VARIANT=Variant,
-            ActionPlugin=object,
+            ActionPlugin=ActionPlugin,
         )
     pending_threads: list[Callable[[], None]] = []
     ui = SimpleNamespace(

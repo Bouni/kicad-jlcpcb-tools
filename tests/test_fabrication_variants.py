@@ -201,9 +201,10 @@ def test_output_lcsc_correction_is_frozen_with_variant_bom_and_cpl(
     (placement,) = _read_csv(paths["cpl_csv"])
     value = "Base device" if not variant_name else "Variant device"
     lcsc = "C111" if not variant_name else variant_lcsc
-    assert tuple(
-        float(placement[field]) for field in ("Mid X", "Mid Y", "Rotation")
-    ) == expected
+    assert (
+        tuple(float(placement[field]) for field in ("Mid X", "Mid Y", "Rotation"))
+        == expected
+    )
     assert (placement["Designator"], placement["Val"], placement["Package"]) == (
         "R1",
         value,
@@ -340,6 +341,54 @@ def test_boards_keep_independent_gerber_sources_and_archives(
     first.zip_gerber_excellon()
     assert second_archive.read_bytes() == previous
     assert second_source.read_bytes() == b"second copper"
+
+
+@pytest.mark.parametrize("variant_name", ["", "A"])
+def test_impedance_reports_follow_variant_staging_and_disabled_regeneration(
+    runtime: SimpleNamespace, tmp_path: Path, variant_name: str
+) -> None:
+    """Publish reports with the complete variant output and omit them when disabled."""
+    exporter = runtime.exporter
+    begin(runtime, variant_name=variant_name)
+    public = {key: Path(path) for key, path in exporter.get_artifact_paths().items()}
+    for path in public.values():
+        path.write_bytes(b"previous")
+    reports = []
+    for extension in ("xlsx", "html"):
+        source = tmp_path / f"report.{extension}"
+        source.write_bytes(extension.encode())
+        reports.append(
+            runtime.modules.fabrication.ArchiveEntry(
+                source, f"Required_impedance_control.{extension}"
+            )
+        )
+    (Path(exporter.gerberdir) / "copper.gbr").write_bytes(b"variant copper")
+    staged_zip = exporter.zip_gerber_excellon(reports)
+    exporter.generate_bom()
+    exporter.generate_cpl()
+    assert staged_zip != public["gerber_zip"]
+    assert {path.read_bytes() for path in public.values()} == {b"previous"}
+    exporter.publish_generation()
+    with ZipFile(public["gerber_zip"]) as archive:
+        assert archive.namelist() == [
+            "Required_impedance_control.html",
+            "Required_impedance_control.xlsx",
+            "copper.gbr",
+        ]
+        assert archive.read("Required_impedance_control.xlsx") == b"xlsx"
+        assert archive.read("Required_impedance_control.html") == b"html"
+    exporter.abort_generation()
+
+    begin(runtime, variant_name=variant_name)
+    (Path(exporter.gerberdir) / "copper.gbr").write_bytes(b"regenerated copper")
+    exporter.zip_gerber_excellon()
+    exporter.generate_bom()
+    exporter.generate_cpl()
+    exporter.publish_generation()
+    with ZipFile(public["gerber_zip"]) as archive:
+        assert archive.namelist() == ["copper.gbr"]
+        assert archive.read("copper.gbr") == b"regenerated copper"
+    exporter.abort_generation()
 
 
 def test_unknown_variant_does_not_fall_back_to_default(

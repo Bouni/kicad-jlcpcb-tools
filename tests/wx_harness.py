@@ -265,6 +265,7 @@ def mainwindow_stubs(
     # taken here -- even where wxPython is installed.  Loading the real module
     # keeps its event names from drifting out of step with a copy.
     stubs[f"{package}.events"] = load(package, "events", stubs)
+    footprint_helpers = load(package, "footprint_helpers", stubs)
 
     symbols = {
         "bom_estimation.assembly_mode": {
@@ -282,7 +283,9 @@ def mainwindow_stubs(
         "bom_widget": {"BomEstimatorController": object, "BomEstimatorWidget": object},
         "corrections": {"CorrectionManagerDialog": object},
         "datamodel": {
-            "PartListDataModel": type("PartListDataModel", (), {"columns": {}}),
+            "PartListDataModel": type(
+                "PartListDataModel", (), {"columns": {"REF_COL": 0}}
+            ),
             "STANDARD_ONLY_TOOLTIP": "",
         },
         "dataview_highlight": {
@@ -294,15 +297,9 @@ def mainwindow_stubs(
         "enrichment.providers": {"LCSCAssemblyMetadataProvider": object},
         "fabrication": {"Fabrication": object},
         "footprint_helpers": {
-            "get_exclude_from_bom": lambda _footprint: False,
-            "get_exclude_from_pos": lambda _footprint: False,
-            "get_is_dnp": lambda _footprint: False,
-            "get_lcsc_value": lambda _footprint: "",
-            "find_lcsc_assignment_text": lambda _footprint: None,
-            "iter_board_items": iter,
-            "set_lcsc_value": lambda *_args, **_kwargs: None,
-            "toggle_exclude_from_bom": lambda _footprint: None,
-            "toggle_exclude_from_pos": lambda _footprint: None,
+            name: value
+            for name, value in vars(footprint_helpers).items()
+            if not name.startswith("__")
         },
         "generate_hooks": {
             "format_hook_error": str,
@@ -338,6 +335,11 @@ def mainwindow_stubs(
         "store": {"Store": object},
         "why_standard_dialog": {"WhyStandardDialog": object},
     }
+    if "footprint_helpers" in overrides:
+        overrides["footprint_helpers"] = {
+            **symbols["footprint_helpers"],
+            **overrides["footprint_helpers"],
+        }
     symbols.update(overrides)
     stubs.update(
         {

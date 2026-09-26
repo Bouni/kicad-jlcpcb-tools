@@ -1,5 +1,6 @@
 """Saved-board and catalog recovery contracts through actual plugin constructors."""
 
+from dataclasses import replace
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -7,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from .native_window_support import focus, window_ui
+from .native_window_support import focus, plugin_action_host, window_ui
 from .native_wx_support import run_native
 
 __all__ = ["window_ui"]
@@ -45,8 +46,15 @@ def test_plugin_reports_startup_error_without_showing_partial_window(
 ) -> None:
     constructor = Mock(side_effect=error)
     monkeypatch.setattr(window_ui.mainwindow, "JLCPCBTools", constructor)
-    window_ui.plugin.JLCPCBPlugin().Run()
-    constructor.assert_called_once_with(None)
+
+    def check(host: Any, wx: Any) -> None:
+        with plugin_action_host(window_ui, host) as invoke:
+            invoke()
+
+    run_native(check)
+    assert constructor.call_count == 1
+    assert constructor.call_args.args == (None,)
+    assert callable(constructor.call_args.kwargs["board_action"])
     assert window_ui.messages == [str(error)]
 
 
@@ -55,7 +63,7 @@ def test_plugin_reports_startup_error_without_showing_partial_window(
 def test_existing_project_database_cannot_abort_plugin_action(
     window_ui: Any, variants: bool, database_state: str
 ) -> None:
-    """Native variants ignore old storage; ordinary startup exposes storage failure."""
+    """Both modes derive mappings from the board despite unusable legacy storage."""
     ui = window_ui
     if not variants:
         ui.board.names.clear()
@@ -82,8 +90,9 @@ def test_existing_project_database_cannot_abort_plugin_action(
             assert ui.dialog.generate_button.IsEnabled()
         else:
             assert ui.dialog._variant_controller is None
-            assert ui.dialog._project_storage_unavailable is (before is not None)
-        if before is None and variants:
+            assert not ui.dialog._project_storage_unavailable
+            assert ui.dialog.store.get_part("R1")["lcsc"] == "C1"
+        if before is None:
             assert not database.exists()
         elif before is not None:
             assert database.read_bytes() == before
@@ -93,6 +102,36 @@ def test_existing_project_database_cannot_abort_plugin_action(
     finally:
         if database_state == "read_only":
             database.chmod(0o644)
+
+
+def test_native_variant_reopening_restores_saved_impedance_without_writes(
+    window_ui: Any,
+) -> None:
+    """Real toolbar controls restore an enabled draft without modifying storage."""
+    saved: dict[str, Any] = {}
+
+    def configure(ui: Any) -> None:
+        controls = ui.dialog._impedance
+        assert not Path(ui.cache.dbfile).exists()
+        config = replace(controls.config, enabled=True)
+        controls._save(config)
+        controls._update_saved_status()
+        assert controls.checkbox.GetValue()
+        saved.update(
+            config=config,
+            revision=controls.revision,
+            contents=Path(ui.cache.dbfile).read_bytes(),
+        )
+
+    def reopened(ui: Any) -> None:
+        controls = ui.dialog._impedance
+        assert controls.checkbox.IsEnabled() and controls.checkbox.GetValue()
+        assert controls.config == saved["config"]
+        assert controls.revision == saved["revision"]
+        assert Path(ui.cache.dbfile).read_bytes() == saved["contents"]
+        assert ui.controller.session.reliable and not ui.messages
+
+    window_ui.run(configure, reopened)
 
 
 def test_startup_failure_stops_library_download(

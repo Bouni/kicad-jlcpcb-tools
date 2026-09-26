@@ -1,4 +1,4 @@
-"""Real assignment/preference databases with stateful board and GUI boundaries."""
+"""Board-owned assignments and real preferences with stateful GUI boundaries."""
 
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import closing
@@ -71,6 +71,10 @@ class Field:
         """Retain field visibility."""
         self.visible = visible
 
+    def IsVisible(self) -> bool:
+        """Read the field visibility used when verifying native edit recovery."""
+        return self.visible
+
 
 class Footprint:
     """Represent live native fields and independent assembly exclusion flags."""
@@ -120,9 +124,17 @@ class Footprint:
         """Change only the named field."""
         self.fields.setdefault(name, Field(name, "")).text = value
 
+    def RemoveField(self, name: str) -> None:
+        """Remove a field introduced by a native edit that was rolled back."""
+        self.fields.pop(name, None)
+
     def GetAttributes(self) -> int:
         """Return assembly exclusion bits."""
         return self.attributes
+
+    def SetAttributes(self, attributes: int) -> None:
+        """Persist native assembly attributes for subsequent reads."""
+        self.attributes = attributes
 
     def IsDNP(self) -> bool:
         """Return the live DNP flag."""
@@ -164,6 +176,17 @@ class Toolbar:
         self.enabled[tool] = enabled
 
 
+class FeatureControl:
+    """Retain the enabled state of the optional impedance toolbar controls."""
+
+    def __init__(self) -> None:
+        self.enabled = False
+
+    def Enable(self, enabled: bool) -> None:
+        """Apply startup and recovery availability without native wx widgets."""
+        self.enabled = enabled
+
+
 def seed_preferences(library: Any, preferences: dict[tuple[str, str], str]) -> None:
     """Install raw legacy rows, including identifiers new writes should reject."""
     with closing(sqlite3.connect(library.part_preferences_db_file)) as db, db:
@@ -195,6 +218,11 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
             filename.write_text("(kicad_pcb)\n", encoding="utf-8")
             board.filename = str(filename)
         window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
+        window._board_identity = mainwindow.board_identity(board)
+        window._board_action = None
+        window._board_unreliable = False
+        window._ordinary_generating = False
+        window._refreshing_board = False
         window.logger = MagicMock()
         library = window.library = object.__new__(mainwindow.Library)
         library.part_preferences_db_file = str(tmp_path / "mappings.db")
@@ -219,6 +247,13 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         window.project_storage_status = MagicMock()
         window.right_toolbar = MagicMock()
         window.upper_toolbar = Toolbar()
+        window._impedance = types.SimpleNamespace(
+            attach_store=MagicMock(),
+            checkbox=FeatureControl(),
+            configure_button=FeatureControl(),
+            preflight=MagicMock(return_value=None),
+            verify_disabled=MagicMock(),
+        )
         window.Layout = MagicMock()
         window._project_storage_unavailable = False
         window._part_preferences_applied_on_open = False
@@ -255,6 +290,8 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
             lcsc="", stock=None
         )
         model.RemoveAll.side_effect = rows.clear
+        model.get_all.side_effect = lambda: [[ref] for ref in rows]
+        model.ObjectToItem.side_effect = lambda row: row[0]
         window.footprint_list = MagicMock()
         window.footprint_list.GetSelections.return_value = list(board.footprints)
         window.populate_footprint_list = MagicMock(side_effect=populate)
@@ -316,22 +353,24 @@ def act(
 
 
 def project_rows(window: Any) -> list[dict[str, Any]]:
-    """Read durable state using a fresh connection after an action."""
-    with closing(sqlite3.connect(window.store.dbfile)) as db:
-        db.row_factory = sqlite3.Row
-        return [
-            dict(row)
-            for row in db.execute("SELECT * FROM part_info ORDER BY reference")
-        ]
+    """Read current board-derived rows independently of displayed model data."""
+    return sorted(window.store.read_all(), key=lambda part: part["reference"])
 
 
-def reject_second_project_update(window: Any, column: str) -> None:
-    """Reject the later row after an earlier update has executed."""
-    assert column in {"lcsc", "stock"}
-    with closing(sqlite3.connect(window.store.dbfile)) as db, db:
-        db.execute(
-            f"CREATE TRIGGER reject_second_assignment BEFORE UPDATE OF {column} ON part_info WHEN NEW.reference = 'R2' BEGIN SELECT RAISE(ABORT, 'later assignment rejected'); END"
-        )
+def reject_second_native_update(window: Any) -> None:
+    """Reject one later native edit while allowing rollback to restore its fields."""
+    footprint = window.pcbnew.GetBoard().FindFootprintByReference("R2")
+    original = footprint.SetField
+    failed = False
+
+    def set_field(name: str, value: str) -> None:
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise RuntimeError("later assignment rejected")
+        original(name, value)
+
+    footprint.SetField = set_field
 
 
 def info_messages(window: Any) -> list[str]:

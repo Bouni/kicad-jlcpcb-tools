@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -34,6 +35,17 @@ def test_package_launch_checks_version_before_loading_window(
     registered = []
     window_imports = []
     window = MagicMock()
+    command = SimpleNamespace(
+        GetSubMenu=lambda: None,
+        GetItemLabelText=lambda: "JLCPCB Tools",
+        GetId=lambda: 71,
+    )
+    menu = SimpleNamespace(GetMenuItems=lambda: [command])
+    editor = SimpleNamespace(
+        IsBeingDeleted=lambda: False,
+        GetMenuBar=lambda: SimpleNamespace(GetMenus=lambda: [(menu, "Tools")]),
+    )
+    board = SimpleNamespace(GetFileName=lambda: "version-test.kicad_pcb")
 
     class ActionPlugin:
         def __init__(self) -> None:
@@ -56,14 +68,19 @@ def test_package_launch_checks_version_before_loading_window(
     spec = importlib.util.spec_from_file_location(package, root / "__init__.py")
     assert spec is not None and spec.loader is not None
     entry = importlib.util.module_from_spec(spec)
-    wx = wx_stubs(submodules=(), MessageBox=MagicMock())
+    wx = wx_stubs(
+        submodules=(), MessageBox=MagicMock(), GetTopLevelWindows=lambda: [editor]
+    )
     replacements = {
         package: entry,
         f"{package}.mainwindow": module(
             f"{package}.mainwindow", __getattr__=window_attribute
         ),
         "pcbnew": module(
-            "pcbnew", ActionPlugin=ActionPlugin, GetBuildVersion=lambda: version
+            "pcbnew",
+            ActionPlugin=ActionPlugin,
+            GetBuildVersion=lambda: version,
+            GetBoard=lambda: board,
         ),
         **wx,
     }
@@ -77,7 +94,8 @@ def test_package_launch_checks_version_before_loading_window(
             registered[0].Run()
         if supported:
             assert window.call_count == 2
-            window.assert_called_with(None)
+            assert window.call_args.args == (None,)
+            assert callable(window.call_args.kwargs["board_action"])
             assert window.return_value.Center.call_count == 2
             assert window.return_value.Show.call_count == 2
             wx["wx"].MessageBox.assert_not_called()

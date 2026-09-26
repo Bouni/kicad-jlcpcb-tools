@@ -15,7 +15,13 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+lib/*
+!lib/openpyxl/
+!lib/openpyxl-3.1.5.dist-info/
+!lib/et_xmlfile/
+!lib/et_xmlfile-2.0.0.dist-info/
+!lib/websockets/
+!lib/websockets-15.0.1.dist-info/
 lib64/
 parts/
 sdist/

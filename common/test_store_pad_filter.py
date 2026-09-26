@@ -1,9 +1,6 @@
 """Tests for store pad filtering helpers used by BOM estimator metadata."""
 
-import contextlib
-import logging
 from pathlib import Path
-import sqlite3
 import types
 from typing import Any, Optional
 
@@ -47,19 +44,71 @@ class _Pad:
 
 
 class _FootprintPads:
-    def __init__(self, pads):
+    def __init__(self, pads: list[_Pad]) -> None:
         self._pads = pads
 
-    def Pads(self):
+    def Pads(self) -> list[_Pad]:
         return self._pads
 
 
 class _FootprintGetPads:
-    def __init__(self, pads):
+    def __init__(self, pads: list[_Pad]) -> None:
         self._pads = pads
 
-    def GetPads(self):
+    def GetPads(self) -> list[_Pad]:
         return self._pads
+
+
+class _BoardFootprint(_FootprintPads):
+    """Stateful native footprint surface for ordinary Store reads."""
+
+    def __init__(
+        self,
+        *,
+        reference: str = "R1",
+        lcsc: str = "C1",
+        value: str = "10k",
+        pads: Optional[list[_Pad]] = None,
+        attributes: int = 0,
+        is_dnp: bool = False,
+    ) -> None:
+        super().__init__(pads if pads is not None else [])
+        self._reference = reference
+        self._lcsc = lcsc
+        self._value = value
+        self._attributes = attributes
+        self._is_dnp = is_dnp
+
+    def GetReference(self) -> str:
+        return self._reference
+
+    def GetValue(self) -> str:
+        return self._value
+
+    def SetValue(self, value: str) -> None:
+        self._value = value
+
+    def GetFPID(self) -> types.SimpleNamespace:
+        return types.SimpleNamespace(GetLibItemName=lambda: "R_0603")
+
+    def GetProperties(self) -> dict[str, str]:
+        return {"LCSC": self._lcsc}
+
+    def SetProperty(self, name: str, value: str) -> None:
+        assert name == "LCSC"
+        self._lcsc = value
+
+    def GetAttributes(self) -> int:
+        return self._attributes
+
+    def SetAttributes(self, attributes: int) -> None:
+        self._attributes = attributes
+
+    def IsDNP(self) -> bool:
+        return self._is_dnp
+
+    def SetDNP(self, is_dnp: bool) -> None:
+        self._is_dnp = is_dnp
 
 
 def _saved_store(tmp_path: Path, footprints: tuple[Any, ...] = ()) -> Any:
@@ -78,35 +127,17 @@ def _store_with_enriched_part(
     lcsc: str = "C1",
     assembly_process: str = "SMT",
     product_type: int = 2,
-) -> Any:
+) -> tuple[Any, _BoardFootprint]:
     """Create a test store containing one enriched LCSC assignment."""
-    store = _saved_store(tmp_path)
-    with contextlib.closing(sqlite3.connect(store.dbfile)) as con, con as cur:
-        cur.execute(
-            "INSERT INTO part_info ("
-            "reference, value, footprint, lcsc, stock, exclude_from_bom, "
-            "exclude_from_pos, assembly_process, component_product_type"
-            ") VALUES ('R1', '10k', 'R_0603', ?, 1, 0, 0, ?, ?)",
-            (lcsc, assembly_process, product_type),
-        )
-        cur.commit()
-    return store
-
-
-def _update_part(store, lcsc, value="10k"):
-    store.update_part(
-        {
-            "reference": "R1",
-            "value": value,
-            "footprint": "R_0603",
-            "lcsc": lcsc,
-            "exclude_from_bom": 0,
-            "exclude_from_pos": 0,
-        }
+    footprint = _BoardFootprint(lcsc=lcsc)
+    store = _saved_store(tmp_path, (footprint,))
+    assert store.set_assembly_metadata(
+        "R1", assembly_process, product_type, expected_lcsc=lcsc
     )
+    return store, footprint
 
 
-def _part_state(store):
+def _part_state(store: Any) -> tuple[Any, ...]:
     part = store.get_part("R1")
     return (
         part["lcsc"],
@@ -157,30 +188,30 @@ def test_get_footprint_pads_supports_getpads_fallback() -> None:
     assert list(get_footprint_pads(fp)) == pads
 
 
-def test_refresh_replaces_stale_npth_metadata_and_preserves_it_on_reopen(
+def test_live_pad_metadata_reflects_board_edits_and_reopening(
     tmp_path: Path,
 ) -> None:
-    """Existing projects shed false joint/THT metadata on the next board sync."""
-    footprint = _BackfillFootprint(pads=[_Pad(3, True), _Pad(3, True)])
+    """Each read derives electrical metadata from the current native geometry."""
+    footprint = _BoardFootprint(pads=[_Pad(0, True), _Pad(0, True)])
     store = _saved_store(tmp_path, (footprint,))
-    store.set_estimator_metadata(
-        "R1", 2, True, footprint_metadata_module.get_assembly_flags(footprint)
-    )
+    initial = store.get_part("R1")
+    assert (initial["pad_count"], initial["has_tht"]) == (2, 1)
 
-    store.update_from_board()
+    footprint.Pads()[:] = [_Pad(3, True), _Pad(3, True)]
     updated = store.get_part("R1")
     assert (updated["pad_count"], updated["has_tht"]) == (0, 0)
+    assert store.read_all() == [updated]
 
     reopened = Store(store.parent, str(tmp_path), store.board).get_part("R1")
     assert (reopened["pad_count"], reopened["has_tht"]) == (0, 0)
     assert reopened["lcsc"] == "C1"
 
 
-def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
-    """Metadata survives refreshes, rejects stale results, and clears on reassignment."""
-    store = _store_with_enriched_part(tmp_path)
+def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path: Path) -> None:
+    """Session facts follow the current LCSC and reject mismatched responses."""
+    store, footprint = _store_with_enriched_part(tmp_path)
 
-    _update_part(store, "C1", value="12k")
+    footprint.SetValue("12k")
     assert _part_state(store) == ("C1", "12k", "SMT", 2)
 
     assert store.set_assembly_metadata("R1", "SMT updated", None, expected_lcsc="C1")
@@ -197,7 +228,8 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
     )
     assert _part_state(store) == ("C1", "12k", "SMT updated", 2)
 
-    _update_part(store, "C2")
+    footprint.SetProperty("LCSC", "C2")
+    footprint.SetValue("10k")
     assert _part_state(store) == ("C2", "10k", "", None)
 
     assert store.set_assembly_metadata(
@@ -205,30 +237,43 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
     )
     product_type = store.get_part("R1")["component_product_type"]
     assert product_type == 0 and type(product_type) is int
-    store.set_lcsc("R1", "CNEW")
-    assert _part_state(store) == ("CNEW", "10k", "", None)
+    footprint.SetProperty("LCSC", "C3")
+    assert _part_state(store) == ("C3", "10k", "", None)
+
+    footprint.SetProperty("LCSC", "C1")
+    assert _part_state(store) == ("C1", "10k", "SMT updated", 2)
+
+    footprint.SetProperty("LCSC", "")
+    assert _part_state(store) == ("", "10k", "", None)
+    assert not store.set_assembly_metadata("R1", "SMT", 0, expected_lcsc="C1")
+
+    footprint.SetProperty("LCSC", "C2")
+    assert _part_state(store) == ("C2", "10k", "SMT", 0)
+
+    reopened = Store(store.parent, str(tmp_path), store.board)
+    assert _part_state(reopened) == ("C2", "10k", "", None)
+    assert reopened.get_assembly_enrichment_targets() == {"C2": ["R1"]}
 
 
 def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path: Path) -> None:
     """Rows missing any required enrichment field should be selected."""
-    s = _saved_store(tmp_path)
-
-    with contextlib.closing(sqlite3.connect(s.dbfile)) as con, con as cur:
-        cur.executemany(
-            "INSERT INTO part_info (reference, value, footprint, lcsc, stock, exclude_from_bom, exclude_from_pos, assembly_process, component_product_type) "
-            "VALUES (?, ?, 'R_0603', ?, 1, 0, 0, ?, ?)",
-            [
-                ("R1", "10k", "C1", "", None),
-                ("R2", "1u", "C2", "SMT", None),
-                ("R3", "100n", "C3", "", 0),
-                ("R4", "47k", "C4", "SMT", 0),
-                ("R5", "22k", "C5", "SMT", 3),
-                ("R6", "4k7", "C6", "SMT", "bad"),
-                ("R7", "1k", "C7", "SMT", 2),
-                ("R8", "2k2", "C8", "SMT", 1),
-            ],
-        )
-        cur.commit()
+    metadata = [
+        ("", None),
+        ("SMT", None),
+        ("", 0),
+        ("SMT", 0),
+        ("SMT", 3),
+        ("SMT", "bad"),
+        ("SMT", 2),
+        ("SMT", 1),
+    ]
+    footprints = tuple(
+        _BoardFootprint(reference=f"R{index}", lcsc=f"C{index}")
+        for index in range(1, len(metadata) + 1)
+    )
+    s = _saved_store(tmp_path, footprints)
+    for footprint, (process, product_type) in zip(footprints, metadata):
+        assert s.set_assembly_metadata(footprint.GetReference(), process, product_type)
 
     targets = s.get_assembly_enrichment_targets()
 
@@ -241,78 +286,47 @@ def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path: Path) -> None:
     }
 
 
-# ---------------------------------------------------------------------------
-# backfill_estimator_metadata tests (B5.5)
-# ---------------------------------------------------------------------------
-
-
-class _BackfillFootprint:
-    """Minimal footprint stub for backfill_estimator_metadata tests."""
-
-    def __init__(
-        self,
-        *,
-        reference="R1",
-        pads=None,
-        attributes=0,
-        is_dnp=False,
-    ):
-        self._reference = reference
-        self._pads = pads or []
-        self._attributes = attributes
-        self._is_dnp = is_dnp
-
-    def GetReference(self):
-        return self._reference
-
-    def GetValue(self) -> str:
-        return "10k"
-
-    def GetFPID(self) -> types.SimpleNamespace:
-        return types.SimpleNamespace(GetLibItemName=lambda: "R_0603")
-
-    def GetProperties(self) -> dict[str, str]:
-        return {"LCSC": "C1"}
-
-    def Pads(self):
-        return self._pads
-
-    def GetAttributes(self):
-        return self._attributes
-
-    def IsDNP(self):
-        return self._is_dnp
-
-
 @pytest.mark.parametrize(
-    "previous,changed",
+    "attributes,is_dnp,expected_bom,expected_pos",
     [
-        ({}, False),
-        ({"pad_count": 1}, True),
-        ({"has_tht": None}, True),
-        ({"assembly_flags": '{"is_dnp": true}'}, True),
-        (None, False),
+        (0, False, False, False),
+        (1 << 3, False, True, False),
+        (1 << 2, False, False, True),
+        (0, True, False, False),
+        ((1 << 3) | (1 << 2), True, True, True),
     ],
-    ids=["matching", "stale-pads", "unset-tht", "stale-flags", "missing-row"],
+    ids=["included", "no-bom", "no-pos", "dnp", "all-flags"],
 )
-def test_backfill_updates_only_changed_existing_metadata(
-    previous: Optional[dict[str, Any]], changed: bool
+def test_assembly_flags_follow_native_board_changes(
+    tmp_path: Path,
+    attributes: int,
+    is_dnp: bool,
+    expected_bom: bool,
+    expected_pos: bool,
 ) -> None:
-    """A present stale row receives one complete update; other rows remain untouched."""
-    store = Store.__new__(Store)
-    store.logger = logging.getLogger(__name__)
-    store.get_part = lambda _ref: None
-    updates: list[tuple[Any, ...]] = []
-    store.set_estimator_metadata = lambda *values: updates.append(values)
-    footprint = _BackfillFootprint(pads=[_Pad(), _Pad()])
-    flags = footprint_metadata_module.get_assembly_flags(footprint)
-    current = {"pad_count": 2, "has_tht": 0, "assembly_flags": flags}
+    """BOM/POS/DNP flags come from current native state, including reversal."""
+    footprint = _BoardFootprint(pads=[_Pad(), _Pad()])
+    store = _saved_store(tmp_path, (footprint,))
+    baseline = store.get_part("R1")
 
-    store.backfill_estimator_metadata(
-        footprint, {} if previous is None else {**current, **previous}
-    )
+    footprint.SetAttributes(attributes)
+    footprint.SetDNP(is_dnp)
+    changed = store.get_part("R1")
+    expected_flags = {
+        "exclude_from_bom": expected_bom,
+        "exclude_from_pos": expected_pos,
+        "is_dnp": is_dnp,
+    }
+    assert parse_assembly_flags(changed) == expected_flags
+    assert bool(changed["exclude_from_bom"]) is expected_bom
+    assert bool(changed["exclude_from_pos"]) is expected_pos
+    assert store.read_all() == [changed]
+    reopened = Store(store.parent, str(tmp_path), store.board)
+    assert parse_assembly_flags(reopened.get_part("R1")) == expected_flags
 
-    assert updates == ([("R1", 2, False, flags)] if changed else [])
+    footprint.SetAttributes(0)
+    footprint.SetDNP(False)
+    assert store.get_part("R1") == baseline
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +334,9 @@ def test_backfill_updates_only_changed_existing_metadata(
 # ---------------------------------------------------------------------------
 
 
-def test_assembly_flags_round_trip_writer_keys_match_reader_expectations():
+def test_assembly_flags_round_trip_writer_keys_match_reader_expectations() -> None:
     """Keys produced by footprint_metadata.get_assembly_flags must parse back via pricing.get_assembly_flags."""
-    fp = _BackfillFootprint(reference="R1", pads=[_Pad()], is_dnp=True)
+    fp = _BoardFootprint(reference="R1", pads=[_Pad()], is_dnp=True)
     flags_json = footprint_metadata_module.get_assembly_flags(fp)
 
     parsed = parse_assembly_flags({"assembly_flags": flags_json})

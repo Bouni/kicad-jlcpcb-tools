@@ -3,7 +3,6 @@
     "bom_estimator_boards": 5,
     "bom_estimator_force_standard": false,
     "bom_estimator_show": true,
-    "lcsc_priority": false,
     "order_number": true,
     "select_alike_auto": false,
     "simplify_stock": true

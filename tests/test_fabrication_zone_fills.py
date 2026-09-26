@@ -4,8 +4,10 @@ import importlib.util
 from pathlib import Path
 import sys
 import types
+from typing import Any
 from unittest.mock import MagicMock, call
 import uuid
+from zipfile import ZipFile
 
 import pytest
 
@@ -116,6 +118,7 @@ def zone_harness(
     }
     return types.SimpleNamespace(
         Fabrication=fabrication_module.Fabrication,
+        ArchiveEntry=fabrication_module.ArchiveEntry,
         constants=constants,
         layer_names=layer_names,
         pcbnew=pcbnew,
@@ -196,6 +199,52 @@ def test_fill_zones_disabled_checks_without_refilling(zone_harness):
     zone_harness.pcbnew.Refresh.assert_not_called()
 
 
+def test_failed_native_fill_stops_before_inspecting_partial_copper(
+    zone_harness: types.SimpleNamespace,
+) -> None:
+    """KiCad False is a failed fill, even if some copper polygons remain."""
+    front = zone_harness.constants["F_Cu"]
+    zone = _make_zone([front], {front: 12})
+    fabrication, _board = _make_fabrication(zone_harness, [zone])
+    zone_harness.zone_filler.Fill.return_value = False
+
+    with pytest.raises(RuntimeError, match="(?i)fill"):
+        fabrication.fill_zones()
+
+    zone.GetFilledPolysList.assert_not_called()
+    zone_harness.pcbnew.Refresh.assert_called_once_with()
+
+
+@pytest.mark.parametrize("refill", [True, False])
+def test_explicit_board_preparation_does_not_use_retained_fabrication_board(
+    zone_harness: types.SimpleNamespace, refill: bool
+) -> None:
+    """Review may target a reloaded native board without changing output ownership."""
+    front = zone_harness.constants["F_Cu"]
+    original_zone = _make_zone([front], {front: 12})
+    fabrication, original_board = _make_fabrication(
+        zone_harness, [original_zone], {"gerber": {"fill_zones": refill}}
+    )
+    active_zone = _make_zone([front], {front: 0}, netname="ACTIVE_GND")
+    active_board = MagicMock(name="active_board")
+    active_board.Zones.return_value = [active_zone]
+    active_board.GetLayerName.return_value = "Active copper"
+
+    assert fabrication.fill_zones(active_board) == ["ACTIVE_GND on Active copper"]
+
+    assert fabrication.board is original_board
+    original_board.Zones.assert_not_called()
+    original_board.GetLayerName.assert_not_called()
+    original_zone.GetFilledPolysList.assert_not_called()
+    active_zone.GetFilledPolysList.assert_called_once_with(front)
+    active_board.GetLayerName.assert_called_once_with(front)
+    if refill:
+        zone_harness.pcbnew.ZONE_FILLER.assert_called_once_with(active_board)
+        zone_harness.zone_filler.Fill.assert_called_once_with([active_zone])
+    else:
+        zone_harness.pcbnew.ZONE_FILLER.assert_not_called()
+
+
 def test_fill_zones_reports_only_empty_copper(zone_harness):
     """Filled copper is omitted while empty copper is reported."""
     front = zone_harness.constants["F_Cu"]
@@ -259,3 +308,79 @@ def test_fill_zones_excludes_non_copper_layers(zone_harness):
     technical_zone.GetFilledPolysList.assert_not_called()
     copper_zone.GetFilledPolysList.assert_called_once_with(front)
     assert zone_harness.pcbnew.IsCopperLayer.call_args_list == [call(mask), call(front)]
+
+
+def _make_output_fabrication(
+    harness: types.SimpleNamespace, project: Path, board_name: str
+) -> Any:
+    """Create a real fabrication output layout using an isolated board mock."""
+    board = MagicMock(name=board_name)
+    board.GetFileName.return_value = str(project / board_name)
+    return harness.Fabrication(types.SimpleNamespace(settings={}), board)
+
+
+def test_same_project_boards_have_independent_plot_directories_and_archives(
+    zone_harness: types.SimpleNamespace, tmp_path: Path
+) -> None:
+    """Two boards cannot include, overwrite, or republish each other's plot data."""
+    first = _make_output_fabrication(zone_harness, tmp_path, "controller.kicad_pcb")
+    second = _make_output_fabrication(zone_harness, tmp_path, "display.kicad_pcb")
+    first_plots = Path(first.gerberdir)
+    second_plots = Path(second.gerberdir)
+    assert first_plots == tmp_path / "jlcpcb" / "gerber" / "controller"
+    assert second_plots == tmp_path / "jlcpcb" / "gerber" / "display"
+    (first_plots / "copper.gbr").write_bytes(b"controller copper")
+    (second_plots / "copper.gbr").write_bytes(b"display copper")
+    (first_plots.parent / "legacy.gbr").write_bytes(b"stale shared output")
+
+    first_zip = first.zip_gerber_excellon()
+    second_zip = second.zip_gerber_excellon()
+    assert first_zip != second_zip
+    with ZipFile(first_zip) as archive:
+        assert archive.namelist() == ["copper.gbr"]
+        assert archive.read("copper.gbr") == b"controller copper"
+    with ZipFile(second_zip) as archive:
+        assert archive.namelist() == ["copper.gbr"]
+        assert archive.read("copper.gbr") == b"display copper"
+
+    previous_second_zip = second_zip.read_bytes()
+    (first_plots / "copper.gbr").write_bytes(b"updated controller copper")
+    first.zip_gerber_excellon()
+    assert second_zip.read_bytes() == previous_second_zip
+    assert (second_plots / "copper.gbr").read_bytes() == b"display copper"
+
+
+def test_fabrication_embeds_only_explicit_workbook_and_drops_it_when_disabled(
+    zone_harness: types.SimpleNamespace, tmp_path: Path
+) -> None:
+    """Only this run's workbook joins manufacturing files in the published ZIP."""
+    fabrication = _make_output_fabrication(zone_harness, tmp_path, "board.kicad_pcb")
+    plots = Path(fabrication.gerberdir)
+    (plots / "copper.gbr").write_bytes(b"copper")
+    (plots / "holes.drl").write_bytes(b"drill")
+    (plots / "map.pdf").write_bytes(b"map")
+    (plots / "stale.xlsx").write_bytes(b"stale workbook")
+    (plots / "snippet.png").write_bytes(b"temporary image")
+    workbook = tmp_path / "Required_impedance_control.xlsx"
+    workbook.write_bytes(b"current impedance workbook")
+
+    zip_path = fabrication.zip_gerber_excellon(
+        [zone_harness.ArchiveEntry(workbook, workbook.name)]
+    )
+    workbook.unlink()
+    with ZipFile(zip_path) as archive:
+        assert archive.namelist() == [
+            "Required_impedance_control.xlsx",
+            "copper.gbr",
+            "holes.drl",
+            "map.pdf",
+        ]
+        assert (
+            archive.read("Required_impedance_control.xlsx")
+            == b"current impedance workbook"
+        )
+        assert archive.testzip() is None
+
+    fabrication.zip_gerber_excellon()
+    with ZipFile(zip_path) as archive:
+        assert archive.namelist() == ["copper.gbr", "holes.drl", "map.pdf"]

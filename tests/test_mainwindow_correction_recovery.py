@@ -1,12 +1,12 @@
 """Exercise correction recovery and generation ordering with real stored data."""
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import closing
 import logging
 from pathlib import Path
 import sqlite3
 from types import MethodType, SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -129,7 +129,12 @@ def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
         for reference in ("C1", "C2")
     ]
     footprint = SimpleNamespace(GetLayer=lambda: 0)
-    board = SimpleNamespace(FindFootprintByReference=lambda _reference: footprint)
+    board = SimpleNamespace(
+        FindFootprintByReference=lambda _reference: footprint,
+        GetFileName=lambda: str(
+            Path(runtime.library.parent.project_path) / "board.kicad_pcb"
+        ),
+    )
     window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
     window.hide_bom_parts = False
     window.hide_pos_parts = False
@@ -189,7 +194,7 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
 
 def _generation_window(runtime: SimpleNamespace) -> tuple[SimpleNamespace, list[str]]:
     """Bind real preflight methods to the established generation test harness."""
-    window, steps = _make_window([])
+    window, steps = _make_window(runtime.mainwindow, [])
     window.library = fresh_library(runtime.library)
     window.correction_status = StatusLabel()
     window.Layout = MagicMock()
@@ -203,6 +208,50 @@ def _generation_window(runtime: SimpleNamespace) -> tuple[SimpleNamespace, list[
             MethodType(getattr(runtime.mainwindow.JLCPCBTools, name), window),
         )
     return window, steps
+
+
+def _generation_fabrication(
+    runtime: SimpleNamespace, window: SimpleNamespace, tmp_path: Path
+) -> Any:
+    """Supply complete assembly rows for the real ordinary generation snapshot."""
+    fabrication = make_fabrication(runtime.modules, window.library, tmp_path)
+    parts = [
+        {
+            **fabrication.parent.store.get_part(footprint.GetReference()),
+            "exclude_from_bom": 0,
+            "is_dnp": False,
+        }
+        for footprint in fabrication.board.Footprints()
+    ]
+
+    def read_all() -> list[dict[str, Any]]:
+        """Return independent reads of this fixture's unchanged board mapping."""
+        return [dict(part) for part in parts]
+
+    def read_bom_parts(
+        source: Optional[Iterable[dict[str, Any]]] = None,  # noqa: UP045
+    ) -> list[dict[str, Any]]:
+        """Group the captured records with real exclusions and mapping keys."""
+        groups: dict[tuple[str, str, str], list[str]] = {}
+        for part in read_all() if source is None else source:
+            if part["exclude_from_bom"] or part["is_dnp"]:
+                continue
+            key = (part["value"], part["footprint"], part["lcsc"])
+            groups.setdefault(key, []).append(part["reference"])
+        return [
+            {
+                "value": value,
+                "footprint": footprint,
+                "lcsc": lcsc,
+                "refs": ",".join(refs),
+            }
+            for (value, footprint, lcsc), refs in groups.items()
+        ]
+
+    fabrication.parent.store.read_all = read_all
+    fabrication.parent.store.read_bom_parts = read_bom_parts
+    window._get_current_board = lambda: fabrication.board
+    return fabrication
 
 
 def _displayed_corrections(window: Any) -> list[str]:
@@ -355,14 +404,18 @@ def test_startup_store_population_recovers_invalid_saved_corrections(
     }
     window.start_assembly_enrichment = MagicMock()
     window.recompute_bom_estimate = MagicMock()
+    window._impedance = SimpleNamespace(attach_store=MagicMock())
     board = window.pcbnew.GetBoard()
-    board.GetFileName = lambda: str(Path(window.project_path) / "board.kicad_pcb")
+    board_path = Path(window.project_path) / "board.kicad_pcb"
+    board_path.touch()
+    board.GetFileName = lambda: str(board_path)
     window.init_fabrication()
     window.store = None
 
     window.init_store()
 
     assert window.store is store
+    window._impedance.attach_store.assert_called_once_with(store)
     assert _displayed_corrections(window) == ["Unresolved", "Unresolved"]
     window.start_assembly_enrichment.assert_called_once_with()
     window.recompute_bom_estimate.assert_called_once_with()
@@ -423,8 +476,9 @@ def test_generation_rejects_bad_data_before_all_side_effects(
     runtime.mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
     assert steps == ["Validating corrections"]
-    for method in vars(window.fabrication).values():
-        method.assert_not_called()
+    for name, method in vars(window.fabrication).items():
+        if name != "end_ordinary_generation":
+            method.assert_not_called()
     window.run_drc_before_gerber_export.assert_not_called()
     window.count_order_number_placeholders.assert_not_called()
     window.build_generate_hook_env.assert_not_called()
@@ -495,9 +549,11 @@ def test_unknown_archive_warnings_keep_healthy_display_and_generation_ready(
     generation, steps = _generation_window(runtime)
     runtime.mainwindow.JLCPCBTools.generate_fabrication_data(generation)
     assert steps[0] == "Validating corrections"
-    generation.fabrication.prepare_cpl.assert_called_once_with(snapshot.corrections)
+    generation.fabrication.begin_ordinary_generation.assert_called_once_with(
+        snapshot.corrections
+    )
     generation.fabrication.write_cpl.assert_called_once_with(
-        generation.fabrication.prepare_cpl.return_value
+        generation.fabrication.begin_ordinary_generation.return_value.cpl_rows
     )
     generation.store.increment_generation_count.assert_called_once()
     inspect_archive.assert_not_called()
@@ -561,7 +617,7 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     """The real generation handler and CPL writer share one snapshot across a run."""
     runtime.library.save_correction_data("Device", 90, (1, 2))
     window, _steps = _generation_window(runtime)
-    fabrication = make_fabrication(runtime.modules, window.library, tmp_path)
+    fabrication = _generation_fabrication(runtime, window, tmp_path)
     window.fabrication = fabrication
     matcher = MagicMock(wraps=fabrication._correction_for_footprint)
     fabrication._correction_for_footprint = matcher
@@ -580,8 +636,6 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
             runtime.library.correctionsdb_file,
             "UPDATE correction SET rotation='47u'",
         )
-        for footprint in fabrication.board.Footprints():
-            footprint.GetPosition = lambda: Point(100, 200)
         return ""
 
     fabrication.get_part_consistency_warnings = MagicMock(
@@ -627,7 +681,7 @@ def test_generation_prepares_placements_before_any_output_or_board_changes(
     """Unrepresentable correction transforms leave every previous artifact intact."""
     runtime.library.save_correction_data("Device", 0, (offset, 0))
     window, steps = _generation_window(runtime)
-    fabrication = make_fabrication(runtime.modules, window.library, tmp_path)
+    fabrication = _generation_fabrication(runtime, window, tmp_path)
     window.fabrication = fabrication
     destination = Path(fabrication.get_cpl_csv_path())
     destination.write_bytes(b"previous complete CPL\x00\xff")
