@@ -39,6 +39,13 @@ from .events import (
     DownloadStartedEvent,
     MessageEvent,
 )
+from .global_db import (
+    CORRECTIONS_LEGACY_NAME,
+    MAPPINGS_LEGACY_NAME,
+    global_db_path,
+    legacy_db_path,
+    migrate_legacy_global_databases,
+)
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
 from .lcsc import normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
@@ -203,6 +210,7 @@ class Library:
         self.partsdb_file = ""
         self.rotationsdb_file = ""
         self.localcorrectionsdb_file = ""
+        self.global_db_file = ""
         self.globalcorrectionsdb_file = ""
         self.correctionsdb_file = ""
         self.part_preferences_db_file = ""
@@ -257,17 +265,28 @@ class Library:
         self.localcorrectionsdb_file = os.path.join(
             self.parent.project_path, "jlcpcb", "project.db"
         )
-        self.globalcorrectionsdb_file = os.path.join(self.datadir, "corrections.db")
+        self.global_db_file = global_db_path(self.datadir)
+        self.category_map = {}
+
+        self.setup()
+        migration = migrate_legacy_global_databases(self.datadir, self.logger)
+        # Serve each domain from global.db once its legacy file is gone; keep the
+        # legacy path when that file remains so a failed migration does not hide data.
+        self.globalcorrectionsdb_file = (
+            self.global_db_file
+            if migration.uses_global(CORRECTIONS_LEGACY_NAME)
+            else legacy_db_path(self.datadir, CORRECTIONS_LEGACY_NAME)
+        )
+        self.part_preferences_db_file = (
+            self.global_db_file
+            if migration.uses_global(MAPPINGS_LEGACY_NAME)
+            else legacy_db_path(self.datadir, MAPPINGS_LEGACY_NAME)
+        )
         self.correctionsdb_file = (
             self.globalcorrectionsdb_file
             if self.uses_global_correction_database()
             else self.localcorrectionsdb_file
         )
-        # Retain the legacy filename so existing shared part preferences stay available.
-        self.part_preferences_db_file = os.path.join(self.datadir, "mappings.db")
-        self.category_map = {}
-
-        self.setup()
         self.check_library()
 
         self.logger.debug(
@@ -297,10 +316,9 @@ class Library:
         else:
             self.state = LibraryState.INITIALIZED
         try:
-            if (
-                not os.path.isfile(self.correctionsdb_file)
-                or os.path.getsize(self.correctionsdb_file) == 0
-            ):
+            # global.db may already exist with part preferences while corrections
+            # tables are still missing (or the reverse); create by table, not file.
+            if not self._sqlite_table_present(self.correctionsdb_file, "correction"):
                 with self._correction_transaction(
                     self.correctionsdb_file, create=True
                 ) as con:
@@ -323,9 +341,8 @@ class Library:
             # Recovery reads report these errors while keeping the manager usable.
             self.logger.warning("Correction storage is unavailable: %s", error)
         try:
-            new_preferences = (
-                not os.path.isfile(self.part_preferences_db_file)
-                or os.path.getsize(self.part_preferences_db_file) == 0
+            new_preferences = not self._sqlite_table_present(
+                self.part_preferences_db_file, "mapping"
             )
             self.create_part_preferences_table()
             if new_preferences:
@@ -333,6 +350,16 @@ class Library:
         except (sqlite3.Error, OSError) as error:
             # Preferences are optional; keep the catalog and Settings accessible.
             self.logger.warning("Part preference storage is unavailable: %s", error)
+
+    def _sqlite_table_present(self, db_path: str, table: str) -> bool:
+        """Return True when an ordinary table exists in a readable SQLite file."""
+        if not os.path.isfile(db_path) or os.path.getsize(db_path) == 0:
+            return False
+        try:
+            with contextlib.closing(self._read_database(db_path)) as con:
+                return self._has_table(con, table)
+        except (sqlite3.Error, OSError):
+            return False
 
     def uses_global_correction_database(self):
         """Check for a project correction table without creating a project database."""
@@ -375,9 +402,10 @@ class Library:
         if currently_using_global == use_global:
             return
         if use_global:
-            if (
-                not Path(self.globalcorrectionsdb_file).exists()
-                or Path(self.globalcorrectionsdb_file).stat().st_size == 0
+            # global.db may already hold part preferences while correction tables
+            # are still missing; create by table, not by non-empty file size.
+            if not self._sqlite_table_present(
+                self.globalcorrectionsdb_file, "correction"
             ):
                 self.create_correction_table(self.globalcorrectionsdb_file)
             migration_issues = self.migrate_corrections()
@@ -1762,7 +1790,7 @@ class Library:
     ) -> CorrectionBatchResult:
         """Inspect once, retain unresolved work, and atomically copy eligible archives."""
         target = self.globalcorrectionsdb_file
-        if not Path(target).exists() or Path(target).stat().st_size == 0:
+        if not self._sqlite_table_present(target, "correction"):
             self.create_correction_table(target)
         try:
             with contextlib.closing(self._read_database(target)) as con:

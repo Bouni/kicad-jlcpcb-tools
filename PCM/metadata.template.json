@@ -24,7 +24,8 @@
     "keep_on_update": [
         "plugins/[^/]+/settings\\.json$",
         "plugins/[^/]+/jlcpcb/corrections\\.db$",
-        "plugins/[^/]+/jlcpcb/mappings\\.db$"
+        "plugins/[^/]+/jlcpcb/mappings\\.db$",
+        "plugins/[^/]+/jlcpcb/global\\.db$"
     ],
     "versions": [{
         "version": "VERSION_HERE",
