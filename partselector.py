@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Collection
 import logging
+import sqlite3
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -15,6 +17,7 @@ from .dataview_highlight import HighlightedTextRenderer
 from .derive_params import params_for_part  # pylint: disable=import-error
 from .events import AssignPartsEvent, UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
+from .lcsc import is_lcsc_part, normalize_lcsc
 from .partdetails import PartDetailsDialog
 from .partselector_columns import (
     DB_FIELDS,
@@ -37,9 +40,39 @@ HIGHLIGHTED_COLUMN_KEYS = {
 }
 
 
+_LCSC_FIELD = DB_FIELDS.index("LCSC Part")
+
+
 def _format_duration(seconds: float) -> str:
     """Format a duration as seconds or milliseconds for UI labels."""
     return f"{seconds:.2f}s" if seconds > 1 else f"{seconds * 1000.0:.0f}ms"
+
+
+def typed_lcsc_offer(
+    keyword: str,
+    shown: Collection[str],
+    lookup: Callable[[str], dict[str, Any]],
+) -> Optional[tuple[str, str, dict[str, Any]]]:
+    """Offer a searched LCSC number that the results do not show.
+
+    Keyword search matches substrings, so a number the catalog lacks seldom
+    finds nothing: C19702 also matches C1970200 and a hundred more. The offer
+    therefore turns on the exact number being absent from the rows shown, and
+    a direct lookup decides what to say. A listed number can be hidden by the
+    filters or pushed past the 1000-row limit; an unlisted one can still be
+    assembled through JLC pre-order or global sourcing.
+
+    Returns the number, the button label and the catalog details to assign
+    with, or None when the keyword is not exactly one number or it is shown.
+    """
+    lcsc = normalize_lcsc(keyword)
+    if not is_lcsc_part(lcsc) or lcsc in shown:
+        return None
+    details = lookup(lcsc)
+    if details:
+        label = f"{lcsc} is in the library but not in these results. Assign it"
+        return lcsc, label, details
+    return lcsc, f"{lcsc} isn't in the JLC library. Assign it anyway", {}
 
 
 class PartSelectorDialog(wx.Dialog):
@@ -70,6 +103,7 @@ class PartSelectorDialog(wx.Dialog):
         self.parts = dict(parts)
         self.assignment_context = assignment_context
         self.assignment_label = assignment_label
+        self._typed_lcsc_offer: Optional[tuple[str, str, dict[str, Any]]] = None
         lcsc_selection = self.get_existing_selection(self.parts)
 
         self.search_timer = wx.Timer(self)
@@ -467,8 +501,14 @@ class PartSelectorDialog(wx.Dialog):
             self, wx.ID_ANY, "0 Results", wx.DefaultPosition, wx.DefaultSize
         )
 
+        # Offers a searched number the results do not show; see typed_lcsc_offer.
+        self.typed_lcsc_button = wx.Button(self, wx.ID_ANY, "")
+        self.typed_lcsc_button.Bind(wx.EVT_BUTTON, self.assign_typed_lcsc)
+        self.typed_lcsc_button.Hide()
+
         result_sizer = wx.BoxSizer(wx.HORIZONTAL)
         result_sizer.Add(self.result_count, 0, wx.LEFT | wx.TOP, 5)
+        result_sizer.Add(self.typed_lcsc_button, 0, wx.LEFT, 10)
 
         # ---------------------------------------------------------------------
         # ------------------------- Result Part list --------------------------
@@ -801,6 +841,7 @@ class PartSelectorDialog(wx.Dialog):
                 self.result_count.SetLabel(
                     "Parts catalog unavailable; download it to search."
                 )
+                self._show_typed_lcsc_offer(None)
                 return
             categories = self.parent.library.categories
             self.category.AppendItems(categories)
@@ -819,6 +860,7 @@ class PartSelectorDialog(wx.Dialog):
             self.result_count.SetLabel(
                 "Parts catalog unavailable; download it to search."
             )
+            self._show_typed_lcsc_offer(None)
             return
         parameters = {
             "keyword": self.keyword.GetValue(),
@@ -835,10 +877,62 @@ class PartSelectorDialog(wx.Dialog):
             "quantity": len(self.parts),
         }
         start = time.time()
-        result = self.parent.library.search(parameters)
+        try:
+            result = self.parent.library.search(parameters)
+        except Exception:
+            # The offer names the last search's number; a failed search must not
+            # leave it up under a new keyword or for new targets.
+            self._show_typed_lcsc_offer(None)
+            raise
         self.logger.debug("len(result) %d", len(result))
         search_duration = time.time() - start
         self.populate_part_list(result, search_duration)
+        self.update_typed_lcsc_offer(result)
+
+    def update_typed_lcsc_offer(self, parts: Any) -> None:
+        """Offer the searched number when the results do not show it."""
+        shown = {normalize_lcsc(row[_LCSC_FIELD]) for row in parts or ()}
+        try:
+            offer = typed_lcsc_offer(
+                self.keyword.GetValue(),
+                shown,
+                lambda lcsc: self.parent._catalog_get_part_details(lcsc, strict=True),
+            )
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning("Unable to look up the searched LCSC number: %s", error)
+            offer = None
+        self._show_typed_lcsc_offer(offer)
+
+    def _show_typed_lcsc_offer(
+        self, offer: Optional[tuple[str, str, dict[str, Any]]]
+    ) -> None:
+        """Show, relabel or hide the offer, keeping it clear of the result count."""
+        previous, self._typed_lcsc_offer = self._typed_lcsc_offer, offer
+        if offer is None and previous is None:
+            return
+        # The result count's text changes width with every search, and a label
+        # resizing itself never moves its neighbours, so a visible offer is laid
+        # out again even when its own label is unchanged.
+        self.typed_lcsc_button.SetLabel(offer[1] if offer else "")
+        self.typed_lcsc_button.Show(offer is not None)
+        self.Layout()
+
+    def assign_typed_lcsc(self, *_: object) -> None:
+        """Assign the offered number to this session's targets, as a pick would."""
+        if self._typed_lcsc_offer is None:
+            return
+        lcsc, _label, details = self._typed_lcsc_offer
+        wx.PostEvent(
+            self.parent,
+            AssignPartsEvent(
+                lcsc=lcsc,
+                type=details.get("type", ""),
+                stock=details.get("stock", ""),
+                references=tuple(self.parts),
+                assignment_context=self.assignment_context,
+            ),
+        )
+        self.Close()
 
     def get_highlight_text(self) -> str:
         """Return the active keyword search text for result highlighting."""
