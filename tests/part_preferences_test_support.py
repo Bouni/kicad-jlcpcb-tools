@@ -202,6 +202,7 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         library.create_part_preferences_table()
         seed_preferences(library, part_preferences or {})
         library.state = mainwindow.LibraryState.INITIALIZED
+        library.is_download_running = MagicMock(return_value=False)
         library.save_part_preferences = MagicMock(wraps=library.save_part_preferences)
         library.get_part_preference = MagicMock(wraps=library.get_part_preference)
         library.get_part_details = MagicMock(
@@ -270,6 +271,52 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
     return make
 
 
+def entry_dialog(wx: Any, code: str, *, accept: bool = True) -> type:
+    """Stand in for the modal Enter LCSC prompt, answering with ``code``."""
+
+    class EntryDialog:
+        opened: list[tuple[tuple[str, ...], str]] = []
+
+        def __init__(self, _parent: Any, references: Any, initial: str = "") -> None:
+            self.opened.append((tuple(references), initial))
+            self.code = code
+
+        def __enter__(self) -> "EntryDialog":
+            return self
+
+        def __exit__(self, *_error: object) -> None:
+            return None
+
+        def ShowModal(self) -> int:
+            return wx.ID_OK if accept else wx.ID_CANCEL
+
+    return EntryDialog
+
+
+def message_dialog(wx: Any, answer: str = "YES") -> type:
+    """Stand in for a Yes/No question, recording the text of each one asked."""
+
+    class Question:
+        asked: list[str] = []
+
+        def __init__(self, _parent: Any, text: str, *_args: object) -> None:
+            self.asked.append(text)
+
+        def __enter__(self) -> "Question":
+            return self
+
+        def __exit__(self, *_error: object) -> None:
+            return None
+
+        def SetYesNoLabels(self, *_labels: str) -> bool:
+            return True
+
+        def ShowModal(self) -> int:
+            return getattr(wx, f"ID_{answer}")
+
+    return Question
+
+
 def act(
     action: str,
     window: Any,
@@ -282,6 +329,8 @@ def act(
 
     A paste copies a product URL naming ``lcsc`` unless ``clipboard_text``
     gives the exact text to paste.
+
+    Enter LCSC types the number and answers Yes if asked about an unlisted part.
     """
     if action == "picker":
         window.assign_parts(
@@ -317,6 +366,14 @@ def act(
         monkeypatch.setattr(mainwindow.wx, "TextDataObject", TextData, raising=False)
         window.paste_part_lcsc()
         clipboard.Close.assert_called_once()
+    elif action == "enter":
+        monkeypatch.setattr(
+            mainwindow, "LcscEntryDialog", entry_dialog(mainwindow.wx, lcsc)
+        )
+        monkeypatch.setattr(
+            mainwindow.wx, "MessageDialog", message_dialog(mainwindow.wx), raising=False
+        )
+        window.enter_part_lcsc()
     elif action == "apply":
         window.apply_selected_part_preferences()
     else:

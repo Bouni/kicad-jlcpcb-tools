@@ -173,6 +173,8 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
 
+To type or paste an LCSC number instead, right-click the selected footprints and choose **Enter LCSC…**. It accepts a part number such as `C25804` or a product link copied from lcsc.com or jlcpcb.com. The number may be one the downloaded parts library does not list: JLC can still assemble LCSC-only parts it buys in through pre-order or global sourcing, and your library may be older than the part. The plugin asks once before assigning such a number. With no library downloaded there is nothing to check against, so it assigns without asking.
+
 ### Part preferences
 
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
