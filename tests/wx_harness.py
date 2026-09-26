@@ -316,6 +316,7 @@ def mainwindow_stubs(
             "loadBitmapScaled": lambda *_args: None,
         },
         "kicad_drc": {"DRCViolationCounter": object},
+        "lcsc_entry_dialog": {"LcscEntryDialog": object},
         "library": {
             "Library": object,
             "LibraryState": types.SimpleNamespace(

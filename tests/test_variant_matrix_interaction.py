@@ -1142,6 +1142,7 @@ def test_context_menu_selection_controls_real_native_edit_scope(
                 "copy_cell",
                 "details",
                 "paste",
+                "enter_lcsc",
                 "copy_to",
                 "remove",
                 "use_base",

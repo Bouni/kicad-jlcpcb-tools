@@ -79,6 +79,7 @@ from .helpers import (
 )
 from .kicad_drc import DRCViolationCounter
 from .lcsc import extract_lcsc, normalize_lcsc
+from .lcsc_entry_dialog import LcscEntryDialog
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .part_preferences import PartPreferencesDialog
@@ -128,6 +129,7 @@ ID_HIDE_POS = 14
 ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
+ID_CONTEXT_MENU_ENTER_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
@@ -1257,15 +1259,19 @@ class JLCPCBTools(wx.Frame):
         """Update progress; source-tagged completion publishes the extracted catalog."""
         self.reset_gauge()
 
-    def _can_apply_user_assignments(self) -> bool:
-        """Explain unavailable assignment dependencies for a user-initiated action."""
+    def _can_apply_user_assignments(self, *, require_catalog: bool = True) -> bool:
+        """Explain unavailable assignment dependencies for a user-initiated action.
+
+        Only a typed LCSC number may be assigned without a catalog: it names its
+        part itself, while every other assignment path reads the catalog.
+        """
         if self.store is None:
             self.logger.warning(
                 "Cannot apply LCSC assignments while project storage is unavailable. "
                 "Check the storage error, then retry after recovery or reopen the dialog."
             )
             return False
-        if not self.is_catalog_available():
+        if require_catalog and not self.is_catalog_available():
             self.logger.warning(
                 "Cannot apply LCSC assignments: the selected parts catalog is unavailable. "
                 "Download it or select an available catalog in Settings."
@@ -1281,13 +1287,15 @@ class JLCPCBTools(wx.Frame):
             return controller.assign_parts(e)
         try:
             details = self._catalog_get_part_details(e.lcsc, strict=True)
+            # An unlisted number must stay a cached miss, or it reads as listed.
+            listed = bool(details)
             details.update(type=e.type, stock=e.stock)
             assigned = self._apply_lcsc_assignments(
                 dict.fromkeys(e.references, e.lcsc),
                 details={e.lcsc: details},
                 remember_part_preferences=True,
             )
-            if assigned:
+            if assigned and listed:
                 key = normalize_lcsc(e.lcsc)
                 self._catalog_details[key] = deepcopy(details)
                 self.partlist_data_model.set_catalog_details(
@@ -1306,9 +1314,10 @@ class JLCPCBTools(wx.Frame):
         details: Optional[dict[str, dict[str, Any]]] = None,
         remember_part_preferences: bool = False,
         notify: bool = True,
+        require_catalog: bool = True,
     ) -> list[str]:
         """Commit project changes before updating board fields or displayed rows."""
-        if self.store is None or not self.is_catalog_available():
+        if self.store is None or (require_catalog and not self.is_catalog_available()):
             return []
         board = self.pcbnew.GetBoard()
         footprints = {
@@ -2766,6 +2775,71 @@ class JLCPCBTools(wx.Frame):
                 "Applied part preferences to %d assignment(s).", len(updated_references)
             )
 
+    def enter_part_lcsc(self, *_: object) -> None:
+        """Assign a typed LCSC number, including one the catalog does not list."""
+        if controller := getattr(self, "_variant_controller", None):
+            return controller.dispatch_action(
+                "enter_lcsc", controller.view.selected_target
+            )
+        selections = self.footprint_list.GetSelections()
+        references = [
+            self.partlist_data_model.get_reference(item) for item in selections
+        ]
+        if not references or not self._can_apply_user_assignments(
+            require_catalog=False
+        ):
+            return
+        current = {self.partlist_data_model.get_lcsc(item) for item in selections}
+        lcsc = self.prompt_manual_lcsc(
+            references, current.pop() if len(current) == 1 else ""
+        )
+        if not lcsc or (details := self.manual_lcsc_details(lcsc)) is None:
+            return
+        self._apply_lcsc_assignments(
+            dict.fromkeys(references, lcsc),
+            details={lcsc: details},
+            remember_part_preferences=True,
+            require_catalog=False,
+        )
+
+    def prompt_manual_lcsc(self, references: Sequence[str], initial: str = "") -> str:
+        """Ask for one LCSC number; return it canonicalized, or "" when cancelled."""
+        with LcscEntryDialog(self, references, initial) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return ""
+            return dialog.code
+
+    def manual_lcsc_details(self, lcsc: str) -> Optional[dict[str, Any]]:
+        """Return catalog details to assign a typed number with, or None to cancel.
+
+        The catalog lists only JLC's assembly library, yet JLC also assembles
+        LCSC-only parts it buys in through pre-order or global sourcing, and a
+        catalog can be older than the part. A number it does not list is asked
+        about once. With no catalog there is nothing to check, so no question;
+        the same holds while Update library rewrites the catalog in place.
+        """
+        if not self.is_catalog_available() or self.library.is_download_running():
+            return {}
+        try:
+            details = self._catalog_get_part_details(lcsc, strict=True)
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning(
+                "Unable to look up %s in the parts catalog: %s", lcsc, error
+            )
+            return None
+        if details:
+            return details
+        with wx.MessageDialog(
+            self,
+            f"{lcsc} isn't in the downloaded JLC parts library. JLC can still "
+            "assemble parts it buys in through pre-order or global sourcing, and "
+            "your library may be older than the part.\n\nAssign it anyway?",
+            "Enter LCSC",
+            wx.YES_NO | wx.ICON_QUESTION | wx.CENTER,
+        ) as dialog:
+            dialog.SetYesNoLabels("Assign", "Cancel")
+            return {} if dialog.ShowModal() == wx.ID_YES else None
+
     def OnRightDown(self, *_: object) -> None:
         """Right click context menu for action on parts table."""
         right_click_menu = wx.Menu()
@@ -2781,6 +2855,12 @@ class JLCPCBTools(wx.Frame):
         )
         right_click_menu.Append(paste_lcsc)
         right_click_menu.Bind(wx.EVT_MENU, self.paste_part_lcsc, paste_lcsc)
+
+        enter_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_ENTER_LCSC, "Enter LCSC…"
+        )
+        right_click_menu.Append(enter_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.enter_part_lcsc, enter_lcsc)
 
         correction_by_reference = wx.MenuItem(
             right_click_menu,
