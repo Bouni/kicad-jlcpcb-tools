@@ -1,7 +1,8 @@
 """Safety utilities for KiCad schematic operations.
 
 Provides lockfile detection, automatic project schematic resolution,
-hierarchical sheet discovery, and atomic file write/backup operations.
+hierarchical sheet discovery, atomic file write/backup operations, and
+zipped backups of a project's schematics.
 """
 
 from collections.abc import Callable, Collection, Iterator
@@ -15,6 +16,7 @@ import shutil
 import stat
 from typing import IO, Any, Optional
 import uuid
+import zipfile
 
 logger = logging.getLogger(__name__)
 
@@ -516,3 +518,99 @@ def atomic_write_schematic(path: str, content: str) -> None:
     # 2. Write the new content beside the target and rename it into place
     with _replacing(abs_path, abs_path, mode="w", encoding="utf-8") as f:
         f.write(content)
+
+
+def _backup_member_name(path: str, project_path: str) -> str:
+    """Name a sheet inside a backup by its place in the project.
+
+    A sheet outside the project folder, such as one shared through `..`,
+    goes under `outside-project/` with its absolute path, so no member name
+    climbs out of the folder the backup is extracted into.
+    """
+    try:
+        relative = os.path.relpath(path, project_path)
+    except ValueError:  # Another drive on Windows
+        relative = os.pardir
+    if relative != os.pardir and not relative.startswith(os.pardir + os.sep):
+        return relative.replace(os.sep, "/")
+    drive, tail = os.path.splitdrive(os.path.abspath(path))
+    parts = [drive.replace(":", "")] + re.split(r"[\\/]", tail)
+    return "/".join(["outside-project", *(part for part in parts if part)])
+
+
+def backup_schematics(
+    project_path: str,
+    board_filename: str,
+    zip_name: str,
+    *,
+    project_name: Optional[str] = None,  # noqa: UP045
+    approved_locks: Collection[str] = (),
+) -> Optional[str]:  # noqa: UP045
+    """Zip every schematic sheet of the board's project into its jlcpcb folder.
+
+    The sheets are each top-level schematic of the project, as
+    resolve_project_schematics finds them, and every sheet below it. They
+    are stored under their paths relative to the project folder. As
+    before an export, nothing is read into the backup while KiCad has a
+    lock on any sheet, or on the project's own schematic, other than
+    approved_locks: a file open in the Schematic Editor may lack its
+    unsaved edits.
+
+    The zip is written beside its final name and renamed into place, so a
+    backup is either complete or absent. A backup that already exists when
+    this is called is not replaced, which lets a caller keep a one-time
+    backup under a fixed name. The check is not atomic: another process
+    that creates the same name meanwhile has its file replaced.
+
+    Args:
+        project_path: Directory containing the KiCad project.
+        board_filename: Filename or full path of the PCB file.
+        zip_name: File name of the backup, ending in `.zip`, to create
+            directly inside `<project_path>/jlcpcb`. Separators, drive
+            and stream colons, and control characters are refused.
+        project_name: Name of the loaded project, when known.
+        approved_locks: Paths reported by an earlier SchematicLockedError
+            whose locks the user has chosen to back up past.
+
+    Returns:
+        The path of the new backup, or None when the project has no
+        schematic to back up.
+
+    Raises:
+        ValueError: If zip_name is not a plain file name ending in `.zip`,
+            or a sheet is not a KiCad schematic.
+        FileExistsError: If a backup named zip_name already exists.
+        SchematicLockedError: Naming every schematic with an unapproved lock.
+        OSError: If a sheet cannot be read or the backup cannot be written.
+
+    """
+    if not re.fullmatch(r"[^\\/:\x00-\x1f\x7f]+\.zip", zip_name, re.IGNORECASE):
+        raise ValueError(f"Backup name {zip_name!r} is not a plain .zip file name")
+    zip_path = os.path.join(project_path, "jlcpcb", zip_name)
+    if os.path.lexists(zip_path):
+        raise FileExistsError(f"Schematic backup already exists: {zip_path}")
+
+    roots = resolve_project_schematics(project_path, board_filename, project_name)
+    if not roots:
+        return None
+    sheets = list(
+        dict.fromkeys(
+            sheet for root in roots for sheet in collect_schematic_hierarchy(root)
+        )
+    )
+    lock_paths = list(sheets)
+    own_schematic = project_schematic_path(project_path, board_filename, project_name)
+    if own_schematic and own_schematic not in lock_paths:
+        lock_paths.append(own_schematic)
+    assert_schematics_not_locked(lock_paths, approved_locks)
+
+    os.makedirs(os.path.dirname(zip_path), exist_ok=True)
+    with (
+        _replacing(zip_path, zip_path, mode="wb") as f,
+        zipfile.ZipFile(
+            f, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False
+        ) as archive,
+    ):
+        for sheet in sheets:
+            archive.write(sheet, _backup_member_name(sheet, project_path))
+    return zip_path

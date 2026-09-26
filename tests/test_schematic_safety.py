@@ -8,6 +8,7 @@ import re
 import socket
 import stat
 import types
+import zipfile
 
 import pytest
 
@@ -17,6 +18,7 @@ from schematic_safety import (
     assert_schematics_writable,
     atomic_write_schematic,
     authenticated_project_name,
+    backup_schematics,
     check_schematic_lock,
     collect_schematic_hierarchy,
     get_schematic_lock_path,
@@ -759,3 +761,182 @@ def test_project_lookups_use_the_loaded_projects_name(tmp_path: Path) -> None:
     assert project_schematic_path(str(tmp_path), "renamed_board.kicad_pcb") == str(
         tmp_path / "renamed_board.kicad_sch"
     )
+
+
+def _backup_members(zip_path: str) -> dict[str, bytes]:
+    """Return the contents of every member of a backup, by member name."""
+    with zipfile.ZipFile(zip_path) as archive:
+        return {name: archive.read(name) for name in archive.namelist()}
+
+
+def _hierarchical_project(tmp_path: Path) -> tuple[Path, Path]:
+    """Write board's schematic with a sub-sheet in a folder, beside another board's."""
+    (tmp_path / "sheets").mkdir()
+    root = tmp_path / "board.kicad_sch"
+    sub = tmp_path / "sheets" / "power.kicad_sch"
+    root.write_text(
+        '(kicad_sch\n  (sheet (property "Sheetfile" "sheets/power.kicad_sch"))\n)\n',
+        encoding="utf-8",
+    )
+    sub.write_text("(kicad_sch)\n", encoding="utf-8")
+    (tmp_path / "other_board.kicad_sch").write_text("(kicad_sch)\n", encoding="utf-8")
+    return root, sub
+
+
+def test_backup_schematics_zips_every_sheet_of_the_project(tmp_path: Path) -> None:
+    """Every sheet of the board's project is stored under its path in the project."""
+    root, sub = _hierarchical_project(tmp_path)
+
+    backup = backup_schematics(str(tmp_path), "board.kicad_pcb", "before.zip")
+
+    assert backup == str(tmp_path / "jlcpcb" / "before.zip")
+    assert _backup_members(backup) == {
+        "board.kicad_sch": root.read_bytes(),
+        "sheets/power.kicad_sch": sub.read_bytes(),
+    }
+
+
+def test_backup_schematics_refuses_a_locked_sheet_until_approved(
+    tmp_path: Path,
+) -> None:
+    """A sheet open in Schematic Editor may have unsaved edits the file lacks."""
+    _root, sub = _hierarchical_project(tmp_path)
+    _lock(sub, "alice")
+
+    with pytest.raises(SchematicLockedError) as raised:
+        backup_schematics(str(tmp_path), "board.kicad_pcb", "before.zip")
+    assert [path for path, _info in raised.value.locks] == [str(sub)]
+    assert not (tmp_path / "jlcpcb").exists()
+
+    backup = backup_schematics(
+        str(tmp_path), "board.kicad_pcb", "before.zip", approved_locks=[str(sub)]
+    )
+    assert "sheets/power.kicad_sch" in _backup_members(backup)
+
+
+def test_backup_schematics_checks_the_projects_own_schematic_lock(
+    tmp_path: Path,
+) -> None:
+    """KiCad locks <project>.kicad_sch whenever the project is open in eeschema."""
+    _project(tmp_path, "board", "power.kicad_sch")
+    _schematics(tmp_path, "power.kicad_sch")
+    _lock(tmp_path / "board.kicad_sch", "alice")
+
+    with pytest.raises(SchematicLockedError):
+        backup_schematics(str(tmp_path), "board.kicad_pcb", "before.zip")
+
+
+def test_backup_schematics_never_replaces_an_existing_backup(tmp_path: Path) -> None:
+    """A name that is already taken keeps its backup, so a one-time backup stays."""
+    _hierarchical_project(tmp_path)
+    (tmp_path / "jlcpcb").mkdir()
+    existing = tmp_path / "jlcpcb" / "before.zip"
+    existing.write_bytes(b"first backup")
+
+    with pytest.raises(FileExistsError):
+        backup_schematics(str(tmp_path), "board.kicad_pcb", "before.zip")
+    assert existing.read_bytes() == b"first backup"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        ".zip",
+        "before",
+        "before.txt",
+        "../before.zip",
+        "old/before.zip",
+        "old\\before.zip",
+        "D:before.zip",
+        "before.zip:stream.zip",
+        "before\x01.zip",
+    ],
+)
+def test_backup_schematics_takes_only_a_zip_file_name(
+    tmp_path: Path, name: str
+) -> None:
+    """The backup is always a zip directly inside the project's jlcpcb folder."""
+    _hierarchical_project(tmp_path)
+
+    with pytest.raises(ValueError):
+        backup_schematics(str(tmp_path), "board.kicad_pcb", name)
+    assert not (tmp_path / "jlcpcb").exists()
+
+
+def test_backup_schematics_without_a_schematic_writes_nothing(tmp_path: Path) -> None:
+    """A project with no schematic has nothing to back up."""
+    assert backup_schematics(str(tmp_path), "board.kicad_pcb", "before.zip") is None
+    assert not (tmp_path / "jlcpcb").exists()
+
+
+def test_failed_backup_leaves_no_partial_zip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backup is either complete under its name or absent."""
+    _hierarchical_project(tmp_path)
+    write = zipfile.ZipFile.write
+
+    def fail_on_the_sub_sheet(
+        archive: zipfile.ZipFile, filename: str, arcname: str, *args: object
+    ) -> None:
+        if arcname == "sheets/power.kicad_sch":
+            raise OSError("disk full")
+        write(archive, filename, arcname, *args)
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", fail_on_the_sub_sheet)
+
+    with pytest.raises(OSError, match="disk full"):
+        backup_schematics(str(tmp_path), "board.kicad_pcb", "before.zip")
+    assert os.listdir(tmp_path / "jlcpcb") == []
+
+
+def test_backup_schematics_names_a_sheet_outside_the_project_safely(
+    tmp_path: Path,
+) -> None:
+    """A shared sheet reached through .. is kept, but no member name climbs out."""
+    project = tmp_path / "board"
+    shared = tmp_path / "shared"
+    project.mkdir()
+    shared.mkdir()
+    (project / "board.kicad_sch").write_text(
+        '(kicad_sch\n  (sheet (property "Sheetfile" "../shared/power.kicad_sch"))\n)\n',
+        encoding="utf-8",
+    )
+    (shared / "power.kicad_sch").write_text("(kicad_sch)\n", encoding="utf-8")
+
+    members = _backup_members(
+        backup_schematics(str(project), "board.kicad_pcb", "before.zip")
+    )
+
+    outside = [name for name in members if name != "board.kicad_sch"]
+    assert len(outside) == 1
+    assert outside[0].startswith("outside-project/")
+    assert outside[0].endswith("/shared/power.kicad_sch")
+    assert ".." not in outside[0].split("/")
+    assert members[outside[0]] == (shared / "power.kicad_sch").read_bytes()
+
+
+def test_backup_schematics_keeps_a_sheet_dated_before_1980(tmp_path: Path) -> None:
+    """Zip has no date before 1980; such a sheet is still backed up."""
+    _root, sub = _hierarchical_project(tmp_path)
+    os.utime(sub, (0, 0))
+
+    backup = backup_schematics(str(tmp_path), "board.kicad_pcb", "before.zip")
+
+    assert _backup_members(backup)["sheets/power.kicad_sch"] == sub.read_bytes()
+
+
+def test_backup_schematics_follows_the_loaded_project(tmp_path: Path) -> None:
+    """A board saved under another name backs up its project's sheets."""
+    _project(tmp_path, "realproject", "power.kicad_sch")
+    _schematics(tmp_path, "power.kicad_sch", "renamed_board.kicad_sch")
+
+    backup = backup_schematics(
+        str(tmp_path),
+        "renamed_board.kicad_pcb",
+        "before.zip",
+        project_name="realproject",
+    )
+
+    assert set(_backup_members(backup)) == {"power.kicad_sch"}
