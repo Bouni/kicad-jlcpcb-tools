@@ -1380,7 +1380,8 @@ class Library:
             con.row_factory = dict_factory
             cur = con.cursor()
             query = """SELECT "LCSC Part" AS lcsc, "Stock" AS stock, "Library Type" AS type,
-                "MFR.Part" as part_no, "Description" as description, "Package" as package,
+                "MFR.Part" as part_no, "Manufacturer" AS manufacturer,
+                "Description" as description, "Package" as package,
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
             cur.execute(query, {"number": number})
