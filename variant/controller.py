@@ -865,6 +865,33 @@ class VariantMainController:
             self.variant_label(target.variant),
         )
 
+    def action_enter_lcsc(self, target: Optional[MatrixTarget]) -> None:
+        """Assign one typed LCSC number to the selected components of one variant."""
+        self.session.require_editable()
+        if target is None or target.variant is None:
+            raise VariantSessionError(
+                "Select components within one variant to enter an LCSC."
+            )
+        targets = self._targets()
+        parts = [
+            self.session.snapshot.get(item.component_id, item.variant_name)
+            for item in targets
+        ]
+        current = {part.lcsc for part in parts}
+        lcsc = self.dialog.prompt_manual_lcsc(
+            [part.reference for part in parts],
+            current.pop() if len(current) == 1 else "",
+        )
+        if not lcsc or self.dialog.manual_lcsc_details(lcsc) is None:
+            return
+        self._apply(tuple(VariantEdit(item, (("lcsc", lcsc),)) for item in targets))
+        self.dialog.logger.info(
+            "Entered %s for %s / %s",
+            lcsc,
+            ", ".join(part.reference for part in parts),
+            self.variant_label(target.variant),
+        )
+
     def action_copy_to(self, target: Any) -> None:
         """Choose a bounded field/ref/destination product and copy effective values."""
         self.session.require_editable()
