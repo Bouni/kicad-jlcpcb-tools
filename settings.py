@@ -419,9 +419,10 @@ class SettingsDialog(wx.Dialog):
         self.library_data_path_setting.SetToolTip(
             wx.ToolTip(
                 "Override where the global library database files are stored."
-                " If you change this, you may want to copy existing part preferences and"
-                " corrections files from the old location to the new one to avoid"
-                " losing existing part preferences and corrections."
+                " If you change this, copy global.db from the old location to keep"
+                " part preferences and corrections. Older corrections.db and"
+                " mappings.db files may still be present after migration; global.db"
+                " is the file this plugin reads."
             )
         )
 
