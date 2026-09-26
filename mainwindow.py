@@ -104,7 +104,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
-from .lcsc import extract_lcsc, normalize_lcsc
+from .lcsc import Lcsc, extract_lcsc, normalize_lcsc
 from .lcsc_entry_dialog import LcscEntryDialog
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
@@ -197,7 +197,7 @@ class JLCPCBTools(wx.Frame):
         board_action: Optional[Callable[[Callable[[], None]], None]] = None,
     ) -> None:
         self.library: Optional[Library] = None
-        self._catalog_details: dict[str, dict[str, Any]] = {}
+        self._catalog_details: dict[Lcsc, dict[str, Any]] = {}
         self._catalog_ready = False
         self._catalog_switch_pending = False
         self.store: Optional[Store] = None
@@ -996,34 +996,36 @@ class JLCPCBTools(wx.Frame):
         self, lcsc: str, *, strict: bool = False
     ) -> dict[str, Any]:
         """Reuse raw catalog records, distinguishing confirmed misses from failures."""
-        key = normalize_lcsc(lcsc)
-        if not key or not self.is_catalog_available():
+        # Keyed on the parsed part, so every key names a part and a value that
+        # names none is neither looked up nor cached.
+        part = Lcsc.parse(lcsc)
+        if part is None or not self.is_catalog_available():
             return {}
         if not hasattr(self, "_catalog_details"):
             self._invalidate_catalog_details()
-        if key not in self._catalog_details:
+        if part not in self._catalog_details:
             if self.library.is_download_running():
                 # Update library rewrites the catalog file in place while it stays
                 # published, so a number not read before is unknown until the new
                 # catalog replaces it. Nothing is cached for it meanwhile.
                 return {}
             try:
-                self._catalog_details[key] = deepcopy(
-                    self.library.get_part_details(key)
+                self._catalog_details[part] = deepcopy(
+                    self.library.get_part_details(str(part))
                 )
             except (sqlite3.Error, OSError) as error:
                 if strict:
                     raise
-                self.logger.warning("Unable to read catalog part %s: %s", key, error)
+                self.logger.warning("Unable to read catalog part %s: %s", part, error)
                 return {}
-            details = self._catalog_details[key]
+            details = self._catalog_details[part]
             self.partlist_data_model.set_catalog_details(
-                key,
+                str(part),
                 details.get("type", ""),
                 details.get("stock", ""),
                 params_for_part(details),
             )
-        return deepcopy(self._catalog_details[key])
+        return deepcopy(self._catalog_details[part])
 
     def _bom_get_part_details(self, lcsc: str) -> dict[str, Any]:
         """Share the current raw catalog snapshot with estimator callbacks."""
@@ -1878,11 +1880,10 @@ class JLCPCBTools(wx.Frame):
                 details={e.lcsc: details},
                 remember_part_preferences=True,
             )
-            if assigned and listed:
-                key = normalize_lcsc(e.lcsc)
-                self._catalog_details[key] = deepcopy(details)
+            if assigned and listed and (part := Lcsc.parse(e.lcsc)) is not None:
+                self._catalog_details[part] = deepcopy(details)
                 self.partlist_data_model.set_catalog_details(
-                    key,
+                    str(part),
                     details.get("type", ""),
                     details.get("stock", ""),
                     params_for_part(details),
