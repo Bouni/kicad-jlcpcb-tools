@@ -39,7 +39,7 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
-from .lcsc import is_lcsc_part, normalize_lcsc
+from .lcsc import Lcsc, is_lcsc_part, normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
@@ -1373,8 +1373,17 @@ class Library:
             cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
             cur.commit()
 
-    def get_part_details(self, number: str) -> dict:
-        """Get the part details for a LCSC number using optimized FTS5 querying."""
+    def get_part_details(self, number) -> dict:
+        """Get the part details for a LCSC number using optimized FTS5 querying.
+
+        Accepts an :class:`Lcsc` or a string. A string that names no part is
+        not an error but a part that is not there, so it returns no details
+        without opening the database.
+        """
+        part = Lcsc.parse(number)
+        if part is None:
+            # Nothing that names a part, so there is nothing to look up.
+            return {}
         with contextlib.closing(sqlite3.connect(self.partsdb_file)) as con:
             con.row_factory = dict_factory
             cur = con.cursor()
@@ -1382,16 +1391,13 @@ class Library:
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
-            wanted = normalize_lcsc(number)
-            # Quoted as a phrase so the number is looked up, not parsed: bare,
-            # a blank, "C123-4" or "N/A" is FTS5 query syntax and raises,
-            # where a phrase that matches nothing simply finds nothing.
-            phrase = '"' + wanted.replace('"', '""') + '"'
-            cur.execute(query, {"number": phrase})
-            # The FTS5 match is not exact, so the row still has to be confirmed;
-            # compare canonically or a differently spelled number finds nothing.
+            # Quoted as a phrase so the number is looked up, not parsed.
+            cur.execute(query, {"number": f'"{part}"'})
+            # The FTS5 match is not exact, so the row still has to be confirmed.
+            # Comparing parsed values makes the two sides canonical by
+            # construction rather than by remembering to normalise both.
             return next(
-                (n for n in cur.fetchall() if normalize_lcsc(n["lcsc"]) == wanted), {}
+                (n for n in cur.fetchall() if Lcsc.parse(n["lcsc"]) == part), {}
             )
 
     def is_download_running(self) -> bool:

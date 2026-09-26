@@ -507,7 +507,7 @@ def test_assignment_catalog_failure_does_not_commit_incomplete_details(
     workflow.drain()
     assert window.store.parts["R1"]["lcsc"] == "C1"
     assert raw_stocks(window) == {"R1": 99}
-    assert "C2" not in window._catalog_details
+    assert workflow.mainwindow.Lcsc("C2") not in window._catalog_details
 
 
 @pytest.mark.parametrize("stock", [0.1, True, -1, "5+"])
