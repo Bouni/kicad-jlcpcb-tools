@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterable, Mapping
 
+from .lcsc import normalize_lcsc
 from .stock_display import parse_stock
 
 STOCK_CONCERN_MULTIPLIER = 10
@@ -31,7 +32,7 @@ def stock_concern_references(
         if part.get("exclude_from_bom") or part.get("is_dnp"):
             continue
         reference = str(part.get("reference") or "").strip()
-        lcsc = str(part.get("lcsc") or "").strip().upper()
+        lcsc = normalize_lcsc(part.get("lcsc"))
         if reference and lcsc:
             groups.setdefault(lcsc, set()).add(reference)
 

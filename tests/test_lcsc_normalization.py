@@ -14,6 +14,7 @@ _spec.loader.exec_module(_lcsc)
 
 normalize_lcsc = _lcsc.normalize_lcsc
 is_lcsc_part = _lcsc.is_lcsc_part
+extract_lcsc = _lcsc.extract_lcsc
 
 
 class TestNormalizeLcsc:
@@ -63,3 +64,54 @@ class TestIsLcscPart:
     def test_invalid_values_and_unicode_digits_rejected(self, value):
         """Non-part strings and non-ASCII digits are rejected."""
         assert is_lcsc_part(value) is False
+
+
+class TestExtractLcsc:
+    """extract_lcsc is the lenient counterpart, for text a person pasted."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("C12345", "C12345"),
+            ("c12345", "C12345"),
+            ("  C12345  ", "C12345"),
+            ("LCSC Part C12345 in stock", "C12345"),
+            ("https://jlcpcb.com/partdetail/C12345", "C12345"),
+            ("C12345, C99999", "C12345"),
+        ],
+    )
+    def test_a_part_number_is_pulled_out_canonically(self, text, expected):
+        """A number is found inside surrounding text and returned canonically."""
+        assert extract_lcsc(text) == expected
+
+    @pytest.mark.parametrize("text", ["", None, "no part here", "12345"])
+    def test_text_without_a_part_number_yields_empty(self, text):
+        """Text carrying no part number produces the empty string."""
+        assert extract_lcsc(text) == ""
+
+    @pytest.mark.parametrize(
+        "text", ["C１２３", "C123４", "C12345６", "C12３45", "see C12345６ here"]
+    )
+    def test_a_number_with_foreign_digits_is_refused_whole(self, text):
+        """A run holding a digit from another script yields nothing at all.
+
+        Pasting reads digits the way the footprint reader does, and it reads
+        the run whole: stopping at the first foreign digit would hand back the
+        ASCII prefix, a different part that looks entirely valid.
+        """
+        assert extract_lcsc(text) == ""
+
+    def test_a_superscript_ends_the_number(self):
+        """A footnote marker is not a decimal digit, so the number stands."""
+        assert extract_lcsc("C123¹") == "C123"
+
+    def test_it_is_more_lenient_than_is_lcsc_part(self):
+        """The two answer different questions and are not interchangeable.
+
+        Pasted text should give up its part number; a schematic field claiming
+        to *be* a part number should not be accepted when it is something else
+        with a number buried in it.
+        """
+        text = "LCSC Part C12345 in stock"
+        assert extract_lcsc(text) == "C12345"
+        assert not is_lcsc_part(text)

@@ -98,6 +98,22 @@ def test_stale_target_is_rejected_but_other_variant_edit_keeps_it_valid(
         adapter.apply_edits([VariantEdit(current, (("lcsc", "C9"),))])
 
 
+def test_lcsc_edits_are_judged_and_written_canonically(native: Any) -> None:
+    """A padded or lower-case number is the part it names; anything else is not.
+
+    The adapter shares the plugin's one definition of a part number, so the
+    field it writes is the canonical spelling every other write path stores.
+    """
+    board, adapter = native
+    after = edit(adapter, "A", lcsc=" c2 ")
+    assert after.get("component-1", "A").lcsc == "C2"
+    assert board.parts[0].GetVariant("A").GetFieldValue("LCSC") == "C2"
+    with pytest.raises(NativeVariantError, match="C followed by digits"):
+        edit(adapter, "A", lcsc="C 2")
+    with pytest.raises(NativeVariantError, match="C followed by digits"):
+        edit(adapter, "A", lcsc="LCSC C2")
+
+
 def test_complete_batch_is_validated_before_mutation(native: Any) -> None:
     board, adapter = native
     snap = adapter.snapshot()

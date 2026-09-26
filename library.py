@@ -8,7 +8,6 @@ import json
 import logging
 import os
 from pathlib import Path, PurePath
-import re
 import sqlite3
 from threading import Lock, Thread
 import time
@@ -40,7 +39,7 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
-from .lcsc import normalize_lcsc
+from .lcsc import is_lcsc_part, normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
@@ -98,12 +97,12 @@ _INITIAL_DOWNLOAD_TARGETS: set[str] = set()
 
 
 def _normalize_part_preference_lcsc(value: object) -> Optional[str]:  # noqa: UP045
-    """Accept a complete C-number without requiring current catalog membership."""
-    if isinstance(value, str) and re.fullmatch(
-        r"C[0-9]+", value.strip(), re.IGNORECASE
-    ):
-        return value.strip().upper()
-    return None
+    """Accept a complete C-number without requiring current catalog membership.
+
+    The shape of a part number is lcsc.py's business, not this module's, so
+    the test and the canonical form both come from there.
+    """
+    return normalize_lcsc(value) if is_lcsc_part(value) else None
 
 
 def _sqlite_file_uri(path: PurePath) -> str:
@@ -1383,8 +1382,17 @@ class Library:
                 "MFR.Part" as part_no, "Description" as description, "Package" as package,
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
-            cur.execute(query, {"number": number})
-            return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
+            wanted = normalize_lcsc(number)
+            # Quoted as a phrase so the number is looked up, not parsed: bare,
+            # a blank, "C123-4" or "N/A" is FTS5 query syntax and raises,
+            # where a phrase that matches nothing simply finds nothing.
+            phrase = '"' + wanted.replace('"', '""') + '"'
+            cur.execute(query, {"number": phrase})
+            # The FTS5 match is not exact, so the row still has to be confirmed;
+            # compare canonically or a differently spelled number finds nothing.
+            return next(
+                (n for n in cur.fetchall() if normalize_lcsc(n["lcsc"]) == wanted), {}
+            )
 
     def is_download_running(self) -> bool:
         """Report the live worker claim independently of catalog readiness."""

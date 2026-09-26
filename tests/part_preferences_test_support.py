@@ -276,8 +276,13 @@ def act(
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
     lcsc: str = "C999",
+    clipboard_text: Optional[str] = None,  # noqa: UP045
 ) -> None:
-    """Exercise real handlers; clipboard text is set before the handler reads it."""
+    """Exercise real handlers; clipboard text is set before the handler reads it.
+
+    A paste copies a product URL naming ``lcsc`` unless ``clipboard_text``
+    gives the exact text to paste.
+    """
     if action == "picker":
         window.assign_parts(
             types.SimpleNamespace(
@@ -300,7 +305,11 @@ def act(
         clipboard.Open.return_value = True
 
         def read(data: TextData) -> bool:
-            data.text = f"https://www.lcsc.com/product-detail/{lcsc}.html"
+            data.text = (
+                clipboard_text
+                if clipboard_text is not None
+                else f"https://www.lcsc.com/product-detail/{lcsc}.html"
+            )
             return True
 
         clipboard.GetData.side_effect = read
