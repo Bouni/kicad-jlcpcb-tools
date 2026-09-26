@@ -10,7 +10,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
-import re
 from types import MappingProxyType
 from typing import Any, Optional, Union
 
