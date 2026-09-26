@@ -176,13 +176,6 @@ class VariantMainController:
         )
         self.view.set_output_variant(selected if selected in names else None)
         self.dialog.generate_button.SetLabel(f"Generate {self.output_name}")
-        self.dialog.right_toolbar.EnableTool(16, selected == "")
-        self.dialog.right_toolbar.SetToolShortHelp(
-            16,
-            "Export explicit Default assignments to the schematic"
-            if selected == ""
-            else "Named-variant schematic export is unavailable; select Default as Output variant.",
-        )
         self._update_enabled()
 
     def output_rows(self) -> list[dict[str, Any]]:
@@ -203,9 +196,6 @@ class VariantMainController:
         self.output_choice.Enable(ready)
         self.dialog.generate_button.Enable(ready and available)
         self.dialog.right_toolbar.Enable(ready)
-        self.dialog.right_toolbar.EnableTool(
-            16, ready and self.session.output_variant == ""
-        )
         self.dialog.right_toolbar.EnableTool(13, not self.session.generating)
         self.dialog.right_toolbar.EnableTool(14, not self.session.generating)
         self._on_target(self.view.selected_target)
@@ -239,7 +229,12 @@ class VariantMainController:
             self._refreshing = False
 
     def _on_timer(self, event: Any) -> None:
-        if self.closed or self._refreshing or self.session.generating:
+        if (
+            self.closed
+            or self._refreshing
+            or self.session.generating
+            or getattr(self.dialog, "_saving_on_close", False)
+        ):
             return
         try:
             previous = self.session.snapshot.source_token
@@ -691,8 +686,7 @@ class VariantMainController:
     def export_to_schematic(
         self, paths: Sequence[str], approved_locks: Collection[str] = ()
     ) -> None:
-        """Report failed or unavailable Default exports at the event boundary."""
-        from ..schematic_safety import SchematicLockedError  # noqa: PLC0415
+        """Save current Default fields, leaving error decisions to the close handler."""
         from ..schematicexport import SchematicExport  # noqa: PLC0415
 
         try:
@@ -702,13 +696,11 @@ class VariantMainController:
             SchematicExport(self.dialog).load_schematic(
                 paths,
                 approved_locks=approved_locks,
-                variant_name=self.session.output_variant,
+                variant_name="",
                 parts=self.cache.assembly_rows(self.session.snapshot, ""),
             )
-        except SchematicLockedError:
-            raise
-        except Exception as error:
-            self._error(error)
+        finally:
+            self._update_enabled()
 
     def action_correction(self, target: Any = None) -> None:
         """Edit the output variant's matching rule in its current database scope."""

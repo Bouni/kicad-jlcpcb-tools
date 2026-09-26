@@ -173,6 +173,27 @@ The LCSC number of your selection will then be assigned to the footprints.
 
 ![Footprint selection](https://github.com/Bouni/kicad-jlcpcb-tools/raw/main/images/footprint_selection.png)
 
+### Automatic schematic saving
+
+Closing JLCPCB Tools saves its LCSC assignments and supported BOM settings to
+the project's schematics. The manual **Export to schematic** button has been
+removed. On boards with design variants, this always saves **Default**;
+selecting a named variant for fabrication does not change the schematic source.
+
+The plugin uses the project's associated schematics and preserves an `_old`
+backup for each file it writes. Projects without an associated schematic close
+without writing one. If a schematic is locked, the default **Cancel** keeps the
+plugin open so you can close Schematic Editor and retry. **Save Anyway** approves
+only the listed locks; **Close without saving** leaves the schematic unchanged.
+Save errors also let you keep the window open or close without saving the
+remaining changes. Earlier sheets may already have been saved if a later write
+fails. A forced application shutdown cannot wait for these prompts: locked or
+failed saves are logged and the window closes.
+
+This saves schematic files. Use KiCad's PCB save command to persist changes to
+the PCB itself. An already-open Schematic Editor does not reload exported files
+automatically and can overwrite them if you choose **Save Anyway**.
+
 ### Part preferences
 
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
