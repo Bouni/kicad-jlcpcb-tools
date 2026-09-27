@@ -1143,7 +1143,18 @@ class JLCPCBTools(wx.Frame):
     def _maybe_show_schematic_storage_notice(self, project_db_preexisted: bool) -> None:
         """Explain once that closing writes fabrication attributes into schematics."""
         store = getattr(self, "store", None)
-        if not project_db_preexisted or store is None:
+        if store is None:
+            return
+        if not project_db_preexisted:
+            # Greenfield projects never migrate old attributes; ack immediately so
+            # the second open (after project.db exists) does not show this notice.
+            try:
+                store.set_schematic_storage_notice_acked()
+            except (sqlite3.Error, OSError) as error:
+                self.logger.warning(
+                    "Unable to record schematic storage notice acknowledgment: %s",
+                    error,
+                )
             return
         try:
             if store.is_schematic_storage_notice_acked():
@@ -1159,8 +1170,7 @@ class JLCPCBTools(wx.Frame):
             "settings into this project's schematics. That may overwrite "
             "fabrication attributes that were never written to the schematic, or "
             "that have not been saved there for a long time.\n\n"
-            "The schematic is the durable store going forward; the plugin database "
-            "is not kept as a parallel forever store.\n\n"
+            "The schematic is where these settings live from now on.\n\n"
             "Before the first automatic write, a one-time zip backup is kept at "
             f"jlcpcb/{SCHEMATIC_PRE_WRITE_BACKUP_ZIP}. An already-open Schematic "
             "Editor does not reload exported files and can overwrite them if you "
@@ -1185,8 +1195,12 @@ class JLCPCBTools(wx.Frame):
         *,
         interactive: bool,
         approved_locks: Collection[str] = (),
-    ) -> None:
-        """Create a one-time zip escape hatch before the first force-write."""
+    ) -> Optional[bool]:
+        """Create a one-time zip escape hatch before the first force-write.
+
+        Returns True to proceed with the schematic write, False to keep the
+        window open, or None to close without saving.
+        """
         try:
             backup_schematics(
                 self.project_path,
@@ -1198,16 +1212,37 @@ class JLCPCBTools(wx.Frame):
                 approved_locks=approved_locks,
             )
         except FileExistsError:
-            return
+            return True
         except SchematicLockedError as error:
             # Lock approval belongs to the schematic write path. Prompting here as
             # well would double the "Schematic Locked" dialog before export runs.
             self.logger.warning(
                 "Schematic pre-write backup skipped while locked: %s", error
             )
-            return
+            return True
         except (OSError, ValueError) as error:
             self.logger.warning("Schematic pre-write backup failed: %s", error)
+            if not interactive:
+                return False
+            dialog = wx.GenericMessageDialog(
+                self,
+                f"Could not create the one-time schematic backup:\n\n{error}\n\n"
+                "Save without a backup to continue writing fabrication attributes "
+                "into the schematic, keep this window open, or close without saving.",
+                "Schematic backup failed",
+                wx.YES_NO | wx.CANCEL | wx.CANCEL_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+            )
+            try:
+                dialog.SetYesNoCancelLabels(
+                    "Save without backup", "Close without saving", "Keep open"
+                )
+                result = dialog.ShowModal()
+            finally:
+                dialog.Destroy()
+            return (
+                True if result == wx.ID_YES else None if result == wx.ID_NO else False
+            )
+        return True
 
     def _initialize_catalog_parts(self) -> None:
         """Apply opening preferences once whenever project and catalog first meet."""
@@ -2819,30 +2854,32 @@ class JLCPCBTools(wx.Frame):
                 return None
             controller = getattr(self, "_variant_controller", None)
 
-            def export(**approval: object) -> None:
+            def export(**approval: object) -> Optional[bool]:
                 check_board()
                 locks = approval.get("approved_locks", ())
                 if not isinstance(locks, (list, tuple, set)):
                     locks = ()
-                self._backup_schematics_before_first_write(
+                decision = self._backup_schematics_before_first_write(
                     interactive=interactive,
                     approved_locks=locks,
                 )
+                if decision is not True:
+                    return decision
                 if controller is not None:
                     controller.export_to_schematic(paths, **approval)
                 else:
                     SchematicExport(self).load_schematic(paths, **approval)
+                return True
 
             try:
-                export()
+                return export()
             except SchematicLockedError as exc:
                 if not interactive:
                     raise
                 decision = self.confirm_locked_schematic_export(exc)
                 if decision is not True:
                     return decision
-                export(approved_locks=[path for path, _info in exc.locks])
-            return True
+                return export(approved_locks=[path for path, _info in exc.locks])
         except Exception as exc:
             self.logger.exception("Automatic schematic save failed")
             if not interactive:

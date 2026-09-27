@@ -108,7 +108,7 @@ def test_notice_shown_for_preexisting_project_db_and_acked(
     title = mainwindow_module.wx.MessageDialog.call_args.args[2]
     message = mainwindow_module.wx.MessageDialog.call_args.args[1]
     assert title == "Schematic storage"
-    assert "durable store" in message
+    assert "settings live from now on" in message
     assert mainwindow_module.SCHEMATIC_PRE_WRITE_BACKUP_ZIP in message
     assert store.is_schematic_storage_notice_acked()
 
@@ -116,14 +116,28 @@ def test_notice_shown_for_preexisting_project_db_and_acked(
 def test_notice_skipped_for_greenfield_projects(
     mainwindow_module: Any, store_module: ModuleType, tmp_path: Path
 ) -> None:
-    """Brand-new projects (no prior project.db) do not get the migration dialog."""
+    """Brand-new projects skip the migration dialog and record the ack immediately."""
     store = _store(store_module, tmp_path)
     window = _notice_window(mainwindow_module, str(tmp_path), store)
 
     window._maybe_show_schematic_storage_notice(False)
 
     mainwindow_module.wx.MessageDialog.assert_not_called()
-    assert not store.is_schematic_storage_notice_acked()
+    assert store.is_schematic_storage_notice_acked()
+
+
+def test_greenfield_ack_suppresses_notice_on_later_open(
+    mainwindow_module: Any, store_module: ModuleType, tmp_path: Path
+) -> None:
+    """After a greenfield open, a later preexisting-db open must stay silent."""
+    store = _store(store_module, tmp_path)
+    window = _notice_window(mainwindow_module, str(tmp_path), store)
+
+    window._maybe_show_schematic_storage_notice(False)
+    window._maybe_show_schematic_storage_notice(True)
+
+    mainwindow_module.wx.MessageDialog.assert_not_called()
+    assert store.is_schematic_storage_notice_acked()
 
 
 def test_notice_not_shown_again_after_ack(

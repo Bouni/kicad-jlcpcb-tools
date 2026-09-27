@@ -564,7 +564,10 @@ def test_schematic_autosave_native_failure_keeps_window_open_then_retries(
     def check(ui: Any) -> None:
         output(ui, "B")
         path = ui.path / "board.kicad_sch"
-        path.write_bytes(b"previous schematic")
+        # Keep a valid KiCad schematic so the pre-write backup can succeed; the
+        # failure under test is the later PCB snapshot, not backup validation.
+        path.write_text("(kicad_sch)\n", encoding="utf-8")
+        original = path.read_bytes()
         exporter = Mock()
         export_module = import_module(
             type(ui.controller).__module__.rsplit(".", 2)[0] + ".schematicexport"
@@ -584,7 +587,7 @@ def test_schematic_autosave_native_failure_keeps_window_open_then_retries(
             ):
                 assert ui.dialog.Close() is False
             exporter.assert_not_called()
-            assert path.read_bytes() == b"previous schematic"
+            assert path.read_bytes() == original
             assert ui.dialog and not ui.dialog._closing
             assert not ui.controller.closed and ui.controller.timer.IsRunning()
             assert (

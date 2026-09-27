@@ -580,3 +580,70 @@ def test_backup_lock_skips_without_prompt_and_still_exports(
         window.logger
     )
     assert window.save_result is True
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        ("ID_YES", True),
+        ("ID_NO", None),
+        ("ID_CANCEL", False),
+    ],
+)
+def test_backup_failure_prompts_before_overwriting_schematics(
+    mainwindow_module: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    response: str,
+    expected: Optional[bool],
+) -> None:
+    """Backup OSError/ValueError must ask before the first force-write proceeds."""
+    _mainwindow, wx = mainwindow_module
+    dialog = _lock_dialog(wx, getattr(wx, response))
+    error = ValueError("duplicate member names in backup zip")
+
+    window, exporter = _export(
+        mainwindow_module,
+        monkeypatch,
+        tmp_path,
+        backup=error,
+    )
+
+    assert "Schematic pre-write backup failed" in _logged_warning(window.logger)
+    message, title, style = wx.GenericMessageDialog.call_args.args[1:]
+    assert str(error) in message
+    assert title == "Schematic backup failed"
+    assert style & wx.CANCEL_DEFAULT
+    dialog.SetYesNoCancelLabels.assert_called_once_with(
+        "Save without backup", "Close without saving", "Keep open"
+    )
+    dialog.Destroy.assert_called_once_with()
+    assert window.save_result is expected
+    if expected is True:
+        exporter.load_schematic.assert_called_once()
+    else:
+        exporter.load_schematic.assert_not_called()
+
+
+@pytest.mark.parametrize("error", [OSError("Disk is full"), ValueError("bad zip")])
+def test_forced_backup_failure_skips_write_without_prompt(
+    mainwindow_module: tuple[Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error: Exception,
+) -> None:
+    """Forced close cannot acknowledge a missing pre-write backup."""
+    _mainwindow, wx = mainwindow_module
+
+    window, exporter = _export(
+        mainwindow_module,
+        monkeypatch,
+        tmp_path,
+        backup=error,
+        interactive=False,
+    )
+
+    assert window.save_result is False
+    exporter.load_schematic.assert_not_called()
+    wx.GenericMessageDialog.assert_not_called()
+    assert "Schematic pre-write backup failed" in _logged_warning(window.logger)
