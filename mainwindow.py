@@ -873,6 +873,11 @@ class JLCPCBTools(wx.Frame):
         if not hasattr(self, "_catalog_details"):
             self._invalidate_catalog_details()
         if key not in self._catalog_details:
+            if self.library.is_download_running():
+                # Update library rewrites the catalog file in place while it stays
+                # published, so a number not read before is unknown until the new
+                # catalog replaces it. Nothing is cached for it meanwhile.
+                return {}
             try:
                 self._catalog_details[key] = deepcopy(
                     self.library.get_part_details(key)

@@ -252,6 +252,10 @@ class _CatalogEventBlocker:
 class _SelectorCatalog:
     """Record real search parameters and inject metadata failures on demand."""
 
+    def is_download_running(self) -> bool:
+        """No catalog update is running in these workflows."""
+        return False
+
     def __init__(self) -> None:
         self.category_names = ["All", "", "Resistors", "Capacitors", "Old category"]
         self.subcategories = {

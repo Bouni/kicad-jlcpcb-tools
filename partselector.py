@@ -891,6 +891,11 @@ class PartSelectorDialog(wx.Dialog):
 
     def update_typed_lcsc_offer(self, parts: Any) -> None:
         """Offer the searched number when the results do not show it."""
+        if self.parent.library.is_download_running():
+            # Update library is rewriting the catalog, so no lookup can say whether
+            # the number is listed; offer nothing until the new one is published.
+            self._show_typed_lcsc_offer(None)
+            return
         shown = {normalize_lcsc(row[_LCSC_FIELD]) for row in parts or ()}
         try:
             offer = typed_lcsc_offer(

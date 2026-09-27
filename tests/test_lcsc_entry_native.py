@@ -1,6 +1,7 @@
 """The real Enter LCSC prompt assigns typed numbers in the production windows."""
 
 from dataclasses import replace
+import sqlite3
 from typing import Any
 from unittest.mock import patch
 
@@ -333,6 +334,43 @@ def test_only_the_main_table_remembers_an_entered_number(
 
         saved = ui.dialog.library.get_all_part_preferences()
         assert [row[2] for row in saved] == (["C555"] if table == "main" else [])
+        assert not ui.messages
+
+    window_ui.run(check)
+
+
+def test_variant_entry_during_update_library_keeps_the_table_usable(
+    window_ui: Any,
+) -> None:
+    """A catalog being rewritten is not read, so the edit shows and edits continue."""
+
+    def check(ui: Any) -> None:
+        def unreadable(_lcsc: str) -> dict[str, Any]:
+            raise sqlite3.DatabaseError("database disk image is malformed")
+
+        ui.catalog.download_running = True
+        ui.catalog.get_part_details = unreadable
+        target = focus(ui, "B")
+
+        def interact(dialog: Any) -> None:
+            dialog.text.SetValue(UNLISTED)
+            button(ui.wx, dialog.ok_button)
+
+        with (
+            patch.object(ui.wx.MessageDialog, "ShowModal") as asked,
+            modal_handler(ui, ui.mainwindow.LcscEntryDialog, interact),
+        ):
+            ui.controller.dispatch_action("enter_lcsc", target)
+
+        asked.assert_not_called()
+        model = ui.controller.model
+        shown = model.get_value(
+            model.row_for_component("component-1"), model.column_for("B", "lcsc")
+        )
+        assert shown == UNLISTED
+        snapshot = ui.controller.session.adapter.snapshot()
+        assert snapshot.get("component-1", "B").lcsc == UNLISTED
+        assert ui.controller.session.reliable and ui.controller.view._mutations_enabled
         assert not ui.messages
 
     window_ui.run(check)

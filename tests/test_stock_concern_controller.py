@@ -155,6 +155,7 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
             window.library = MagicMock()
+            window.library.is_download_running.return_value = False
             window.library.state = mainwindow.LibraryState.INITIALIZED
             window.library.get_parts_db_info.return_value = None
             window.SetTitle = MagicMock()
