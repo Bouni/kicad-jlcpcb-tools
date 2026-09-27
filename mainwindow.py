@@ -5,10 +5,11 @@ from __future__ import annotations
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 # ruff: noqa: I001, UP045
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 import logging
 import os
@@ -22,6 +23,7 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
+from .board_context import BoardContextChanged, board_identity
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
@@ -86,6 +88,7 @@ from .partselector import PartSelectorDialog
 from .schematic_safety import (
     SchematicLockedError,
     authenticated_project_name,
+    backup_schematics,
     resolve_project_schematics,
 )
 from .schematicexport import SchematicExport
@@ -103,6 +106,8 @@ FOOTPRINT_COLUMN_KEYS = {
     for key, index in PartListDataModel.columns.items()
     if key not in {"TRAILING_SPACER_COL", "STANDARD_ONLY_COL", "ENRICH_COL"}
 }
+
+SCHEMATIC_PRE_WRITE_BACKUP_ZIP = "schematics-before-plugin-attributes.zip"
 
 if TYPE_CHECKING:
     from .library import CorrectionSnapshot
@@ -125,7 +130,6 @@ ID_TOGGLE_POS = 11
 ID_PART_DETAILS = 12
 ID_HIDE_BOM = 13
 ID_HIDE_POS = 14
-ID_EXPORT_TO_SCHEMATIC = 16
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
@@ -165,8 +169,11 @@ class JLCPCBTools(wx.Frame):
         self.store: Optional[Store] = None
         self._variant_controller = None
         self._closing = False
+        self._saving_on_close = False
+        self._generating = False
         self.pcbnew = kicad_provider.get_pcbnew()
         board = self.pcbnew.GetBoard()
+        self._schematic_board_identity = board_identity(board)
         board_filename = str(board.GetFileName())
         if not board_filename.strip():
             raise ValueError("Save the PCB before opening the JLCPCB plugin.")
@@ -459,16 +466,6 @@ class JLCPCBTools(wx.Frame):
             "Hide excluded POS parts",
         )
 
-        self.export_schematic_button = self.right_toolbar.AddTool(
-            ID_EXPORT_TO_SCHEMATIC,
-            "Export to schematic",
-            loadBitmapScaled(
-                "mdi-application-export.png",
-                self.scale_factor,
-            ),
-            "Export LCSC assignments to schematic",
-        )
-
         self.Bind(wx.EVT_TOOL, self.select_part, self.select_part_button)
         self.Bind(wx.EVT_TOOL, self.remove_lcsc_number, self.remove_lcsc_number_button)
         self.Bind(wx.EVT_TOOL, self.toggle_select_alike, self.select_alike_button)
@@ -478,7 +475,6 @@ class JLCPCBTools(wx.Frame):
         self.Bind(wx.EVT_TOOL, self.get_part_details, self.part_details_button)
         self.Bind(wx.EVT_TOOL, self.OnBomHide, self.hide_bom_button)
         self.Bind(wx.EVT_TOOL, self.OnPosHide, self.hide_pos_button)
-        self.Bind(wx.EVT_TOOL, self.export_to_schematic, self.export_schematic_button)
 
         self.right_toolbar.ToggleTool(ID_SELECT_ALIKE, self.auto_select_alike)
 
@@ -493,7 +489,6 @@ class JLCPCBTools(wx.Frame):
                     "Remove LCSC number",
                     "Auto-select alike",
                     "Toggle BOM & POS",
-                    "Export to schematic",
                 )
                 text_widths = []
                 for label in tool_labels:
@@ -945,21 +940,77 @@ class JLCPCBTools(wx.Frame):
             self._set_project_storage_error(error)
             self._clear_catalog_views()
 
-    def quit_dialog(self, *_: object) -> None:
-        """Close modeless children and release resources once before destruction."""
+    def quit_dialog(self, event: Optional[wx.Event] = None) -> None:
+        """Save the schematic before releasing any resources needed for a retry."""
+        close_event = event if callable(getattr(event, "CanVeto", None)) else None
+        forced = close_event is not None and not close_event.CanVeto()
+
+        def veto() -> None:
+            """Let native Close() report that the window remains open."""
+            if close_event is not None and close_event.CanVeto():
+                close_event.Veto()
+
         if getattr(self, "_closing", False):
             return
-        # Modal callers still need their dialog and parent after ShowModal returns.
-        if any(
-            isinstance(child, wx.Dialog) and child.IsModal()
-            for child in self.GetChildren()
-        ):
+        if getattr(self, "_saving_on_close", False):
+            if forced:
+                self._forced_close_pending = True
+                for child in self.GetChildren():
+                    if isinstance(child, wx.Dialog) and child.IsModal():
+                        child.EndModal(wx.ID_CANCEL)
+            else:
+                veto()
             return
+        # Modal callers still need their dialog and parent after ShowModal returns.
+        modal_children = [
+            child
+            for child in self.GetChildren()
+            if isinstance(child, wx.Dialog) and child.IsModal()
+        ]
         logger = logging.getLogger(__name__)
         logger.info("quit_dialog()")
         controller = getattr(self, "_variant_controller", None)
-        if controller is not None and controller.session.generating:
+
+        def is_generating() -> bool:
+            return getattr(self, "_generating", False) or (
+                controller is not None and controller.session.generating
+            )
+
+        if modal_children or is_generating():
+            if forced:
+                self._forced_close_pending = True
+                if not getattr(self, "_forced_close_waiting", False):
+                    self._forced_close_waiting = True
+
+                    def finish_close() -> None:
+                        # Wait for modal callers and generation finally blocks to
+                        # finish using the controls before destroying their parent.
+                        if not self or self._closing:
+                            return
+                        if any(modal_children) or is_generating():
+                            wx.CallLater(25, finish_close)
+                        else:
+                            self._forced_close_waiting = False
+                            self.Close(force=True)
+
+                    wx.CallLater(25, finish_close)
+                for child in modal_children:
+                    child.EndModal(wx.ID_CANCEL)
+            else:
+                veto()
             return
+        if getattr(self, "store", None) is not None and not getattr(
+            self, "_project_storage_unavailable", False
+        ):
+            self._saving_on_close = True
+            try:
+                saved = self.export_to_schematic(interactive=not forced)
+            finally:
+                self._saving_on_close = False
+            forced = forced or getattr(self, "_forced_close_pending", False)
+            if saved is False and not forced:
+                veto()
+                return
         if lookup := getattr(self, "assembly_lookup", None):
             lookup.close()
         tooltip = getattr(self, "_type_cell_tooltip", None)
@@ -1043,6 +1094,9 @@ class JLCPCBTools(wx.Frame):
 
     def init_store(self) -> None:
         """Initialize fabrication and the appropriate native or ordinary assignments."""
+        project_db_preexisted = Path(
+            os.path.join(self.project_path, "jlcpcb", "project.db")
+        ).is_file()
         if controller := getattr(self, "_variant_controller", None):
             try:
                 controller.session._check_board()
@@ -1054,6 +1108,7 @@ class JLCPCBTools(wx.Frame):
                 self.store = controller.cache
                 self._set_project_storage_error(None)
                 controller._update_enabled()
+                self._maybe_show_schematic_storage_notice(project_db_preexisted)
             except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
                 self._set_project_storage_error(error)
                 controller._update_enabled()
@@ -1074,6 +1129,7 @@ class JLCPCBTools(wx.Frame):
             self.assembly_lookup.invalidate()
             self.store = store_type(self, self.project_path, board)
             self._set_project_storage_error(None)
+            self._maybe_show_schematic_storage_notice(project_db_preexisted)
             if store_type is not Store:
                 from .variant.controller import VariantMainController
 
@@ -1083,6 +1139,110 @@ class JLCPCBTools(wx.Frame):
             self._initialize_catalog_parts()
         except (sqlite3.Error, OSError, ValueError) as error:
             self._set_project_storage_error(error)
+
+    def _maybe_show_schematic_storage_notice(self, project_db_preexisted: bool) -> None:
+        """Explain once that closing writes fabrication attributes into schematics."""
+        store = getattr(self, "store", None)
+        if store is None:
+            return
+        if not project_db_preexisted:
+            # Greenfield projects never migrate old attributes; ack immediately so
+            # the second open (after project.db exists) does not show this notice.
+            try:
+                store.set_schematic_storage_notice_acked()
+            except (sqlite3.Error, OSError) as error:
+                self.logger.warning(
+                    "Unable to record schematic storage notice acknowledgment: %s",
+                    error,
+                )
+            return
+        try:
+            if store.is_schematic_storage_notice_acked():
+                return
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning(
+                "Unable to read schematic storage notice state: %s", error
+            )
+            return
+        dialog = wx.MessageDialog(
+            self,
+            "Closing JLCPCB Tools now saves LCSC assignments and supported BOM "
+            "settings into this project's schematics. That may overwrite "
+            "fabrication attributes that were never written to the schematic, or "
+            "that have not been saved there for a long time.\n\n"
+            "The schematic is where these settings live from now on.\n\n"
+            "Before the first automatic write, a one-time zip backup is kept at "
+            f"jlcpcb/{SCHEMATIC_PRE_WRITE_BACKUP_ZIP}. An already-open Schematic "
+            "Editor does not reload exported files and can overwrite them if you "
+            "choose Save Anyway.",
+            "Schematic storage",
+            wx.OK | wx.ICON_INFORMATION | wx.CENTER,
+        )
+        try:
+            dialog.ShowModal()
+        finally:
+            dialog.Destroy()
+        try:
+            store.set_schematic_storage_notice_acked()
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning(
+                "Unable to record schematic storage notice acknowledgment: %s",
+                error,
+            )
+
+    def _backup_schematics_before_first_write(
+        self,
+        *,
+        interactive: bool,
+        approved_locks: Collection[str] = (),
+    ) -> Optional[bool]:
+        """Create a one-time zip escape hatch before the first force-write.
+
+        Returns True to proceed with the schematic write, False to keep the
+        window open, or None to close without saving.
+        """
+        try:
+            backup_schematics(
+                self.project_path,
+                self.board_name,
+                SCHEMATIC_PRE_WRITE_BACKUP_ZIP,
+                project_name=authenticated_project_name(
+                    getattr(self, "pcbnew", None), self.project_path
+                ),
+                approved_locks=approved_locks,
+            )
+        except FileExistsError:
+            return True
+        except SchematicLockedError as error:
+            # Lock approval belongs to the schematic write path. Prompting here as
+            # well would double the "Schematic Locked" dialog before export runs.
+            self.logger.warning(
+                "Schematic pre-write backup skipped while locked: %s", error
+            )
+            return True
+        except (OSError, ValueError) as error:
+            self.logger.warning("Schematic pre-write backup failed: %s", error)
+            if not interactive:
+                return False
+            dialog = wx.GenericMessageDialog(
+                self,
+                f"Could not create the one-time schematic backup:\n\n{error}\n\n"
+                "Save without a backup to continue writing fabrication attributes "
+                "into the schematic, keep this window open, or close without saving.",
+                "Schematic backup failed",
+                wx.YES_NO | wx.CANCEL | wx.CANCEL_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+            )
+            try:
+                dialog.SetYesNoCancelLabels(
+                    "Save without backup", "Close without saving", "Keep open"
+                )
+                result = dialog.ShowModal()
+            finally:
+                dialog.Destroy()
+            return (
+                True if result == wx.ID_YES else None if result == wx.ID_NO else False
+            )
+        return True
 
     def _initialize_catalog_parts(self) -> None:
         """Apply opening preferences once whenever project and catalog first meet."""
@@ -2327,6 +2487,7 @@ class JLCPCBTools(wx.Frame):
                 "Cannot generate fabrication files while part assignments are unavailable."
             )
             return
+        self._generating = True
         self.generate_button.Enable(False)
         self.reset_gauge()
         wx.BeginBusyCursor()
@@ -2506,6 +2667,7 @@ class JLCPCBTools(wx.Frame):
             )
         finally:
             self._current_generation_step = "initialization"
+            self._generating = False
             self.reset_gauge()
             if wx.IsBusy():
                 wx.EndBusyCursor()
@@ -2658,68 +2820,105 @@ class JLCPCBTools(wx.Frame):
             )
         self.populate_footprint_list()
 
-    def export_to_schematic(self, *_: object) -> None:
-        """Export assignments to schematics with auto-detection and lock protection."""
-        paths = resolve_project_schematics(
-            self.project_path,
-            self.board_name,
-            authenticated_project_name(
-                getattr(self, "pcbnew", None), self.project_path
-            ),
-        )
-        if not paths:
-            with wx.FileDialog(
-                self,
-                "Select Schematics",
-                self.project_path,
-                self.schematic_name,
-                "KiCad Schematics (*.kicad_sch)|*.kicad_sch",
-                wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
-            ) as openFileDialog:
-                if openFileDialog.ShowModal() != wx.ID_OK:
-                    return
-                paths = openFileDialog.GetPaths()
+    def export_to_schematic(self, *, interactive: bool = True) -> Optional[bool]:
+        """Save on close: True means saved, False keep open, None close unsaved.
 
-        controller = getattr(self, "_variant_controller", None)
-
-        def export(**approval: object) -> None:
-            if controller is not None:
-                controller.export_to_schematic(paths, **approval)
-            else:
-                SchematicExport(self).load_schematic(paths, **approval)
-
+        Projects without a matching schematic need no write or file picker.
+        Forced shutdown never opens a dialog or approves a schematic lock.
+        """
         try:
-            try:
-                export()
-            except SchematicLockedError as exc:
-                if not self.confirm_locked_schematic_export(exc):
-                    return
-                export(approved_locks=[path for path, _info in exc.locks])
-        except Exception as exc:
-            self.logger.exception("Schematic export failed")
-            wx.MessageBox(
-                f"Failed to export schematic: {exc}",
-                "Schematic Export Error",
-                style=wx.OK | wx.ICON_ERROR,
-            )
 
-    def confirm_locked_schematic_export(self, error: SchematicLockedError) -> bool:
-        """Ask whether to export to a schematic that KiCad has locked.
+            def check_board() -> None:
+                """Never save a stale window's assignments into another project."""
+                identity = getattr(self, "_schematic_board_identity", None)
+                if (
+                    identity is not None
+                    and board_identity(self.pcbnew.GetBoard()) != identity
+                ):
+                    raise BoardContextChanged(
+                        "The PCB was closed, replaced, or saved under another name. "
+                        "Reopen JLCPCB Tools before saving its schematic."
+                    )
+
+            paths = resolve_project_schematics(
+                self.project_path,
+                self.board_name,
+                authenticated_project_name(
+                    getattr(self, "pcbnew", None), self.project_path
+                ),
+            )
+            if not paths:
+                self.logger.info(
+                    "No project schematic found; automatic schematic save skipped"
+                )
+                return None
+            controller = getattr(self, "_variant_controller", None)
+
+            def export(**approval: object) -> Optional[bool]:
+                check_board()
+                locks = approval.get("approved_locks", ())
+                if not isinstance(locks, (list, tuple, set)):
+                    locks = ()
+                decision = self._backup_schematics_before_first_write(
+                    interactive=interactive,
+                    approved_locks=locks,
+                )
+                if decision is not True:
+                    return decision
+                if controller is not None:
+                    controller.export_to_schematic(paths, **approval)
+                else:
+                    SchematicExport(self).load_schematic(paths, **approval)
+                return True
+
+            try:
+                return export()
+            except SchematicLockedError as exc:
+                if not interactive:
+                    raise
+                decision = self.confirm_locked_schematic_export(exc)
+                if decision is not True:
+                    return decision
+                return export(approved_locks=[path for path, _info in exc.locks])
+        except Exception as exc:
+            self.logger.exception("Automatic schematic save failed")
+            if not interactive:
+                return False
+            # Use wx's modal lifecycle so forced close can end the prompt on macOS.
+            dialog = wx.GenericMessageDialog(
+                self,
+                f"Could not save the schematic:\n\n{exc}\n\n"
+                "Keep this window open to correct the problem and try again, "
+                "or close without saving the remaining changes.",
+                "Schematic save failed",
+                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_ERROR | wx.CENTER,
+            )
+            try:
+                dialog.SetYesNoLabels("Close without saving", "Keep open")
+                result = dialog.ShowModal()
+            finally:
+                dialog.Destroy()
+            return None if result == wx.ID_YES else False
+
+    def confirm_locked_schematic_export(
+        self, error: SchematicLockedError
+    ) -> Optional[bool]:
+        """Choose save anyway, close unsaved, or cancel closing (the default).
 
         KiCad's lock file cannot show whether its session is still running,
         so this asks the way KiCad does when it finds one.
         """
-        dialog = wx.MessageDialog(
+        dialog = wx.GenericMessageDialog(
             self,
             f"{error}\n\nIf a Schematic Editor has a locked file open, save and "
             "close it first: its next save would overwrite this export. A lock "
             "file left over from a crash can be deleted.\n\n"
             "See KiCad issue #2077: https://gitlab.com/kicad/code/kicad/-/issues/2077",
             "Schematic Locked",
-            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+            wx.YES_NO | wx.CANCEL | wx.CANCEL_DEFAULT | wx.ICON_WARNING | wx.CENTER,
         )
         try:
-            dialog.SetYesNoLabels("Export Anyway", "Cancel")
+            dialog.SetYesNoCancelLabels("Save Anyway", "Close without saving", "Cancel")
             result = dialog.ShowModal()
         finally:
             dialog.Destroy()
@@ -2728,7 +2927,7 @@ class JLCPCBTools(wx.Frame):
             error,
             "continue" if result == wx.ID_YES else "stop",
         )
-        return result == wx.ID_YES
+        return True if result == wx.ID_YES else None if result == wx.ID_NO else False
 
     def save_selected_part_preferences(self, *_: object) -> None:
         """Remember the selected LCSC assignments as part preferences."""

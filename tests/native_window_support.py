@@ -480,6 +480,14 @@ def window_ui(
         monkeypatch.setattr(
             wx, "MessageBox", lambda text, *args, **kwargs: ui.messages.append(text)
         )
+        # Native suites are not about the one-time migration notice; skip it so
+        # re-init_store cannot hang on GTK MessageDialog, ack-write project.db, or
+        # shadow GenericMessageDialog.ShowModal (which inherits from MessageDialog).
+        monkeypatch.setattr(
+            main.JLCPCBTools,
+            "_maybe_show_schematic_storage_notice",
+            lambda _self, _preexisted: None,
+        )
 
         ui.run = partial(run_frames, ui)
         try:
