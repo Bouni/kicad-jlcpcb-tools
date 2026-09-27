@@ -269,6 +269,27 @@ def test_variant_view_handles_the_action(
     assert dialog.opened == []
 
 
+def test_first_download_lists_the_board_for_entry(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no catalog yet the table still lists the board, so a number can be entered."""
+    window = make_window(footprints=[Footprint("R1"), Footprint("R2")])
+    window.library.state = mainwindow.LibraryState.UPDATE_NEEDED
+    window._catalog_ready = False
+    window.test_rows.clear()
+    window.populate_footprint_list.reset_mock()
+
+    window.init_store()
+
+    window.populate_footprint_list.assert_called_once()
+    assert sorted(window.test_rows) == ["R1", "R2"]
+    window.library.get_part_details.assert_not_called()
+    window.library.get_part_preference.assert_not_called()
+    _dialog, question = _enter(window, mainwindow, monkeypatch)
+    assert question.asked == []
+    assert [row["lcsc"] for row in project_rows(window)] == [UNLISTED, UNLISTED]
+
+
 def test_update_library_answers_from_cache_and_reads_nothing_new(
     make_window: Callable[..., Any],
 ) -> None:

@@ -339,6 +339,37 @@ def test_only_the_main_table_remembers_an_entered_number(
     window_ui.run(check)
 
 
+def test_first_download_lists_the_board_so_a_number_can_be_entered(
+    window_ui: Any,
+) -> None:
+    """Opened with no catalog yet, the ordinary table still lists the board's parts."""
+    _main_table(window_ui)
+    window_ui.failure = "missing"
+
+    def check(ui: Any) -> None:
+        assert not ui.dialog.is_catalog_available()
+        ui.catalog.update.assert_called_once()
+        assert len(ui.dialog.partlist_data_model.data) == 1
+        ui.dialog.footprint_list.SelectAll()
+
+        def interact(dialog: Any) -> None:
+            dialog.text.SetValue(UNLISTED)
+            button(ui.wx, dialog.ok_button)
+
+        with (
+            patch.object(ui.wx.MessageDialog, "ShowModal") as asked,
+            modal_handler(ui, ui.mainwindow.LcscEntryDialog, interact) as opened,
+        ):
+            ui.dialog.enter_part_lcsc()
+
+        assert len(opened) == 1
+        asked.assert_not_called()
+        assert ui.board.parts[0].fields["LCSC"] == UNLISTED
+        assert ui.cache.get_part("R1")["lcsc"] == UNLISTED
+
+    window_ui.run(check)
+
+
 def test_variant_entry_during_update_library_keeps_the_table_usable(
     window_ui: Any,
 ) -> None:
