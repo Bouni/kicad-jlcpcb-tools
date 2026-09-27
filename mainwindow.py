@@ -1253,13 +1253,16 @@ class JLCPCBTools(wx.Frame):
 
     def _initialize_catalog_parts(self) -> None:
         """Apply opening preferences once whenever project and catalog first meet."""
-        if getattr(self, "_variant_controller", None):
+        if getattr(self, "_variant_controller", None) or self.store is None:
             return
         if (
-            self.store is None
-            or self.library.state != LibraryState.INITIALIZED
+            self.library.state != LibraryState.INITIALIZED
             or not self.is_catalog_available()
         ):
+            # The board's parts do not depend on the catalog. List them with blank
+            # catalog columns, so a number can be entered while the first download
+            # runs; preferences and enrichment wait for the catalog.
+            self.populate_footprint_list()
             return
         if not getattr(self, "_part_preferences_applied_on_open", False):
             self._part_preferences_applied_on_open = True
