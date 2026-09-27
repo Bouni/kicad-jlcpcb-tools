@@ -5,6 +5,7 @@ from contextlib import closing
 import logging
 from pathlib import Path
 import sqlite3
+from threading import Lock
 import types
 from typing import Any, Union
 
@@ -38,6 +39,8 @@ def make_library(
         library.localcorrectionsdb_file if local else library.globalcorrectionsdb_file
     )
     library.state = module.LibraryState.INITIALIZED
+    library.download_lock = Lock()
+    library._download_running = False
     library.create_correction_table()
     seed_raw(library, rows)
     return library
@@ -62,6 +65,8 @@ def fresh_library(library: Any) -> Any:
         "state",
     ):
         setattr(fresh, name, getattr(library, name))
+    fresh.download_lock = Lock()
+    fresh._download_running = False
     return fresh
 
 

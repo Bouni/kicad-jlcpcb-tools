@@ -267,3 +267,23 @@ def test_variant_view_handles_the_action(
         "enter_lcsc", controller.view.selected_target
     )
     assert dialog.opened == []
+
+
+def test_update_library_answers_from_cache_and_reads_nothing_new(
+    make_window: Callable[..., Any],
+) -> None:
+    """While the catalog is rewritten, known parts still answer and new ones are unknown."""
+    window = make_window()
+    window.library.get_part_details.return_value = {"type": "Basic", "stock": 27}
+    assert window._catalog_get_part_details("C100", strict=True)["stock"] == 27
+    window.library.get_part_details.reset_mock()
+    window.library.is_download_running.return_value = True
+
+    assert window._catalog_get_part_details("C100", strict=True)["stock"] == 27
+    assert window._catalog_get_part_details("C200", strict=True) == {}
+    window.library.get_part_details.assert_not_called()
+
+    # The unknown answer was not cached, so the new catalog is read for it.
+    window.library.is_download_running.return_value = False
+    assert window._catalog_get_part_details("C200", strict=True)["stock"] == 27
+    window.library.get_part_details.assert_called_once_with("C200")

@@ -285,3 +285,15 @@ def test_failed_search_drops_the_offer(
     )
     selector.assign_typed_lcsc()
     assert queued == []
+
+
+def test_no_offer_while_update_library_rewrites_the_catalog(selector: Any) -> None:
+    """During a catalog update no lookup can say whether the number is listed."""
+    window = selector.parent
+    window.library.get_part_details.return_value = {}
+    window.library.is_download_running.return_value = True
+
+    _search(selector, UNLISTED)
+
+    assert selector._typed_lcsc_offer is None
+    window.library.get_part_details.assert_not_called()

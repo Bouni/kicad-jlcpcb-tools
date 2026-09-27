@@ -430,6 +430,7 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
         initialize_store = MagicMock()
         monkeypatch.setattr(module.JLCPCBTools, "init_store", initialize_store)
         library = MagicMock()
+        library.is_download_running.return_value = False
         library.state = (
             module.LibraryState.INITIALIZED
             if ready
