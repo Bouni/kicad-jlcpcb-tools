@@ -28,6 +28,7 @@ _spec.loader.exec_module(_fh)
 
 get_lcsc_value = _fh.get_lcsc_value
 set_lcsc_value = _fh.set_lcsc_value
+find_lcsc_assignment_text = _fh.find_lcsc_assignment_text
 
 
 class FakeField:
@@ -84,6 +85,10 @@ class LegacyFootprint:
         """Return the footprint's properties."""
         return self.properties
 
+    def SetProperties(self, properties: dict[str, str]) -> None:
+        """Apply the native KiCad 7 property map replacement."""
+        self.properties = dict(properties)
+
 
 # ---------------------------------------------------------------------------
 # Reading
@@ -125,23 +130,68 @@ class TestReadingTheField:
         footprint = FakeFootprint(FakeField("LCSC Part #", text))
         assert get_lcsc_value(footprint) == ""
 
-    def test_the_users_own_field_wins_over_a_plugin_written_one(self):
-        """An untrimmed field is preferred over a later duplicate.
-
-        Before normalisation the untrimmed field failed the match, so a second
-        field written by the plugin was returned instead -- the BOM, CPL and
-        corrections all silently used a different part than the schematic said.
-        """
+    def test_ordinary_reading_retains_first_valid_alias_precedence(self) -> None:
+        """Alias writing must not introduce variant conflict policy into the store."""
         footprint = FakeFootprint(
             FakeField("LCSC Part #", "C12345 "),
             FakeField("LCSC", "C99999"),
         )
         assert get_lcsc_value(footprint) == "C12345"
 
+    @pytest.mark.parametrize(
+        "fields,expected",
+        [
+            ({"LCSC": "", "JLCPCB": "C100"}, "C100"),
+            ({"LCSC": "  ", "JLCPCB": "C100"}, "C100"),
+            ({"LCSC": "C100", "JLCPCB": "C200"}, "C100"),
+            ({"LCSC": "C100", "JLCPCB": "invalid"}, "C100"),
+            ({"JLCPCB Customer ID": "C100"}, ""),
+            ({"JLCPCB Rotation": "C100"}, ""),
+            ({"LCSC": " c100 ", "JLCPCB Part #": "C100"}, "C100"),
+            ({"LCSC": "C100", "JLCPCB": ""}, "C100"),
+        ],
+    )
+    @pytest.mark.parametrize("legacy", [False, True])
+    def test_ordinary_assignment_precedence_is_independent_of_api_generation(
+        self, fields: dict[str, str], expected: str, legacy: bool
+    ) -> None:
+        """Ordinary reads retain the first valid assignment and exclude metadata."""
+        footprint = (
+            LegacyFootprint(fields)
+            if legacy
+            else FakeFootprint(
+                *(FakeField(name, text) for name, text in fields.items())
+            )
+        )
+        assert get_lcsc_value(footprint) == expected
+
+    @pytest.mark.parametrize("alias", ["LCSC PartNr", "JLCPCB Part Nr", "JLC_Part_Nr"])
+    def test_part_nr_is_a_recognized_existing_assignment(self, alias: str) -> None:
+        """PartNr names retain recognition when assignment aliases are shared."""
+        footprint = FakeFootprint(FakeField(alias, " c12345 "))
+        assert get_lcsc_value(footprint) == "C12345"
+        assert find_lcsc_assignment_text(footprint) == (alias, " c12345 ")
+
+        set_lcsc_value(footprint, "C999")
+        assert [(field.name, field.text) for field in footprint.fields] == [
+            (alias, "C999")
+        ]
+        set_lcsc_value(footprint, "")
+        assert [(field.name, field.text) for field in footprint.fields] == [(alias, "")]
+
     def test_legacy_properties_are_normalised_too(self):
         """The KiCad <= 7 properties path gets the same treatment."""
         footprint = LegacyFootprint({"LCSC Part #": " c12345 "})
         assert get_lcsc_value(footprint) == "C12345"
+
+    def test_preferences_only_treat_recognized_assignment_text_as_occupied(
+        self,
+    ) -> None:
+        """Unrelated C-shaped metadata is preserved without blocking an empty mapping."""
+        footprint = FakeFootprint(FakeField("JLCPCB Customer ID", "C100"))
+        assert find_lcsc_assignment_text(footprint) is None
+        footprint.fields.append(FakeField("LCSC Part Number", "invalid"))
+        assert find_lcsc_assignment_text(footprint) == ("LCSC Part Number", "invalid")
 
 
 # ---------------------------------------------------------------------------
@@ -231,3 +281,54 @@ class TestWritingTheField:
         footprint = FakeFootprint(field)
         set_lcsc_value(footprint, "")
         assert field.GetText() == ""
+
+    @pytest.mark.parametrize("value", ["C77777", ""])
+    def test_legacy_properties_update_every_assignment_only(self, value: str) -> None:
+        """KiCad 7 assignment and clear update all aliases without losing metadata."""
+        footprint = LegacyFootprint(
+            {"LCSC Part #": " c12345 ", "LCSC": "C99999", "JLCPCB Rotation": "90"}
+        )
+        set_lcsc_value(footprint, value)
+        assert footprint.properties == {
+            "LCSC Part #": value,
+            "LCSC": value,
+            "JLCPCB Rotation": "90",
+        }
+
+    def test_legacy_properties_create_assignment(self) -> None:
+        """A KiCad 7 board lacking part properties gains an LCSC assignment."""
+        footprint = LegacyFootprint({"Manufacturer": "Acme"})
+        set_lcsc_value(footprint, " c123 ")
+        assert footprint.properties == {"Manufacturer": "Acme", "LCSC": "C123"}
+
+    @pytest.mark.parametrize("value", ["C777", ""])
+    @pytest.mark.parametrize("legacy", [False, True])
+    def test_assignment_reuses_blank_and_invalid_aliases_preserving_metadata(
+        self, value: str, legacy: bool
+    ) -> None:
+        """Aliases keep their role after clear; unrelated C-shaped text is not mapping."""
+        fields = {
+            "LCSC Part Number": "invalid",
+            "JLCPCB Part #": "",
+            "JLCPCB Customer ID": "C100",
+            "JLCPCB Rotation": "C200",
+        }
+        footprint = (
+            LegacyFootprint(fields)
+            if legacy
+            else FakeFootprint(
+                *(FakeField(name, text) for name, text in fields.items())
+            )
+        )
+        set_lcsc_value(footprint, value)
+        actual = (
+            footprint.GetProperties()
+            if legacy
+            else {field.GetName(): field.GetText() for field in footprint.GetFields()}
+        )
+        assert actual == {
+            "LCSC Part Number": value,
+            "JLCPCB Part #": value,
+            "JLCPCB Customer ID": "C100",
+            "JLCPCB Rotation": "C200",
+        }

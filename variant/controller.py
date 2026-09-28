@@ -687,6 +687,7 @@ class VariantMainController:
         self, paths: Sequence[str], approved_locks: Collection[str] = ()
     ) -> None:
         """Save current Default fields, leaving error decisions to the close handler."""
+        from ..schematic_snapshot import capture_native  # noqa: PLC0415
         from ..schematicexport import SchematicExport  # noqa: PLC0415
 
         try:
@@ -697,7 +698,7 @@ class VariantMainController:
                 paths,
                 approved_locks=approved_locks,
                 variant_name="",
-                parts=self.cache.assembly_rows(self.session.snapshot, ""),
+                snapshot=capture_native(self.session.snapshot),
             )
         finally:
             self._update_enabled()

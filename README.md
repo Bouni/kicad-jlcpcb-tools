@@ -204,6 +204,36 @@ This saves schematic files. Use KiCad's PCB save command to persist changes to
 the PCB itself. An already-open Schematic Editor does not reload exported files
 automatically and can overwrite them if you choose **Save Anyway**.
 
+### Part assignment field names
+
+PCB assignments and schematic export recognize a range of field names, however the default field name is presently 'LCSC'.
+
+The list of recognized field names is:
+
+- `LCSC`,
+- `JLC`
+- `JLCPCB`
+
+Optionally followed by `Part`, `Part Number`, `Part Num`,
+`Part No`, `Part Nr`, `PN`, `Number`, `Code`, or `ID`. Case, spaces, and punctuation are
+ignored.
+
+Other prefixed fields, including `JLCPCB Rotation` and `LCSC custom code`,
+are metadata; move part numbers from those fields into one of the recognized fields above.
+
+Assigning or exporting a part updates every existing assignment alias together,
+preserving its name. A hidden `LCSC` field is created for a nonempty assignment
+when no alias exists.
+Schematic export reads live Default PCB fields: all-empty aliases clear the
+schematic assignment; missing, invalid, conflicting, or whitespace-only values
+preserve it and report the affected references. Reused-sheet instances must all
+be present and agree before their shared assignment changes. Symbols absent
+from the PCB and named-variant overrides remain unchanged.
+
+![KiCad Symbol Properties showing an LCSC field with the example value C25804](images/schematic-lcsc-field.png)
+
+*KiCad Symbol Properties with sample part data.*
+
 ### Part preferences
 
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
