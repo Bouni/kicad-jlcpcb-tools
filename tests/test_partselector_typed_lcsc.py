@@ -181,8 +181,14 @@ def test_listed_number_hidden_from_the_results_carries_catalog_facts(
     assert (event.lcsc, event.type, event.stock) == ("C19702", "Basic", 22095)
     window.assign_parts(event)
     assert [(row["lcsc"], row["stock"]) for row in storage.project_rows(window)] == [
-        ("C19702", 22095)
+        ("C19702", None)
     ]
+    assert (
+        window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C19702"
+    )
+    assert [
+        (row["lcsc"], row["type"], row["stock"]) for row in window.test_rows.values()
+    ] == [("C19702", "Basic", 22095)]
 
 
 def test_offer_hides_when_the_results_show_the_number_or_the_catalog_goes(
