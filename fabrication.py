@@ -1,16 +1,18 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 import csv
 from dataclasses import dataclass
 import hashlib
 from importlib import import_module
+import io
 import logging
 import math
 import os
 from pathlib import Path
 import re
+import sqlite3
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -54,11 +56,13 @@ from .fabrication_archive import (
     collect_gerber_entries,
 )
 from .footprint_helpers import get_is_dnp
+from .lcsc import is_lcsc_part, normalize_lcsc
 
 # JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
 # 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
 # Quantity) so the Designator chunk alone is capped at 1920 characters.
-_BOM_DESIGNATOR_MAX_LEN = 1920  # 2048 - 128 padding for remaining CSV fields
+_BOM_ROW_MAX_LEN = 2048
+_BOM_DESIGNATOR_MAX_LEN = _BOM_ROW_MAX_LEN - 128  # padding for the other CSV fields
 
 
 @dataclass(frozen=True)
@@ -98,7 +102,9 @@ def _checked_position(x: float, y: float) -> Any:
 
 
 def split_bom_designators(
-    designators: list, max_len: int = _BOM_DESIGNATOR_MAX_LEN
+    designators: list,
+    max_len: int = _BOM_DESIGNATOR_MAX_LEN,
+    measure: Callable[[str], int] = len,
 ) -> list:
     """Split a list of reference designators into chunks whose joined length fits within *max_len*.
 
@@ -110,7 +116,9 @@ def split_bom_designators(
 
     Args:
         designators: Ordered list of reference strings, e.g. ``["R1", "R2", ...]``.
-        max_len: Maximum allowed byte-length of the comma-joined designator string.
+        max_len: Maximum allowed length of the comma-joined designator string.
+        measure: Length of one reference, in characters unless a caller
+            budgets bytes.
 
     Returns:
         A list of non-empty lists, each safe to pass to ``",".join()``.
@@ -122,18 +130,39 @@ def split_bom_designators(
     current: list = []
     current_len = 0
     for ref in designators:
-        # Length if this ref were appended: len(ref) plus the comma separator
-        added = len(ref) if not current else len(ref) + 1
+        # Length if this ref were appended: its own length plus the comma separator
+        added = measure(ref) if not current else measure(ref) + 1
         if current and current_len + added > max_len:
             chunks.append(current)
             current = [ref]
-            current_len = len(ref)
+            current_len = measure(ref)
         else:
             current.append(ref)
             current_len += added
     if current:
         chunks.append(current)
     return chunks
+
+
+def _single_line(text: Any) -> str:
+    """Fold catalog line breaks into spaces so each BOM row stays on one line."""
+    return re.sub(r"[\r\n]+", " ", str(text or ""))
+
+
+def _utf8_len(text: str) -> int:
+    """Count UTF-8 bytes, the stricter reading of JLC's row limit."""
+    return len(text.encode("utf-8"))
+
+
+def _bom_line_bytes(row: tuple[Any, ...]) -> int:
+    """Measure a row as write_bom's csv.writer emits it, less its CRLF.
+
+    The real terminator matters: with an empty one, Python 3.9's csv leaves a
+    field holding a line break unquoted, unlike the writer being measured.
+    """
+    line = io.StringIO()
+    csv.writer(line).writerow(row)
+    return _utf8_len(line.getvalue()) - 2
 
 
 class Fabrication:
@@ -988,12 +1017,82 @@ class Fabrication:
     def write_bom(self, rows: tuple[tuple[Any, ...], ...]) -> None:
         """Write prepared BOM rows without rereading the board or store."""
         self._require_output_snapshot()
+        header = ["Comment", "Designator", "Footprint", "LCSC", "Quantity"]
+        if self.parent.settings.get("gerber", {}).get(
+            "bom_manufacturer_columns", False
+        ):
+            header += ["Manufacturer", "MPN"]
+            rows = self._add_manufacturer_columns(rows)
         bom_path = self.get_staged_artifact_paths()["bom_csv"]
         with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(["Comment", "Designator", "Footprint", "LCSC", "Quantity"])
+            writer.writerow(header)
             writer.writerows(rows)
         self.logger.info("Finished generating BOM file %s", bom_path)
+
+    def _add_manufacturer_columns(
+        self, rows: tuple[tuple[Any, ...], ...]
+    ) -> tuple[tuple[Any, ...], ...]:
+        """Append catalog Manufacturer and MPN cells, re-splitting rows JLC would reject."""
+        columns = self._manufacturer_columns(row[3] for row in rows)
+        result = []
+        for value, designators, package, lcsc, quantity in rows:
+            extra = columns.get(normalize_lcsc(lcsc), ("", ""))
+            row = (value, designators, package, lcsc, quantity, *extra)
+            if _bom_line_bytes(row) <= _BOM_ROW_MAX_LEN:
+                result.append(row)
+                continue
+            # A split designator cell holds commas, so csv quotes it: two bytes.
+            others = _bom_line_bytes((value, "", package, lcsc, quantity, *extra))
+            result.extend(
+                (value, ",".join(chunk), package, lcsc, len(chunk), *extra)
+                for chunk in split_bom_designators(
+                    designators.split(","),
+                    _BOM_ROW_MAX_LEN - others - 2,
+                    measure=_utf8_len,
+                )
+            )
+        return tuple(result)
+
+    def _manufacturer_columns(
+        self, lcsc_codes: Iterable[Any]
+    ) -> dict[str, tuple[str, str]]:
+        """Look up each LCSC number's manufacturer and MPN once in the parts catalog.
+
+        This is the one source of the BOM's Manufacturer and MPN cells. Lookups go
+        through the main window's catalog cache, which the part list has already
+        warmed for every assigned part. A number the catalog lacks, or a catalog
+        that is unavailable or failing, leaves blank cells: the columns document
+        the parts, so they never block output.
+        """
+        codes = sorted(
+            {code for code in map(normalize_lcsc, lcsc_codes) if is_lcsc_part(code)}
+        )
+        if not codes:
+            return {}
+        if not self.parent.is_catalog_available():
+            self.logger.warning(
+                "Parts catalog is unavailable; BOM Manufacturer and MPN left blank"
+            )
+            return {}
+        columns = {}
+        for code in codes:
+            try:
+                details = self.parent._catalog_get_part_details(code, strict=True)
+            except (sqlite3.Error, OSError) as error:
+                self.logger.warning(
+                    "Parts catalog lookup failed at %s; it and later BOM "
+                    "Manufacturer and MPN cells are left blank: %s",
+                    code,
+                    error,
+                )
+                break
+            if details:
+                columns[code] = (
+                    _single_line(details.get("manufacturer")),
+                    _single_line(details.get("part_no")),
+                )
+        return columns
 
     def get_part_consistency_warnings(self) -> str:
         """Check the plausibility of the parts, there should be just one value per LCSC number.

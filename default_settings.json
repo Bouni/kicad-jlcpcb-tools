@@ -9,6 +9,7 @@
     "simplify_stock": true
   },
   "gerber": {
+    "bom_manufacturer_columns": false,
     "fill_zones": true,
     "force_drc": true,
     "lcsc_bom_cpl": true,
