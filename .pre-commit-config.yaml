@@ -15,6 +15,8 @@ repos:
       - id: pyupgrade
         args: [--keep-runtime-typing]
         exclude: ^.lib/
+        args:
+          - --keep-runtime-typing
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.47.0
     hooks:
