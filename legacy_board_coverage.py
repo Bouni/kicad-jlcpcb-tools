@@ -17,7 +17,6 @@ from .part_assignments import ResolvedAssignment, safe_assignment_value
 
 LegacyIdentity = tuple[str, str, str, bool, bool]
 
-
 # RFC 1740, appendices A/B: big-endian AppleDouble magic, v2, and a
 # 26-byte fixed header followed by 12-byte entry descriptors.
 _APPLEDOUBLE_SIGNATURE = b"\x00\x05\x16\x07\x00\x02\x00\x00"
@@ -118,6 +117,12 @@ class SavedBoardCoverage:
     current_path: str
     advisories: tuple[str, ...] = ()
     requires_sources: bool = True
+    # Portable sibling notices support durable disclosure without treating
+    # current-board save advice as a new migration notification.
+    sibling_notices: tuple[str, ...] = ()
+    # Exact diagnostic subset lets callers route sibling notices separately,
+    # while preserving every diagnostic as an archival blocker.
+    sibling_diagnostics: tuple[str, ...] = ()
 
 
 def _is_appledouble_sidecar(path: str) -> bool:
@@ -225,10 +230,12 @@ def _row_diagnostics(
     snapshots: tuple[SavedBoardSnapshot, ...],
     current_path: str,
     schematic_saved_ids: frozenset[str],
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str]]:
     """Protect recoverable saved rows and prove each chosen current assignment."""
     diagnostics = []
     advisories = []
+    sibling_notices = []
+    sibling_diagnostics = []
     current_by_id = {part.component_id: part for part in current_parts}
     current_snapshot = next(
         (snapshot for snapshot in snapshots if snapshot.path == current_path), None
@@ -291,18 +298,26 @@ def _row_diagnostics(
                 if snapshot.path == current_path and part.component_id in durable_ids:
                     continue
                 if part.native_value is None:
-                    messages = (
-                        advisories
-                        if part.assignment.status == "missing"
+                    missing = (
+                        part.assignment.status == "missing"
                         and not part.assignment.aliases
-                        else diagnostics
                     )
-                    messages.append(
+                    message = (
                         f"{label} [{part.component_id}]: {snapshot.path} still needs "
                         "active recovery; its saved native assignment is missing "
                         "or unsafe."
                     )
-    return diagnostics, advisories
+                    (advisories if missing else diagnostics).append(message)
+                    if snapshot.path != current_path:
+                        sibling_notices.append(
+                            f"{os.path.basename(snapshot.path)}: {label} "
+                            f"[{part.component_id}] still needs active recovery; its "
+                            "saved native assignment is "
+                            + ("missing." if missing else "unsafe.")
+                        )
+                        if not missing:
+                            sibling_diagnostics.append(message)
+    return diagnostics, advisories, sibling_notices, sibling_diagnostics
 
 
 def collect_saved_board_coverage(
@@ -338,6 +353,8 @@ def collect_saved_board_coverage(
     current_path = os.path.abspath(current_path)
     directory = str(Path(current_path).parent)
     diagnostics: list[str] = []
+    sibling_notices: list[str] = []
+    sibling_diagnostics: list[str] = []
     snapshots: list[SavedBoardSnapshot] = []
     tokens: list[BoardSourceToken] = []
     candidates: tuple[str, ...] = ()
@@ -368,11 +385,23 @@ def collect_saved_board_coverage(
                 physical[before.physical_id] = snapshot
             tokens.append(before)
         except Exception as error:
-            diagnostics.append(f"Cannot read saved PCB {path}: {error}")
-    row_diagnostics, advisories = _row_diagnostics(
-        rows, current_parts, tuple(snapshots), current_path, schematic_saved_ids
+            message = f"Cannot read saved PCB {path}: {error}"
+            diagnostics.append(message)
+            if path != current_path:
+                # Loader exceptions can embed the supplied absolute pathname.
+                details = str(error).replace(path, os.path.basename(path))
+                sibling_notices.append(
+                    f"Cannot read saved PCB {os.path.basename(path)}: {details}"
+                )
+                sibling_diagnostics.append(message)
+    row_diagnostics, advisories, row_notices, row_sibling_diagnostics = (
+        _row_diagnostics(
+            rows, current_parts, tuple(snapshots), current_path, schematic_saved_ids
+        )
     )
     diagnostics.extend(row_diagnostics)
+    sibling_notices.extend(row_notices)
+    sibling_diagnostics.extend(row_sibling_diagnostics)
     result = SavedBoardCoverage(
         not diagnostics and not advisories,
         tuple(dict.fromkeys(diagnostics)),
@@ -382,6 +411,8 @@ def collect_saved_board_coverage(
         candidates,
         current_path,
         tuple(dict.fromkeys(advisories)),
+        sibling_notices=tuple(dict.fromkeys(sibling_notices)),
+        sibling_diagnostics=tuple(dict.fromkeys(sibling_diagnostics)),
     )
     if result.eligible and not verify_saved_board_sources(result):
         return SavedBoardCoverage(
@@ -415,6 +446,8 @@ def verify_saved_board_sources(coverage: SavedBoardCoverage) -> bool:
             or coverage.snapshots
             or coverage.source_tokens
             or coverage.candidate_paths
+            or coverage.sibling_notices
+            or coverage.sibling_diagnostics
         )
     if not coverage.source_tokens:
         return False

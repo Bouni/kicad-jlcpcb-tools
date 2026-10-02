@@ -458,6 +458,40 @@ def test_appledouble_sidecar_is_not_loaded_as_a_saved_board(
 
 
 @pytest.mark.parametrize(
+    "filename", ["._real.kicad_pcb", "tmp.kicad_pcb", "board-fail-drc.kicad_pcb"]
+)
+@pytest.mark.parametrize(
+    "fields, reason", [({}, "missing"), ({"LCSC": "invalid"}, "unsafe")]
+)
+def test_real_sibling_blockers_have_portable_user_notices(
+    coverage: ModuleType,
+    tmp_path: Path,
+    filename: str,
+    fields: dict[str, str],
+    reason: str,
+) -> None:
+    """Unusual real PCB names stay protected and their exact owner is disclosed."""
+    path, other = tmp_path / "board.kicad_pcb", tmp_path / filename
+    boards = {
+        str(path): saved(path, Footprint(fields={"LCSC": "C123"})),
+        str(other): saved(other, Footprint(fields=fields)),
+    }
+
+    result = collect(coverage, path, boards)
+
+    assert not result.eligible
+    assert str(other) in result.candidate_paths
+    assert len(result.sibling_notices) == 1
+    message = result.sibling_notices[0]
+    assert filename in message and reason in message
+    assert "R1" in message and "uuid-r1" in message and "C123" in message
+    assert str(tmp_path) not in message
+    assert result.sibling_diagnostics == (
+        result.diagnostics if reason == "unsafe" else ()
+    )
+
+
+@pytest.mark.parametrize(
     "metadata",
     [
         b"\x00\x05\x16\x07",
@@ -508,6 +542,7 @@ def test_appledouble_signature_without_sidecar_name_remains_a_candidate(
     result = collect(coverage, path, boards)
     assert not result.eligible
     assert str(other) in result.candidate_paths
+    assert result.sibling_diagnostics == result.diagnostics
 
 
 def test_sidecar_replaced_during_header_read_is_not_excluded(
@@ -544,6 +579,7 @@ def test_sidecar_replaced_during_header_read_is_not_excluded(
 
     assert not result.eligible
     assert str(sidecar) in result.candidate_paths
+    assert any("._board.kicad_pcb" in message for message in result.sibling_notices)
 
 
 @pytest.mark.parametrize("change", ["added", "deleted", "replaced"])
@@ -617,6 +653,34 @@ def test_unreadable_metadata_named_file_remains_a_disclosed_blocker(
 
     assert not result.eligible
     assert str(other) in result.candidate_paths
+    assert result.sibling_notices == (
+        "Cannot read saved PCB ._board.kicad_pcb: permission denied",
+    )
+    assert result.sibling_diagnostics == result.diagnostics
+
+
+def test_current_board_save_advisories_are_not_sibling_notices(
+    coverage: ModuleType, tmp_path: Path
+) -> None:
+    """The controller can disclose siblings without repeating normal save advice."""
+    path = tmp_path / "board.kicad_pcb"
+    boards = {str(path): saved(path, Footprint())}
+    result = collect(coverage, path, boards)
+    assert not result.eligible and result.advisories
+    assert not result.sibling_notices
+    assert not result.sibling_diagnostics
+
+
+def test_no_source_exemption_cannot_include_sibling_blockers(
+    coverage: ModuleType, tmp_path: Path
+) -> None:
+    """An explicit no-row result cannot be used with inconsistent blocker data."""
+    result = collect(coverage, tmp_path / "unsaved.kicad_pcb", {}, parts=(), rows=())
+    assert result.eligible and coverage.verify_saved_board_sources(result)
+    for field in ("sibling_notices", "sibling_diagnostics"):
+        assert not coverage.verify_saved_board_sources(
+            replace(result, **{field: ("other.kicad_pcb needs recovery",)})
+        )
 
 
 @pytest.mark.parametrize("component_id", ["", "uuid-r1"])

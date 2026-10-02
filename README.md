@@ -270,12 +270,25 @@ so another window's changes cannot be archived using an outdated recovery check.
 Before archival, the plugin reads the saved current PCB and sibling PCBs in the
 same directory. macOS AppleDouble metadata sidecars are excluded. Recovery needed
 by another board stays active, including recovery needed by temporary PCB copies.
-Obsolete rows can
+The migration report names blocking sibling files and repeats only new notices;
+acknowledgment does not allow archival. Obsolete rows can
 be archived only when those saved boards confirm they are no longer needed;
 an unsaved deletion or footprint change is insufficient. Native-only recovery
 stays active until you explicitly save the PCB. The plugin never saves it for
 you. Cancellation, incomplete saves, unresolved recovery, and unreadable saved
 boards retain the recovery table for a later retry.
+
+The durable `jlcpcb/legacy-migration-report.json` records the source board, old
+legacy value, chosen native value or clear, and the reason for each recovery
+decision, retaining original provenance and the latest board snapshot without
+adding a full snapshot for every session. It survives schematic-report cleanup
+and archival. When an existing native value or explicit clear supersedes a
+legacy number, an interactive close
+shows the previously unseen decisions once. Forced shutdown leaves that notice
+pending for the next interactive close. Failed audit writes retain recovery data
+and retry later without reapplying imported assignments. If the audit still cannot
+be written, keep the plugin open to retry. Explicitly closing without the audit
+or forcing shutdown can lose observations that could not be written to disk.
 
 Archived assignments are never imported again, and legacy CSV files are never
 automatically imported. Archival preserves generation counters, corrections,

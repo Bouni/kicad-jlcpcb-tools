@@ -264,3 +264,59 @@ def test_native_forced_close_unwinds_interactive_preservation_report(
         assert "R1 [component-1]" in report.read_text(encoding="utf-8")
 
     window_ui.run(check)
+
+
+@pytest.mark.parametrize("variants", [False, True])
+def test_forced_close_in_preservation_report_defers_pending_audit_until_reopen(
+    window_ui: Any, variants: bool
+) -> None:
+    """Shutdown cannot open a second modal or lose an undisplayed migration audit."""
+    from .test_part_info_autosave_retirement import has_legacy, seed_project
+
+    database = seed_project(window_ui, variants)
+    window_ui.acknowledge_legacy_audits = False
+    path = associated_schematic(window_ui)
+    transient = window_ui.path / "jlcpcb" / "schematic-save-report.txt"
+    helper = import_module(
+        window_ui.mainwindow.__package__ + ".legacy_migration_report"
+    )
+
+    def interrupted(ui: Any) -> None:
+        assert helper.load_pending_legacy_migration_reports(str(ui.path))
+        ui.board.parts[0].SetField("LCSC", "invalid")
+
+        def force(dialog: Any) -> None:
+            assert dialog.GetCaption() == "Schematic assignments preserved"
+            assert dialog.IsModal() and ui.dialog._saving_on_close
+            assert ui.dialog.Close(force=True) is True
+            assert not dialog.IsModal()
+
+        with modal_handler(ui, ui.wx.GenericMessageDialog, force) as dialogs:
+            assert ui.dialog.Close() is True
+        assert len(dialogs) == 1
+        assert has_legacy(database)
+        assert '(property "LCSC" "C100"' in path.read_text(encoding="utf-8")
+        assert transient.exists()
+        pending = helper.load_pending_legacy_migration_reports(str(ui.path))
+        assert len(pending) == 1 and pending[0].override_messages
+        ui.board.parts[0].SetField("LCSC", "C1")
+
+    def reopened(ui: Any) -> None:
+        def acknowledge(dialog: Any) -> None:
+            assert dialog.GetCaption() == "Legacy assignment migration"
+            assert "C999" in dialog.GetMessage() and "C1" in dialog.GetMessage()
+            assert not has_legacy(database)
+            assert not transient.exists()
+            dialog.EndModal(ui.wx.ID_OK)
+
+        with modal_handler(ui, ui.wx.GenericMessageDialog, acknowledge) as dialogs:
+            assert ui.dialog.Close() is True
+        assert len(dialogs) == 1
+        assert not helper.load_pending_legacy_migration_reports(str(ui.path))
+
+    def acknowledged(ui: Any) -> None:
+        with patch.object(ui.wx.GenericMessageDialog, "ShowModal") as show:
+            assert ui.dialog.Close() is True
+            show.assert_not_called()
+
+    window_ui.run(interrupted, reopened, acknowledged)

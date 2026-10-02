@@ -480,6 +480,8 @@ def window_ui(
         pcbnew=pcbnew,
         supplier=SimpleNamespace(fetch_iter=Mock(return_value=iter(()))),
         pending_threads=pending_threads,
+        acknowledge_legacy_audits=True,
+        legacy_audit_notifications=[],
     )
     if request.node.get_closest_marker("native_kicad"):
 
@@ -702,6 +704,30 @@ def window_ui(
             main.JLCPCBTools,
             "_maybe_show_schematic_storage_notice",
             lambda _self, _preexisted: None,
+        )
+        show_legacy_audit = main.JLCPCBTools._show_pending_legacy_migration_audit
+
+        def acknowledge_legacy_audit(frame: Any, *, interactive: bool) -> None:
+            """Acknowledge only unrelated migration-audit notices, never save prompts."""
+            if not ui.acknowledge_legacy_audits or not interactive:
+                show_legacy_audit(frame, interactive=interactive)
+                return
+
+            def acknowledge(dialog: Any) -> int:
+                assert dialog.GetCaption() == "Legacy assignment migration"
+                ui.legacy_audit_notifications.append(dialog.GetMessage())
+                return wx.ID_OK
+
+            # Scoped to the audit method so outer close/lock modal handlers do
+            # not schedule two interactions for this separate notification.
+            # Audit-specific tests disable this shim and exercise the real modal.
+            with patch.object(wx.GenericMessageDialog, "ShowModal", acknowledge):
+                show_legacy_audit(frame, interactive=interactive)
+
+        monkeypatch.setattr(
+            main.JLCPCBTools,
+            "_show_pending_legacy_migration_audit",
+            acknowledge_legacy_audit,
         )
 
         ui.run = partial(run_frames, ui)
