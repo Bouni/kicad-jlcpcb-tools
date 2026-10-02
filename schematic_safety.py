@@ -493,7 +493,7 @@ def atomic_write_schematic(path: str, content: str) -> None:
         path: Path to the target schematic file. A symlink is followed, as
             KiCad follows it when it saves: the file it points to is
             replaced and the link is kept.
-        content: The text content to write.
+        content: The text content to write, with its line endings preserved.
 
     An existing target is first copied to `<path>_old`, beside the file
     itself rather than a link to it, and is not replaced unless that backup
@@ -516,7 +516,7 @@ def atomic_write_schematic(path: str, content: str) -> None:
             backup.write(previous)
 
     # 2. Write the new content beside the target and rename it into place
-    with _replacing(abs_path, abs_path, mode="w", encoding="utf-8") as f:
+    with _replacing(abs_path, abs_path, mode="w", encoding="utf-8", newline="") as f:
         f.write(content)
 
 
