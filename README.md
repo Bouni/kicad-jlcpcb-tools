@@ -274,6 +274,16 @@ stays active until you explicitly save the PCB. The plugin never saves it for
 you. Cancellation, incomplete saves, unresolved recovery, and unreadable saved
 boards retain the recovery table for a later retry.
 
+The durable `jlcpcb/legacy-migration-report.json` records the source board, old
+legacy value, chosen native value or clear, and the reason for each recovery
+decision. It survives schematic-report cleanup and archival. When an existing
+native value or explicit clear supersedes a legacy number, an interactive close
+shows the previously unseen decisions once. Forced shutdown leaves that notice
+pending for the next interactive close. Failed audit writes retain recovery data
+and retry later without reapplying imported assignments. If the audit still cannot
+be written, keep the plugin open to retry. Explicitly closing without the audit
+or forcing shutdown can lose observations that could not be written to disk.
+
 Archived assignments are never imported again, and legacy CSV files are never
 automatically imported. Archival preserves generation counters, corrections,
 other tables, and CSV files. Reading or refreshing assignments does not create

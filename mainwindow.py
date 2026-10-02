@@ -45,6 +45,11 @@ from .legacy_part_migration import (
 from .schematic_links import SchematicIndex
 from .schematic_snapshot import capture_board
 from .schematic_discovery import discover_project_schematics
+from .legacy_migration_report import (
+    record_legacy_migration_report,
+    load_pending_legacy_migration_reports,
+    acknowledge_legacy_migration_report,
+)
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
@@ -163,6 +168,10 @@ def _board_has_variants(board: Any) -> bool:
     """Detect native variants independently of catalog or project initialization."""
     variant_names = getattr(board, "GetVariantNamesForUI", None)
     return callable(variant_names) and len(tuple(variant_names())) > 1
+
+
+class _LegacyMigrationAuditError(OSError):
+    """A pending startup observation must remain available for a write retry."""
 
 
 class KicadProvider:
@@ -1386,6 +1395,8 @@ class JLCPCBTools(wx.Frame):
     def _migrate_legacy_assignments(self) -> None:
         """Recover absent Default fields once, before preferences or initial display."""
         if getattr(self, "_legacy_migration_completed", False):
+            if getattr(self, "_legacy_audit_pending_plan", None) is not None:
+                self._persist_legacy_migration_audit(self._legacy_audit_pending_plan)
             return
         self._legacy_migration_failed = False
         self._legacy_migration_block_preferences = False
@@ -1439,6 +1450,7 @@ class JLCPCBTools(wx.Frame):
                     len(plan.assignments),
                 )
             self._legacy_migration_completed = True
+            self._persist_legacy_migration_audit(plan)
         except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
             self._legacy_migration_failed = True
             self._legacy_migration_block_preferences = True
@@ -1446,6 +1458,69 @@ class JLCPCBTools(wx.Frame):
                 "Unable to recover legacy assignments; recovery data retained: %s",
                 error,
             )
+
+    def _persist_legacy_migration_audit(self, plan: LegacyMigrationPlan) -> bool:
+        """Retain startup decisions before archival without replaying a native import."""
+        if not plan.active_table:
+            return True
+        self._legacy_audit_pending_plan = plan
+        try:
+            record_legacy_migration_report(
+                self.project_path,
+                self.store.dbfile,
+                plan,
+                board_name=os.path.basename(getattr(self, "board_name", "")),
+                imported_assignments=getattr(self, "_legacy_imported_assignments", {}),
+            )
+        except (OSError, ValueError) as error:
+            self._legacy_audit_error = str(error)
+            self.logger.warning(
+                "Unable to preserve the legacy migration audit: %s", error
+            )
+            return False
+        self._legacy_audit_pending_plan = None
+        self._legacy_audit_error = None
+        return True
+
+    def _show_pending_legacy_migration_audit(self, *, interactive: bool) -> None:
+        """Acknowledge old values only after a completed interactive notification."""
+        if not interactive or getattr(self, "_forced_close_pending", False):
+            return
+        try:
+            pending = load_pending_legacy_migration_reports(self.project_path)
+        except (OSError, ValueError) as error:
+            self.logger.warning("Unable to read the legacy migration audit: %s", error)
+            return
+        for report in pending:
+            if not report.override_messages:
+                continue
+            dialog = wx.GenericMessageDialog(
+                self,
+                "These legacy assignments were superseded by native PCB values or "
+                "explicit clears. The original values remain in the migration audit "
+                "and legacy archive.\n\n"
+                + "\n".join(report.override_messages)
+                + f"\n\nComplete migration audit:\n{report.path}",
+                "Legacy assignment migration",
+                wx.OK | wx.ICON_INFORMATION | wx.CENTER,
+            )
+            try:
+                result = dialog.ShowModal()
+            finally:
+                dialog.Destroy()
+            if result != wx.ID_OK or getattr(self, "_forced_close_pending", False):
+                return
+            try:
+                acknowledge_legacy_migration_report(
+                    self.project_path,
+                    report.generation_id,
+                    messages=report.override_messages,
+                )
+            except (OSError, ValueError) as error:
+                self.logger.warning(
+                    "Unable to record migration audit acknowledgment: %s", error
+                )
+                return
 
     def _maybe_show_schematic_storage_notice(self, project_db_preexisted: bool) -> None:
         """Explain once that closing writes fabrication attributes into schematics."""
@@ -3245,6 +3320,14 @@ class JLCPCBTools(wx.Frame):
             diagnostics.append(
                 "Legacy recovery remains incomplete; its recovery data was retained."
             )
+        # Another window can archive the table while this window still holds its
+        # first observation after an audit write failure. Retry that observation
+        # before reading current coverage or returning for an inactive table.
+        startup = getattr(self, "_legacy_audit_pending_plan", None)
+        if startup is not None and not self._persist_legacy_migration_audit(startup):
+            raise _LegacyMigrationAuditError(
+                f"Unable to save legacy migration audit: {self._legacy_audit_error}"
+            )
         try:
             plan, state, _footprints = self._legacy_migration_state()
         except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
@@ -3252,6 +3335,10 @@ class JLCPCBTools(wx.Frame):
             return diagnostics
         if not plan.active_table:
             return diagnostics
+        if not self._persist_legacy_migration_audit(plan):
+            raise _LegacyMigrationAuditError(
+                f"Unable to save legacy migration audit: {self._legacy_audit_error}"
+            )
         if not plan.retirement_eligible or plan.assignments:
             eligible = False
             for row in (
@@ -3404,9 +3491,23 @@ class JLCPCBTools(wx.Frame):
                 interactive=interactive,
                 schematic_saved=schematic_saved,
             )
+            self._show_pending_legacy_migration_audit(interactive=interactive)
             return True
         except Exception as exc:
-            if native_finalization:
+            if isinstance(exc, _LegacyMigrationAuditError):
+                self.logger.exception("Legacy migration audit could not be saved")
+                title = "Legacy migration audit not saved"
+                message = (
+                    (
+                        "Safe schematic changes were saved.\n\n"
+                        if schematic_saved
+                        else ""
+                    )
+                    + f"{exc}\n\nKeep this window open to correct the problem and retry. "
+                    "Closing now can lose migration history that has not reached disk."
+                )
+                close_label = "Close without audit"
+            elif native_finalization:
                 self.logger.exception("Legacy assignment recovery finalization failed")
                 title = "Legacy assignment recovery incomplete"
                 message = (

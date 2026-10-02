@@ -104,6 +104,9 @@ def _export(
     window._finalize_legacy_assignments = lambda outcome, **kwargs: (
         mainwindow.JLCPCBTools._finalize_legacy_assignments(window, outcome, **kwargs)
     )
+    window._show_pending_legacy_migration_audit = lambda **kwargs: (
+        mainwindow.JLCPCBTools._show_pending_legacy_migration_audit(window, **kwargs)
+    )
     window._legacy_migration_state = lambda: (
         mainwindow.JLCPCBTools._legacy_migration_state(window)
     )
@@ -572,6 +575,9 @@ def test_roots_come_from_the_loaded_project_for_a_renamed_board(
     )
     window._finalize_legacy_assignments = lambda outcome, **kwargs: (
         mainwindow.JLCPCBTools._finalize_legacy_assignments(window, outcome, **kwargs)
+    )
+    window._show_pending_legacy_migration_audit = lambda **kwargs: (
+        mainwindow.JLCPCBTools._show_pending_legacy_migration_audit(window, **kwargs)
     )
     window._legacy_migration_state = lambda: (
         mainwindow.JLCPCBTools._legacy_migration_state(window)
