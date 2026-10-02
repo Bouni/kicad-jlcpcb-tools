@@ -631,6 +631,559 @@ def test_native_disk_parser_keeps_unsaved_override_out_of_archive_proof(
         ]
 
 
+def test_failed_startup_audit_is_retried_without_reapplying_native_import(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An audit write failure preserves initial provenance and never undoes a user undo."""
+    footprint = LinkedFootprint(fields={})
+    window = make_window(footprints=[footprint])
+    seed(window)
+    record = mainwindow.record_legacy_migration_report
+    failed = MagicMock(side_effect=OSError("audit disk unavailable"))
+    monkeypatch.setattr(mainwindow, "record_legacy_migration_report", failed)
+
+    window.init_store()
+
+    assert footprint.field.text == "C123"
+    assert (
+        window._legacy_migration_completed
+        and window._legacy_audit_pending_plan is not None
+    )
+    footprint.RemoveField("LCSC")
+    monkeypatch.setattr(mainwindow, "record_legacy_migration_report", record)
+    window.init_store()
+    assert footprint.fields == {}
+    assert window._legacy_audit_pending_plan is None
+    assert all(
+        not report.override_messages
+        for report in mainwindow.load_pending_legacy_migration_reports(
+            window.project_path
+        )
+    )
+    report = Path(window.project_path) / "jlcpcb" / "legacy-migration-report.json"
+    assert "imported" in report.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("retry_fails", [False, True])
+def test_pending_startup_audit_survives_another_board_archiving_the_table(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    retry_fails: bool,
+) -> None:
+    """An inactive table cannot discard a different window's unpersisted startup decision."""
+    first = make_window(footprints=[LinkedFootprint(lcsc="C456")])
+    database = seed(first)
+    save_fixture_board(first.pcbnew.GetBoard())
+    record = mainwindow.record_legacy_migration_report
+    failure = MagicMock(side_effect=OSError("audit volume unavailable"))
+    monkeypatch.setattr(mainwindow, "record_legacy_migration_report", failure)
+    first.init_store()
+    assert first._legacy_audit_pending_plan is not None
+
+    monkeypatch.setattr(mainwindow, "record_legacy_migration_report", record)
+    board = support.Board([LinkedFootprint(lcsc="C789")])
+    board.filename = str(Path(first.project_path) / "sibling.kicad_pcb")
+    save_fixture_board(board)
+    second = make_window(board=board)
+    second.board_name = "sibling.kicad_pcb"
+    second._maybe_show_schematic_storage_notice = MagicMock()
+    second.init_store()
+    assert second._finalize_legacy_assignments(None, schematic_saved=False) == []
+    with closing(sqlite3.connect(database)) as connection:
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name='part_info'"
+            ).fetchall()
+            == []
+        )
+
+    if retry_fails:
+        monkeypatch.setattr(mainwindow, "record_legacy_migration_report", failure)
+        with pytest.raises(OSError, match="audit"):
+            first._finalize_legacy_assignments(None, schematic_saved=False)
+        assert first._legacy_audit_pending_plan is not None
+        first._backup_schematics_before_first_write = lambda **_kwargs: True
+        exporter = MagicMock()
+        exporter.load_schematic.return_value = SimpleNamespace(
+            retirement_eligible=True, diagnostics=(), saved=()
+        )
+        monkeypatch.setattr(
+            mainwindow, "SchematicExport", MagicMock(return_value=exporter)
+        )
+        dialog = MagicMock()
+        dialog.ShowModal.return_value = mainwindow.wx.ID_NO
+        show = MagicMock(return_value=dialog)
+        monkeypatch.setattr(mainwindow.wx, "GenericMessageDialog", show, raising=False)
+        assert first.export_to_schematic(interactive=True) is False
+        assert "audit" in show.call_args.args[2].lower()
+        assert "Keep open" in dialog.SetYesNoLabels.call_args.args
+        monkeypatch.setattr(mainwindow, "record_legacy_migration_report", record)
+
+    assert first._finalize_legacy_assignments(None, schematic_saved=False) == []
+    assert first._legacy_audit_pending_plan is None
+    messages = "\n".join(
+        message
+        for report in mainwindow.load_pending_legacy_migration_reports(
+            first.project_path
+        )
+        for message in report.override_messages
+    )
+    assert "board.kicad_pcb" in messages and "C456" in messages
+    assert "sibling.kicad_pcb" in messages and "C789" in messages
+
+
+def test_imported_assignment_is_not_later_reported_as_a_preexisting_override(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+) -> None:
+    """A later choice cannot rewrite the historical reason that a startup row carried over."""
+    footprint = LinkedFootprint(fields={})
+    window = make_window(footprints=[footprint])
+    seed(window)
+    window.init_store()
+    footprint.SetField("LCSC", "C456")
+    plan, _state, _footprints = window._legacy_migration_state()
+    assert window._persist_legacy_migration_audit(plan)
+
+    assert all(
+        not report.override_messages
+        for report in mainwindow.load_pending_legacy_migration_reports(
+            window.project_path
+        )
+    )
+    report = Path(window.project_path) / "jlcpcb" / "legacy-migration-report.json"
+    text = report.read_text(encoding="utf-8")
+    assert "imported" in text and "C123" in text and "C456" in text
+
+
+def test_delayed_startup_audit_keeps_import_origin_and_newer_same_board_state(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Another window cannot erase an earlier successful import's delayed audit."""
+    footprint = LinkedFootprint(fields={})
+    first = make_window(footprints=[footprint])
+    seed(first)
+    record = mainwindow.record_legacy_migration_report
+    monkeypatch.setattr(
+        mainwindow,
+        "record_legacy_migration_report",
+        MagicMock(side_effect=OSError("audit unavailable")),
+    )
+    first.init_store()
+    assert footprint.field.text == "C123"
+    assert first._legacy_audit_pending_plan is not None
+
+    monkeypatch.setattr(mainwindow, "record_legacy_migration_report", record)
+    footprint.SetField("LCSC", "C456")
+    second = make_window(board=first.pcbnew.GetBoard())
+    second.board_name = first.board_name
+    second._maybe_show_schematic_storage_notice = MagicMock()
+    second.init_store()
+    first._migrate_legacy_assignments()
+
+    pending = mainwindow.load_pending_legacy_migration_reports(first.project_path)
+    assert all(not report.override_messages for report in pending)
+    document = json.loads(
+        (
+            Path(first.project_path) / "jlcpcb" / "legacy-migration-report.json"
+        ).read_text(encoding="utf-8")
+    )
+    observations = document["generations"][0]["observations"]
+    assert observations[0]["rows"][0]["disposition"] == "imported"
+    assert observations[-1]["rows"][0]["native_value"] == "C456"
+
+
+def test_audit_acknowledges_only_rows_presented_before_concurrent_observations(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The modal's acknowledgment cannot hide another board's subsequently recorded override."""
+    footprint = LinkedFootprint(lcsc="C456")
+    window = make_window(footprints=[footprint])
+    seed(window)
+    window.init_store()
+    plan, _state, _footprints = window._legacy_migration_state()
+    dialog = MagicMock()
+
+    def show() -> int:
+        mainwindow.record_legacy_migration_report(
+            window.project_path,
+            window.store.dbfile,
+            plan,
+            board_name="sibling.kicad_pcb",
+        )
+        return mainwindow.wx.ID_OK
+
+    dialog.ShowModal.side_effect = show
+    monkeypatch.setattr(
+        mainwindow.wx,
+        "GenericMessageDialog",
+        MagicMock(return_value=dialog),
+        raising=False,
+    )
+
+    window._show_pending_legacy_migration_audit(interactive=True)
+
+    pending = mainwindow.load_pending_legacy_migration_reports(window.project_path)
+    assert len(pending) == 1
+    assert all(
+        "sibling.kicad_pcb" in message for message in pending[0].override_messages
+    )
+    assert all(
+        "board.kicad_pcb" not in message for message in pending[0].override_messages
+    )
+
+
+def test_forced_close_during_audit_keeps_notification_pending(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A shutdown cancellation cannot acknowledge the old/new decisions it interrupts."""
+    footprint = LinkedFootprint(lcsc="")
+    window = make_window(footprints=[footprint])
+    seed(window)
+    window.init_store()
+    dialog = MagicMock()
+
+    def forced() -> int:
+        window._forced_close_pending = True
+        return mainwindow.wx.ID_CANCEL
+
+    dialog.ShowModal.side_effect = forced
+    monkeypatch.setattr(
+        mainwindow.wx,
+        "GenericMessageDialog",
+        MagicMock(return_value=dialog),
+        raising=False,
+    )
+
+    window._show_pending_legacy_migration_audit(interactive=True)
+
+    pending = mainwindow.load_pending_legacy_migration_reports(window.project_path)
+    assert len(pending) == 1 and pending[0].override_messages
+
+
+def test_forced_close_during_prior_report_does_not_open_audit_modal(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A forced shutdown ending the first warning cannot open a second notification."""
+    window = make_window(footprints=[LinkedFootprint(lcsc="")])
+    seed(window)
+    window.init_store()
+    window._forced_close_pending = True
+    dialog = MagicMock()
+    monkeypatch.setattr(mainwindow.wx, "GenericMessageDialog", dialog, raising=False)
+
+    window._show_pending_legacy_migration_audit(interactive=True)
+
+    dialog.assert_not_called()
+    pending = mainwindow.load_pending_legacy_migration_reports(window.project_path)
+    assert pending and pending[0].override_messages
+
+
+@pytest.mark.parametrize(
+    "filename", ["tmp-review.kicad_pcb", "board-fail-drc.kicad_pcb"]
+)
+@pytest.mark.parametrize("assignment", ["missing", "invalid", "malformed"])
+def test_sibling_recovery_blocker_is_disclosed_once_and_still_prevents_archive(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    assignment: str,
+) -> None:
+    """Acknowledging a saved sibling cannot discard the assignment it still needs."""
+    from importlib import reload
+    import sys
+
+    monkeypatch.setattr(
+        mainwindow.kicad_pcbnew, "GetBuildVersion", lambda: "10.0-test", raising=False
+    )
+    reload(sys.modules[mainwindow.__package__ + ".schematic_safety"])
+    exporter = reload(sys.modules[mainwindow.__package__ + ".schematicexport"])
+    monkeypatch.setattr(mainwindow, "SchematicExport", exporter.SchematicExport)
+    window = make_window(footprints=[LinkedFootprint(lcsc="C123")])
+    database = seed(window)
+    window.init_store()
+    save_fixture_board(window.pcbnew.GetBoard())
+    sibling = support.Board([LinkedFootprint(fields={})])
+    if assignment == "invalid":
+        sibling.GetFootprints()[0].SetField("LCSC", "invalid")
+    sibling.filename = str(Path(window.project_path) / filename)
+    save_fixture_board(sibling)
+    if assignment == "malformed":
+        Path(sibling.filename).write_bytes(b"not a PCB")
+    window._backup_schematics_before_first_write = lambda **_kwargs: True
+    dialog = MagicMock()
+    dialog.ShowModal.return_value = mainwindow.wx.ID_OK
+    create_dialog = MagicMock(return_value=dialog)
+    monkeypatch.setattr(
+        mainwindow.wx, "GenericMessageDialog", create_dialog, raising=False
+    )
+
+    assert window.export_to_schematic(interactive=True) is True, (
+        create_dialog.call_args.args[1] if create_dialog.called else "No report"
+    )
+    assert create_dialog.call_count == 1
+    message = create_dialog.call_args.args[1]
+    assert filename in message
+    if assignment != "malformed":
+        assert "R1" in message and "C123" in message
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM part_info").fetchone() == (1,)
+
+    assert window.export_to_schematic(interactive=True) is True
+    assert create_dialog.call_count == 1
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM part_info").fetchone() == (1,)
+
+    if assignment == "missing":
+        sibling.GetFootprints()[0].SetField("LCSC", "invalid")
+    else:
+        sibling.GetFootprints()[0].RemoveField("LCSC")
+    save_fixture_board(sibling)
+    assert window.export_to_schematic(interactive=True) is True
+    assert create_dialog.call_count == 2
+    assert create_dialog.call_args.args[1] != message
+    assert window.export_to_schematic(interactive=True) is True
+    assert create_dialog.call_count == 2
+
+    sibling.GetFootprints()[0].SetField("LCSC", "C123")
+    save_fixture_board(sibling)
+    assert window.export_to_schematic(interactive=True) is True
+    assert create_dialog.call_count == 2
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT * FROM part_info_retired").fetchall()
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='part_info'"
+            ).fetchone()
+            is None
+        )
+
+
+def test_another_boards_successful_archive_clears_resolved_retention_notices(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """A globally safe saved inventory cannot leave another board's stale notice pending."""
+    first = make_window(footprints=[LinkedFootprint(lcsc="C123")])
+    database = seed(first)
+    (Path(first.project_path) / "board.kicad_sch").unlink()
+    first.init_store()
+    save_fixture_board(first.pcbnew.GetBoard())
+    sibling = support.Board([LinkedFootprint(fields={})])
+    sibling.filename = str(Path(first.project_path) / "tmp-recovery.kicad_pcb")
+    save_fixture_board(sibling)
+    assert first.export_to_schematic(interactive=False) is True
+    pending = mainwindow.load_pending_legacy_migration_reports(first.project_path)
+    assert any(report.retention_messages for report in pending)
+
+    second = make_window(board=sibling)
+    second.board_name = Path(sibling.filename).name
+    second._maybe_show_schematic_storage_notice = MagicMock()
+    second.init_store()
+    assert sibling.GetFootprints()[0].field.text == "C123"
+    save_fixture_board(sibling)
+    assert second.export_to_schematic(interactive=False) is True
+
+    assert all(
+        not report.retention_messages
+        for report in mainwindow.load_pending_legacy_migration_reports(
+            first.project_path
+        )
+    )
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT * FROM part_info_retired").fetchall()
+
+
+def test_failed_archive_source_guard_preserves_a_concurrent_sibling_notice(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outdated eligible scan cannot erase another window's new recovery warning."""
+    first = make_window(footprints=[LinkedFootprint(lcsc="C123")])
+    database = seed(first)
+    (Path(first.project_path) / "board.kicad_sch").unlink()
+    first.init_store()
+    save_fixture_board(first.pcbnew.GetBoard())
+    sibling = support.Board([LinkedFootprint(lcsc="C123")])
+    sibling.filename = str(Path(first.project_path) / "tmp-raced.kicad_pcb")
+    save_fixture_board(sibling)
+    second = make_window(board=first.pcbnew.GetBoard())
+    second.board_name = first.board_name
+    second._maybe_show_schematic_storage_notice = MagicMock()
+    second.init_store()
+    retire = mainwindow.retire_legacy_part_info
+
+    def replace_sibling_before_archive(*args: Any, **kwargs: Any) -> Any:
+        sibling.GetFootprints()[0].RemoveField("LCSC")
+        save_fixture_board(sibling)
+        assert second.export_to_schematic(interactive=False) is True
+        return retire(*args, **kwargs)
+
+    monkeypatch.setattr(
+        mainwindow, "retire_legacy_part_info", replace_sibling_before_archive
+    )
+    assert first.export_to_schematic(interactive=False) is False
+
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM part_info").fetchone() == (1,)
+    assert any(
+        "tmp-raced.kicad_pcb" in message
+        for report in mainwindow.load_pending_legacy_migration_reports(
+            first.project_path
+        )
+        for message in report.retention_messages
+    )
+
+
+def test_post_archive_notice_failure_reconciles_on_reopen_without_reimporting(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed notice refresh leaves archived rows safe and retries with inactive evidence."""
+    first = make_window(footprints=[LinkedFootprint(lcsc="C123")])
+    database = seed(first)
+    (Path(first.project_path) / "board.kicad_sch").unlink()
+    first.init_store()
+    save_fixture_board(first.pcbnew.GetBoard())
+    sibling = support.Board([LinkedFootprint(fields={})])
+    sibling.filename = str(Path(first.project_path) / "tmp-recovery.kicad_pcb")
+    save_fixture_board(sibling)
+    assert first.export_to_schematic(interactive=False) is True
+    sibling.GetFootprints()[0].SetField("LCSC", "C123")
+    save_fixture_board(sibling)
+    mark = mainwindow.mark_legacy_migration_reports_retired
+    attempts = []
+
+    def fail_first_refresh(*args: Any, **kwargs: Any) -> None:
+        attempts.append(kwargs.get("generation_id"))
+        if len(attempts) == 1:
+            raise OSError("report is read-only")
+        mark(*args, **kwargs)
+
+    monkeypatch.setattr(
+        mainwindow, "mark_legacy_migration_reports_retired", fail_first_refresh
+    )
+    dialog = MagicMock()
+    dialog.ShowModal.return_value = mainwindow.wx.ID_NO
+    create_dialog = MagicMock(return_value=dialog)
+    monkeypatch.setattr(
+        mainwindow.wx, "GenericMessageDialog", create_dialog, raising=False
+    )
+    assert first.export_to_schematic(interactive=True) is False
+    assert create_dialog.call_args.args[2] == "Legacy migration report not updated"
+    assert "history was preserved" in create_dialog.call_args.args[1]
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT * FROM part_info_retired").fetchall()
+
+    reopened = make_window(board=first.pcbnew.GetBoard())
+    reopened.board_name = first.board_name
+    reopened._maybe_show_schematic_storage_notice = MagicMock()
+    reopened.init_store()
+    assert reopened.export_to_schematic(interactive=True) is True
+    assert attempts[-1] is None and create_dialog.call_count == 1
+    assert all(
+        not report.retention_messages
+        for report in mainwindow.load_pending_legacy_migration_reports(
+            first.project_path
+        )
+    )
+    with closing(sqlite3.connect(database)) as connection:
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='part_info'"
+            ).fetchone()
+            is None
+        )
+
+
+@pytest.mark.parametrize("phase", ["before_rename", "after_incomplete_scan"])
+def test_concurrent_archive_is_reconciled_before_displaying_old_sibling_notices(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    """An archiver that has not refreshed notices cannot cause a stale close prompt."""
+    first = make_window(footprints=[LinkedFootprint(lcsc="C123")])
+    database = seed(first)
+    (Path(first.project_path) / "board.kicad_sch").unlink()
+    first.init_store()
+    save_fixture_board(first.pcbnew.GetBoard())
+    sibling = support.Board([LinkedFootprint(fields={})])
+    sibling.filename = str(Path(first.project_path) / "tmp-recovery.kicad_pcb")
+    save_fixture_board(sibling)
+    reporter_board = support.Board([LinkedFootprint(lcsc="C123")])
+    reporter_board.filename = str(Path(first.project_path) / "reporter.kicad_pcb")
+    save_fixture_board(reporter_board)
+    reporter = make_window(board=reporter_board)
+    reporter.board_name = "reporter.kicad_pcb"
+    reporter._maybe_show_schematic_storage_notice = MagicMock()
+    reporter.init_store()
+    assert reporter.export_to_schematic(interactive=False) is True
+    assert any(
+        report.retention_messages
+        for report in mainwindow.load_pending_legacy_migration_reports(
+            first.project_path
+        )
+    )
+    retire = mainwindow.retire_legacy_part_info
+
+    if phase == "before_rename":
+        sibling.GetFootprints()[0].SetField("LCSC", "C123")
+        save_fixture_board(sibling)
+
+        def archive_first(*args: Any, **kwargs: Any) -> Any:
+            assert retire(*args, **kwargs) is not None
+            return retire(*args, **kwargs)
+
+        monkeypatch.setattr(mainwindow, "retire_legacy_part_info", archive_first)
+    else:
+        finalize = first._finalize_legacy_assignments
+
+        def archive_after_incomplete_scan(*args: Any, **kwargs: Any) -> list[str]:
+            diagnostics = finalize(*args, **kwargs)
+            sibling.GetFootprints()[0].SetField("LCSC", "C123")
+            save_fixture_board(sibling)
+            assert (
+                reporter._finalize_legacy_assignments(None, schematic_saved=False) == []
+            )
+            return diagnostics
+
+        mark = mainwindow.mark_legacy_migration_reports_retired
+
+        def defer_marker(*args: Any, **kwargs: Any) -> None:
+            if kwargs.get("generation_id") is not None:
+                return
+            mark(*args, **kwargs)
+
+        monkeypatch.setattr(
+            mainwindow, "mark_legacy_migration_reports_retired", defer_marker
+        )
+        first._finalize_legacy_assignments = archive_after_incomplete_scan
+
+    dialog = MagicMock()
+    dialog.ShowModal.return_value = mainwindow.wx.ID_OK
+    create_dialog = MagicMock(return_value=dialog)
+    monkeypatch.setattr(
+        mainwindow.wx, "GenericMessageDialog", create_dialog, raising=False
+    )
+    assert first.export_to_schematic(interactive=True) is True
+    create_dialog.assert_not_called()
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT * FROM part_info_retired").fetchall()
+
+
 def test_schematic_changed_after_export_cannot_prove_import_is_durable(
     make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

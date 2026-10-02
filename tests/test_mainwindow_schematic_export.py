@@ -104,8 +104,14 @@ def _export(
     window._finalize_legacy_assignments = lambda outcome, **kwargs: (
         mainwindow.JLCPCBTools._finalize_legacy_assignments(window, outcome, **kwargs)
     )
+    window._show_pending_legacy_migration_audit = lambda **kwargs: (
+        mainwindow.JLCPCBTools._show_pending_legacy_migration_audit(window, **kwargs)
+    )
     window._legacy_migration_state = lambda: (
         mainwindow.JLCPCBTools._legacy_migration_state(window)
+    )
+    window._mark_legacy_migration_retired = lambda generation_id=None: (
+        mainwindow.JLCPCBTools._mark_legacy_migration_retired(window, generation_id)
     )
     window.save_result = mainwindow.JLCPCBTools.export_to_schematic(
         window, interactive=interactive
@@ -573,8 +579,14 @@ def test_roots_come_from_the_loaded_project_for_a_renamed_board(
     window._finalize_legacy_assignments = lambda outcome, **kwargs: (
         mainwindow.JLCPCBTools._finalize_legacy_assignments(window, outcome, **kwargs)
     )
+    window._show_pending_legacy_migration_audit = lambda **kwargs: (
+        mainwindow.JLCPCBTools._show_pending_legacy_migration_audit(window, **kwargs)
+    )
     window._legacy_migration_state = lambda: (
         mainwindow.JLCPCBTools._legacy_migration_state(window)
+    )
+    window._mark_legacy_migration_retired = lambda generation_id=None: (
+        mainwindow.JLCPCBTools._mark_legacy_migration_retired(window, generation_id)
     )
     window._report_schematic_save = lambda diagnostics, **kwargs: (
         mainwindow.JLCPCBTools._report_schematic_save(window, diagnostics, **kwargs)
