@@ -9,7 +9,8 @@ from .part_assignments import is_assignment_alias
 _QUOTED = r'"(?:\\[^\r\n]|[^"\\\r\n])*"'
 _SPACE = " \t\r\n\0"
 _TOKEN = re.compile(
-    rf'(?P<comment>^[ \t\0]*\#[^\r\n]*)|{_QUOTED}|[()]|[^ \t\r\n\0()"]+', re.MULTILINE
+    rf'(?P<comment>(?:^|(?<=\r))[ \t\0]*\#[^\r\n]*)|{_QUOTED}|[()]|[^ \t\r\n\0()"]+',
+    re.MULTILINE,
 )
 _ESCAPES = {
     "a": "\a",
@@ -132,10 +133,25 @@ def _arguments(text: str, form: _Form) -> list[_Atom]:
     return arguments
 
 
+def _insertion_layout(text: str, position: int) -> tuple[str, str]:
+    """Use the anchor's line ending and indentation without normalizing source text."""
+    previous = max(text.rfind("\n", 0, position), text.rfind("\r", 0, position))
+    if previous >= 0:
+        start = previous
+        if text[previous] == "\n" and previous and text[previous - 1] == "\r":
+            start -= 1
+        newline = text[start : previous + 1]
+    else:
+        following = re.search(r"\r\n|\r|\n", text[position:])
+        newline = following.group() if following else "\n"
+    prefix = text[previous + 1 : position]
+    indent = prefix if not prefix.strip() else "    "
+    return newline, indent
+
+
 def _new_field(text: str, reference: _Form, value: str, version7: bool) -> str:
     """Place a hidden canonical field beside the Reference when no alias exists."""
-    prefix = text[text.rfind("\n", 0, reference.start) + 1 : reference.start]
-    indent = prefix if not prefix.strip() else "    "
+    newline, indent = _insertion_layout(text, reference.start)
     location = next(
         (
             text[form.start : form.end]
@@ -147,12 +163,12 @@ def _new_field(text: str, reference: _Form, value: str, version7: bool) -> str:
     encoded = _quote(value)
     if version7:
         return (
-            f'\n{indent}(property "LCSC" {encoded} {location}\n'
-            f"{indent}  (effects (font (size 1.27 1.27)) hide)\n{indent})"
+            f'{newline}{indent}(property "LCSC" {encoded} {location}{newline}'
+            f"{indent}  (effects (font (size 1.27 1.27)) hide){newline}{indent})"
         )
     return (
-        f'\n{indent}(property "LCSC" {encoded}\n{indent}  {location}\n'
-        f"{indent}  (effects (font (size 1.27 1.27)) (hide yes))\n{indent})"
+        f'{newline}{indent}(property "LCSC" {encoded}{newline}{indent}  {location}{newline}'
+        f"{indent}  (effects (font (size 1.27 1.27)) (hide yes)){newline}{indent})"
     )
 
 
@@ -224,8 +240,13 @@ def update_symbol_fields(
                         raise ValueError(f"Invalid BOM state on symbol {symbol_uuid}")
                     edits.append((args[0].start, args[0].end, desired))
             else:
+                newline, indent = _insertion_layout(text, children[0].start)
                 edits.append(
-                    (children[0].end, children[0].end, f"\n    (in_bom {desired})")
+                    (
+                        children[0].end,
+                        children[0].end,
+                        f"{newline}{indent}(in_bom {desired})",
+                    )
                 )
     pieces = []
     offset = 0
