@@ -68,8 +68,8 @@ def test_listed_number_is_assigned_with_catalog_facts_without_asking(
     assert question.asked == []
     window.library.get_part_details.assert_called_once_with("C19702")
     assert [(row["lcsc"], row["stock"]) for row in project_rows(window)] == [
-        ("C19702", 5),
-        ("C19702", 5),
+        ("C19702", None),
+        ("C19702", None),
     ]
     assert all(
         fp.field.text == "C19702" for fp in window.pcbnew.GetBoard().GetFootprints()

@@ -184,6 +184,26 @@ the project's schematics. The manual **Export to schematic** button has been
 removed. On boards with design variants, this always saves **Default**;
 selecting a named variant for fabrication does not change the schematic source.
 
+A missing assignment field preserves the schematic's existing part number;
+an explicit empty assignment clears it. Invalid or conflicting assignments are
+preserved and reported while safe assignments still save. Footprints are linked
+to symbols by KiCad's UUID paths, so changed or duplicate references do not
+redirect a save. PCB-only footprints need no schematic update. Stale or ambiguous
+links are preserved and reported.
+For reused sheets, a shared field is updated only when every instance is linked
+and agrees on that field. A linked multi-unit component updates all authenticated
+units together; incomplete or ambiguous component membership is preserved.
+
+Ordinary unassigned parts and PCB-only footprints close quietly. If an unassigned
+PCB footprint has a part number in the schematic, use KiCad's **Update PCB from
+Schematic** to transfer it to the board. This is an advisory, not a save failure.
+When a conflict, invalid assignment, or unresolved link needs attention, the plugin keeps the complete report
+at `jlcpcb/schematic-save-report.txt`, identifying affected footprints and the
+reasons. Interactive closing also shows a warning; forced shutdown saves the
+report without a prompt. A later complete save removes an outdated report.
+Safe partial saves can complete; they do not authorize archival of active legacy
+recovery data.
+
 Projects that already have a `jlcpcb/project.db` see a one-time notice explaining
 that the schematic is now the durable store. Before the first automatic write,
 the plugin also keeps a permanent zip at
@@ -204,12 +224,85 @@ This saves schematic files. Use KiCad's PCB save command to persist changes to
 the PCB itself. An already-open Schematic Editor does not reload exported files
 automatically and can overwrite them if you choose **Save Anyway**.
 
+### Where part assignments are stored
+
+The live KiCad board is the sole source of LCSC assignments, with or without
+named design variants. Selecting, pasting, or clearing a part updates the native
+footprint fields or the selected variant's fields. **Save the PCB in KiCad to
+persist these changes.** Refreshing the plugin reads the current board, including
+edits made outside the plugin.
+
+Both table modes recognize `LCSC`, `JLC`, and `JLCPCB` assignment fields,
+optionally followed by `Part`, `Part Number`, `Part Num`, `Part No`, `PartNr`,
+`PN`, `Number`, `Code`, or `ID`; case, spaces, and punctuation are ignored.
+Conflicting or invalid assignments appear unassigned. Selecting or clearing a part updates
+all recognized assignment fields together. Other prefixed fields, such as
+`JLCPCB Rotation` or `LCSC custom code`, remain metadata; move part numbers from
+such fields into a recognized assignment field.
+
+Previously, ordinary boards used database or CSV assignments while boards with
+named variants read native fields. Editing or clearing Default, then removing
+the last named variant, could therefore restore an obsolete database assignment.
+Both modes now read and edit the board; the former schematic/database priority
+setting no longer applies.
+
+On opening, the plugin checks an existing `jlcpcb/project.db` for recoverable
+legacy assignments before applying part preferences or displaying the initial
+BOM. It imports a valid LCSC number only when the board assignment field is
+missing and the reference, value, footprint, and BOM/POS flags exactly match
+the historical row. Every linked schematic unit must also have no assignment or
+the same part number. PCB-only footprints and projects confirmed to have no
+schematic can recover directly into native fields, even if the PCB retains old
+symbol paths. Unreadable project files and missing declared sheets do not count
+as an absent schematic. Within a discovered hierarchy, stale or ambiguous links
+remain unresolved.
+Existing native values, explicit clears, invalid or conflicting
+fields, unresolved links, and disagreeing shared instances are preserved.
+Recovery imports neither stock nor flags and does not require a parts catalog.
+Save the PCB to retain recovered assignments.
+
+Once recovery is durable in the saved schematic or PCB, the active `part_info`
+table is renamed to `part_info_retired`, preserving its rows and schema. Existing
+archives remain intact; later archives use names such as `part_info_retired_2`.
+The plugin rechecks the table's schema and data inside the archive transaction
+so another window's changes cannot be archived using an outdated recovery check.
+Before archival, the plugin reads the saved current PCB and sibling PCBs in the
+same directory. Recovery needed by another board stays active. Obsolete rows can
+be archived only when those saved boards confirm they are no longer needed;
+an unsaved deletion or footprint change is insufficient. Native-only recovery
+stays active until you explicitly save the PCB. The plugin never saves it for
+you. Cancellation, incomplete saves, unresolved recovery, and unreadable saved
+boards retain the recovery table for a later retry.
+
+The durable `jlcpcb/legacy-migration-report.json` records the source board, old
+legacy value, chosen native value or clear, and the reason for each recovery
+decision. It survives schematic-report cleanup and archival. When an existing
+native value or explicit clear supersedes a legacy number, an interactive close
+shows the previously unseen decisions once. Forced shutdown leaves that notice
+pending for the next interactive close. Failed audit writes retain recovery data
+and retry later without reapplying imported assignments. If the audit still cannot
+be written, keep the plugin open to retry. Explicitly closing without the audit
+or forcing shutdown can lose observations that could not be written to disk.
+
+Archived assignments are never imported again, and legacy CSV files are never
+automatically imported. Archival preserves generation counters, corrections,
+other tables, and CSV files. Reading or refreshing assignments does not create
+or modify `part_info`; the notice acknowledgment and generation counter use
+the separate `metadata` table.
+
+Supplier descriptions and other part details are cached in memory by LCSC
+number and fetched again as needed. Stock and pricing come from the currently
+selected parts catalog; they are not persisted as board assignments.
+
 ### Part preferences
 
 Part preferences remember which LCSC part to use for a value and footprint combination across projects. Two independent settings are enabled by default:
 
 - **Remember my part preferences** remembers each successful part selection or pasted LCSC assignment. The latest explicit assignment replaces the preference; opening a board does not change preferences.
 - **Parts preferences fill in empty LCSC assignments** fills blank LCSC assignments once each time the plugin window opens. Existing assignments are preserved. DNP parts and parts excluded from BOM or POS are skipped.
+
+Applying part preferences, including automatic filling on opening, writes the
+native board fields. Save the PCB to keep those assignments.
 
 Clearing an LCSC assignment keeps its part preference, so an eligible blank assignment may fill again on the next opening. Exclude the part or disable automatic filling to keep it blank. The right-click actions **Save part preferences** and **Apply part preferences** remain available even when automation is disabled. Use **Part preferences** to delete, import, or export preferences. Deleting a preference does not remove assignments from your boards.
 

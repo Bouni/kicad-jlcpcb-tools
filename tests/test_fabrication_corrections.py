@@ -166,9 +166,8 @@ def test_parts_table_reports_the_correction_used_by_cpl(
     fabrication.parent.store.get_part = lambda _reference: part
     window = _population_window(runtime)
     window.store.read_all.return_value = [part]
-    window.pcbnew = SimpleNamespace(
-        GetBoard=lambda: SimpleNamespace(FindFootprintByReference=lambda _reference: fp)
-    )
+    fabrication.board.FindFootprintByReference = lambda _reference: fp
+    window.pcbnew = SimpleNamespace(GetBoard=lambda: fabrication.board)
 
     window.populate_footprint_list()
     fabrication.generate_cpl()
@@ -289,9 +288,8 @@ def test_part_rules_share_the_display_and_cpl_policy(
     # no parts database here, and that lookup is not what is under test.
     window.library.get_part_details = lambda _lcsc: {}
     window.store.read_all.return_value = [part]
-    window.pcbnew = SimpleNamespace(
-        GetBoard=lambda: SimpleNamespace(FindFootprintByReference=lambda _reference: fp)
-    )
+    fabrication.board.FindFootprintByReference = lambda _reference: fp
+    window.pcbnew = SimpleNamespace(GetBoard=lambda: fabrication.board)
 
     window.populate_footprint_list()
     fabrication.generate_cpl()
@@ -308,14 +306,14 @@ def test_part_rules_share_the_display_and_cpl_policy(
     assert float(row["Mid Y"]) == pytest.approx(-18 - offset[1])
 
 
-def test_cpl_resolves_the_stored_part_number_not_the_footprint_field(
+def test_cpl_resolves_the_supplied_mapping_without_rereading_fields(
     runtime: SimpleNamespace, tmp_path: Path
 ) -> None:
-    """The BOM orders the store's number, so the CPL must rotate for that one.
+    """CPL and BOM must use the same normalized assembly mapping.
 
-    "Paste LCSC" and "Find LCSC from Mappings" write the store without touching
-    the footprint field, so a stale field would rotate one part while the BOM
-    ordered another -- the silent wrong rotation part rules exist to prevent.
+    The board-backed store resolves configured supplier field names. Fabrication
+    consumes that result so its correction lookup follows the same assignment
+    as BOM grouping, rather than resolving raw footprint fields independently.
     """
     runtime.library.insert_lcsc_correction_data("C111", 180, (0, 0))
     runtime.library.insert_lcsc_correction_data("C222", 90, (0, 0))

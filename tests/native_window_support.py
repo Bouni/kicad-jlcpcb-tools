@@ -2,6 +2,8 @@
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from copy import deepcopy
+from dataclasses import replace
 from functools import partial
 import importlib
 import json
@@ -12,6 +14,7 @@ from threading import Thread
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import MagicMock, Mock, patch
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 
@@ -21,7 +24,7 @@ from .native_wx_support import pump, run_native, wait_until
 from .variant_native_support import Board, Footprint, Variant
 from .wx_harness import ROOT, module, package_stubs, temporary_modules
 
-__all__ = ["native_bindings", "window_ui"]
+__all__ = ["native_bindings", "plugin_action_host", "window_ui"]
 
 
 class _SelectedItem:
@@ -43,9 +46,16 @@ class _SelectedItem:
 class _SelectableFootprint(Footprint, _SelectedItem):
     """Combine native variant state with observable board selection."""
 
-    def __init__(self, board: Any, component: str, ref: str = "R1") -> None:
+    def __init__(
+        self, board: Any, component: str, ref: str = "R1", *, schematic_path: str = ""
+    ) -> None:
         Footprint.__init__(self, board, component, ref)
         _SelectedItem.__init__(self)
+        self.schematic_path = schematic_path
+
+    def GetPath(self) -> Any:
+        """Read the retained schematic link independently of the display reference."""
+        return SimpleNamespace(AsString=lambda: self.schematic_path)
 
     def GetFPID(self) -> Any:
         return SimpleNamespace(
@@ -59,8 +69,12 @@ class _SelectableFootprint(Footprint, _SelectedItem):
 class _Pcbnew:
     """Return the live board and its current selection, including other items."""
 
-    def __init__(self, board: Any) -> None:
+    def __init__(self, board: Any, pcbnew_module: Any) -> None:
         self.board = board
+        self.LoadBoard = lambda filename: pcbnew_module.LoadBoard(filename)
+        for name in ("PCB_IO_MGR", "IO_MGR"):
+            if hasattr(pcbnew_module, name):
+                setattr(self, name, getattr(pcbnew_module, name))
         self.other_items: list[_SelectedItem] = []
         self.Refresh = MagicMock()
 
@@ -73,6 +87,94 @@ class _Pcbnew:
             for item in (*self.board.GetFootprints(), *self.other_items)
             if item.IsSelected()
         ]
+
+
+class _SavedBoards:
+    """Separate explicitly saved fixture boards from the mutable editor state."""
+
+    def __init__(self) -> None:
+        self.snapshots: dict[Path, tuple[bytes, Any]] = {}
+        self.component_ids: dict[str, str] = {}
+        self.sequence = 0
+
+    def _serialize_footprint(self, footprint: Any) -> str:
+        """Write real PCB grammar while assigning stable UUIDs to fixture labels."""
+        component = footprint.m_Uuid.AsString()
+        try:
+            identity = str(UUID(component))
+        except ValueError:
+            identity = str(uuid5(NAMESPACE_URL, f"kicad-window-fixture:{component}"))
+        self.component_ids[identity] = component
+
+        def quote(text: str) -> str:
+            """Preserve Unicode while escaping quoted native field values."""
+            return json.dumps(text, ensure_ascii=False)
+
+        fields = "\n".join(
+            f"    (property {quote(field.GetName())} {quote(field.GetText())})"
+            for field in footprint.GetFields()
+        )
+        flags = footprint.GetAttributes()
+        attributes = " ".join(
+            name
+            for bit, name in (
+                (1, "smd"),
+                (4, "exclude_from_pos_files"),
+                (8, "exclude_from_bom"),
+                (64, "dnp"),
+            )
+            if flags & bit
+        )
+        variant_fields = "\n".join(
+            f"    (variant (name {quote(name)}) "
+            + " ".join(
+                f"(field (name {quote(field)}) (value {quote(value)}))"
+                for field, value in variant.fields.items()
+            )
+            + ")"
+            for name, variant in footprint.variants.items()
+        )
+        return (
+            f"  (footprint {quote(footprint.GetFPIDAsString())}\n"
+            f'    (layer "F.Cu") (uuid "{identity}")\n'
+            + fields
+            + f"\n    (attr {attributes})\n"
+            + variant_fields
+            + "\n  )\n"
+        )
+
+    def save(self, board: Any, filename: Optional[str] = None) -> None:
+        """Model an explicit user save with new bytes and a detached board copy."""
+        path = Path(filename or board.GetFileName()).resolve()
+        snapshot = deepcopy(board)
+        snapshot.GetFileName = lambda: str(path)
+        snapshot.Footprints = snapshot.GetFootprints
+        snapshot.modified = False
+        self.sequence += 1
+        parts = snapshot.GetFootprints()
+        version = 20260206 if any(part.variants for part in parts) else 20241229
+        contents = (
+            f"(kicad_pcb (version {version}) (generator pcbnew)\n"
+            f'  (generator_version "fixture-save-{self.sequence}")\n'
+            '  (general (thickness 1.6)) (paper "A4")\n'
+            '  (layers (0 "F.Cu" signal) (31 "B.Cu" signal))\n'
+            "  (setup (pad_to_mask_clearance 0))\n"
+            + "".join(self._serialize_footprint(part) for part in parts)
+            + ")\n"
+        ).encode("utf-8")
+        path.write_bytes(contents)
+        self.snapshots[path] = (contents, snapshot)
+        board.modified = False
+
+    def load(self, filename: str) -> Any:
+        """Return a fresh read-only-load result, never the current editor object."""
+        path = Path(filename).resolve()
+        if path not in self.snapshots:
+            raise OSError(f"No saved fixture PCB snapshot: {path}")
+        contents, snapshot = self.snapshots[path]
+        if path.read_bytes() != contents:
+            raise OSError(f"Saved fixture PCB changed outside an explicit save: {path}")
+        return deepcopy(snapshot)
 
 
 def button(wx: Any, control: Any) -> None:
@@ -190,10 +292,55 @@ def modal_handler(
         raise failures[0]
 
 
+@contextmanager
+def plugin_action_host(ui: Any, host: Any) -> Iterator[Callable[[], None]]:
+    """Route production actions through real wx menus with a simulated KiCad host.
+
+    This fixture exercises native wx event routing, not KiCad's C++ undo stack.
+    The separate plugin action tests model that source-inspected transaction.
+    """
+    wx = ui.wx
+    plugin = ui.plugin.JLCPCBPlugin()
+    menu = wx.Menu()
+    command = menu.Append(wx.ID_ANY, plugin.name)
+    menubar = wx.MenuBar()
+    menubar.Append(menu, "Tools")
+    previous = host.GetMenuBar()
+    host.SetMenuBar(menubar)
+    running = False
+
+    def invoke() -> None:
+        nonlocal running
+        running = True
+        try:
+            plugin.Run()
+        finally:
+            running = False
+
+    def on_menu(event: Any) -> None:
+        invoke()
+
+    host.Bind(wx.EVT_MENU, on_menu, id=command.GetId())
+    try:
+        with (
+            patch.object(ui.plugin.pcbnew, "GetBoard", lambda: ui.board, create=True),
+            patch.object(
+                ui.plugin.pcbnew, "IsActionRunning", lambda: running, create=True
+            ),
+        ):
+            yield invoke
+    finally:
+        host.Unbind(wx.EVT_MENU, handler=on_menu, id=command.GetId())
+        host.SetMenuBar(previous)
+        menubar.Destroy()
+
+
 def run_frames(ui: Any, *checks: Callable[[Any], None]) -> None:
     """Exercise actual modeless plugin windows after their action has returned."""
 
-    def run_one(host: Any, wx: Any, check: Callable[[Any], None]) -> None:
+    def run_one(
+        host: Any, wx: Any, invoke: Callable[[], None], check: Callable[[Any], None]
+    ) -> None:
         errors: list[BaseException] = []
         frames: list[Any] = []
         completed = False
@@ -218,7 +365,7 @@ def run_frames(ui: Any, *checks: Callable[[Any], None]) -> None:
                     if controller is not None and controller.session.generating:
                         controller.end_generation()
                     if frame and not frame.IsBeingDeleted():
-                        frame.Close()
+                        frame.Close(force=bool(errors))
                     assert frame._part_selector is None
                 except BaseException as error:
                     errors.append(error)
@@ -226,16 +373,16 @@ def run_frames(ui: Any, *checks: Callable[[Any], None]) -> None:
 
         factory = ui.mainwindow.JLCPCBTools
 
-        def constructor(parent: Any) -> Any:
+        def constructor(parent: Any, **kwargs: Any) -> Any:
             ui.defaults_path.write_text(json.dumps(ui.settings))
-            frame = factory(parent, ui.provider)
+            frame = factory(parent, ui.provider, **kwargs)
             frames.append(frame)
             return frame
 
         previous_loop = wx.EventLoopBase.GetActive()
         ui.mainwindow.JLCPCBTools = constructor
         try:
-            ui.plugin.JLCPCBPlugin().Run()
+            invoke()
         finally:
             ui.mainwindow.JLCPCBTools = factory
         assert len(frames) == 1, ui.messages
@@ -252,8 +399,9 @@ def run_frames(ui: Any, *checks: Callable[[Any], None]) -> None:
             raise errors[0]
 
     def exercise(host: Any, wx: Any) -> None:
-        for check in checks:
-            run_one(host, wx, check)
+        with plugin_action_host(ui, host) as invoke:
+            for check in checks:
+                run_one(host, wx, invoke, check)
 
     run_native(exercise)
 
@@ -282,6 +430,16 @@ def window_ui(
         board.SetFileName(str(tmp_path / "native-dialog.kicad_pcb"))
         assert pcbnew.SaveBoard(board.GetFileName(), board, True)
     else:
+
+        class ActionPlugin:
+            """Initialize defaults as KiCad's real Python base does."""
+
+            def __init__(self) -> None:
+                self.defaults()
+
+            def defaults(self) -> None:
+                """Permit the production action class to provide its defaults."""
+
         board = Board()
         board.parts = [_SelectableFootprint(board, "component-1")]
         board.Footprints = board.GetFootprints
@@ -309,7 +467,7 @@ def window_ui(
             Refresh=lambda: None,
             GetBuildVersion=lambda: "10.0-test",
             FOOTPRINT_VARIANT=Variant,
-            ActionPlugin=object,
+            ActionPlugin=ActionPlugin,
         )
     pending_threads: list[Callable[[], None]] = []
     ui = SimpleNamespace(
@@ -322,7 +480,45 @@ def window_ui(
         pcbnew=pcbnew,
         supplier=SimpleNamespace(fetch_iter=Mock(return_value=iter(()))),
         pending_threads=pending_threads,
+        acknowledge_legacy_audits=True,
+        legacy_audit_notifications=[],
     )
+    if request.node.get_closest_marker("native_kicad"):
+
+        def save_board(source: Any = None, filename: Optional[str] = None) -> None:
+            """Use the actual native serialization only when explicitly requested."""
+            current = ui.board if source is None else source
+            assert pcbnew.SaveBoard(filename or current.GetFileName(), current, True)
+
+    else:
+        saved_boards = _SavedBoards()
+        saved_boards.save(board)
+        pcbnew.LoadBoard = saved_boards.load
+
+        def load_saved_board(file_type: Any, filename: str) -> Any:
+            """Model the uncached native file reader independently of LoadBoard."""
+            assert file_type == "fixture-kicad-sexp"
+            return saved_boards.load(filename)
+
+        pcbnew.PCB_IO_MGR = SimpleNamespace(
+            KICAD_SEXP="fixture-kicad-sexp", Load=load_saved_board
+        )
+
+        def save_board(source: Any = None, filename: Optional[str] = None) -> None:
+            """Persist only an explicit fixture user-save step."""
+            saved_boards.save(ui.board if source is None else source, filename)
+
+    def reload_board(filename: Optional[str] = None) -> None:
+        """Discard unsaved editor changes by loading a detached saved board."""
+        path = filename or ui.board.GetFileName()
+        if request.node.get_closest_marker("native_kicad"):
+            manager = getattr(pcbnew, "PCB_IO_MGR", None) or pcbnew.IO_MGR
+            ui.board = manager.Load(manager.KICAD_SEXP, path)
+        else:
+            ui.board = pcbnew.LoadBoard(path)
+
+    ui.save_board = save_board
+    ui.reload_board = reload_board
 
     def defer_thread(
         *, target: Callable[..., None], daemon: bool, args: tuple[Any, ...] = ()
@@ -350,13 +546,34 @@ def window_ui(
             raise failures[0]
 
     ui.run_worker = run_worker
-    ui.provider = SimpleNamespace(get_pcbnew=lambda: _Pcbnew(board))
+    ui.provider = SimpleNamespace(get_pcbnew=lambda: _Pcbnew(ui.board, ui.pcbnew))
     monkeypatch.syspath_prepend(str(ROOT / "lib"))
     levels = {name: logging.getLogger(name).level for name in ("requests", "urllib3")}
     with temporary_modules(
         {**package_stubs(package), "pcbnew": pcbnew}, namespaces=(package,)
     ):
         main = importlib.import_module(package + ".mainwindow")
+        if not request.node.get_closest_marker("native_kicad"):
+            read_saved_pcb = main.read_saved_pcb_assignments
+
+            def read_saved_fixture_pcb(filename: str) -> tuple[Any, ...]:
+                """Parse actual PCB bytes, translating only known fixture UUID labels."""
+                # The parser validates every field and UUID from disk unchanged.
+                # Existing window tests use selection labels such as component-1;
+                # unknown UUIDs remain untouched so identity mismatches still fail.
+                return tuple(
+                    replace(
+                        part,
+                        component_id=saved_boards.component_ids.get(
+                            part.component_id, part.component_id
+                        ),
+                    )
+                    for part in read_saved_pcb(filename)
+                )
+
+            monkeypatch.setattr(
+                main, "read_saved_pcb_assignments", read_saved_fixture_pcb
+            )
         controller = importlib.import_module(package + ".variant.controller")
         library = importlib.import_module(package + ".library")
         ui.mainwindow = ui.main = main
@@ -487,6 +704,30 @@ def window_ui(
             main.JLCPCBTools,
             "_maybe_show_schematic_storage_notice",
             lambda _self, _preexisted: None,
+        )
+        show_legacy_audit = main.JLCPCBTools._show_pending_legacy_migration_audit
+
+        def acknowledge_legacy_audit(frame: Any, *, interactive: bool) -> None:
+            """Acknowledge only unrelated migration-audit notices, never save prompts."""
+            if not ui.acknowledge_legacy_audits or not interactive:
+                show_legacy_audit(frame, interactive=interactive)
+                return
+
+            def acknowledge(dialog: Any) -> int:
+                assert dialog.GetCaption() == "Legacy assignment migration"
+                ui.legacy_audit_notifications.append(dialog.GetMessage())
+                return wx.ID_OK
+
+            # Scoped to the audit method so outer close/lock modal handlers do
+            # not schedule two interactions for this separate notification.
+            # Audit-specific tests disable this shim and exercise the real modal.
+            with patch.object(wx.GenericMessageDialog, "ShowModal", acknowledge):
+                show_legacy_audit(frame, interactive=interactive)
+
+        monkeypatch.setattr(
+            main.JLCPCBTools,
+            "_show_pending_legacy_migration_audit",
+            acknowledge_legacy_audit,
         )
 
         ui.run = partial(run_frames, ui)

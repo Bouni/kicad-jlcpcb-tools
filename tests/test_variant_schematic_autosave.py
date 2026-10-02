@@ -12,15 +12,31 @@ from .native_window_support import choose_output, window_ui
 __all__ = ["window_ui"]
 pytestmark = pytest.mark.native_wx
 
+SCHEMATIC_ROOT = "00000000-0000-0000-0000-000000000001"
+
 
 def _schematic(ui: Any) -> Path:
-    """Create a schematic with distinct Default and named-variant assignments."""
+    """Create actual UUID links and distinct Default/named-variant assignments."""
     path = ui.path / "autosave.kicad_sch"
+    symbols = []
+    for index, part in enumerate(ui.board.parts, start=1):
+        symbol_uuid = f"10000000-0000-0000-0000-{index:012d}"
+        part.schematic_path = f"/{SCHEMATIC_ROOT}/{symbol_uuid}"
+        symbols.append(_schematic_symbol(part.GetReference(), symbol_uuid))
     path.write_text(
-        """(kicad_sch
-  (symbol
+        f'(kicad_sch\n  (uuid "{SCHEMATIC_ROOT}")\n' + "".join(symbols) + ")\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _schematic_symbol(reference: str, symbol_uuid: str) -> str:
+    """Preserve named overrides while the Default assignment and BOM can change."""
+    return f"""  (symbol
     (lib_id "Device:R")
-    (property "Reference" "R1"
+    (uuid "{symbol_uuid}")
+    (in_bom yes)
+    (property "Reference" "{reference}"
       (at 0 0 0)
     )
     (property "LCSC" "C100"
@@ -31,8 +47,8 @@ def _schematic(ui: Any) -> Path:
     )
     (instances
       (project "board"
-        (path "/first"
-          (reference "R1")
+        (path "/{SCHEMATIC_ROOT}"
+          (reference "{reference}")
           (unit 1)
           (variant (name "A")
             (field (name "LCSC") (value "C999"))
@@ -41,11 +57,7 @@ def _schematic(ui: Any) -> Path:
       )
     )
   )
-)
-""",
-        encoding="utf-8",
-    )
-    return path
+"""
 
 
 @pytest.mark.parametrize("selected", ["", "A", "B"])
@@ -64,10 +76,12 @@ def test_schematic_autosave_uses_current_default_and_preserves_named_output(
         remembered = controller.cache.get_output_variant()
         path = _schematic(ui)
         try:
-            controller.export_to_schematic([str(path)])
+            outcome = controller.export_to_schematic([str(path)])
             written = path.read_text(encoding="utf-8")
             assert '(property "LCSC" "C111"' in written
             assert '(field (name "LCSC") (value "C999"))' in written
+            assert outcome.saved == ("component-1",)
+            assert outcome.retirement_eligible
             assert controller.session.snapshot.get("component-1", "").lcsc == "C111"
             assert controller.session.adapter.snapshot() == before
             assert controller.session.output_variant == selected

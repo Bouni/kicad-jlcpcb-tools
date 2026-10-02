@@ -189,3 +189,134 @@ def test_native_forced_close_respects_lock_without_prompting(window_ui: Any) -> 
             lock.unlink()
 
     window_ui.run(check)
+
+
+@pytest.mark.parametrize("variants", [False, True])
+@pytest.mark.parametrize(
+    "state", ["missing_missing", "missing_empty", "missing_code", "pcb_only"]
+)
+def test_routine_preservation_closes_without_warning_or_report(
+    window_ui: Any, variants: bool, state: str
+) -> None:
+    """Normal absent assignments and unlinked hardware do not create modal noise."""
+    if not variants:
+        window_ui.board.names.clear()
+        window_ui.board.current = ""
+    path = associated_schematic(window_ui)
+    part = window_ui.board.parts[0]
+    if state == "pcb_only":
+        part.schematic_path = ""
+    else:
+        part.fields.pop("LCSC")
+    text = path.read_text(encoding="utf-8")
+    if state == "missing_missing":
+        text = text.replace(
+            '    (property "LCSC" "C100"\n      (at 0 1 0)\n    )\n', ""
+        )
+    elif state == "missing_empty":
+        text = text.replace('(property "LCSC" "C100"', '(property "LCSC" ""')
+    path.write_text(text, encoding="utf-8")
+    report = window_ui.path / "jlcpcb" / "schematic-save-report.txt"
+
+    def check(ui: Any) -> None:
+        with patch.object(ui.wx.GenericMessageDialog, "ShowModal") as show:
+            assert ui.dialog.Close() is True
+            show.assert_not_called()
+        assert path.read_text(encoding="utf-8") == text
+        assert not report.exists()
+        assert not ui.messages
+
+    window_ui.run(check, check)
+
+
+@pytest.mark.parametrize("variants", [False, True])
+def test_native_forced_close_unwinds_interactive_preservation_report(
+    window_ui: Any,
+    variants: bool,
+) -> None:
+    """Shutdown ends the preservation warning while its parent remains alive."""
+    if not variants:
+        window_ui.board.names.clear()
+        window_ui.board.current = ""
+    path = associated_schematic(window_ui)
+    window_ui.board.parts[0].SetField("LCSC", "invalid")
+    report = window_ui.path / "jlcpcb" / "schematic-save-report.txt"
+
+    def check(ui: Any) -> None:
+        frame = ui.dialog
+
+        def force(dialog: Any) -> None:
+            assert dialog.GetCaption() == "Schematic assignments preserved"
+            assert dialog.IsModal() and frame._saving_on_close
+            assert "R1 [component-1]" in report.read_text(encoding="utf-8")
+            assert frame.Close(force=True) is True
+            assert not dialog.IsModal()
+            assert frame and not frame._closing
+            if variants:
+                assert not ui.controller.closed
+
+        with modal_handler(ui, ui.wx.GenericMessageDialog, force) as dialogs:
+            assert frame.Close() is True
+        assert len(dialogs) == 1 and frame._closing
+        if variants:
+            assert ui.controller.closed and not ui.controller.timer.IsRunning()
+        assert '(property "LCSC" "C100"' in path.read_text(encoding="utf-8")
+        assert "R1 [component-1]" in report.read_text(encoding="utf-8")
+
+    window_ui.run(check)
+
+
+@pytest.mark.parametrize("variants", [False, True])
+def test_forced_close_in_preservation_report_defers_pending_audit_until_reopen(
+    window_ui: Any, variants: bool
+) -> None:
+    """Shutdown cannot open a second modal or lose an undisplayed migration audit."""
+    from .test_part_info_autosave_retirement import has_legacy, seed_project
+
+    database = seed_project(window_ui, variants)
+    window_ui.acknowledge_legacy_audits = False
+    path = associated_schematic(window_ui)
+    transient = window_ui.path / "jlcpcb" / "schematic-save-report.txt"
+    helper = import_module(
+        window_ui.mainwindow.__package__ + ".legacy_migration_report"
+    )
+
+    def interrupted(ui: Any) -> None:
+        assert helper.load_pending_legacy_migration_reports(str(ui.path))
+        ui.board.parts[0].SetField("LCSC", "invalid")
+
+        def force(dialog: Any) -> None:
+            assert dialog.GetCaption() == "Schematic assignments preserved"
+            assert dialog.IsModal() and ui.dialog._saving_on_close
+            assert ui.dialog.Close(force=True) is True
+            assert not dialog.IsModal()
+
+        with modal_handler(ui, ui.wx.GenericMessageDialog, force) as dialogs:
+            assert ui.dialog.Close() is True
+        assert len(dialogs) == 1
+        assert has_legacy(database)
+        assert '(property "LCSC" "C100"' in path.read_text(encoding="utf-8")
+        assert transient.exists()
+        pending = helper.load_pending_legacy_migration_reports(str(ui.path))
+        assert len(pending) == 1 and pending[0].override_messages
+        ui.board.parts[0].SetField("LCSC", "C1")
+
+    def reopened(ui: Any) -> None:
+        def acknowledge(dialog: Any) -> None:
+            assert dialog.GetCaption() == "Legacy assignment migration"
+            assert "C999" in dialog.GetMessage() and "C1" in dialog.GetMessage()
+            assert not has_legacy(database)
+            assert not transient.exists()
+            dialog.EndModal(ui.wx.ID_OK)
+
+        with modal_handler(ui, ui.wx.GenericMessageDialog, acknowledge) as dialogs:
+            assert ui.dialog.Close() is True
+        assert len(dialogs) == 1
+        assert not helper.load_pending_legacy_migration_reports(str(ui.path))
+
+    def acknowledged(ui: Any) -> None:
+        with patch.object(ui.wx.GenericMessageDialog, "ShowModal") as show:
+            assert ui.dialog.Close() is True
+            show.assert_not_called()
+
+    window_ui.run(interrupted, reopened, acknowledged)

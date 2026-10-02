@@ -4,35 +4,23 @@ from collections.abc import Iterator
 import re
 from typing import Any, Optional
 
-from .lcsc import is_lcsc_part, normalize_lcsc
+from .lcsc import normalize_lcsc
+from .part_assignments import (
+    ResolvedAssignment,
+    is_assignment_alias,
+    resolve_assignment,
+)
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
 
 
-def _iter_assignment_fields(fp: Any):
+def _iter_assignment_fields(fp: Any) -> Iterator[tuple[str, str]]:
     """Yield (name, text) for every field, whichever KiCad API the board has."""
     try:
         return ((field.GetName(), field.GetText()) for field in fp.GetFields())
     except AttributeError:
         return iter(fp.GetProperties().items())
-
-
-def _is_assignment_alias(name: str) -> bool:
-    """Report whether a field name is one of the LCSC assignment aliases."""
-    return bool(re.match(r"lcsc|jlc", name, re.IGNORECASE))
-
-
-def _claims_the_part(name: str, text: str) -> bool:
-    """Report whether an alias field is claiming to hold the part number.
-
-    The canonical ``LCSC`` field claims it whatever it holds, because that is
-    the one the plugin writes when nothing else is there. Any other alias
-    claims it once its text names a part -- tested through the same normalised
-    predicate the reader uses, so a field typed as `` c12345 `` is recognised
-    as the claim it is rather than left behind as a stale duplicate.
-    """
-    return _is_assignment_alias(name) and (name.lower() == "lcsc" or is_lcsc_part(text))
 
 
 def find_lcsc_assignment_text(fp: Any) -> Optional[tuple[str, str]]:
@@ -42,22 +30,19 @@ def find_lcsc_assignment_text(fp: Any) -> Optional[tuple[str, str]]:
     legacy reader does not recognize. Inspect every alias before filling.
     """
     for name, text in _iter_assignment_fields(fp):
-        if _is_assignment_alias(name) and text != "":
+        if is_assignment_alias(name) and text != "":
             return name, text
     return None
 
 
-def get_lcsc_value(fp):
-    """Get the first lcsc number (C123456 for example) from the properties of the footprint.
+def get_lcsc_assignment(fp: Any) -> tuple[ResolvedAssignment, str]:
+    """Capture assignment provenance and its normalized value in one native read."""
+    return resolve_assignment(dict(_iter_assignment_fields(fp)), {}, "")
 
-    The text is normalised before it is tested, so a field holding ``C12345 ``
-    or ``c12345`` names the part it looks like instead of reading as blank
-    (issue #773), and the canonical form is what the caller gets back.
-    """
-    for name, text in _iter_assignment_fields(fp):
-        if _is_assignment_alias(name) and is_lcsc_part(text):
-            return normalize_lcsc(text)
-    return ""
+
+def get_lcsc_value(fp: Any) -> str:
+    """Read the same normalized, unambiguous assignment as variant Default."""
+    return get_lcsc_assignment(fp)[1]
 
 
 def set_lcsc_value(fp: Any, lcsc: str) -> None:
@@ -65,10 +50,17 @@ def set_lcsc_value(fp: Any, lcsc: str) -> None:
     if not fp:
         return
     lcsc = normalize_lcsc(lcsc)
+    try:
+        fields = list(fp.GetFields())
+    except AttributeError:
+        properties = dict(fp.GetProperties())
+        names = [name for name in properties if is_assignment_alias(name)]
+        for name in names or ["LCSC"]:
+            properties[name] = lcsc
+        fp.SetProperties(properties)
+        return
     names = [
-        field.GetName()
-        for field in fp.GetFields()
-        if _claims_the_part(field.GetName(), field.GetText())
+        field.GetName() for field in fields if is_assignment_alias(field.GetName())
     ]
     if names:
         for name in names:

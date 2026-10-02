@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 import re
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
 import wx
@@ -25,6 +25,9 @@ from .matrix_model import EDITABLE_FIELDS, CatalogMetadata, CorrectionState, Mat
 from .matrix_view import MatrixTarget, VariantMatrixView, coordinates_for
 from .native import BoardVariantSnapshot, VariantEdit, VariantNativeAdapter
 from .session import VariantSession, VariantSessionError
+
+if TYPE_CHECKING:
+    from ..schematicexport import ExportOutcome
 
 
 @dataclass(frozen=True)
@@ -479,8 +482,13 @@ class VariantMainController:
         )
 
     def _apply(self, edits: Sequence[Any]) -> None:
+        """Apply captured edits within the editor's native action transaction."""
         try:
-            self.session.apply(edits)
+            callback = getattr(self.dialog, "_board_action", None)
+            if callback is None or not self.session.edits_needed(edits):
+                self.session.apply(edits)
+            else:
+                callback(lambda: self.session.apply(edits))
         except Exception:
             # Native compensation can successfully reread newer external state.
             # Publish that recovered view before accepting another grid action.
@@ -684,20 +692,30 @@ class VariantMainController:
                 self._error(error)
 
     def export_to_schematic(
-        self, paths: Sequence[str], approved_locks: Collection[str] = ()
-    ) -> None:
-        """Save current Default fields, leaving error decisions to the close handler."""
+        self,
+        paths: Sequence[str],
+        approved_locks: Collection[str] = (),
+        *,
+        root_uuids: Optional[Mapping[str, str]] = None,
+        shared_project: bool = False,
+    ) -> ExportOutcome:
+        """Save current Default fields and return preservation coverage to close."""
         from ..schematicexport import SchematicExport  # noqa: PLC0415
 
         try:
             self.session.require_editable()
             self.session.refresh()
             self.render()
-            SchematicExport(self.dialog).load_schematic(
+            context = {}
+            if root_uuids is not None:
+                context["root_uuids"] = root_uuids
+            if shared_project:
+                context["shared_project"] = True
+            return SchematicExport(self.dialog).load_schematic(
                 paths,
                 approved_locks=approved_locks,
                 variant_name="",
-                parts=self.cache.assembly_rows(self.session.snapshot, ""),
+                **context,
             )
         finally:
             self._update_enabled()

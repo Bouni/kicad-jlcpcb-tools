@@ -99,6 +99,20 @@ class VariantSession:
                 "Variant data is unavailable. Refresh before editing or generating."
             )
 
+    def edits_needed(self, edits: Sequence[VariantEdit]) -> bool:
+        """Validate a read-only edit batch before opening a native undo action."""
+        self.require_editable()
+        try:
+            return self.adapter.edits_needed(tuple(edits))
+        except Exception:
+            # Even validation can discover an unreadable or changed board.
+            # Recover the projection exactly as a rejected apply would.
+            try:
+                self.refresh()
+            except Exception:
+                self.reliable = False
+            raise
+
     def apply(self, edits: Sequence[VariantEdit]) -> BoardVariantSnapshot:
         """Apply native edits first and recover projection failures by rereading."""
         self.require_editable()
