@@ -17,29 +17,6 @@ from typing import Any, Optional
 import unicodedata
 import weakref
 
-from pcbnew import (  # pylint: disable=import-error
-    DRILL_MARKS_NO_DRILL_SHAPE,
-    EXCELLON_WRITER,
-    PCB_VIA,
-    PLOT_CONTROLLER,
-    PLOT_FORMAT_GERBER,
-    ZONE_FILLER,
-    B_Cu,
-    B_Mask,
-    B_Paste,
-    B_SilkS,
-    Edge_Cuts,
-    F_Cu,
-    F_Mask,
-    F_Paste,
-    F_SilkS,
-    FromMM,
-    IsCopperLayer,
-    Refresh,
-    ToMM,
-    wxPoint,
-)
-
 from .correction_data import (
     AnyCorrection,
     Correction,
@@ -54,6 +31,55 @@ from .fabrication_archive import (
     collect_gerber_entries,
 )
 from .footprint_helpers import get_is_dnp
+from .kicad_runtime import import_pcbnew, using_ipc
+
+if using_ipc():
+    # KiCad 10.99+ IPC plugins have no SWIG module; these mirror its API.
+    from .ipc_pcbnew import (
+        DRILL_MARKS_NO_DRILL_SHAPE,
+        EXCELLON_WRITER,
+        PCB_VIA,
+        PLOT_CONTROLLER,
+        PLOT_FORMAT_GERBER,
+        ZONE_FILLER,
+        B_Cu,
+        B_Mask,
+        B_Paste,
+        B_SilkS,
+        Edge_Cuts,
+        F_Cu,
+        F_Mask,
+        F_Paste,
+        F_SilkS,
+        FromMM,
+        IsCopperLayer,
+        Refresh,
+        ToMM,
+        wxPoint,
+    )
+else:
+    from pcbnew import (  # pylint: disable=import-error
+        DRILL_MARKS_NO_DRILL_SHAPE,
+        EXCELLON_WRITER,
+        PCB_VIA,
+        PLOT_CONTROLLER,
+        PLOT_FORMAT_GERBER,
+        ZONE_FILLER,
+        B_Cu,
+        B_Mask,
+        B_Paste,
+        B_SilkS,
+        Edge_Cuts,
+        F_Cu,
+        F_Mask,
+        F_Paste,
+        F_SilkS,
+        FromMM,
+        IsCopperLayer,
+        Refresh,
+        ToMM,
+        wxPoint,
+    )
 
 # JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
 # 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
@@ -830,7 +856,7 @@ class Fabrication:
                 + [
                     (
                         f"CuIn{layer}",
-                        getattr(import_module("pcbnew"), f"In{layer}_Cu"),
+                        getattr(import_pcbnew(), f"In{layer}_Cu"),
                         f"Inner layer {layer}",
                     )
                     for layer in range(1, layer_count - 1)

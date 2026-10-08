@@ -1,0 +1,11 @@
+# Installed by KiCad 10.99+ into this plugin's Python environment (see plugin.json).
+# wxPython is not installable from PyPI on every platform; KiCad creates the
+# environment with system site-packages, so use an interpreter that has it.
+# Runtime dependencies of the kicad-python (kipy) bundled in lib/kipy:
+protobuf>=5.29.6,<6
+pynng>=0.9.0,<0.10.0
+jsonschema>=4.23.0,<5
+zstandard>=0.25.0,<0.26.0
+typing_extensions>=4.13.2; python_version < "3.13"
+# Plugin dependencies:
+requests>=2.28

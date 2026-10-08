@@ -7,9 +7,8 @@ import logging
 import os
 from typing import Any, Optional
 
-from pcbnew import GetBuildVersion  # pylint: disable=import-error
-
 from .core.version import is_version7
+from .kicad_runtime import import_pcbnew
 from .part_assignments import safe_assignment_value
 from .schematic_fields import update_symbol_fields
 from .schematic_links import SchematicIndex
@@ -27,6 +26,8 @@ from .schematic_snapshot import (
     capture_board,
     capture_rows,
 )
+
+GetBuildVersion = import_pcbnew().GetBuildVersion
 
 __all__ = [
     "ExportOutcome",
