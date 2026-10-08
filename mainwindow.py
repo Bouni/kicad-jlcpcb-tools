@@ -18,7 +18,6 @@ import sqlite3
 import sys
 import time
 
-import pcbnew as kicad_pcbnew
 import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
@@ -104,6 +103,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
+from .kicad_runtime import import_pcbnew
 from .lcsc import extract_lcsc, normalize_lcsc
 from .lcsc_entry_dialog import LcscEntryDialog
 from .library import CorrectionState, Library, LibraryState
@@ -123,6 +123,9 @@ from .stock_concern import stock_concern_references
 from .type_cell_tooltip import TypeCellTooltip
 from .why_standard_dialog import WhyStandardDialog
 from .window_layout import get_column_widths, restore_column_widths
+
+# SWIG pcbnew, or its IPC-backed equivalent when run as a KiCad 10.99+ IPC plugin.
+kicad_pcbnew = import_pcbnew()
 
 FOOTPRINT_COLUMN_KEYS = {
     index: key
@@ -205,6 +208,7 @@ class JLCPCBTools(wx.Frame):
         self._closing = False
         self._saving_on_close = False
         self._generating = False
+        self._kicad_provider = kicad_provider
         self.pcbnew = kicad_provider.get_pcbnew()
         board = self.pcbnew.GetBoard()
         self._schematic_board_identity = board_identity(board)
@@ -1719,7 +1723,9 @@ class JLCPCBTools(wx.Frame):
 
     def init_fabrication(self) -> None:
         """Initialize the fabrication."""
-        self.fabrication = Fabrication(self, self._get_current_board())
+        provider = getattr(self, "_kicad_provider", None)
+        create = getattr(provider, "create_fabrication", Fabrication)
+        self.fabrication = create(self, self._get_current_board())
 
     def reset_gauge(self, *_):
         """Initialize the gauge."""

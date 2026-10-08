@@ -1,0 +1,22 @@
+{
+    "$schema": "https://go.kicad.org/api/schemas/v1",
+    "identifier": "com.github.bouni.kicad-jlcpcb-tools",
+    "name": "JLCPCB Tools",
+    "description": "Generate JLCPCB-compatible Gerber, Excellon, BOM and CPL files",
+    "runtime": {
+        "type": "python",
+        "min_version": "3.9"
+    },
+    "actions": [
+        {
+            "identifier": "open",
+            "name": "JLCPCB Tools",
+            "description": "Assign LCSC parts and generate JLCPCB production files",
+            "show-button": true,
+            "scopes": ["pcb"],
+            "entrypoint": "ipc_plugin.py",
+            "icons-light": ["jlcpcb-icon.png"],
+            "icons-dark": ["jlcpcb-icon.png"]
+        }
+    ]
+}

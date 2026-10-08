@@ -98,6 +98,36 @@ In order to get it working you can run the following 3 commands:
 
 See [issue #94](https://github.com/Bouni/kicad-jlcpcb-tools/issues/94) for more info.
 
+### KiCad 10.99 (nightly) and newer
+
+KiCad 10.99 no longer has the SWIG `pcbnew` Python module, so action plugins in
+`scripting/plugins` are not loaded. The plugin instead runs as an IPC API plugin
+(`plugin.json` → `ipc_plugin.py`) in its own process and talks to the PCB Editor
+through the bundled [kicad-python](https://gitlab.com/kicad/code/kicad-python)
+in `lib/kipy` (see `lib/kipy/VENDORED.md`). KiCad 10.0 and older keep using the
+SWIG action plugin from the same checkout.
+
+1. Put the plugin in KiCad's IPC plugin folder, `<KiCad data>/10.99/plugins`, for
+   example on Linux: `ln -s /path/to/kicad-jlcpcb-tools ~/.local/share/kicad/10.99/plugins/`
+   (on Windows and macOS the folder is `Documents/KiCad/10.99/plugins`).
+2. In **Preferences → Plugins**, enable the KiCad API and choose a Python
+   interpreter that has wxPython (on Linux usually the distribution's `/usr/bin/python3`
+   with its wxPython package). KiCad creates a virtual environment for the plugin
+   that includes that interpreter's packages and installs `requirements.txt` into it.
+3. Restart KiCad (or reload in **Preferences → PCB Editor → Plugins**) and use the
+   **JLCPCB Tools** button on the PCB Editor's top toolbar.
+
+Differences from the SWIG plugin:
+
+- Each assignment or BOM/POS change is one KiCad commit, so **Edit → Undo** reverts it.
+- Gerber and drill files are plotted by `kicad-cli` from a snapshot of the open
+  board, so unsaved edits and the zone refill are included as before.
+- KiCad 10.99's API rewrites a footprint whenever its fields or attributes change.
+  On the footprints you edit this can turn fab-layer reference text on rotated parts
+  by 180°, and drops dimensions and unit pin maps placed inside the footprint.
+  Copper, mask, paste, silkscreen and drill output are not affected. This is a
+  KiCad API issue; the plugin logs a reminder when it opens.
+
 ## Usage 🥳
 
 To access the plugin choose `Tools → External Plugins → JLCPCB Tools` from the *PCB Editor* menus

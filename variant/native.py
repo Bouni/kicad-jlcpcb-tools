@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any, Optional, Union
 
 from ..footprint_metadata import get_footprint_pad_metadata
+from ..kicad_runtime import import_pcbnew
 from ..lcsc import is_lcsc_part, normalize_lcsc
 from ..part_assignments import (
     AssignmentAlias,  # noqa: F401 -- Retain the public native adapter import.
@@ -484,9 +485,7 @@ class VariantNativeAdapter:
     def _make_variant(self, name: str, record: _Record) -> Any:
         factory = self.variant_factory
         if factory is None:
-            import pcbnew  # pylint: disable=import-error,import-outside-toplevel
-
-            factory = pcbnew.FOOTPRINT_VARIANT
+            factory = import_pcbnew().FOOTPRINT_VARIANT
         variant = factory(name)
         variant.SetDNP(bool(record.attributes & FLAG_MASKS["pop"]))
         variant.SetExcludedFromBOM(bool(record.attributes & FLAG_MASKS["bom"]))

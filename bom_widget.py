@@ -7,12 +7,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import suppress
 
-import pcbnew  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
 from .bom_estimation.assembly_mode import AssemblyModeDecision
 from .bom_estimation.view import evaluate_bom_estimate, selected_assembly_parts
 from .helpers import HighResWxSize
+from .kicad_runtime import import_pcbnew
+
+pcbnew = import_pcbnew()
 
 
 class BomEstimatorWidget:
