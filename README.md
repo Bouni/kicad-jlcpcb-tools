@@ -331,6 +331,8 @@ Also in the `production_files` folder, two files are generated, `BOM-<projectnam
 
 Footprints are included into the BOM and CPL files according to their `exclude from BOM` and `exclude from POS` attributes.
 
+A footprint's CPL `Mid X`/`Mid Y` is the center of the bounding box of its soldered pads: NPTH holes and paste-only pads are left out, and a footprint without soldered pads uses its own position.
+
 Optional pre/post generation hook scripts can be configured in settings.
 
 - The pre-hook runs before generation and can block generation on failure (with Continue/Cancel prompt).

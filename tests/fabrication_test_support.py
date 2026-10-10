@@ -35,6 +35,7 @@ def modules() -> Iterator[SimpleNamespace]:
     pcbnew = MagicMock()
     pcbnew.FromMM = lambda value: value
     pcbnew.ToMM = lambda value: value
+    pcbnew.PAD_ATTRIB_NPTH = 3  # KiCad's PAD_ATTRIB: PTH=0, SMD=1, CONN=2, NPTH=3
     pcbnew.wxPoint = Point
     pcbnew.VECTOR2I = Point
     with load_correction_modules(
