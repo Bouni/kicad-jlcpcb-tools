@@ -460,6 +460,7 @@ def window_ui(
                 "F_Paste F_SilkS DRILL_MARKS_NO_DRILL_SHAPE".split(),
                 0,
             ),
+            PAD_ATTRIB_NPTH=3,
             FromMM=lambda value: int(value * 1_000_000),
             ToMM=lambda value: value / 1_000_000,
             wxPoint=lambda x, y: SimpleNamespace(x=x, y=y),

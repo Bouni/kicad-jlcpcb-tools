@@ -20,6 +20,7 @@ import weakref
 from pcbnew import (  # pylint: disable=import-error
     DRILL_MARKS_NO_DRILL_SHAPE,
     EXCELLON_WRITER,
+    PAD_ATTRIB_NPTH,
     PCB_VIA,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
@@ -103,6 +104,11 @@ def _checked_position(x: float, y: float) -> Any:
     if any(not -(2**31) <= int(value) <= 2**31 - 1 for value in (x, y)):
         raise ValueError("position exceeds KiCad's signed 32-bit coordinate range")
     return wxPoint(x, y)
+
+
+def _is_soldered_pad(pad: Any) -> bool:
+    """Return True for soldered copper: not an NPTH hole, not a paste-only pad."""
+    return pad.GetAttribute() != PAD_ATTRIB_NPTH and pad.IsOnCopperLayer()
 
 
 def split_bom_designators(
@@ -716,9 +722,11 @@ class Fabrication:
         return position
 
     def get_position(self, footprint):
-        """Calculate position based on center of bounding box."""
+        """Calculate position based on center of the soldered pads' bounding box."""
         try:
-            pads = footprint.Pads()
+            pads = [pad for pad in footprint.Pads() if _is_soldered_pad(pad)]
+            if not pads:
+                return footprint.GetPosition()
             bbox = pads[0].GetBoundingBox()
             for pad in pads:
                 bbox.Merge(pad.GetBoundingBox())
