@@ -1,6 +1,7 @@
 """Tests for looking a part up in the parts database by an LCSC number."""
 
 import sqlite3
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -74,11 +75,28 @@ class TestGetPartDetails:
         """C1234 does not resolve to C12345."""
         assert library.get_part_details("C1234") == {}
 
-    @pytest.mark.parametrize("number", ["", "   ", "C123-4", "C12.5", "N/A", 'C1"2'])
-    def test_text_that_is_not_a_number_is_not_a_query(self, library, number):
-        """Whatever the store holds is looked up, never parsed as FTS5 syntax.
+    def test_it_accepts_a_part_object(self, library):
+        """An Lcsc can be passed straight in, and resolves the same way."""
+        lcsc_type = sys.modules[type(library).__module__].Lcsc
+        assert library.get_part_details(lcsc_type("C12345")).get("stock") == "5000"
+        assert library.get_part_details(lcsc_type(" c12345 ")).get("stock") == "5000"
 
-        Passed to MATCH bare, each of these raised OperationalError: a blank
-        is an FTS5 syntax error, and "C123-4" reads as a column filter.
+    @pytest.mark.parametrize(
+        "number", ["", "   ", "C123-4", "C12.5", "N/A", 'C1"2', "R1234", "12345"]
+    )
+    def test_text_that_is_not_a_number_is_not_a_query(self, library, tmp_path, number):
+        """A value that names no part answers "not found" without asking FTS5.
+
+        Passed to MATCH bare, the first six raised OperationalError: a blank
+        is an FTS5 syntax error, and "C123-4" reads as a column filter. None
+        of them names a part, so none is looked up at all, which a database
+        that cannot even be opened proves.
         """
+        library.partsdb_file = str(tmp_path / "no such directory" / "parts.db")
         assert library.get_part_details(number) == {}
+
+    def test_the_unopenable_database_does_fail_a_real_lookup(self, library, tmp_path):
+        """The proof above is only a proof if a real part would have failed."""
+        library.partsdb_file = str(tmp_path / "no such directory" / "parts.db")
+        with pytest.raises(sqlite3.OperationalError):
+            library.get_part_details("C12345")

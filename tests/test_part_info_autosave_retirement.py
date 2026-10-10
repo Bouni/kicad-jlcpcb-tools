@@ -78,8 +78,14 @@ def test_complete_autosave_archives_legacy_rows_and_reopen_does_not_recreate_tab
         if first:
             if variants:
                 ui.board.parts[0].SetField("LCSC", assignment)
-            else:
+            elif assignment:
                 assert ui.dialog._apply_lcsc_assignments({"R1": assignment}) == ["R1"]
+            else:
+                # Clearing is Remove LCSC; an assignment always names a part.
+                model = ui.dialog.partlist_data_model
+                row = model.data[model.find_index("R1")]
+                ui.dialog.footprint_list.Select(model.ObjectToItem(row))
+                ui.dialog.remove_lcsc_number()
         exporter = import_module(ui.mainwindow.__package__ + ".schematicexport")
         write = exporter.atomic_write_schematic
 

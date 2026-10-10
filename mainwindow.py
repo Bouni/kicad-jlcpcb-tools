@@ -10,7 +10,7 @@ from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 import logging
 import os
 import re
@@ -104,7 +104,7 @@ from .helpers import (
     loadBitmapScaled,
 )
 from .kicad_drc import DRCViolationCounter
-from .lcsc import extract_lcsc, normalize_lcsc
+from .lcsc import Lcsc, extract_lcsc
 from .lcsc_entry_dialog import LcscEntryDialog
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
@@ -197,7 +197,7 @@ class JLCPCBTools(wx.Frame):
         board_action: Optional[Callable[[Callable[[], None]], None]] = None,
     ) -> None:
         self.library: Optional[Library] = None
-        self._catalog_details: dict[str, dict[str, Any]] = {}
+        self._catalog_details: dict[Lcsc, dict[str, Any]] = {}
         self._catalog_ready = False
         self._catalog_switch_pending = False
         self.store: Optional[Store] = None
@@ -993,37 +993,39 @@ class JLCPCBTools(wx.Frame):
         self._catalog_details = {}
 
     def _catalog_get_part_details(
-        self, lcsc: str, *, strict: bool = False
+        self, lcsc: Union[Lcsc, str], *, strict: bool = False
     ) -> dict[str, Any]:
         """Reuse raw catalog records, distinguishing confirmed misses from failures."""
-        key = normalize_lcsc(lcsc)
-        if not key or not self.is_catalog_available():
+        # Keyed on the parsed part, so every key names a part and a value that
+        # names none is neither looked up nor cached.
+        part = Lcsc.parse(lcsc)
+        if part is None or not self.is_catalog_available():
             return {}
         if not hasattr(self, "_catalog_details"):
             self._invalidate_catalog_details()
-        if key not in self._catalog_details:
+        if part not in self._catalog_details:
             if self.library.is_download_running():
                 # Update library rewrites the catalog file in place while it stays
                 # published, so a number not read before is unknown until the new
                 # catalog replaces it. Nothing is cached for it meanwhile.
                 return {}
             try:
-                self._catalog_details[key] = deepcopy(
-                    self.library.get_part_details(key)
+                self._catalog_details[part] = deepcopy(
+                    self.library.get_part_details(str(part))
                 )
             except (sqlite3.Error, OSError) as error:
                 if strict:
                     raise
-                self.logger.warning("Unable to read catalog part %s: %s", key, error)
+                self.logger.warning("Unable to read catalog part %s: %s", part, error)
                 return {}
-            details = self._catalog_details[key]
+            details = self._catalog_details[part]
             self.partlist_data_model.set_catalog_details(
-                key,
+                str(part),
                 details.get("type", ""),
                 details.get("stock", ""),
                 params_for_part(details),
             )
-        return deepcopy(self._catalog_details[key])
+        return deepcopy(self._catalog_details[part])
 
     def _bom_get_part_details(self, lcsc: str) -> dict[str, Any]:
         """Share the current raw catalog snapshot with estimator callbacks."""
@@ -1878,11 +1880,10 @@ class JLCPCBTools(wx.Frame):
                 details={e.lcsc: details},
                 remember_part_preferences=True,
             )
-            if assigned and listed:
-                key = normalize_lcsc(e.lcsc)
-                self._catalog_details[key] = deepcopy(details)
+            if assigned and listed and (part := Lcsc.parse(e.lcsc)) is not None:
+                self._catalog_details[part] = deepcopy(details)
                 self.partlist_data_model.set_catalog_details(
-                    key,
+                    str(part),
                     details.get("type", ""),
                     details.get("stock", ""),
                     params_for_part(details),
@@ -1899,7 +1900,14 @@ class JLCPCBTools(wx.Frame):
         notify: bool = True,
         require_catalog: bool = True,
     ) -> list[str]:
-        """Apply a verified native batch before publishing assignments or preferences."""
+        """Apply a verified native batch before publishing assignments or preferences.
+
+        Assignments arrive as strings from the part selector, the clipboard,
+        the Enter LCSC prompt and saved preferences, so they are parsed once
+        here, at the boundary. What the board field, the model and the saved
+        preferences see below is the canonical number of a part that is known
+        to be one.
+        """
         if self.store is None or (require_catalog and not self.is_catalog_available()):
             return []
         try:
@@ -1907,26 +1915,42 @@ class JLCPCBTools(wx.Frame):
         except BoardContextChanged as error:
             self._set_project_storage_error(error)
             return []
-        assignments = {ref: normalize_lcsc(lcsc) for ref, lcsc in assignments.items()}
+        parts = {}
+        for reference, number in assignments.items():
+            # Skipped like a reference the board no longer has: one bad entry
+            # is not a reason to abandon the rest of the action.
+            if (part := Lcsc.parse(number)) is None:
+                self.logger.warning(
+                    "Skipped %s: %r does not name an LCSC part.", reference, number
+                )
+            else:
+                parts[reference] = part
         footprints = {
             reference: footprint
-            for reference in assignments
+            for reference in parts
             if (footprint := board.FindFootprintByReference(reference)) is not None
         }
         if not footprints:
             return []
+        # The caller's details are keyed by whatever string it holds, so they
+        # are parsed too rather than compared against a canonical key.
+        supplied = {
+            part: row
+            for number, row in (details or {}).items()
+            if (part := Lcsc.parse(number)) is not None
+        }
         catalog = {}
         try:
-            for lcsc in dict.fromkeys(assignments[ref] for ref in footprints):
-                part = (details or {}).get(lcsc)
-                if part is None:
-                    part = self._catalog_get_part_details(lcsc, strict=True)
-                catalog[lcsc] = (part, params_for_part(part))
+            for part in dict.fromkeys(parts[ref] for ref in footprints):
+                row = supplied.get(part)
+                if row is None:
+                    row = self._catalog_get_part_details(part, strict=True)
+                catalog[part] = (row, params_for_part(row))
         except (sqlite3.Error, OSError) as error:
             self.logger.warning("Unable to apply LCSC assignments: %s", error)
             return []
 
-        edits = [(fp, {"lcsc": assignments[ref]}) for ref, fp in footprints.items()]
+        edits = [(fp, {"lcsc": str(parts[ref])}) for ref, fp in footprints.items()]
         if not self._apply_board_change(
             lambda: apply_board_part_edits(edits),
             "apply LCSC assignments",
@@ -1941,13 +1965,14 @@ class JLCPCBTools(wx.Frame):
             except BoardContextChanged as error:
                 self._set_project_storage_error(error)
                 return []
-            lcsc = assignments[reference]
-            part, params = catalog[lcsc]
-            stock = part.get("stock")
+            part = parts[reference]
+            lcsc = str(part)
+            row, params = catalog[part]
+            stock = row.get("stock")
             self.partlist_data_model.set_lcsc(
                 reference,
                 lcsc,
-                part.get("type", ""),
+                row.get("type", ""),
                 stock if stock is not None else "",
                 params,
             )
