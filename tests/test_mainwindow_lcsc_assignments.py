@@ -677,3 +677,40 @@ def test_an_assignment_that_names_no_part_is_skipped_and_the_rest_applied(
         str(call.args[0]) % call.args[1:]
         for call in window.logger.warning.call_args_list
     ] == ["Skipped R1: '10k resistor' does not name an LCSC part."]
+
+
+def test_details_supplied_under_another_spelling_need_no_lookup(
+    make_window: Callable[..., Any],
+) -> None:
+    """A caller's details count for the part they name, however it spelled it."""
+    window = make_window()
+    window.library.get_part_details.side_effect = AssertionError("catalog read")
+
+    assigned = window._apply_lcsc_assignments(
+        {"R1": "C200"}, details={" c200 ": {"type": "Extended", "stock": 5}}
+    )
+
+    assert assigned == ["R1"]
+    window.library.get_part_details.assert_not_called()
+    assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
+    assert window.test_rows["R1"]["lcsc"] == "C200"
+    assert (window.test_rows["R1"]["type"], window.test_rows["R1"]["stock"]) == (
+        "Extended",
+        5,
+    )
+
+
+def test_two_spellings_of_one_part_share_one_lookup_and_persist_canonically(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """Equivalent spellings in one action are one part: one read, one stored form."""
+    window = make_window(footprints=[Footprint(lcsc=""), Footprint("R2", lcsc="")])
+
+    assigned = window._apply_lcsc_assignments({"R1": " c200 ", "R2": "C200"})
+
+    assert assigned == ["R1", "R2"]
+    window.library.get_part_details.assert_called_once_with("C200")
+    board = window.pcbnew.GetBoard()
+    assert [fp.field.text for fp in board.GetFootprints()] == ["C200", "C200"]
+    reopened = mainwindow.Store(window, window.project_path, board)
+    assert [reopened.get_part(ref)["lcsc"] for ref in ("R1", "R2")] == ["C200", "C200"]

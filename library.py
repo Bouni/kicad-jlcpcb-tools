@@ -1401,7 +1401,7 @@ class Library:
             cur.execute(f"CREATE TABLE IF NOT EXISTS parts ({cols})")
             cur.commit()
 
-    def get_part_details(self, number) -> dict:
+    def get_part_details(self, number: Union[Lcsc, str]) -> dict:
         """Get the part details for a LCSC number using optimized FTS5 querying.
 
         Accepts an :class:`Lcsc` or a string. A string that names no part is

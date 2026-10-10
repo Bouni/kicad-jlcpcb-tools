@@ -146,7 +146,7 @@ class Lcsc:
 
     value: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Reject anything that is not a canonical part number."""
         canonical = normalize_lcsc(self.value)
         if not is_lcsc_part(canonical):
@@ -155,7 +155,7 @@ class Lcsc:
         object.__setattr__(self, "value", canonical)
 
     @classmethod
-    def parse(cls, value) -> Optional["Lcsc"]:
+    def parse(cls, value: object) -> Optional["Lcsc"]:
         """Return the part this value names, or None if it names none.
 
         Use this wherever a value is *claimed* to be a part number -- a
