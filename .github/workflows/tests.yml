@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install pytest
-        run: pip install pytest
+        run: pip install pytest pre-commit
       - name: Install python packages
         run: pip install .
       - name: Run tests

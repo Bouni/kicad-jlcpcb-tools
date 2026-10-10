@@ -43,6 +43,10 @@ Issues = "https://github.com/bouni/kicad-jlcpcb-tools/issues"
 [tool.setuptools]
 packages = ["db_build", "common"]
 
+[tool.ruff]
+# KiCad's bundled plugin interpreter can still be Python 3.9.
+target-version = "py39"
+
 [tool.ruff.lint]
 
 select = [
@@ -138,6 +142,9 @@ ignore = [
     "UP038", # `isinstance(x, A | B)` requires Python 3.10+; KiCad bundles 3.9
 ]
 
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "common", "dblib"]
