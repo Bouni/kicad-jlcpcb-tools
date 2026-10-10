@@ -173,6 +173,37 @@ def _bom_line_bytes(row: tuple[Any, ...]) -> int:
     return _utf8_len(line.getvalue()) - 2
 
 
+def _csv_text_bytes(text: str) -> int:
+    """Count text's UTF-8 bytes inside a quoted csv field, where each quote doubles."""
+    return _utf8_len(text) + text.count('"')
+
+
+def _fit_bom_row(
+    row: tuple[Any, ...], extra: tuple[str, str]
+) -> Optional[list[tuple[Any, ...]]]:  # noqa: UP045
+    """Split a row's designators so each line, *extra* appended, fits JLC's limit.
+
+    Returns None when a single reference cannot fit beside the row's other cells.
+    """
+    value, designators, package, lcsc, quantity = row
+    whole = (*row, *extra)
+    if _bom_line_bytes(whole) <= _BOM_ROW_MAX_LEN:
+        return [whole]
+    # A split designator cell holds commas, so csv wraps it in quotes: two bytes.
+    others = _bom_line_bytes((value, "", package, lcsc, quantity, *extra))
+    rows = [
+        (value, ",".join(chunk), package, lcsc, len(chunk), *extra)
+        for chunk in split_bom_designators(
+            designators.split(","),
+            _BOM_ROW_MAX_LEN - others - 2,
+            measure=_csv_text_bytes,
+        )
+    ]
+    if any(_bom_line_bytes(line) > _BOM_ROW_MAX_LEN for line in rows):
+        return None
+    return rows
+
+
 class Fabrication:
     """Contains all functionality to generate the JLCPCB production files."""
 
@@ -1128,25 +1159,38 @@ class Fabrication:
     def _add_manufacturer_columns(
         self, rows: tuple[tuple[Any, ...], ...]
     ) -> tuple[tuple[Any, ...], ...]:
-        """Append catalog Manufacturer and MPN cells, re-splitting rows JLC would reject."""
+        """Append catalog Manufacturer and MPN cells, re-splitting rows JLC would reject.
+
+        A row whose other cells leave no room for even one reference beside its
+        manufacturer and MPN keeps those two cells blank instead. A row whose
+        comment, footprint and LCSC cells alone overflow is written as the
+        setting-off export writes it, plus the blank cells: splitting
+        designators cannot shorten those. Either case is logged, because the
+        columns never block output.
+        """
         columns = self._manufacturer_columns(row[3] for row in rows)
         result = []
-        for value, designators, package, lcsc, quantity in rows:
-            extra = columns.get(normalize_lcsc(lcsc), ("", ""))
-            row = (value, designators, package, lcsc, quantity, *extra)
-            if _bom_line_bytes(row) <= _BOM_ROW_MAX_LEN:
-                result.append(row)
-                continue
-            # A split designator cell holds commas, so csv quotes it: two bytes.
-            others = _bom_line_bytes((value, "", package, lcsc, quantity, *extra))
-            result.extend(
-                (value, ",".join(chunk), package, lcsc, len(chunk), *extra)
-                for chunk in split_bom_designators(
-                    designators.split(","),
-                    _BOM_ROW_MAX_LEN - others - 2,
-                    measure=_utf8_len,
-                )
-            )
+        for row in rows:
+            extra = columns.get(normalize_lcsc(row[3]), ("", ""))
+            fitted = _fit_bom_row(row, extra)
+            if fitted is None:
+                fitted = _fit_bom_row(row, ("", ""))
+                if fitted is not None:
+                    self.logger.warning(
+                        "Manufacturer and MPN left blank for %s: with them its BOM "
+                        "row exceeds JLC's %d-byte limit",
+                        row[1],
+                        _BOM_ROW_MAX_LEN,
+                    )
+                else:
+                    self.logger.warning(
+                        "The BOM row for %s exceeds JLC's %d-byte limit even "
+                        "without Manufacturer and MPN",
+                        row[1],
+                        _BOM_ROW_MAX_LEN,
+                    )
+                    fitted = [(*row, "", "")]
+            result.extend(fitted)
         return tuple(result)
 
     def _manufacturer_columns(
