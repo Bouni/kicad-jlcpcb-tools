@@ -1,6 +1,8 @@
 """Tests for store pad filtering helpers used by BOM estimator metadata."""
 
+from contextlib import closing
 from pathlib import Path
+import sqlite3
 import types
 from typing import Any, Optional
 
@@ -111,14 +113,21 @@ class _BoardFootprint(_FootprintPads):
         self._is_dnp = is_dnp
 
 
-def _saved_store(tmp_path: Path, footprints: tuple[Any, ...] = ()) -> Any:
+def _saved_store(
+    tmp_path: Path, footprints: tuple[Any, ...] = (), assembly_metadata: Any = None
+) -> Any:
     """Construct a real ordinary Store using a saved-board fixture."""
     filename = tmp_path / "board.kicad_pcb"
     filename.write_text("(kicad_pcb)\n", encoding="utf-8")
     board = types.SimpleNamespace(
         GetFileName=lambda: str(filename), GetFootprints=lambda: footprints
     )
-    return Store(types.SimpleNamespace(settings={}), str(tmp_path), board)
+    return Store(
+        types.SimpleNamespace(settings={}),
+        str(tmp_path),
+        board,
+        assembly_metadata=assembly_metadata,
+    )
 
 
 def _store_with_enriched_part(
@@ -253,6 +262,37 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path: Path) -> None:
     reopened = Store(store.parent, str(tmp_path), store.board)
     assert _part_state(reopened) == ("C2", "10k", "", None)
     assert reopened.get_assembly_enrichment_targets() == {"C2": ["R1"]}
+
+
+def test_saved_facts_reach_a_store_opened_later(tmp_path: Path) -> None:
+    """A store sharing global.db reads saved facts and fetches none of them."""
+    path = str(tmp_path / "global.db")
+    footprint = _BoardFootprint(lcsc="C1")
+    first = _saved_store(
+        tmp_path, (footprint,), store_module.AssemblyMetadataCache(path)
+    )
+    assert first.get_assembly_enrichment_targets() == {"C1": ["R1"]}
+    first.cache_lcsc_metadata("c1", "SMT", 2)
+    reopened = _saved_store(
+        tmp_path, (footprint,), store_module.AssemblyMetadataCache(path)
+    )
+    assert _part_state(reopened) == ("C1", "10k", "SMT", 2)
+    assert reopened.get_assembly_enrichment_targets() == {}
+
+
+def test_aged_facts_are_fetched_again_but_stay_in_use(tmp_path: Path) -> None:
+    """A month-old class is refreshed in the background, never blanked."""
+    path = tmp_path / "global.db"
+    store_module.AssemblyMetadataCache(str(path)).merge("C1", "SMT", 2)
+    with closing(sqlite3.connect(path)) as con, con:
+        con.execute("UPDATE lcsc_assembly_metadata SET fetched_at = 0")
+    store = _saved_store(
+        tmp_path,
+        (_BoardFootprint(lcsc="C1"),),
+        store_module.AssemblyMetadataCache(str(path)),
+    )
+    assert _part_state(store) == ("C1", "10k", "SMT", 2)
+    assert store.get_assembly_enrichment_targets() == {"C1": ["R1"]}
 
 
 def test_get_assembly_enrichment_targets_uses_or_logic(tmp_path: Path) -> None:
