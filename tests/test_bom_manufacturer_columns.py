@@ -19,7 +19,10 @@ import pytest
 
 from tests import part_preferences_test_support as preferences_support
 from tests.correction_test_support import make_library
-from tests.fabrication_test_support import modules as fabrication_modules
+from tests.fabrication_test_support import (
+    longest_bom_line,
+    modules as fabrication_modules,
+)
 
 modules = fabrication_modules
 mainwindow = preferences_support.mainwindow
@@ -375,8 +378,7 @@ def test_long_rows_are_resplit_to_fit_the_jlc_row_limit(
 
     rows = _written(fab)
 
-    lines = Path(fab.get_bom_csv_path()).read_text(encoding="utf-8").splitlines()
-    assert max(len(line.encode("utf-8")) for line in lines) <= 2048
+    assert longest_bom_line(fab) <= 2048
     assert [ref for row in rows[1:] for ref in row[1].split(",")] == refs
     assert sum(int(row[4]) for row in rows[1:]) == 500
     for row in rows[1:]:
@@ -393,15 +395,8 @@ def test_resplit_counts_non_ascii_designators_in_bytes(
 
     rows = _written(fab)
 
-    lines = Path(fab.get_bom_csv_path()).read_text(encoding="utf-8").splitlines()
-    assert max(len(line.encode("utf-8")) for line in lines) <= 2048
+    assert longest_bom_line(fab) <= 2048
     assert [ref for row in rows[1:] for ref in row[1].split(",")] == refs
-
-
-def _longest_line(fab: Any) -> int:
-    """Return the byte length of the written BOM's longest line."""
-    text = Path(fab.get_bom_csv_path()).read_text(encoding="utf-8")
-    return max(len(line.encode("utf-8")) for line in text.splitlines())
 
 
 def test_resplit_counts_the_quotes_csv_doubles_in_designators(
@@ -416,12 +411,12 @@ def test_resplit_counts_the_quotes_csv_doubles_in_designators(
     group = _group("10k", ",".join(refs), "C25804")
     off = bom_factory([group], enabled=False)
     off.generate_bom()
-    assert _longest_line(off) <= 2048
+    assert longest_bom_line(off) <= 2048
 
     fab = bom_factory([group])
     rows = _written(fab)
 
-    assert _longest_line(fab) <= 2048
+    assert longest_bom_line(fab) <= 2048
     assert len(rows) > 2
     assert [ref for row in rows[1:] for ref in row[1].split(",")] == refs
     for row in rows[1:]:
@@ -436,14 +431,14 @@ def test_row_that_cannot_fit_the_columns_keeps_them_blank_and_warns(
     group = _group("Z" * 2000, "R1", "C25804")
     off = bom_factory([group], enabled=False)
     off.generate_bom()
-    assert _longest_line(off) <= 2048
+    assert longest_bom_line(off) <= 2048
 
     fab = bom_factory([group])
     with caplog.at_level(logging.WARNING):
         rows = _written(fab)
 
     assert rows[1:] == [["Z" * 2000, "R1", "R_0603", "C25804", "1", "", ""]]
-    assert _longest_line(fab) <= 2048
+    assert longest_bom_line(fab) <= 2048
     assert "Manufacturer and MPN left blank for R1" in caplog.text
 
 
@@ -454,11 +449,12 @@ def test_row_too_long_without_the_columns_is_written_unchanged_and_warns(
     group = _group("Z" * 2040, "R1", "C25804")
     off = bom_factory([group], enabled=False)
     off.generate_bom()
-    assert _longest_line(off) > 2048
+    assert longest_bom_line(off) > 2048
 
+    caplog.clear()
     fab = bom_factory([group])
     with caplog.at_level(logging.WARNING):
         rows = _written(fab)
 
     assert rows[1:] == [["Z" * 2040, "R1", "R_0603", "C25804", "1", "", ""]]
-    assert "exceeds JLC's 2048-byte limit even without" in caplog.text
+    assert "2048-byte limit even with one reference per row" in caplog.text

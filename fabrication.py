@@ -58,9 +58,10 @@ from .fabrication_archive import (
 from .footprint_helpers import get_is_dnp
 from .lcsc import is_lcsc_part, normalize_lcsc
 
-# JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
-# 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
-# Quantity) so the Designator chunk alone is capped at 1920 characters.
+# JLC rejects BOM rows over 2048, counted here in UTF-8 bytes, the stricter
+# reading.  Designator chunks are first capped at 1920 characters, leaving 128
+# for the other fields (Comment, Footprint, LCSC, Quantity); write_bom re-splits
+# any row whose written bytes still exceed the limit.
 _BOM_ROW_MAX_LEN = 2048
 _BOM_DESIGNATOR_MAX_LEN = _BOM_ROW_MAX_LEN - 128  # padding for the other CSV fields
 
@@ -179,7 +180,7 @@ def _csv_text_bytes(text: str) -> int:
 
 
 def _fit_bom_row(
-    row: tuple[Any, ...], extra: tuple[str, str]
+    row: tuple[Any, ...], extra: tuple[str, ...]
 ) -> Optional[list[tuple[Any, ...]]]:  # noqa: UP045
     """Split a row's designators so each line, *extra* appended, fits JLC's limit.
 
@@ -1143,11 +1144,13 @@ class Fabrication:
         """Validate captured source before writing its prepared BOM rows."""
         self._require_output_snapshot()
         header = ["Comment", "Designator", "Footprint", "LCSC", "Quantity"]
+        columns = None
         if self.parent.settings.get("gerber", {}).get(
             "bom_manufacturer_columns", False
         ):
             header += ["Manufacturer", "MPN"]
-            rows = self._add_manufacturer_columns(rows)
+            columns = self._manufacturer_columns(row[3] for row in rows)
+        rows = self._fit_bom_rows(rows, columns)
         self.validate_generation()
         bom_path = self.get_staged_artifact_paths()["bom_csv"]
         with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
@@ -1156,25 +1159,28 @@ class Fabrication:
             writer.writerows(rows)
         self.logger.info("Finished generating BOM file %s", bom_path)
 
-    def _add_manufacturer_columns(
-        self, rows: tuple[tuple[Any, ...], ...]
+    def _fit_bom_rows(
+        self,
+        rows: tuple[tuple[Any, ...], ...],
+        columns: Optional[dict[str, tuple[str, str]]],  # noqa: UP045
     ) -> tuple[tuple[Any, ...], ...]:
-        """Append catalog Manufacturer and MPN cells, re-splitting rows JLC would reject.
+        """Re-split rows JLC would reject, appending Manufacturer and MPN from *columns*.
 
-        A row whose other cells leave no room for even one reference beside its
-        manufacturer and MPN keeps those two cells blank instead. A row whose
-        comment, footprint and LCSC cells alone overflow is written as the
-        setting-off export writes it, plus the blank cells: splitting
-        designators cannot shorten those. Either case is logged, because the
-        columns never block output.
+        Only a row over the limit changes. A row whose other cells leave no room
+        for even one reference beside its manufacturer and MPN keeps those two
+        cells blank instead. A row that cannot fit even one reference beside its
+        other cells is written whole: splitting designators cannot shorten it.
+        Either case is logged, because the limit never blocks output.
         """
-        columns = self._manufacturer_columns(row[3] for row in rows)
+        blank = () if columns is None else ("", "")
         result = []
         for row in rows:
-            extra = columns.get(normalize_lcsc(row[3]), ("", ""))
+            extra = (
+                blank if columns is None else columns.get(normalize_lcsc(row[3]), blank)
+            )
             fitted = _fit_bom_row(row, extra)
-            if fitted is None:
-                fitted = _fit_bom_row(row, ("", ""))
+            if fitted is None and extra != blank:
+                fitted = _fit_bom_row(row, blank)
                 if fitted is not None:
                     self.logger.warning(
                         "Manufacturer and MPN left blank for %s: with them its BOM "
@@ -1182,14 +1188,14 @@ class Fabrication:
                         row[1],
                         _BOM_ROW_MAX_LEN,
                     )
-                else:
-                    self.logger.warning(
-                        "The BOM row for %s exceeds JLC's %d-byte limit even "
-                        "without Manufacturer and MPN",
-                        row[1],
-                        _BOM_ROW_MAX_LEN,
-                    )
-                    fitted = [(*row, "", "")]
+            if fitted is None:
+                self.logger.warning(
+                    "The BOM row for %s exceeds JLC's %d-byte limit even with "
+                    "one reference per row",
+                    row[1],
+                    _BOM_ROW_MAX_LEN,
+                )
+                fitted = [(*row, *blank)]
             result.extend(fitted)
         return tuple(result)
 
