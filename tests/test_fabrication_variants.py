@@ -225,6 +225,76 @@ def test_output_lcsc_correction_is_frozen_with_variant_bom_and_cpl(
     runtime.exporter.abort_generation()
 
 
+@pytest.mark.parametrize(
+    "variant_name,lcsc,columns",
+    [
+        ("", "C111", ("Base Maker", "BASE-MPN")),
+        ("A", "C222", ("Variant Maker", "VARIANT-MPN")),
+    ],
+)
+def test_manufacturer_columns_follow_the_frozen_output_variant(
+    runtime: SimpleNamespace,
+    variant_name: str,
+    lcsc: str,
+    columns: tuple[str, str],
+) -> None:
+    """Default and named exports enrich their own frozen LCSC, not the active one."""
+    catalog = {
+        "C111": {"manufacturer": "Base Maker", "part_no": "BASE-MPN"},
+        "C222": {"manufacturer": "Variant Maker", "part_no": "VARIANT-MPN"},
+        "C999": {"manufacturer": "Active Maker", "part_no": "ACTIVE-MPN"},
+    }
+    looked_up: list[str] = []
+
+    def catalog_details(code: str, *, strict: bool = False) -> dict[str, str]:
+        """Answer from the stand-in catalog, recording each LCSC asked for."""
+        assert strict, "catalog errors must reach the exporter"
+        looked_up.append(code)
+        return catalog.get(code, {})
+
+    runtime.parent.settings = {"gerber": {"bom_manufacturer_columns": True}}
+    runtime.parent.is_catalog_available = lambda: True
+    runtime.parent._catalog_get_part_details = catalog_details
+    # The active mapping the window would read still holds C999 for R1.
+    runtime.parent.store.read_bom_parts.return_value = [
+        {
+            "value": "Active device",
+            "refs": "R1",
+            "footprint": "Package:Device",
+            "lcsc": "C999",
+        }
+    ]
+    begin(
+        runtime,
+        part(value="Variant device", lcsc="C222"),
+        default_parts=(part(value="Base device", lcsc="C111"),),
+        variants=("", "A"),
+        variant_name=variant_name,
+    )
+    value = "Base device" if not variant_name else "Variant device"
+    frozen = ((value, "R1", "Package:Device", lcsc, 1),)
+    assert runtime.exporter.output_snapshot.bom_rows == frozen
+
+    runtime.exporter.generate_bom()
+
+    assert _read_csv(runtime.exporter.get_staged_artifact_paths()["bom_csv"]) == [
+        {
+            "Comment": value,
+            "Designator": "R1",
+            "Footprint": "Package:Device",
+            "LCSC": lcsc,
+            "Quantity": "1",
+            "Manufacturer": columns[0],
+            "MPN": columns[1],
+        }
+    ]
+    assert looked_up == [lcsc]
+    # The snapshot keeps its five source columns; only the written file grows.
+    assert runtime.exporter.output_snapshot.bom_rows == frozen
+    runtime.parent.store.read_bom_parts.assert_not_called()
+    runtime.exporter.abort_generation()
+
+
 @pytest.mark.parametrize("invalid", [None, (), "wrong"])
 def test_unresolved_corrections_never_create_variant_outputs(
     runtime: SimpleNamespace, invalid: Any

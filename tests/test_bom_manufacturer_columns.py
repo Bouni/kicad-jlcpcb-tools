@@ -11,16 +11,18 @@ import csv
 import logging
 from pathlib import Path
 import sqlite3
-from types import SimpleNamespace
+from types import MethodType, ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, call
 
 import pytest
 
+from tests import part_preferences_test_support as preferences_support
 from tests.correction_test_support import make_library
 from tests.fabrication_test_support import modules as fabrication_modules
 
 modules = fabrication_modules
+mainwindow = preferences_support.mainwindow
 
 # The downloaded catalog's FTS5 layout. It is trigram-tokenised like the real
 # one, so a lookup for C25804 also meets its prefix neighbour C2580400.
@@ -179,6 +181,62 @@ def test_setting_on_appends_catalog_manufacturer_and_mpn(
         ["TP", "TP1", "R_0603", "", "1", "", ""],
         ["NE5532", "U1", "SOIC-8", "C404404", "1", "", ""],
     ]
+
+
+def _use_window_cache(fab: Any, mainwindow: ModuleType, library: Any) -> Any:
+    """Give the exporter's parent the real main-window catalog cache over ``library``.
+
+    The three cache methods are the production functions bound to the parent, so
+    the window's own state (library, readiness flag, part-list model, logger)
+    is the only thing the test supplies.
+    """
+    parent = fab.parent
+    parent.library = library
+    parent._catalog_ready = True
+    parent.partlist_data_model = MagicMock()
+    parent.logger = MagicMock()
+    for name in (
+        "is_catalog_available",
+        "_invalidate_catalog_details",
+        "_catalog_get_part_details",
+    ):
+        method = getattr(mainwindow.JLCPCBTools, name)
+        setattr(parent, name, MethodType(method, parent))
+    return parent
+
+
+def test_window_cache_reads_each_code_once_and_keeps_the_manufacturer(
+    bom_factory: BomFactory, library: Any, mainwindow: ModuleType
+) -> None:
+    """The real window cache serves part-list warming, shared parts and repeat exports.
+
+    The part list warms C25804 before any export; two groups share it and the
+    BOM is generated twice. The catalog is still read once per code, and the
+    manufacturer the cache keeps reaches the written cells both times.
+    """
+    fab = bom_factory(
+        [
+            _group("10k", "R1", "C25804"),
+            _group("10K", "R2", "C25804"),
+            _group("BAV99", "D1", "C2500", "SOT-23"),
+        ]
+    )
+    window = _use_window_cache(fab, mainwindow, library)
+    window._catalog_get_part_details("C25804")
+
+    first = _written(fab)
+    second = _written(fab)
+
+    uniroyal = ["UNI-ROYAL(Uniroyal Elec)", "0603WAF1002T5E"]
+    assert first == second
+    assert first == [
+        _HEADER,
+        ["10k", "R1", "R_0603", "C25804", "1", *uniroyal],
+        ["10K", "R2", "R_0603", "C25804", "1", *uniroyal],
+        ["BAV99", "D1", "SOT-23", "C2500", "1", "Nexperia", "BAV99,215"],
+    ]
+    assert library.get_part_details.call_args_list == [call("C25804"), call("C2500")]
+    assert window._catalog_details["C25804"]["manufacturer"] == uniroyal[0]
 
 
 def test_each_part_is_looked_up_once_in_canonical_form(

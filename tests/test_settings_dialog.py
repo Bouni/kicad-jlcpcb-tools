@@ -10,12 +10,15 @@ must describe the behaviour when checked and never change with the state.
 Legacy LCSC priority settings must not expose a competing mapping source.
 """
 
+import json
+from pathlib import Path
 import types
 from typing import Any, Optional
 
 import pytest
 
 from .stock_test_support import board_row, stock_modules
+from .test_settings_defaults import plugin_dir, shipped_defaults
 from .test_settings_persistence import JLCPCBTools, mainwindow
 from .wx_harness import load, module, package_stubs, wx_stubs
 
@@ -483,3 +486,50 @@ def test_simplify_stock_event_updates_display_persists_and_reopens(
         parent.settings = {}
         parent.load_settings()
         assert SettingsDialog(parent).simplify_stock_setting.GetValue() is enabled
+
+
+def test_bom_manufacturer_columns_default_off_then_save_and_reopen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An old document gets the shipped off default; ticking the box persists across reopen."""
+    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    old = shipped_defaults()
+    del old["gerber"]["bom_manufacturer_columns"]
+    plugin_dir(tmp_path, shipped_defaults(), old)
+    saved = tmp_path / "settings.json"
+
+    def stored_flag() -> object:
+        """Read the setting from the file itself, not from any window's memory."""
+        return json.loads(saved.read_text(encoding="utf-8"))["gerber"][
+            "bom_manufacturer_columns"
+        ]
+
+    def open_window() -> Any:
+        """Reload the settings as a freshly opened main window does."""
+        window = object.__new__(JLCPCBTools)
+        window.window = object()
+        window.scale_factor = 1.0
+        window.library = types.SimpleNamespace(datadir="/data")
+        window.load_settings()
+        return window
+
+    parent = open_window()
+    assert parent.settings["gerber"]["bom_manufacturer_columns"] is False
+    assert stored_flag() is False
+    dialog = SettingsDialog(parent)
+    control = dialog.bom_manufacturer_columns_setting
+    assert control.GetValue() is False
+
+    control.SetValue(True)
+    (event,) = _fire(control)
+    parent.update_settings(event)
+
+    assert (event.section, event.setting, event.value) == (
+        "gerber",
+        "bom_manufacturer_columns",
+        True,
+    )
+    assert stored_flag() is True
+    reopened = open_window()
+    assert reopened.settings["gerber"]["bom_manufacturer_columns"] is True
+    assert SettingsDialog(reopened).bom_manufacturer_columns_setting.GetValue() is True
