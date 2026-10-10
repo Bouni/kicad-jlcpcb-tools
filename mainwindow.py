@@ -2330,6 +2330,9 @@ class JLCPCBTools(wx.Frame):
             if part["lcsc"] == lcsc:
                 self.partlist_data_model.set_assembly_metadata(part["reference"], part)
         self._refresh_assembly_tooltip()
+        # Lookups arrive about a second apart, so the estimate follows each one
+        # instead of waiting for the whole batch; on_bom_data_changed coalesces.
+        wx.PostEvent(self, BomDataChangedEvent(source="enrichment_result"))
 
     def _refresh_bom_after_enrichment_update(self) -> None:
         """Clear finished status even after failures, then refresh the BOM once."""

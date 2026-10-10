@@ -119,27 +119,36 @@ def drain_delivery(workflow: SimpleNamespace) -> None:
         deliver_next(workflow)
 
 
-def test_each_result_updates_std_before_batch_completion(
+def test_each_result_updates_std_and_the_estimate_before_batch_completion(
     workflow: SimpleNamespace,
 ) -> None:
-    """A first Standard-only result cannot look Economic while another is pending."""
+    """Each result refreshes its row and asks the BOM estimate to follow it.
+
+    A first Standard-only result cannot look Economic while another is pending.
+    """
     window = workflow.window
+    posted = workflow.main.wx.PostEvent
+
+    def sources() -> list[str]:
+        return [call.args[1].source for call in posted.call_args_list]
+
     assert cell(workflow) == "?"
     window.start_assembly_enrichment()
     assert cell(workflow) == cell(workflow, "R2") == "◷"
-    workflow.main.wx.PostEvent.reset_mock()
+    posted.reset_mock()
     run_worker(workflow)
     deliver_next(workflow)
     assert cell(workflow) == "✓"
     assert "Standard Only" in tooltip(workflow)
     assert "SMT" in tooltip(workflow)
     assert cell(workflow, "R2") == "◷"
-    workflow.main.wx.PostEvent.assert_not_called()
+    assert sources() == ["enrichment_result"]
+    assert window.read_assembly_parts()[0]["component_product_type"] == 2
     deliver_next(workflow)
     assert cell(workflow, "R2") == "—"
+    assert sources() == ["enrichment_result"] * 2
     deliver_next(workflow)
-    workflow.main.wx.PostEvent.assert_called_once()
-    assert workflow.main.wx.PostEvent.call_args.args[1].source == "enrichment_update"
+    assert sources() == ["enrichment_result"] * 2 + ["enrichment_update"]
     assert not window.assembly_lookup.pending
 
 
