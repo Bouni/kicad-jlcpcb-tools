@@ -50,9 +50,65 @@ from .lcsc import Lcsc, is_lcsc_part, normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
-from .value_normalize import exact_case_resistance
+from .value_normalize import MICRO_SIGNS, OHM_SIGNS, sign_spellings, whole_value
 
 DatabasePath = Union[str, os.PathLike[str]]
+
+# The text a value written with its unit must appear in, whole: the description
+# and the part number, with a space before each so that a value at the start of
+# either still has something that is not a digit in front of it.
+_WHOLE_VALUE_TEXT = (
+    "(' ' || ifnull(\"Description\", '') || ' ' || ifnull(\"MFR.Part\", ''))"
+)
+
+# How each letter of a value may be written in that text.  Descriptions write
+# a value the catalog's way, but part numbers often do not (CYA1265-10UH,
+# 470UF25VF140KM, 10μH0805), so a letter whose case means nothing takes either
+# case, and the micro prefix and the ohm unit take every sign the search reads
+# as them.  m and M stay exact: they are milli and mega (issue #849).
+_VALUE_LETTERS = {
+    **{c: f"[{c.lower()}{c.upper()}]" for c in "kunpfhKUNPFH"},
+    "u": f"[uU{MICRO_SIGNS}]",
+    "\u03a9": f"[{OHM_SIGNS}]",
+}
+
+
+def _whole_value_pattern(value: str) -> str:
+    """Return the GLOB pattern that finds ``value`` whole in _WHOLE_VALUE_TEXT."""
+    spelled = "".join(_VALUE_LETTERS.get(c, c) for c in value)
+    return f"*[^0-9.]{spelled}*"
+
+
+def _match_any(spellings: list[str]) -> str:
+    """Return the full-text query for a term that may be spelled several ways.
+
+    The index folds case and reads µ and μ as one letter, so spellings that
+    differ only that way are one phrase.  The rest are an OR inside the MATCH
+    expression: an OR of conditions beside the MATCH can make SQLite drop the
+    MATCH index and refuse the query.
+    """
+    phrases: dict[str, str] = {}
+    for spelling in spellings:
+        phrases.setdefault(spelling.casefold(), f'"{escape_fts_phrase(spelling)}"')
+    if len(phrases) == 1:
+        return next(iter(phrases.values()))
+    return f"({' OR '.join(phrases.values())})"
+
+
+def _like_any(spellings: list[str]) -> str:
+    """Return the description LIKE test for a term that may be spelled several ways.
+
+    LIKE reads none of the signs as another, so each spelling needs its own
+    test.  The ESCAPE clause keeps an OR of them safe beside a MATCH: SQLite
+    offers the full-text index only a LIKE without one, and an OR of those can
+    make it scan the index once per spelling and refuse the MATCH.
+    """
+    likes = [
+        f"description LIKE '%{escape_like_term(s)}%' ESCAPE '\\'" for s in spellings
+    ]
+    if len(likes) == 1:
+        return likes[0]
+    return f"({' OR '.join(likes)})"
 
 
 @dataclass(frozen=True)
@@ -492,22 +548,31 @@ class Library:
             for w in keywords:
                 # skip over empty keywords
                 if w != "":
+                    # The catalog mostly writes a micro sign as u, but some
+                    # part numbers write µ or μ.  The part selector's µ button
+                    # types U+00B5, and some keyboards type the ohm sign U+2126
+                    # where the catalog writes U+03A9.  A term is searched as
+                    # typed and in each spelling the catalog uses.
+                    spellings = sign_spellings(w)
                     if len(w) < 3:  # LIKE entry
-                        escaped = escape_like_term(w)
-                        kw = f"description LIKE '%{escaped}%' ESCAPE '\\'"
-                        like_chunks.append(kw)
+                        like_chunks.append(_like_any(spellings))
                     else:  # MATCH entry
-                        escaped = escape_fts_phrase(w)
-                        kw = f'"{escaped}"'
-                        match_keywords_intermediate.append(kw)
-                        # MATCH folds case, so 10mΩ finds 10MΩ parts too
-                        # (issue #849).  GLOB does not fold it, and FTS5 runs it
-                        # through the same trigram index.  The pattern is bound,
-                        # and the term it comes from holds no GLOB metacharacter.
-                        exact = exact_case_resistance(w)
-                        if exact is not None:
-                            query_chunks.append('"Description" GLOB ?')
-                            query_params.append(f"*{exact}*")
+                        match_keywords_intermediate.append(_match_any(spellings))
+                    # Both paths match substrings, so 1kΩ also finds 5.1kΩ and
+                    # 51kΩ, and they fold case, so 10mΩ also finds 10MΩ (issue
+                    # #849).  A value written with its unit is held to that
+                    # value: no digit or point may come before it, and GLOB
+                    # keeps the case of m and M.  Some parts carry the value
+                    # only in the part number (XRNR4020-4.7uH/M), so both
+                    # columns are searched, joined into one text with a space in
+                    # front for the start.  One pattern needs no OR, which
+                    # beside a MATCH can make SQLite drop the MATCH index and
+                    # refuse the query.  The pattern is bound, and the value in
+                    # it holds no GLOB metacharacter.
+                    whole = whole_value(w)
+                    if whole is not None:
+                        query_chunks.append(_WHOLE_VALUE_TEXT + " GLOB ?")
+                        query_params.append(_whole_value_pattern(whole))
             if match_keywords_intermediate:
                 match_entry = " AND ".join(match_keywords_intermediate)
                 match_chunks.append(f"{match_entry}")

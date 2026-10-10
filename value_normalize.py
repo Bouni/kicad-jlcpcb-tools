@@ -136,9 +136,60 @@ def _format_decimal(value: Decimal) -> str:
     return f"{normalized:f}"
 
 
+def fold_signs(text: str) -> str:
+    """Spell the micro and ohm signs the way the catalog's descriptions do.
+
+    Descriptions write 10uF, not 10µF, and their Ω is the Greek capital
+    omega U+03A9, never the ohm sign U+2126.  This is the spelling a board
+    value is rewritten into; a search also tries the others (sign_spellings).
+    """
+    return text.replace("µ", "u").replace("μ", "u").replace("\u2126", "\u03a9")
+
+
+# The characters the catalog's full-text index reads as one letter: the micro
+# sign U+00B5 and the Greek mu U+03BC, and the Greek capital omega U+03A9 and
+# the ohm sign U+2126.
+MICRO_SIGNS = "\u00b5\u03bc"
+OHM_SIGNS = "\u03a9\u2126"
+
+# How the catalog writes each sign.  A micro sign is mostly u, but some part
+# numbers write µ or μ (100μF 25V, 10μH0805), and older downloaded catalogs
+# have more of them.  An ohm sign is only ever U+03A9.
+_CATALOG_SPELLINGS = (
+    (MICRO_SIGNS, ("u", "\u00b5", "\u03bc")),
+    (OHM_SIGNS, ("\u03a9",)),
+)
+
+
+def sign_spellings(term: str) -> list[str]:
+    """Return a search term as typed, then in each spelling the catalog uses.
+
+    A search must find a sign however the catalog writes it, and still find
+    it the way it was typed, which may be how a part number writes it.  Each
+    spelling writes a sign the same way throughout.  A typed µ or μ is a
+    micro sign wherever it is, but a typed u is one only as the prefix of a
+    value written with its unit: 10uF is also spelled 10µF, while uPD78F
+    stays as typed.
+    """
+    marked = term
+    parsed = _parse_whole_value(term)
+    if parsed is not None and parsed[2] == "u":
+        at = parsed[0].start("prefix")
+        marked = f"{term[:at]}{MICRO_SIGNS[0]}{term[at + 1 :]}"
+    spellings = [marked]
+    for signs, catalog in _CATALOG_SPELLINGS:
+        if any(sign in marked for sign in signs):
+            spellings = [
+                spelling.translate({ord(sign): written for sign in signs})
+                for spelling in spellings
+                for written in catalog
+            ]
+    return list(dict.fromkeys([term, *spellings]))
+
+
 def _clean(text: str) -> str:
-    """Fold both micro signs onto 'u', which is what the catalog writes."""
-    return text.strip().replace("µ", "u").replace("μ", "u")
+    """Strip a board value and fold its micro and ohm signs."""
+    return fold_signs(text.strip())
 
 
 def _resolve_rung(rest: str, quantity: Quantity) -> Optional[str]:
@@ -281,25 +332,64 @@ def quantity_for_reference(reference: str) -> Optional[Quantity]:
     return _QUANTITY_BY_REFERENCE_PREFIX.get(match.group(1).upper())
 
 
-# A resistance on the milli or mega rung, written with its unit: 10mΩ, 1.5MΩ.
-# The catalog's full-text index folds case, and these are the terms where case
-# is the whole meaning -- 62 resistor values are written both ways in a
-# 717,025-part snapshot.  Either ohm sign is accepted; the catalog writes only
-# U+03A9, never U+2126.  The digits are ASCII on purpose: the match is all a
-# caller needs to know the term holds no GLOB or LIKE metacharacter.
-_EXACT_CASE_RESISTANCE_RE = re.compile(r"[0-9]*\.?[0-9]+[mM][\u03a9\u2126]")
+# The quantity a value's unit letter names, for a term typed into the search.
+# fold_signs() has already turned the ohm sign U+2126 into U+03A9, the only one
+# the catalog writes.
+_QUANTITY_BY_UNIT = {
+    "\u03a9": RESISTANCE,
+    "F": CAPACITANCE,
+    "f": CAPACITANCE,
+    "H": INDUCTANCE,
+    "h": INDUCTANCE,
+}
+
+# A value written with its unit: 1kΩ, 100nF, 4.7uH, 1Ω.  The digits are ASCII
+# on purpose: a match is all a caller needs to know the term holds no GLOB or
+# LIKE metacharacter.
+_WHOLE_VALUE_RE = re.compile(
+    r"(?P<num>[0-9]*\.?[0-9]+)(?P<prefix>[^\W\d_]?)(?P<unit>[\u03a9FfHh])"
+)
 
 
-def exact_case_resistance(term: str) -> Optional[str]:
-    """Return a search term in the catalog's spelling if its case must match.
-
-    ``10mΩ`` is a current-sense shunt and ``10MΩ`` a bias resistor, and nothing
-    but the case of one letter tells them apart.  A term that spells out both
-    the prefix and the ohm sign means one of them exactly, so it comes back
-    with the ohm sign the catalog uses.  Anything else returns None, including
-    a bare ``10m``: with no unit its case is not evidence of anything, since a
-    megohm is often written in lower case on a schematic.
-    """
-    if _EXACT_CASE_RESISTANCE_RE.fullmatch(term) is None:
+def _parse_whole_value(
+    term: str,
+) -> Optional[tuple[re.Match[str], Quantity, str]]:
+    """Return the match, quantity and prefix rung of a term naming one value."""
+    match = _WHOLE_VALUE_RE.fullmatch(fold_signs(term))
+    if match is None:
         return None
-    return term.replace("\u2126", "\u03a9")
+    quantity = _QUANTITY_BY_UNIT[match.group("unit")]
+    prefix = match.group("prefix")
+    rung = quantity.prefixes.get(prefix) if prefix else ""
+    if rung is None:
+        return None
+    return match, quantity, rung
+
+
+def whole_value(term: str) -> Optional[str]:
+    """Return a search term in the catalog's spelling if it names one value.
+
+    The catalog's full-text index matches substrings, so ``1kΩ`` also finds
+    ``5.1kΩ`` and ``51kΩ``, and it folds case, so ``10mΩ`` also finds ``10MΩ``
+    (issue #849).  A term that spells out its unit means exactly one value,
+    and the search can hold it to that.  The prefix is looked up in the
+    quantity's own table, which is where its case is decided: ``1KΩ`` comes
+    back as ``1kΩ`` and ``100NF`` as ``100nF``, while ``10mΩ`` and ``10MΩ``
+    stay apart.  Micro and ohm signs are read the way the catalog writes them
+    first, so 10µF is 10uF.
+
+    Anything else returns None and is searched as a substring, as before: a
+    bare ``1k`` names no unit, ``4k7`` is not how the catalog writes a value,
+    and a prefix the quantity has no rung for (``10MH``, ``10uΩ``) is not a
+    value the catalog spells at all.
+    """
+    parsed = _parse_whole_value(term)
+    if parsed is None:
+        return None
+    match, quantity, rung = parsed
+    # .1uF is 0.1uF: the catalog writes the zero, and the search refuses a
+    # digit before the value, so a bare leading point could match nothing.
+    number = match.group("num")
+    if number.startswith("."):
+        number = f"0{number}"
+    return f"{number}{rung}{quantity.symbol}"
