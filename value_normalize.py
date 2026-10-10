@@ -137,15 +137,54 @@ def _format_decimal(value: Decimal) -> str:
 
 
 def fold_signs(text: str) -> str:
-    """Spell the micro and ohm signs the way the catalog writes them.
+    """Spell the micro and ohm signs the way the catalog's descriptions do.
 
-    The catalog writes 10uF, never 10µF, and its Ω is the Greek capital omega
-    U+03A9, never the ohm sign U+2126.  The full-text index folds the micro
-    sign U+00B5 onto the Greek mu U+03BC but never onto 'u', and LIKE folds
-    neither ohm character onto the other, so a term typed with any of them
-    can find nothing unless it is folded first.
+    Descriptions write 10uF, not 10µF, and their Ω is the Greek capital
+    omega U+03A9, never the ohm sign U+2126.  This is the spelling a board
+    value is rewritten into; a search also tries the others (sign_spellings).
     """
     return text.replace("µ", "u").replace("μ", "u").replace("\u2126", "\u03a9")
+
+
+# The characters the catalog's full-text index reads as one letter: the micro
+# sign U+00B5 and the Greek mu U+03BC, and the Greek capital omega U+03A9 and
+# the ohm sign U+2126.
+MICRO_SIGNS = "\u00b5\u03bc"
+OHM_SIGNS = "\u03a9\u2126"
+
+# How the catalog writes each sign.  A micro sign is mostly u, but some part
+# numbers write µ or μ (100μF 25V, 10μH0805), and older downloaded catalogs
+# have more of them.  An ohm sign is only ever U+03A9.
+_CATALOG_SPELLINGS = (
+    (MICRO_SIGNS, ("u", "\u00b5", "\u03bc")),
+    (OHM_SIGNS, ("\u03a9",)),
+)
+
+
+def sign_spellings(term: str) -> list[str]:
+    """Return a search term as typed, then in each spelling the catalog uses.
+
+    A search must find a sign however the catalog writes it, and still find
+    it the way it was typed, which may be how a part number writes it.  Each
+    spelling writes a sign the same way throughout.  A typed µ or μ is a
+    micro sign wherever it is, but a typed u is one only as the prefix of a
+    value written with its unit: 10uF is also spelled 10µF, while uPD78F
+    stays as typed.
+    """
+    marked = term
+    parsed = _parse_whole_value(term)
+    if parsed is not None and parsed[2] == "u":
+        at = parsed[0].start("prefix")
+        marked = f"{term[:at]}{MICRO_SIGNS[0]}{term[at + 1 :]}"
+    spellings = [marked]
+    for signs, catalog in _CATALOG_SPELLINGS:
+        if any(sign in marked for sign in signs):
+            spellings = [
+                spelling.translate({ord(sign): written for sign in signs})
+                for spelling in spellings
+                for written in catalog
+            ]
+    return list(dict.fromkeys([term, *spellings]))
 
 
 def _clean(text: str) -> str:
@@ -312,6 +351,21 @@ _WHOLE_VALUE_RE = re.compile(
 )
 
 
+def _parse_whole_value(
+    term: str,
+) -> Optional[tuple[re.Match[str], Quantity, str]]:
+    """Return the match, quantity and prefix rung of a term naming one value."""
+    match = _WHOLE_VALUE_RE.fullmatch(fold_signs(term))
+    if match is None:
+        return None
+    quantity = _QUANTITY_BY_UNIT[match.group("unit")]
+    prefix = match.group("prefix")
+    rung = quantity.prefixes.get(prefix) if prefix else ""
+    if rung is None:
+        return None
+    return match, quantity, rung
+
+
 def whole_value(term: str) -> Optional[str]:
     """Return a search term in the catalog's spelling if it names one value.
 
@@ -329,14 +383,10 @@ def whole_value(term: str) -> Optional[str]:
     and a prefix the quantity has no rung for (``10MH``, ``10uΩ``) is not a
     value the catalog spells at all.
     """
-    match = _WHOLE_VALUE_RE.fullmatch(fold_signs(term))
-    if match is None:
+    parsed = _parse_whole_value(term)
+    if parsed is None:
         return None
-    quantity = _QUANTITY_BY_UNIT[match.group("unit")]
-    prefix = match.group("prefix")
-    rung = quantity.prefixes.get(prefix) if prefix else ""
-    if rung is None:
-        return None
+    match, quantity, rung = parsed
     # .1uF is 0.1uF: the catalog writes the zero, and the search refuses a
     # digit before the value, so a bare leading point could match nothing.
     number = match.group("num")

@@ -11,6 +11,7 @@ from value_normalize import (
     canonicalize,
     fold_signs,
     quantity_for_reference,
+    sign_spellings,
     whole_value,
 )
 
@@ -644,3 +645,31 @@ def test_anything_else_is_left_to_the_substring_search(term):
 def test_micro_and_ohm_signs_are_spelled_as_the_catalog_writes_them(text, expected):
     """Both micro signs are written u, and the ohm sign as the Greek omega."""
     assert fold_signs(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("term", "expected"),
+    [
+        ("10\u00b5F", ["10\u00b5F", "10uF", "10\u03bcF"]),
+        ("10\u03bcF", ["10\u03bcF", "10uF", "10\u00b5F"]),
+        ("10uF", ["10uF", "10\u00b5F", "10\u03bcF"]),
+        ("10UF", ["10UF", "10uF", "10\u00b5F", "10\u03bcF"]),
+        ("4.7uH", ["4.7uH", "4.7\u00b5H", "4.7\u03bcH"]),
+        ("100\u00b5A", ["100\u00b5A", "100uA", "100\u03bcA"]),
+        ("\u03bcPD78F", ["\u03bcPD78F", "uPD78F", "\u00b5PD78F"]),
+        ("5\u2126", ["5\u2126", "5\u03a9"]),
+    ],
+)
+def test_a_sign_is_searched_as_typed_and_as_the_catalog_writes_it(term, expected):
+    """The term as typed comes first, then each spelling the catalog uses.
+
+    A u is a micro sign in a value written with its unit, so 10uF is also
+    spelled 10µF.  A typed µ or μ is one wherever it is.
+    """
+    assert sign_spellings(term) == expected
+
+
+@pytest.mark.parametrize("term", ["uPD78F", "100uA", "1k\u03a9", "10mH", "0402"])
+def test_a_term_with_nothing_to_respell_is_searched_as_typed(term):
+    """A u outside a value may be a letter, and the catalog's Ω is U+03A9."""
+    assert sign_spellings(term) == [term]

@@ -22,7 +22,7 @@ from .partselector_columns import (
     PARTSELECTOR_COLUMN_KEYS,
     PARTSELECTOR_COLUMNS,
 )
-from .value_normalize import fold_signs
+from .value_normalize import sign_spellings
 from .window_layout import get_column_widths, restore_column_widths, to_dip
 
 if TYPE_CHECKING:
@@ -146,7 +146,7 @@ class PartSelectorDialog(wx.Dialog):
             0,
         )
         self.micro_button.SetToolTip(
-            "Type µ. It searches as u, which is how the catalog writes it."
+            "Type µ. It also finds u, which is how the catalog mostly writes it."
         )
 
         manufacturer_label = wx.StaticText(
@@ -878,12 +878,16 @@ class PartSelectorDialog(wx.Dialog):
     def get_highlight_text(self) -> str:
         """Return the active keyword search text for result highlighting.
 
-        Micro and ohm signs are read as the search reads them, so a 10µF search
-        highlights the 10uF it found.
+        Each word is highlighted in every spelling the search looks for, so a
+        10µF search highlights the 10uF and 10μF parts it found.
         """
         if not self.parent.settings.get("highlighting", {}).get("matches", True):
             return ""
-        return fold_signs(self.keyword.GetValue())
+        return " ".join(
+            spelling
+            for word in self.keyword.GetValue().split()
+            for spelling in sign_spellings(word)
+        )
 
     def update_subcategories(self, *_: object) -> None:
         """Update the possible subcategory selection."""
@@ -987,8 +991,9 @@ class PartSelectorDialog(wx.Dialog):
             "still match inside longer text: 50V also finds 150V.\n"
             "With the Ω written, m is milli and M is mega: 10mΩ finds milliohm "
             "parts such as shunts, 10MΩ finds megohm ones.\n"
-            "µ and u are the same: 10µF finds 10uF parts. The Ω and µ buttons "
-            "type those symbols at the cursor.\n"
+            "µ also finds u, which is how the catalog mostly writes it, and in a "
+            "value u also finds µ: 10uF and 10µF find the same parts. The Ω and "
+            "µ buttons type those symbols at the cursor.\n"
             "\n"
             "The other fields each search their own column. With no keywords, "
             "only Part number starts a search.\n"

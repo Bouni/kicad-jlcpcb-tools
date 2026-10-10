@@ -43,10 +43,12 @@ def _selector(text: str, settings: dict) -> object:
     return selector
 
 
-def test_micro_and_ohm_signs_are_highlighted_as_the_catalog_writes_them():
-    """A 10µF search finds 10uF parts, so the highlight looks for 10uF too."""
+def test_each_spelling_the_search_tries_is_highlighted():
+    """A 10µF search finds 10uF and 10μF parts, so the highlight looks for both."""
     selector = _selector("10\u00b5F 5\u2126 0805", {})
-    assert selector.get_highlight_text() == "10uF 5\u03a9 0805"
+    assert selector.get_highlight_text() == (
+        "10\u00b5F 10uF 10\u03bcF 5\u2126 5\u03a9 0805"
+    )
 
 
 def test_highlighting_can_still_be_switched_off():

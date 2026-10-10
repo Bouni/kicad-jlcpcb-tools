@@ -365,7 +365,98 @@ def test_micro_and_ohm_signs_search_as_the_catalog_writes_them(
 
     The part selector's µ button types U+00B5.  Without a unit the term is
     still a substring, so 10µ finds 110uF too.  Short terms go through LIKE,
-    which folds neither sign, so they need the fold as much as long ones.
+    which folds neither sign, so they need the catalog's spelling as much as
+    long ones.
     """
     _add_parts(search_library, _WHOLE_VALUE_PARTS)
     assert _search_ids(search_library, keyword) == expected
+
+
+# Rows that write a sign some other way than the catalog's descriptions do.
+# C503889, C5139245 and C3039946 are written as a downloaded catalog of
+# 2025-04-09 has them; today's catalog still has part numbers such as
+# 100μF 25V and 10μH0805.  No catalog writes the ohm sign U+2126, but an index
+# that held one would read it as Ω.
+_SIGN_SPELLING_PARTS = [
+    ("C503889", "CA45-A-6.3V-10\u03bcF-K", ""),
+    ("C5139245", "MS5N100FD", "1kV 5A 4.5V@100\u03bcA 1 N-Channel"),
+    ("C50581513", "MMDT2227", "35@100\u00b5A,10V 40V 600mA"),
+    ("C200015", "BSS138", "50V 220mA 1.5V@100uA 1 N-Channel"),
+    ("C3039946", "\u03bcPD78F1211GB-GAF-AX", ""),
+    ("C200016", "uPD78F1211GB-GAF-AX", ""),
+    ("C200017", "", "10uF 25V X5R Ceramic Capacitor"),
+    ("C200018", "", "110uF 25V Ceramic Capacitor"),
+    ("C200019", "", "22\u03bcF 25V Ceramic Capacitor"),
+    ("C200020", "", "1k\u2126 ±1% 100mW Chip Resistor"),
+    ("C200021", "", "5\u2126 ±1% 100mW Chip Resistor"),
+]
+
+_TEN_MICROFARADS = {"C503889", "C200017"}
+
+
+def _add_spelled_parts(library):
+    """Add the sign-spelling rows, each with its part number and description."""
+    with closing(sqlite3.connect(library.partsdb_file)) as con, con:
+        con.executemany(
+            'INSERT INTO parts ("LCSC Part", "MFR.Part", "Package", "Description", '
+            '"Library Type", "Stock") '
+            "VALUES (?, ?, 'SMD', ?, 'Extended', '1000')",
+            _SIGN_SPELLING_PARTS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("keyword", "expected"),
+    [
+        pytest.param("10\u00b5F", _TEN_MICROFARADS, id="micro-sign-value"),
+        pytest.param("10\u03bcF", _TEN_MICROFARADS, id="greek-mu-value"),
+        pytest.param("10uF", _TEN_MICROFARADS, id="u-value"),
+        pytest.param(
+            "100\u00b5A",
+            {"C5139245", "C50581513", "C200015"},
+            id="micro-sign-description",
+        ),
+        pytest.param(
+            "\u03bcPD78F1211GB-GAF-AX", {"C3039946", "C200016"}, id="greek-mu-model"
+        ),
+        pytest.param(
+            "\u00b5PD78F1211GB-GAF-AX", {"C3039946", "C200016"}, id="micro-sign-model"
+        ),
+        pytest.param(
+            "\u00b5F", {"C200017", "C200018", "C200019"}, id="short-micro-sign"
+        ),
+        pytest.param("1kΩ", {"C200020"}, id="ohm-sign-value"),
+        pytest.param("5\u2126", {"C578005", "C200021"}, id="short-ohm-sign"),
+    ],
+)
+def test_a_sign_is_found_as_typed_and_as_the_catalog_writes_it(
+    search_library, keyword, expected
+):
+    """A sign typed one way also finds the other ways a catalog writes it.
+
+    10µF finds the 10uF the descriptions write, and still the 10μF a part
+    number writes under no description; 10uF finds both as well, since in a
+    value u is a micro sign.  A model name typed with μ keeps its μ.  Short
+    terms go through LIKE, which reads none of the signs as another.
+    """
+    _add_spelled_parts(search_library)
+    assert _search_ids(search_library, keyword) == expected
+
+
+def test_spelling_alternatives_keep_the_match_index(search_library, caplog):
+    """The spellings of a short term must not cost the MATCH beside them its index.
+
+    Given an OR of two LIKEs beside a MATCH, SQLite can plan one index scan per
+    LIKE and then refuse the MATCH, unless each LIKE has an ESCAPE clause.  The
+    search's ORDER BY happens to prevent that plan as well, so the query is
+    checked without it.  A lone ohm sign is two spellings, U+2126 and U+03A9.
+    """
+    caplog.set_level(logging.DEBUG, logger=__name__)
+    ohms_0402 = {"C17477", "C25077", *(f"C57800{value}" for value in range(1, 10))}
+    assert _search_ids(search_library, "0402 \u2126") == ohms_0402
+    (query,) = [r.args[0] for r in caplog.records if r.msg == "query '%s'"]
+    unordered = query.split(" ORDER BY ")[0]
+    with closing(sqlite3.connect(search_library.partsdb_file)) as con:
+        plan = [row[3] for row in con.execute(f"EXPLAIN QUERY PLAN {unordered}")]
+        assert len(con.execute(unordered).fetchall()) == len(ohms_0402)
+    assert not any("MULTI-INDEX OR" in step for step in plan)
