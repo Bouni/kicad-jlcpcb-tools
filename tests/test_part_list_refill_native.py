@@ -25,6 +25,14 @@ def displayed_lcsc(view: Any, model: Any, column: int) -> list[str]:
     return [row[column] for row in rows]
 
 
+def part_buttons_enabled(selector: Any) -> tuple[bool, bool]:
+    """Report whether Select part and Part details are enabled."""
+    return (
+        selector.select_part_button.IsEnabled(),
+        selector.part_details_button.IsEnabled(),
+    )
+
+
 @pytest.mark.parametrize("ascending", [True, False], ids=["ascending", "descending"])
 @pytest.mark.parametrize(
     ("key", "order"), [("lcsc", LCSC_ORDER), ("stock", STOCK_ORDER)]
@@ -72,6 +80,7 @@ def test_selector_refill_keeps_the_sort_and_clears_the_selection(
         pump(ui.wx)
         assert displayed_lcsc(view, model, index["lcsc"]) == expected
         assert view.GetSelectedItemsCount() == 0
+        assert part_buttons_enabled(selector) == (False, False)
 
         select_result(ui, selector)
         ui.catalog.search.side_effect = lambda _parameters: []
@@ -79,6 +88,7 @@ def test_selector_refill_keeps_the_sort_and_clears_the_selection(
         pump(ui.wx)
         assert model.data == []
         assert view.GetSelectedItemsCount() == 0
+        assert part_buttons_enabled(selector) == (False, False)
         assert selector.result_count.GetLabel().startswith("0 parts")
         selector.Close()
 

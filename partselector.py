@@ -795,8 +795,7 @@ class PartSelectorDialog(wx.Dialog):
         # replacing its target, including when the following search fails.
         self.search_timer.Stop()
         self.part_list.UnselectAll()
-        self.part_list_model.RemoveAll()
-        self.enable_toolbar_buttons(False)
+        self.clear_results()
         self.parts = dict(parts)
         self.assignment_context = assignment_context
         if assignment_label is not None or self.assignment_label is not None:
@@ -825,6 +824,12 @@ class PartSelectorDialog(wx.Dialog):
             self.part_details_button,
         ]:
             b.Enable(bool(state))
+
+    def clear_results(self) -> None:
+        """Empty the result list and disable the buttons that need a selected part."""
+        self.part_list_model.RemoveAll()
+        # The reset drops any selection, but only wxOSX reports that to OnPartSelected.
+        self.enable_toolbar_buttons(False)
 
     def add_ohm_symbol(self, *_):
         """Type the Ω symbol at the cursor in the search string."""
@@ -865,7 +870,7 @@ class PartSelectorDialog(wx.Dialog):
         """Discard stale results and repopulate filters from the selected catalog."""
         self.search_timer.Stop()
         category = self.category.GetValue()
-        self.part_list_model.RemoveAll()
+        self.clear_results()
         # Clear emits EVT_TEXT on Cocoa, even for an empty read-only combo.
         # Suppress callbacks until both filters contain the final catalog state.
         with wx.EventBlocker(self.category), wx.EventBlocker(self.subcategory):
@@ -892,7 +897,7 @@ class PartSelectorDialog(wx.Dialog):
     def search(self, *_: object) -> None:
         """Search the library for parts that meet the search criteria."""
         if not self.parent.is_catalog_available():
-            self.part_list_model.RemoveAll()
+            self.clear_results()
             self.result_count.SetLabel(
                 "Parts catalog unavailable; download it to search."
             )
@@ -1011,7 +1016,7 @@ class PartSelectorDialog(wx.Dialog):
         """Populate the list with the result of the search."""
         search_duration_text = _format_duration(search_duration)
         start = time.time()
-        self.part_list_model.RemoveAll()
+        self.clear_results()
         if parts is None:
             return
         limit_text = " (limited)" if len(parts) >= 1000 else ""
