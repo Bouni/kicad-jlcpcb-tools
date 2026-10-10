@@ -116,8 +116,8 @@ class PartSelectorDialog(wx.Dialog):
         self.keyword.SetHint("e.g. 10kΩ 0603")
         self.keyword.SetToolTip(
             "Every word must appear in the part.\n"
-            "A value in Ω, F or H (10kΩ, 100nF, 4.7uH) finds only that value: "
-            "1kΩ won't find 5.1kΩ.\n"
+            "A value in Ω, F or H (10kΩ, 100nF, 4.7uH) isn't found inside a "
+            "longer number: 1kΩ won't find 5.1kΩ.\n"
             "With the Ω written, m is milli and M is mega: 10mΩ is milliohms, "
             "10MΩ megohms."
         )
@@ -134,7 +134,8 @@ class PartSelectorDialog(wx.Dialog):
             0,
         )
         self.ohm_button.SetToolTip(
-            "Type Ω. After a value (10kΩ) it matches that exact value."
+            "Type Ω. After a value (10kΩ) it keeps the value from matching "
+            "inside a longer one, such as 510kΩ."
         )
 
         self.micro_button = wx.Button(
@@ -986,7 +987,9 @@ class PartSelectorDialog(wx.Dialog):
             "\n"
             "Values\n"
             "A resistance, capacitance or inductance written with its unit (10kΩ, "
-            "100nF, 4.7uH) finds that value only: 1kΩ doesn't find 5.1kΩ or 51kΩ. "
+            "100nF, 4.7uH) isn't found inside a longer number: 1kΩ doesn't find "
+            "5.1kΩ or 51kΩ. It can still match a part number that runs on past "
+            "it, as STB100NF04T4 does for 100nF. "
             "Without the unit, 1k finds any text that contains 1k, and other units "
             "still match inside longer text: 50V also finds 150V.\n"
             "With the Ω written, m is milli and M is mega: 10mΩ finds milliohm "
