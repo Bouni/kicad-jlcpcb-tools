@@ -257,14 +257,17 @@ def test_completion_storage_failure_disables_stale_rows_and_refreshes_summary(
 def test_storage_recovery_restarts_lookup_and_rejects_old_delivery(
     window_ui: Any, storage_failed: bool
 ) -> None:
-    """Each storage lifetime rejects old callbacks and fetches its own supplier facts."""
+    """Each storage lifetime rejects old callbacks and fetches its own supplier facts.
+
+    The facts the surviving lifetime saved reach the reopened window without
+    another lookup.
+    """
     ui = window_ui
     ui.board.names.clear()
     ui.board.current = ""
     ui.supplier.fetch_iter.side_effect = [
         iter([("C1", {"assembly_process": "THT", "component_product_type": 1})]),
         iter([("C1", {"assembly_process": "SMT", "component_product_type": 2})]),
-        iter([("C1", {"assembly_process": "THT", "component_product_type": 1})]),
     ]
 
     def recover(ui: Any) -> None:
@@ -287,15 +290,11 @@ def test_storage_recovery_restarts_lookup_and_rejects_old_delivery(
         assert_assembly_feedback(frame, "R1", "✓", pending=False, process="SMT")
 
     def reopen(ui: Any) -> None:
-        assert ui.dialog.store.get_part("R1")["component_product_type"] is None
-        assert len(ui.pending_threads) == 1
-        assert_assembly_feedback(ui.dialog, "R1", "◷", pending=True)
-        ui.run_worker()
-        pump(ui.wx)
-        assert ui.dialog.store.get_part("R1")["component_product_type"] == 1
+        part = ui.dialog.store.get_part("R1")
+        assert (part["assembly_process"], part["component_product_type"]) == ("SMT", 2)
         assert ui.pending_threads == []
-        assert_assembly_feedback(ui.dialog, "R1", "—", pending=False, process="THT")
-        assert ui.supplier.fetch_iter.call_count == 3
+        assert_assembly_feedback(ui.dialog, "R1", "✓", pending=False, process="SMT")
+        assert ui.supplier.fetch_iter.call_count == 2
 
     ui.run(recover, reopen)
 

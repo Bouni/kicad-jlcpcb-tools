@@ -143,6 +143,39 @@ def test_each_result_updates_std_before_batch_completion(
     assert not window.assembly_lookup.pending
 
 
+def test_saved_classes_reach_a_reopened_window_without_a_lookup(
+    workflow: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Classes fetched once show at once in the next window on the same data."""
+    window = workflow.window
+    path = str(tmp_path / "global.db")
+
+    def open_store() -> None:
+        # The store's package carries the real classifier; this window's
+        # package stubs it, so the cache comes from the store's side.
+        window.assembly_lookup.invalidate()
+        window.store = workflow.db.Store(
+            window,
+            str(tmp_path),
+            workflow.board,
+            assembly_metadata=workflow.db.AssemblyMetadataCache(path),
+        )
+        window.populate_footprint_list()
+
+    open_store()
+    window.start_assembly_enrichment()
+    run_worker(workflow)
+    drain_delivery(workflow)
+    assert (cell(workflow), cell(workflow, "R2")) == ("✓", "—")
+
+    open_store()
+    assert (cell(workflow), cell(workflow, "R2")) == ("✓", "—")
+    window.start_assembly_enrichment()
+    assert not workflow.jobs
+    assert not window.assembly_lookup.pending
+    assert "Retrieving" not in tooltip(workflow)
+
+
 @pytest.mark.parametrize(
     "classification,expected", [(None, "?"), (2, "✓"), (0, "—"), (1, "—")]
 )

@@ -303,8 +303,12 @@ or modify `part_info`; the notice acknowledgment and generation counter use
 the separate `metadata` table.
 
 Supplier descriptions and other part details are cached in memory by LCSC
-number and fetched again as needed. Stock and pricing come from the currently
-selected parts catalog; they are not persisted as board assignments.
+number and fetched again as needed. A part's assembly process and
+Standard-only class are the exception: they are saved by LCSC number in
+`global.db` in the data folder, so a board opened again shows them at once,
+and they are fetched again in the background once they are 30 days old.
+Stock and pricing come from the currently selected parts catalog; they are
+not persisted as board assignments.
 
 ### Part preferences
 

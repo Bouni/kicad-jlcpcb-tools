@@ -394,7 +394,7 @@ def test_startup_store_population_recovers_invalid_saved_corrections(
     window = _population_window(runtime)
     store = window.store
     window._variant_mode = False
-    monkeypatch.setattr(runtime.mainwindow, "Store", lambda *_args: store)
+    monkeypatch.setattr(runtime.mainwindow, "Store", lambda *_args, **_kwargs: store)
     window.project_path = runtime.library.parent.project_path
     board_path = Path(window.project_path) / "board.kicad_pcb"
     board_path.write_text("(kicad_pcb)\n", encoding="utf-8")

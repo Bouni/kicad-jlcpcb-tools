@@ -67,6 +67,7 @@ from .dataview_highlight import (
     decode_highlighted_value,
 )
 from .derive_params import params_for_part
+from .enrichment.cache import AssemblyMetadataCache
 from .enrichment.worker import AssemblyMetadataLookup
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
@@ -1271,7 +1272,12 @@ class JLCPCBTools(wx.Frame):
 
                 store_type = VariantStore
             self.assembly_lookup.invalidate()
-            self.store = store_type(self, self.project_path, board)
+            self.store = store_type(
+                self,
+                self.project_path,
+                board,
+                assembly_metadata=self._assembly_metadata_cache(),
+            )
             self._set_project_storage_error(None)
             self._migrate_legacy_assignments()
             if getattr(self, "_board_unreliable", False):
@@ -1286,6 +1292,18 @@ class JLCPCBTools(wx.Frame):
             self._initialize_catalog_parts()
         except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
+
+    def _assembly_metadata_cache(self) -> AssemblyMetadataCache:
+        """Open the supplier facts saved in the current data folder's global.db.
+
+        Without a library or its database path the facts last only as long as
+        the store, as they did before they were saved.
+        """
+        path = getattr(getattr(self, "library", None), "global_db_file", "")
+        return AssemblyMetadataCache(
+            path if isinstance(path, str) and path.strip() else None,
+            getattr(self, "logger", None),
+        )
 
     @staticmethod
     def _migration_footprints(
@@ -2288,7 +2306,7 @@ class JLCPCBTools(wx.Frame):
         except sqlite3.Error as error:
             self.logger.warning("Unable to start assembly enrichment: %s", error)
             return
-        # Supplier facts are shared by LCSC for this dialog's lifetime.
+        # Lookups are made once per LCSC; the store saves their facts in global.db.
         self.assembly_lookup.request(targets, retry=True)
         for lcsc, refs in targets.items():
             if lcsc in self.assembly_lookup.pending:
