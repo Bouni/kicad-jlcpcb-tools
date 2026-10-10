@@ -3,7 +3,6 @@
 from collections.abc import Iterator
 import contextlib
 from copy import deepcopy
-from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -12,23 +11,15 @@ import sqlite3
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
-from ..bom_estimation.assembly_mode import ComponentProductType
 from ..core.settings_persistence import (
     VariantPreferencePatch,
     changed_variant_preferences,
 )
+from ..enrichment.cache import AssemblyMetadataCache
 from .generation_counter import generation_count_transaction, publication_guard
 
 if TYPE_CHECKING:
     from .native import BoardVariantSnapshot
-
-
-@dataclass(frozen=True)
-class _AssemblyMetadata:
-    """Supplier facts retained only for the current plugin dialog lifetime."""
-
-    assembly_process: str = ""
-    component_product_type: Optional[int] = None
 
 
 class VariantSnapshotError(ValueError):
@@ -40,7 +31,9 @@ class VariantStore:
 
     Session snapshots are passed explicitly when adapting rows. SQLite is used
     only for the existing generation counter.
-    Supplier facts are shared by LCSC and refetched after reopening.
+    Supplier facts are shared by LCSC through the cache the window supplies,
+    which saves them in global.db; the default cache keeps them only as long as
+    this store.
     """
 
     GENERATION_COUNT_KEY = "generation_count"
@@ -53,6 +46,8 @@ class VariantStore:
         parent: Any,
         project_path: str,
         board: Any,
+        *,
+        assembly_metadata: Optional[AssemblyMetadataCache] = None,
     ) -> None:
         filename = str(board.GetFileName())
         if not filename.strip():
@@ -69,7 +64,11 @@ class VariantStore:
         self.datadir = os.path.join(project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
         self.board_id = str(uuid4())
-        self._assembly_metadata: dict[str, _AssemblyMetadata] = {}
+        self._assembly_metadata = (
+            assembly_metadata
+            if assembly_metadata is not None
+            else AssemblyMetadataCache(None)
+        )
 
     def ensure_current_board(self) -> None:
         """Require reopening after Save As without persisting a board registry."""
@@ -189,7 +188,9 @@ class VariantStore:
             snapshot.for_variant(variant_name),
             key=lambda part: self._reference_key(part.reference),
         ):
-            metadata = self._assembly_metadata.get(part.lcsc, _AssemblyMetadata())
+            assembly_process, component_product_type = self._assembly_metadata.get(
+                part.lcsc
+            )
             rows.append(
                 {
                     "reference": part.reference,
@@ -200,8 +201,8 @@ class VariantStore:
                     "variant_name": part.variant_name,
                     "pad_count": part.pad_count,
                     "has_tht": part.has_tht,
-                    "assembly_process": metadata.assembly_process,
-                    "component_product_type": metadata.component_product_type,
+                    "assembly_process": assembly_process,
+                    "component_product_type": component_product_type,
                     "exclude_from_bom": not part.bom,
                     "exclude_from_pos": not part.pos,
                     "is_dnp": not part.pop,
@@ -210,17 +211,11 @@ class VariantStore:
         return rows
 
     def get_missing_metadata(self, snapshot: "BoardVariantSnapshot") -> set[str]:
-        """Return unique assigned supplier IDs still missing assembly facts."""
-        valid_types = {item.value for item in ComponentProductType}
+        """Return unique assigned supplier IDs missing a fact or due a refresh."""
         return {
             part.lcsc
             for part in snapshot.components
-            if part.lcsc
-            and (
-                not (facts := self._assembly_metadata.get(part.lcsc))
-                or not facts.assembly_process
-                or facts.component_product_type not in valid_types
-            )
+            if part.lcsc and self._assembly_metadata.needs_fetch(part.lcsc)
         }
 
     def set_assembly_metadata(
@@ -230,13 +225,7 @@ class VariantStore:
         component_product_type: Optional[int],
     ) -> None:
         """Merge supplier facts by the requested identifier, independent of edits."""
-        existing = self._assembly_metadata.get(lcsc, _AssemblyMetadata())
-        self._assembly_metadata[lcsc] = _AssemblyMetadata(
-            assembly_process or existing.assembly_process,
-            component_product_type
-            if component_product_type is not None
-            else existing.component_product_type,
-        )
+        self._assembly_metadata.merge(lcsc, assembly_process, component_product_type)
 
     def _preferences(self) -> dict[str, Any]:
         """Read the current board's UI choices from the existing settings document."""

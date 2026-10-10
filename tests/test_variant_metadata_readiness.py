@@ -115,6 +115,33 @@ def test_background_classification_updates_standard_and_real_estimate(
     window_ui.run(check)
 
 
+def test_known_classification_stays_visible_while_its_lookup_runs_and_fails(
+    window_ui: Any,
+) -> None:
+    """Refreshing a classified part never blanks its Std cells or the estimate."""
+
+    def settled(ui: Any) -> bool:
+        return not ui.controller._render_queued
+
+    def check(ui: Any) -> None:
+        _complete(ui, 2, assembly_process="")
+        _assert_classification(ui, True, "known")
+        ui.controller.refresh()
+        wait_until(ui.wx, lambda: settled(ui))
+        assert set(ui.controller.assembly_lookup.pending) == {"C1"}
+        _assert_classification(ui, True, "known")
+        ui.supplier.fetch_iter.side_effect = RuntimeError("supplier unavailable")
+        ui.run_worker()
+        wait_until(
+            ui.wx,
+            lambda: not ui.controller.assembly_lookup.pending and settled(ui),
+        )
+        assert ui.controller.assembly_lookup.errors == {"C1"}
+        _assert_classification(ui, True, "known")
+
+    window_ui.run(check)
+
+
 @pytest.mark.parametrize(
     "partial", [False, True], ids=["full-failure", "partial-failure"]
 )
