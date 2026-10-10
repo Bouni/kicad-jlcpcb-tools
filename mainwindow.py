@@ -19,6 +19,13 @@ import sys
 import time
 
 import pcbnew as kicad_pcbnew
+
+# Python 3.14 removed .next() from SwigPyIterator; add compatibility shim.
+if hasattr(kicad_pcbnew, "SwigPyIterator") and not hasattr(
+    kicad_pcbnew.SwigPyIterator, "next"
+):
+    kicad_pcbnew.SwigPyIterator.next = lambda self: self.__next__()
+
 import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
