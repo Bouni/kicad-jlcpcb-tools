@@ -115,6 +115,33 @@ def test_background_classification_updates_standard_and_real_estimate(
     window_ui.run(check)
 
 
+def test_known_classification_stays_visible_while_its_lookup_runs_and_fails(
+    window_ui: Any,
+) -> None:
+    """Refreshing a classified part never blanks its Std cells or the estimate."""
+
+    def settled(ui: Any) -> bool:
+        return not ui.controller._render_queued
+
+    def check(ui: Any) -> None:
+        _complete(ui, 2, assembly_process="")
+        _assert_classification(ui, True, "known")
+        ui.controller.refresh()
+        wait_until(ui.wx, lambda: settled(ui))
+        assert set(ui.controller.assembly_lookup.pending) == {"C1"}
+        _assert_classification(ui, True, "known")
+        ui.supplier.fetch_iter.side_effect = RuntimeError("supplier unavailable")
+        ui.run_worker()
+        wait_until(
+            ui.wx,
+            lambda: not ui.controller.assembly_lookup.pending and settled(ui),
+        )
+        assert ui.controller.assembly_lookup.errors == {"C1"}
+        _assert_classification(ui, True, "known")
+
+    window_ui.run(check)
+
+
 @pytest.mark.parametrize(
     "partial", [False, True], ids=["full-failure", "partial-failure"]
 )
@@ -223,32 +250,24 @@ def test_queued_classification_cannot_revive_a_closed_controller(
     window_ui.run(check)
 
 
-@pytest.mark.parametrize("offline", [False, True])
-def test_reopened_dialog_refetches_classification_without_the_main_helper(
-    window_ui: Any, offline: bool
+def test_reopened_dialog_shows_saved_classification_without_a_lookup(
+    window_ui: Any,
 ) -> None:
-    """Reopening retains native assignments and fetches fresh session-only facts."""
+    """Reopening keeps native assignments and the saved class, even offline."""
 
     def original(ui: Any) -> None:
         _complete(ui)
         _assert_classification(ui, True, "known")
+        ui.supplier.fetch_iter.side_effect = RuntimeError("supplier unavailable")
 
     def reopened(ui: Any) -> None:
-        _assert_classification(ui, None, "pending")
+        _assert_classification(ui, True, "known")
         for variant in ("", "A", "B"):
             assert (
                 ui.controller.session.snapshot.get("component-1", variant).lcsc == "C1"
             )
-        assert len(ui.pending_threads) == 1
-        if offline:
-            ui.supplier.fetch_iter.side_effect = RuntimeError("supplier unavailable")
-            ui.run_worker()
-            wait_until(ui.wx, lambda: _standard_cell(ui) == (None, "error"))
-        else:
-            _complete(ui)
-        _assert_classification(
-            ui, None if offline else True, "error" if offline else "known"
-        )
+        assert not ui.pending_threads
+        assert not ui.controller.assembly_lookup.pending
 
     with patch.object(
         window_ui.main.JLCPCBTools,

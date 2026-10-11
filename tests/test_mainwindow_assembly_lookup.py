@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from importlib import import_module
 import sqlite3
+from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
@@ -10,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 from .native_window_support import _SelectableFootprint, window_ui
-from .native_wx_support import pump
+from .native_wx_support import pump, wait_until
 
 __all__ = ["window_ui"]
 pytestmark = pytest.mark.native_wx
@@ -257,14 +258,17 @@ def test_completion_storage_failure_disables_stale_rows_and_refreshes_summary(
 def test_storage_recovery_restarts_lookup_and_rejects_old_delivery(
     window_ui: Any, storage_failed: bool
 ) -> None:
-    """Each storage lifetime rejects old callbacks and fetches its own supplier facts."""
+    """Each storage lifetime rejects old callbacks and fetches its own supplier facts.
+
+    The facts the surviving lifetime saved reach the reopened window without
+    another lookup.
+    """
     ui = window_ui
     ui.board.names.clear()
     ui.board.current = ""
     ui.supplier.fetch_iter.side_effect = [
         iter([("C1", {"assembly_process": "THT", "component_product_type": 1})]),
         iter([("C1", {"assembly_process": "SMT", "component_product_type": 2})]),
-        iter([("C1", {"assembly_process": "THT", "component_product_type": 1})]),
     ]
 
     def recover(ui: Any) -> None:
@@ -287,15 +291,11 @@ def test_storage_recovery_restarts_lookup_and_rejects_old_delivery(
         assert_assembly_feedback(frame, "R1", "✓", pending=False, process="SMT")
 
     def reopen(ui: Any) -> None:
-        assert ui.dialog.store.get_part("R1")["component_product_type"] is None
-        assert len(ui.pending_threads) == 1
-        assert_assembly_feedback(ui.dialog, "R1", "◷", pending=True)
-        ui.run_worker()
-        pump(ui.wx)
-        assert ui.dialog.store.get_part("R1")["component_product_type"] == 1
+        part = ui.dialog.store.get_part("R1")
+        assert (part["assembly_process"], part["component_product_type"]) == ("SMT", 2)
         assert ui.pending_threads == []
-        assert_assembly_feedback(ui.dialog, "R1", "—", pending=False, process="THT")
-        assert ui.supplier.fetch_iter.call_count == 3
+        assert_assembly_feedback(ui.dialog, "R1", "✓", pending=False, process="SMT")
+        assert ui.supplier.fetch_iter.call_count == 2
 
     ui.run(recover, reopen)
 
@@ -344,5 +344,53 @@ def test_thread_start_failure_clears_pending_feedback_and_allows_retry(
         assert frame.store.get_part("R1")["component_product_type"] == 2
         assert not frame.assembly_lookup.pending
         assert_assembly_feedback(frame, "R1", "✓", pending=False, process="SMT")
+
+    ui.run(check)
+
+
+def test_estimate_follows_a_result_while_the_next_code_is_pending(
+    window_ui: Any,
+) -> None:
+    """A Standard-only result decides the estimate before the batch finishes."""
+    ui = window_ui
+    ui.board.names.clear()
+    ui.board.current = ""
+    second = _SelectableFootprint(ui.board, "component-2", "R2")
+    second.SetField("LCSC", "C2")
+    ui.board.parts.append(second)
+    release = Event()
+
+    def fetch(codes: Any) -> Iterator[tuple[str, dict[str, Any]]]:
+        assert sorted(codes) == ["C1", "C2"]
+        yield "C1", {"assembly_process": "SMT", "component_product_type": 2}
+        assert release.wait(5), "the test never released the second result"
+        yield "C2", {"assembly_process": "SMT", "component_product_type": 0}
+
+    ui.supplier.fetch_iter.side_effect = fetch
+
+    def check(ui: Any) -> None:
+        frame = ui.dialog
+        assert len(ui.pending_threads) == 1
+        worker = Thread(target=ui.pending_threads.pop(0), daemon=True)
+        worker.start()
+        try:
+            wait_until(
+                ui.wx,
+                lambda: frame.bom_estimator_decision is not None
+                and frame.bom_estimator_decision.board_standard is True,
+                reason="the estimate waited for the whole batch",
+            )
+            assert "C2" in frame.assembly_lookup.pending
+            assert frame.bom_estimator_decision.classification_missing_refs == {"R2"}
+            assert_assembly_feedback(frame, "R2", "◷", pending=True)
+        finally:
+            release.set()
+            worker.join(5)
+        assert not worker.is_alive()
+        wait_until(ui.wx, lambda: not frame.assembly_lookup.pending)
+        pump(ui.wx)
+        assert frame.bom_estimator_decision.board_standard is True
+        assert not frame.bom_estimator_decision.classification_missing_refs
+        assert_assembly_feedback(frame, "R2", "—", pending=False, process="SMT")
 
     ui.run(check)

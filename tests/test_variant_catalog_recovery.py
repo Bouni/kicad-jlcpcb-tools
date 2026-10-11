@@ -18,6 +18,7 @@ from .native_window_support import (
 )
 from .native_wx_support import wait_until
 from .test_variant_mainwindow_lifecycle import download
+from .test_variant_metadata_readiness import _assert_classification, _complete
 
 __all__ = ["window_ui"]
 pytestmark = pytest.mark.native_wx
@@ -120,5 +121,46 @@ def test_catalog_retry_does_not_restore_a_replaced_board(
         assert not ui.controller.session.reliable
         assert not ui.dialog.generate_button.IsEnabled()
         assert not ui.dialog._can_apply_user_assignments()
+
+    window_ui.run(check)
+
+
+def test_data_folder_chosen_while_storage_failed_serves_its_own_facts(
+    window_ui: Any,
+) -> None:
+    """The retained variant store follows a data folder chosen during recovery."""
+
+    def check(ui: Any) -> None:
+        dialog, controller = ui.dialog, ui.controller
+        cache_type = ui.mainwindow.AssemblyMetadataCache
+        old = Path(ui.catalog.global_db_file)
+        destination = old.parent.parent / "destination"
+        destination.mkdir()
+        new = destination / "global.db"
+        cache_type(str(new)).merge("C1", "THT", 0)
+        _complete(ui)
+        _assert_classification(ui, True, "known")
+        _fail_catalog(ui, "replacement")
+        assert dialog.store is None
+        refresh = ui.catalog.refresh_library_config
+
+        def switch() -> bool:
+            ui.catalog.global_db_file = str(new)
+            return refresh()
+
+        with patch.object(ui.catalog, "refresh_library_config", side_effect=switch):
+            dialog.update_settings(
+                SimpleNamespace(
+                    section="library", setting="data_path", value=str(destination)
+                )
+            )
+        assert dialog.store is controller.cache
+        assert not dialog._project_storage_unavailable
+        _assert_classification(ui, False, "known")
+        controller._enriched(
+            "C200", {"assembly_process": "THT", "component_product_type": 2}
+        )
+        assert cache_type(str(new)).get("C200") == ("THT", 2)
+        assert cache_type(str(old)).get("C200") == ("", None)
 
     window_ui.run(check)

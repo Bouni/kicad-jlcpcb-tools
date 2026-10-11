@@ -13,7 +13,9 @@ from typing import Any
 import pytest
 
 from .variant_data_support import (
+    SavedNativeBoard,
     _component,
+    _parent,
     _snapshot,
     _store,
     store_module_impl as store_module,
@@ -58,6 +60,54 @@ def test_assembly_rows_preserve_capture_flags_facts_and_natural_reference_order(
     assert store.assembly_rows(snapshot, "")[0]["lcsc"] == "C100"
     assert not hasattr(store, "snapshot")
     assert not Path(store.dbfile).exists()
+
+
+def test_saved_supplier_facts_reach_a_reopened_store(tmp_path: Path) -> None:
+    """Facts one store saved are read, not fetched again, by the next store."""
+    path = tmp_path / "global.db"
+
+    def reopen() -> Any:
+        return store_module.VariantStore(
+            _parent(tmp_path),
+            str(tmp_path),
+            SavedNativeBoard(tmp_path),
+            assembly_metadata=store_module.AssemblyMetadataCache(str(path)),
+        )
+
+    parts = (_component("", "C100"), _component("A", "C200"))
+    first = reopen()
+    assert first.get_missing_metadata(_snapshot(first, parts, ("", "A"))) == {
+        "C100",
+        "C200",
+    }
+    first.set_assembly_metadata("C100", "SMT", 2)
+    first.set_assembly_metadata("C200", "SMT", None)
+    second = reopen()
+    snapshot = _snapshot(second, parts, ("", "A"))
+    assert second.get_missing_metadata(snapshot) == {"C200"}
+    row = second.assembly_rows(snapshot, "")[0]
+    assert (row["assembly_process"], row["component_product_type"]) == ("SMT", 2)
+    with closing(sqlite3.connect(path)) as con, con:
+        con.execute("UPDATE lcsc_assembly_metadata SET fetched_at = 0")
+    aged = reopen()
+    snapshot = _snapshot(aged, parts, ("", "A"))
+    assert aged.get_missing_metadata(snapshot) == {"C100", "C200"}
+    row = aged.assembly_rows(snapshot, "")[0]
+    assert (row["assembly_process"], row["component_product_type"]) == ("SMT", 2)
+
+
+def test_a_replaced_cache_serves_the_rows(tmp_path: Path) -> None:
+    """A data-folder switch hands the store another cache, which rows then read."""
+    store = _store(tmp_path)
+    parts = (_component("", "C100"),)
+    store.set_assembly_metadata("C100", "SMT", 2)
+    replacement = store_module.AssemblyMetadataCache(str(tmp_path / "global.db"))
+    replacement.merge("C100", "THT", 0)
+    store.assembly_metadata = replacement
+    assert store.assembly_metadata is replacement
+    row = store.assembly_rows(_snapshot(store, parts, ("",)), "")[0]
+    assert (row["assembly_process"], row["component_product_type"]) == ("THT", 0)
+    assert store.get_missing_metadata(_snapshot(store, parts, ("",))) == set()
 
 
 def test_rows_reject_foreign_snapshots_and_removed_variants(tmp_path: Path) -> None:

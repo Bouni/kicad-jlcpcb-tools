@@ -1,5 +1,6 @@
 """Publish captured variant data through real windows and native wx events."""
 
+from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
 import sqlite3
@@ -29,6 +30,21 @@ def _checkbox(ui: Any, control: Any, value: bool) -> None:
     event = ui.wx.CommandEvent(ui.wx.wxEVT_CHECKBOX, control.GetId())
     event.SetEventObject(control)
     control.GetEventHandler().ProcessEvent(event)
+
+
+def _global_data_but_supplier_facts(path: Path) -> list[tuple[str, list[Any]]]:
+    """Read every global.db table except the supplier facts enrichment saves."""
+    with closing(sqlite3.connect(path)) as con:
+        tables = [
+            name
+            for (name,) in con.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name != 'lcsc_assembly_metadata' ORDER BY name"
+            )
+        ]
+        return [
+            (name, con.execute(f'SELECT * FROM "{name}"').fetchall()) for name in tables
+        ]
 
 
 def _complete(ui: Any) -> None:
@@ -143,7 +159,7 @@ def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
         startup_read_counts.append(len(project_reads))
         assert bool(project_reads) is (database_state != "absent")
         corrections = Path(ui.catalog.correctionsdb_file)
-        correction_bytes = corrections.read_bytes()
+        global_data = _global_data_but_supplier_facts(corrections)
         assert Path(ui.cache.dbfile) == path
         assert c.session.snapshot.get("component-1", "").lcsc == "C100"
         assert c.session.snapshot.get("component-1", "A").lcsc == "C200"
@@ -158,7 +174,7 @@ def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
         for field in ("bom", "pop"):
             h.click(0, c.model.column_for("A", field))
         _complete(ui)
-        assert corrections.read_bytes() == correction_bytes
+        assert _global_data_but_supplier_facts(corrections) == global_data
         c.refresh()
         part = c.session.snapshot.get("component-1", "A")
         assert part.lcsc == "" and not part.bom and not part.pop
@@ -180,9 +196,8 @@ def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
         assert c.session.snapshot.get("component-1", "").lcsc == "C100"
         part = c.session.snapshot.get("component-1", "A")
         assert part.lcsc == "" and not part.bom and not part.pop
-        assert ui.cache.get_missing_metadata(c.session.snapshot) == {"C100"}
-        _complete(ui)
-        assert not ui.messages
+        assert ui.cache.get_missing_metadata(c.session.snapshot) == set()
+        assert not ui.pending_threads and not ui.messages
         assert len(project_reads) == startup_read_counts[-1]
         close(ui)
 
@@ -284,7 +299,10 @@ def test_native_boundaries_observe_changes_without_display_validation_loops(
 def test_supplier_completion_joins_captured_lcsc_without_native_snapshot_fanout(
     window_ui: Any,
 ) -> None:
-    """Shared facts survive empty updates, never follow reassignment, and refetch on reopen."""
+    """Shared facts survive empty updates, never follow reassignment, and are saved.
+
+    The reopened window fetches only the code that is still unclassified.
+    """
     window_ui.board.names = ["A", "B", *[f"V{i}" for i in range(10)]]
     window_ui.board.parts.extend(
         _SelectableFootprint(window_ui.board, f"component-{index}", f"R{index}")
@@ -342,13 +360,9 @@ def test_supplier_completion_joins_captured_lcsc_without_native_snapshot_fanout(
 
     def reopened(ui: Any) -> None:
         c = ui.controller
-        assert ui.cache.get_missing_metadata(c.session.snapshot) == {"C1", "C900"}
-        ui.supplier.fetch_iter.return_value = iter(
-            [
-                ("C1", {"assembly_process": "THT", "component_product_type": 2}),
-                ("C900", {}),
-            ]
-        )
+        # C1's facts were saved; only the unclassified C900 is fetched again.
+        assert ui.cache.get_missing_metadata(c.session.snapshot) == {"C900"}
+        ui.supplier.fetch_iter.return_value = iter([("C900", {})])
         c.timer.Stop()
         with patch.object(
             c.session.adapter,
@@ -356,7 +370,8 @@ def test_supplier_completion_joins_captured_lcsc_without_native_snapshot_fanout(
             side_effect=AssertionError("supplier reread native data"),
         ):
             _complete(ui)
-            assert c.model.get_value(0, c.model.column_for("B", "standard")) is True
+            assert set(ui.supplier.fetch_iter.call_args.args[0]) == {"C900"}
+            assert c.model.get_value(0, c.model.column_for("B", "standard")) is False
             for variant in c.session.snapshot.variants:
                 for row in ui.cache.assembly_rows(c.session.snapshot, variant.name):
                     if row["lcsc"] == "C900":
@@ -365,7 +380,7 @@ def test_supplier_completion_joins_captured_lcsc_without_native_snapshot_fanout(
                         assert (
                             row["assembly_process"],
                             row["component_product_type"],
-                        ) == ("THT", 2)
+                        ) == ("SMT", 0)
         assert not Path(ui.cache.dbfile).exists() and not ui.messages
 
     window_ui.run(check, reopened)

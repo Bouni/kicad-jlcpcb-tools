@@ -67,6 +67,7 @@ from .dataview_highlight import (
     decode_highlighted_value,
 )
 from .derive_params import params_for_part
+from .enrichment.cache import AssemblyMetadataCache
 from .enrichment.worker import AssemblyMetadataLookup
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
@@ -1271,7 +1272,12 @@ class JLCPCBTools(wx.Frame):
 
                 store_type = VariantStore
             self.assembly_lookup.invalidate()
-            self.store = store_type(self, self.project_path, board)
+            self.store = store_type(
+                self,
+                self.project_path,
+                board,
+                assembly_metadata=self._assembly_metadata_cache(),
+            )
             self._set_project_storage_error(None)
             self._migrate_legacy_assignments()
             if getattr(self, "_board_unreliable", False):
@@ -1286,6 +1292,39 @@ class JLCPCBTools(wx.Frame):
             self._initialize_catalog_parts()
         except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
+
+    def _assembly_metadata_path(self) -> Optional[str]:
+        """Return the current data folder's global.db, or None without one."""
+        path = getattr(getattr(self, "library", None), "global_db_file", "")
+        return path if isinstance(path, str) and path.strip() else None
+
+    def _assembly_metadata_cache(self) -> AssemblyMetadataCache:
+        """Open the supplier facts saved in the current data folder's global.db.
+
+        Without a library or its database path the facts last only as long as
+        the store, as they did before they were saved.
+        """
+        return AssemblyMetadataCache(
+            self._assembly_metadata_path(), getattr(self, "logger", None)
+        )
+
+    def _rebind_assembly_metadata(self) -> None:
+        """Move the open store to the facts of a newly chosen data folder.
+
+        Lookups still in flight then record their facts in the new folder,
+        which is right because the facts belong to the part, not the board.
+        A design-variant window keeps its store on the controller while a
+        storage error has cleared ``self.store``; that store moves too, so the
+        recovery that restores it reads the new folder.
+        """
+        store = getattr(self, "store", None) or getattr(
+            getattr(self, "_variant_controller", None), "cache", None
+        )
+        if (
+            store is not None
+            and store.assembly_metadata.path != self._assembly_metadata_path()
+        ):
+            store.assembly_metadata = self._assembly_metadata_cache()
 
     @staticmethod
     def _migration_footprints(
@@ -2288,7 +2327,7 @@ class JLCPCBTools(wx.Frame):
         except sqlite3.Error as error:
             self.logger.warning("Unable to start assembly enrichment: %s", error)
             return
-        # Supplier facts are shared by LCSC for this dialog's lifetime.
+        # Lookups are made once per LCSC; the store saves their facts in global.db.
         self.assembly_lookup.request(targets, retry=True)
         for lcsc, refs in targets.items():
             if lcsc in self.assembly_lookup.pending:
@@ -2312,6 +2351,9 @@ class JLCPCBTools(wx.Frame):
             if part["lcsc"] == lcsc:
                 self.partlist_data_model.set_assembly_metadata(part["reference"], part)
         self._refresh_assembly_tooltip()
+        # Lookups arrive about a second apart, so the estimate follows each one
+        # instead of waiting for the whole batch; on_bom_data_changed coalesces.
+        wx.PostEvent(self, BomDataChangedEvent(source="enrichment_result"))
 
     def _refresh_bom_after_enrichment_update(self) -> None:
         """Clear finished status even after failures, then refresh the BOM once."""
@@ -2841,6 +2883,9 @@ class JLCPCBTools(wx.Frame):
                     self._catalog_switch_pending = True
                     self._refresh_catalog_views()
                     return
+                # Corrections and part preferences follow the new data folder
+                # at once; the supplier facts follow before the repaint below.
+                self._rebind_assembly_metadata()
                 if self.library.state == LibraryState.INITIALIZED:
                     self._publish_catalog()
                 else:

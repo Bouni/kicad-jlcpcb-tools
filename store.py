@@ -9,7 +9,7 @@ import re
 import sqlite3
 from typing import Any, Optional
 
-from .bom_estimation.assembly_mode import classify_component_product_type
+from .enrichment.cache import AssemblyMetadataCache
 from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
@@ -24,23 +24,46 @@ from .variant.generation_counter import generation_count_transaction
 
 
 class Store:
-    """Adapt live board fields, with supplier facts cached by LCSC for this session.
+    """Adapt live board fields, with supplier facts cached by LCSC.
 
     This adapter does not read legacy assignments. The window performs guarded
     startup recovery and archival separately. This adapter uses project SQLite
-    storage only for the generation counter and notice metadata.
+    storage only for the generation counter and notice metadata. Supplier facts
+    come from the cache the window supplies, which saves them in global.db; the
+    default cache keeps them only as long as this adapter.
     """
 
     GENERATION_COUNT_KEY = "generation_count"
     SCHEMATIC_STORAGE_NOTICE_ACKED_KEY = "schematic_storage_notice_acked"
 
-    def __init__(self, parent: Any, project_path: str, board: Any) -> None:
+    def __init__(
+        self,
+        parent: Any,
+        project_path: str,
+        board: Any,
+        *,
+        assembly_metadata: Optional[AssemblyMetadataCache] = None,
+    ) -> None:
         self.parent = parent
         self.project_path = project_path
         self._board = board
         self.datadir = os.path.join(project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
-        self._assembly_metadata: dict[str, dict[str, Any]] = {}
+        self._assembly_metadata = (
+            assembly_metadata
+            if assembly_metadata is not None
+            else AssemblyMetadataCache(None)
+        )
+
+    @property
+    def assembly_metadata(self) -> AssemblyMetadataCache:
+        """Return the cache supplier facts are read and recorded through."""
+        return self._assembly_metadata
+
+    @assembly_metadata.setter
+    def assembly_metadata(self, cache: AssemblyMetadataCache) -> None:
+        """Use another cache, as when Settings moves the data folder."""
+        self._assembly_metadata = cache
 
     @property
     def board(self) -> Any:
@@ -79,7 +102,7 @@ class Store:
     def _part_row(self, footprint: Any) -> dict[str, Any]:
         """Capture one footprint's current native data and matching supplier facts."""
         assignment, lcsc = get_lcsc_assignment(footprint)
-        metadata = self._assembly_metadata.get(lcsc, {})
+        assembly_process, component_product_type = self._assembly_metadata.get(lcsc)
         pad_count, has_tht = get_footprint_pad_metadata(footprint)
         return {
             "reference": footprint.GetReference(),
@@ -94,8 +117,8 @@ class Store:
             "pad_count": pad_count,
             "has_tht": has_tht,
             "assembly_flags": get_assembly_flags(footprint),
-            "assembly_process": metadata.get("assembly_process", ""),
-            "component_product_type": metadata.get("component_product_type"),
+            "assembly_process": assembly_process,
+            "component_product_type": component_product_type,
         }
 
     def read_all(self) -> list[dict[str, Any]]:
@@ -197,15 +220,7 @@ class Store:
         component_product_type: object,
     ) -> None:
         """Merge supplier facts independently of any current footprint assignment."""
-        code = normalize_lcsc(lcsc)
-        if not code:
-            return
-        metadata = self._assembly_metadata.setdefault(code, {})
-        if assembly_process:
-            metadata["assembly_process"] = assembly_process
-        classification = classify_component_product_type(component_product_type)
-        if classification is not None:
-            metadata["component_product_type"] = int(classification)
+        self._assembly_metadata.merge(lcsc, assembly_process, component_product_type)
 
     def set_assembly_metadata(
         self,
@@ -226,7 +241,7 @@ class Store:
     def get_assembly_enrichment_targets(
         self, references: Optional[Iterable[str]] = None
     ) -> dict[str, list[str]]:
-        """Group current assignments missing either required supplier fact."""
+        """Group current assignments missing a supplier fact or due a refresh."""
         selected = set(references) if references is not None else None
         targets: dict[str, list[str]] = {}
         for part in sorted(
@@ -236,6 +251,6 @@ class Store:
                 selected is not None and part["reference"] not in selected
             ):
                 continue
-            if not part["assembly_process"] or part["component_product_type"] is None:
+            if self._assembly_metadata.needs_fetch(part["lcsc"]):
                 targets.setdefault(part["lcsc"], []).append(part["reference"])
         return targets

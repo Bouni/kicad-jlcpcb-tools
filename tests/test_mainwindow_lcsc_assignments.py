@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from contextlib import closing
 from copy import deepcopy
+import importlib
 import sqlite3
 from types import MethodType, SimpleNamespace
 from typing import Any, Optional
@@ -494,7 +495,7 @@ def test_project_database_unavailable_at_startup_keeps_settings_reachable(
     """Failure before preference lookup must not abort the already-created window."""
     window = make_window()
 
-    def unavailable_store(*_args: object) -> None:
+    def unavailable_store(*_args: object, **_kwargs: object) -> None:
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(mainwindow, "Store", unavailable_store)
@@ -727,3 +728,119 @@ def test_the_catalog_cache_refuses_a_key_that_is_not_a_part(
         window._catalog_details["C200"] = {}
     with pytest.raises(TypeError, match="Lcsc"):
         _ = "C200" in window._catalog_details
+
+
+def test_opening_reads_saved_supplier_facts_from_global_db(
+    make_window: Callable[..., Any], mainwindow: Any, tmp_path: Any
+) -> None:
+    """A board opened again starts with its saved classes and targets none."""
+    path = tmp_path / "global.db"
+    mainwindow.AssemblyMetadataCache(str(path)).merge("C100", "SMT", 2)
+    window = make_window(footprints=[Footprint(lcsc="C100")])
+    assert window.store.get_part("R1")["component_product_type"] is None
+    window.library.global_db_file = str(path)
+
+    window.init_store()
+
+    part = window.store.get_part("R1")
+    assert (part["assembly_process"], part["component_product_type"]) == ("SMT", 2)
+    assert window.store.get_assembly_enrichment_targets() == {}
+    window.store.cache_lcsc_metadata("C200", "THT", 0)
+    assert mainwindow.AssemblyMetadataCache(str(path)).get("C200") == ("THT", 0)
+
+
+@pytest.mark.parametrize("library", ["none", "unset", "empty", "not text"])
+def test_without_a_global_db_path_facts_stay_in_memory(
+    make_window: Callable[..., Any], tmp_path: Any, library: str
+) -> None:
+    """A window with no usable database path behaves as before facts were saved."""
+    window = make_window(footprints=[Footprint(lcsc="C100")])
+    if library == "none":
+        window.library = None
+    elif library == "empty":
+        window.library.global_db_file = " "
+    elif library == "not text":
+        window.library.global_db_file = MagicMock()
+    before = sorted(tmp_path.iterdir())
+
+    cache = window._assembly_metadata_cache()
+    cache.merge("C100", "SMT", 2)
+
+    assert cache.get("C100") == ("SMT", 2)
+    assert sorted(tmp_path.iterdir()) == before
+
+
+def test_variant_boards_open_with_the_same_saved_facts(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """init_store hands a design-variant board's store the global.db cache too."""
+    path = tmp_path / "global.db"
+    mainwindow.AssemblyMetadataCache(str(path)).merge("C100", "SMT", 2)
+    window = make_window(footprints=[Footprint(lcsc="C100")])
+    window.library.global_db_file = str(path)
+    window._variant_mode = True
+    package = mainwindow.__name__.rsplit(".", 1)[0]
+    variant_store = importlib.import_module(f"{package}.variant.store")
+    received = []
+
+    def capture(*_args: object, assembly_metadata: Any = None) -> None:
+        received.append(assembly_metadata)
+        raise ValueError("stop before the variant controller is built")
+
+    monkeypatch.setattr(variant_store, "VariantStore", capture)
+
+    window.init_store()
+
+    assert [cache.get("C100") for cache in received] == [("SMT", 2)]
+    assert window.store is None
+
+
+def test_switching_data_folder_moves_the_store_to_its_saved_facts(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """A data folder chosen in Settings serves its own facts before the repaint."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    old.mkdir()
+    new.mkdir()
+    mainwindow.AssemblyMetadataCache(str(new / "global.db")).merge("C100", "THT", 0)
+    window = make_window(footprints=[Footprint(lcsc="C100")])
+    window.library.global_db_file = str(old / "global.db")
+    window.init_store()
+    window.store.cache_lcsc_metadata("C100", "SMT", 2)
+    cache = window.store.assembly_metadata
+    window._rebind_assembly_metadata()
+    assert window.store.assembly_metadata is cache
+
+    def refresh() -> bool:
+        window.library.global_db_file = str(new / "global.db")
+        return True
+
+    seen = []
+    monkeypatch.setattr(
+        window.library, "refresh_library_config", refresh, raising=False
+    )
+    monkeypatch.setattr(
+        window,
+        "_publish_catalog",
+        lambda: seen.append(window.store.get_part("R1")["component_product_type"]),
+    )
+    window.library.state = mainwindow.LibraryState.INITIALIZED
+
+    window._apply_library_settings()
+
+    assert seen == [0]
+    window.store.cache_lcsc_metadata("C200", "SMT", 2)
+    assert mainwindow.AssemblyMetadataCache(str(new / "global.db")).get("C200") == (
+        "SMT",
+        2,
+    )
+    assert mainwindow.AssemblyMetadataCache(str(old / "global.db")).get("C200") == (
+        "",
+        None,
+    )

@@ -341,13 +341,15 @@ class VariantMainController:
                     stock=catalog.get("stock"),
                     price=result.prices.get(part.reference),
                     price_label=result.price_labels.get(part.reference, ""),
+                    # A known class stays visible while a refresh runs or after
+                    # one fails, as the ordinary window's Std column does.
                     status=(
-                        "pending"
+                        "complete"
+                        if classification_known
+                        else "pending"
                         if part.lcsc in self.assembly_lookup.pending
                         else "error"
                         if part.lcsc in self.assembly_lookup.errors
-                        else "complete"
-                        if classification_known
                         else "missing"
                     ),
                     lcsc=part.lcsc,

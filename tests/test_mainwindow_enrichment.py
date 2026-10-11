@@ -119,28 +119,70 @@ def drain_delivery(workflow: SimpleNamespace) -> None:
         deliver_next(workflow)
 
 
-def test_each_result_updates_std_before_batch_completion(
+def test_each_result_updates_std_and_the_estimate_before_batch_completion(
     workflow: SimpleNamespace,
 ) -> None:
-    """A first Standard-only result cannot look Economic while another is pending."""
+    """Each result refreshes its row and asks the BOM estimate to follow it.
+
+    A first Standard-only result cannot look Economic while another is pending.
+    """
     window = workflow.window
+    posted = workflow.main.wx.PostEvent
+
+    def sources() -> list[str]:
+        return [call.args[1].source for call in posted.call_args_list]
+
     assert cell(workflow) == "?"
     window.start_assembly_enrichment()
     assert cell(workflow) == cell(workflow, "R2") == "◷"
-    workflow.main.wx.PostEvent.reset_mock()
+    posted.reset_mock()
     run_worker(workflow)
     deliver_next(workflow)
     assert cell(workflow) == "✓"
     assert "Standard Only" in tooltip(workflow)
     assert "SMT" in tooltip(workflow)
     assert cell(workflow, "R2") == "◷"
-    workflow.main.wx.PostEvent.assert_not_called()
+    assert sources() == ["enrichment_result"]
+    assert window.read_assembly_parts()[0]["component_product_type"] == 2
     deliver_next(workflow)
     assert cell(workflow, "R2") == "—"
+    assert sources() == ["enrichment_result"] * 2
     deliver_next(workflow)
-    workflow.main.wx.PostEvent.assert_called_once()
-    assert workflow.main.wx.PostEvent.call_args.args[1].source == "enrichment_update"
+    assert sources() == ["enrichment_result"] * 2 + ["enrichment_update"]
     assert not window.assembly_lookup.pending
+
+
+def test_saved_classes_reach_a_reopened_window_without_a_lookup(
+    workflow: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Classes fetched once show at once in the next window on the same data."""
+    window = workflow.window
+    path = str(tmp_path / "global.db")
+
+    def open_store() -> None:
+        # The store's package carries the real classifier; this window's
+        # package stubs it, so the cache comes from the store's side.
+        window.assembly_lookup.invalidate()
+        window.store = workflow.db.Store(
+            window,
+            str(tmp_path),
+            workflow.board,
+            assembly_metadata=workflow.db.AssemblyMetadataCache(path),
+        )
+        window.populate_footprint_list()
+
+    open_store()
+    window.start_assembly_enrichment()
+    run_worker(workflow)
+    drain_delivery(workflow)
+    assert (cell(workflow), cell(workflow, "R2")) == ("✓", "—")
+
+    open_store()
+    assert (cell(workflow), cell(workflow, "R2")) == ("✓", "—")
+    window.start_assembly_enrichment()
+    assert not workflow.jobs
+    assert not window.assembly_lookup.pending
+    assert "Retrieving" not in tooltip(workflow)
 
 
 @pytest.mark.parametrize(
