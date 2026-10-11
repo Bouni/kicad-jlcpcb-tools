@@ -239,7 +239,7 @@ def ccw_correction(math_rotation_deg: float) -> int:
 
 
 def naming_rule_to_cpl(rotation: int) -> int:
-    """Convert a rotation from EasyEDA's naming rule to the CPL's sense.
+    """Convert a rotation from EasyEDA's naming rule (``naming.parse_package_name``) to the CPL's sense.
 
     The naming-rule table counts the counter-clockwise turn that carries KiCad's
     footprint onto JLC's drawing: for a -BL token, KiCad's top-left pin 1 lands
