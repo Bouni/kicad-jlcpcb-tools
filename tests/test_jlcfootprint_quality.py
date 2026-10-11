@@ -82,3 +82,10 @@ def test_lists_of_different_lengths_are_not_pairs():
     """Paired centres must pair up: a missing JLC centre is an error, not a smaller RMS."""
     with pytest.raises(ValueError):
         angular_rms([(0.0, 0.0), (1.0, 0.0)], [(0.0, 0.0)], 0.0)
+
+
+def test_a_much_larger_footprint_cannot_hide_a_wrong_layout():
+    """Each side's near-centre cutoff is its own: a hundredfold scale leaves every pad judged."""
+    kicad = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)]
+    jlc = [(100.0, 0.0), (-100.0, 0.0), (0.0, 100.0), (0.0, -100.0)]
+    assert angular_rms(kicad, jlc, 0.0) > 45.0

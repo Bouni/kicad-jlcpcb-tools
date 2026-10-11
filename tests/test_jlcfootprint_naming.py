@@ -27,6 +27,11 @@ from jlcfootprint.naming import (
         ("CONN-SMD-2P-P1.20_BM02B-ACHSS-GAN-TF-LF-SN", "CONN-SMD-2P"),
         ("L0603", "L"),
         ("L0201-RD", "L"),
+        ("R0603_1", "R"),
+        ("L0402-SMD_L1.0-W0.5-MLK1005S7N5JTD25", "L"),
+        ("LED0603_L1.6-W0.8-RD_CSL0901S10T1", "LED"),
+        ("D2PAK-7_L10.2-W9.0-P1.27-LS15.2-BL", "D2PAK-7"),
+        ("RJ45-TH_0826-1X1T-23-F", "RJ45-TH"),
     ],
 )
 def test_extract_family(name, family):
@@ -193,3 +198,16 @@ def test_chip_diodes_read_cathode_first():
     assert parse_package_name("D0603-FD").rotation_correction == 180
     assert parse_package_name("D0402-BI").rotation_correction == 0
     assert parse_package_name("D0402").rotation_source == "family_default"
+
+
+def test_a_chip_code_keeps_its_family_behind_a_suffix():
+    """A suffix after a chip code changes neither its family default nor an LED's cathode-first reading."""
+    plain = parse_package_name("R0603")
+    suffixed = parse_package_name("R0603_1")
+    assert (suffixed.rotation_source, suffixed.rotation_correction) == (
+        plain.rotation_source,
+        plain.rotation_correction,
+    )
+    assert parse_package_name(
+        "LED0603_L1.6-W0.8-RD_CSL0901S10T1"
+    ).rotation_correction == (parse_package_name("LED0603-RD").rotation_correction)

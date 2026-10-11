@@ -317,6 +317,13 @@ def _before_dimensions(head: str) -> str:
 _LEADING_ALPHA_RE = re.compile(r"^([A-Z]+(?:-[A-Z]+)*)(?=\d|$)")
 # A head that carries its own orientation token looks like LED0603-RD: letters, digits, token.
 _HEAD_WITH_DIGITS_RE = re.compile(r"^[A-Z]+(?:-[A-Z]+)*\d")
+# A chip code, a standard passive's or an LED's family letters followed by a
+# four-digit size, reads as that family before an underscore too: "R0603_1",
+# "L0402-SMD_L1.0-..." and "LED0603_L1.6-W0.8-RD_..." are R, L and LED, as "R0603"
+# is R.  Other heads before an underscore keep their digits: over EasyEDA's library
+# the leading-letter rule would make D2PAK-... a D, a diode family, and RJ45-TH an RJ,
+# which the manufacturer-part-number denylist does not hold.
+_CHIP_CODE_RE = re.compile(r"^(R|C|L|D|F|LED)\d{4}(?=-|$)")
 
 
 def extract_family(package_name: str) -> str:
@@ -324,6 +331,7 @@ def extract_family(package_name: str) -> str:
 
     Examples:
         "C0603"                          → "C"
+        "L0402-SMD_L1.0-W0.5-MLK1005"    → "L"
         "LED0603-RD"                     → "LED"
         "SOIC-8_L4.9-W3.9-P1.27-BL"    → "SOIC-8"
         "CAP-SMD_BD6.3-L6.6-W6.6-FD"   → "CAP-SMD"
@@ -334,7 +342,9 @@ def extract_family(package_name: str) -> str:
     package_name = package_name.upper()
     head = package_name.split("_", 1)[0]
     if "_" in package_name and not _head_tokens(head):
-        return _before_dimensions(head)
+        head = _before_dimensions(head)
+        chip = _CHIP_CODE_RE.match(head)
+        return chip.group(1) if chip else head
     head = _before_dimensions(head)
     m = _LEADING_ALPHA_RE.match(head)
     if m:

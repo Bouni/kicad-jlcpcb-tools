@@ -48,13 +48,12 @@ def angular_rms(
     cj_x = sum(p[0] for p in jlc_centres) / n
     cj_y = sum(p[1] for p in jlc_centres) / n
 
-    radii = [math.hypot(kx - ck_x, ky - ck_y) for (kx, ky) in kicad_centres] + [
-        math.hypot(jx - cj_x, jy - cj_y) for (jx, jy) in jlc_centres
-    ]
-    mean_radius = sum(radii) / len(radii) if radii else 0.0
     # A pad near the centroid (an exposed pad, a DPAK tab) has a bearing that a
-    # hundredth of a millimetre can swing by tens of degrees; leave it out.
-    near_centre = 0.1 * mean_radius
+    # hundredth of a millimetre can swing by tens of degrees; leave it out.  "Near" is
+    # a tenth of the side's own mean radius, so a footprint much larger than the other
+    # cannot make every pad of the smaller one near and the error zero.
+    kicad_near = 0.1 * _mean_radius(kicad_centres, ck_x, ck_y)
+    jlc_near = 0.1 * _mean_radius(jlc_centres, cj_x, cj_y)
 
     angular_errs_sq = []
     for (kx, ky), (jx, jy) in zip(kicad_centres, jlc_centres):
@@ -62,10 +61,7 @@ def angular_rms(
         dk_y = ky - ck_y
         dj_x = jx - cj_x
         dj_y = jy - cj_y
-        if (
-            math.hypot(dk_x, dk_y) <= near_centre
-            or math.hypot(dj_x, dj_y) <= near_centre
-        ):
+        if math.hypot(dk_x, dk_y) <= kicad_near or math.hypot(dj_x, dj_y) <= jlc_near:
             continue
         bearing_kicad = math.degrees(math.atan2(dk_y, dk_x))
         bearing_jlc = math.degrees(math.atan2(dj_y, dj_x))
@@ -79,3 +75,8 @@ def angular_rms(
         angular_rms_deg = 0.0
 
     return angular_rms_deg
+
+
+def _mean_radius(centres: list[tuple[float, float]], cx: float, cy: float) -> float:
+    """Return the centres' mean distance from (cx, cy)."""
+    return sum(math.hypot(x - cx, y - cy) for (x, y) in centres) / len(centres)
