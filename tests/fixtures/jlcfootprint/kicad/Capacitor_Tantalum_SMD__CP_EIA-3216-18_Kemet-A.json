@@ -1,0 +1,33 @@
+{
+ "library": "Capacitor_Tantalum_SMD",
+ "name": "CP_EIA-3216-18_Kemet-A",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -1.3525,
+   "y": 0.0,
+   "width": 1.415,
+   "height": 1.39,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 1.3525,
+   "y": 0.0,
+   "width": 1.415,
+   "height": 1.39,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -2.31,
+  -1.05,
+  2.31,
+  1.05
+ ]
+}

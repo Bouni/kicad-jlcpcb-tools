@@ -1,0 +1,33 @@
+{
+ "library": "Diode_SMD",
+ "name": "D_SOD-323",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -1.05,
+   "y": 0.0,
+   "width": 0.6,
+   "height": 0.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 1.05,
+   "y": 0.0,
+   "width": 0.6,
+   "height": 0.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -1.6,
+  -0.95,
+  1.6,
+  0.95
+ ]
+}
