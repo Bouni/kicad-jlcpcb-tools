@@ -113,7 +113,7 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
 
 
 class DRCViolationCounter:
-    """Run KiCad SWIG DRC and return the count of violations."""
+    """Run KiCad SWIG DRC and return its error violations."""
 
     def __init__(
         self,
@@ -123,8 +123,12 @@ class DRCViolationCounter:
         self._pcbnew_module = pcbnew_module
         self._working_dir = working_dir
 
-    def get_violation_count(self, board_filename: str) -> int:
-        """Run DRC and return violation count, raising RuntimeError on failure."""
+    def get_error_violations(self, board_filename: str) -> tuple[int, list[str]]:
+        """Run DRC and return the error count with the error messages.
+
+        The messages are empty, while the count is not, when the report gives
+        no per-item severity. Raises RuntimeError when DRC cannot run.
+        """
         if self._pcbnew_module is None:
             raise RuntimeError(
                 "No KiCad Python module provided. Cannot run SWIG DRC without pcbnew."
@@ -152,14 +156,14 @@ class DRCViolationCounter:
                         logger.warning("First %d DRC error(s):", min(10, len(error_messages)))
                         for message in error_messages[:10]:
                             logger.warning("  %s", message)
-                    return error_count
+                    return error_count, error_messages
                 except Exception as exc:
                     raise RuntimeError("Failed to parse DRC report") from exc
 
             if os.path.exists(report_path):
                 raise RuntimeError("DRC report file was created but empty")
 
-            return 0
+            return 0, []
         finally:
             if report_path and os.path.exists(report_path):
                 with contextlib.suppress(OSError):

@@ -3321,7 +3321,9 @@ class JLCPCBTools(wx.Frame):
                 working_dir=self.project_path,
             )
             self.flush_generation_ui()
-            violation_count = drc_counter.get_violation_count(board_filename)
+            violation_count, _messages = drc_counter.get_error_violations(
+                board_filename
+            )
 
             if violation_count > 0:
                 dialog = wx.MessageDialog(
