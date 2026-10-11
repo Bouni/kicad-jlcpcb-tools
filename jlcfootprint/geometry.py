@@ -43,6 +43,15 @@ class Pad(NamedTuple):
     shape: str = ""
 
 
+def normal_number(number: str) -> str:
+    """Strip leading zeros from a purely numeric pad or pin number, so ``01`` and ``1`` agree.
+
+    Every reader applies it, to EasyEDA's pads and pins and to KiCad's pads alike,
+    so a pad numbered ``01`` on both sides still pairs.
+    """
+    return (number.lstrip("0") or "0") if number.isdigit() else number
+
+
 def named_pads(pads: list[Pad]) -> list[Pad]:
     """Return the pads that carry a name, the only pads that can be paired.
 

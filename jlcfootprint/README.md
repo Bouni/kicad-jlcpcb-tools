@@ -2,7 +2,7 @@
 
 JLC places each part by the EasyEDA footprint of the LCSC part number you picked, not by your KiCad footprint. This package works out a part's CPL rotation from that footprint: it aligns the KiCad footprint's pads onto JLC's pads, and the turn that aligns them is the rotation the CPL needs. The same alignment says whether the picked part fits the pads at all.
 
-Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx or pcbnew, and these modules use the standard library only. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad.
+Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx or pcbnew, and these modules use the standard library only. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers are recorded under `tests/fixtures/jlcfootprint/`.
 
 | Module | What it holds |
 | --- | --- |
@@ -10,6 +10,8 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `solver.py` | The 2D rigid alignment of two pad sets |
 | `quality.py` | The angular RMS, a measure of how well a rotation explains the pads |
 | `naming.py` | EasyEDA's footprint naming rule: the pin-1 position a package name encodes |
+| `easyeda_parse.py` | EasyEDA's answers read into records: the batch lookup, footprint and symbol documents, the classic per-part response |
+| `records.py` | The small records judging a part needs without the parsers: symbol pins, the pin-1 labels, the drawings' marks |
 
 ## Frames and units
 
@@ -59,11 +61,25 @@ EasyEDA's Footprint Naming Rule puts pin 1's position into the package name: `{f
 
 The rule is a convention, and EasyEDA's library does not always follow it. Over EasyEDA's library, an FD or RD token agrees with the "+" marks drawn on the symbol and footprint on 201 of 203 electrolytic cans, but on only 39 of 45 molded tantalum chips. So the check treats a package name as one source among several, never as the answer on its own.
 
+## Reading EasyEDA's data
+
+`easyeda_parse.py` reads EasyEDA's answers. It makes no requests of its own.
+
+- **The Pro host** (`pro.easyeda.com`) answers in two steps. The batch lookup (`searchByCodes`) takes up to 200 LCSC numbers and returns one record per part it knows: the symbol uuid, the footprint uuid and the package name (`parse_devices_response`). The per-uuid endpoint then returns one document, a footprint (`parse_puuid_response`) or a symbol (`parse_symbol_response`), in EasyEDA Pro's text form: one JSON array per line, in mils, with Y up. `assemble_record` joins a hit and its two documents into one `ComponentRecord`.
+- **The classic host** answers per LCSC number, with the symbol and the footprint in one response (`parse_component_response`). Its shapes are `~`-separated strings in 10-mil canvas units, with Y down. The per-uuid endpoint still serves some footprints in this form, and `parse_puuid_response` reads both.
+- **One pad form.** Pro pads are converted to classic canvas units as they are read: mils divided by ten, Y flipped, and a polygon pad's bounding box taken as its size. Everything downstream sees one raw pad geometry, which `geometry.easyeda_pads_to_mm` turns into millimetres. Leading zeros are stripped from numeric pad and pin numbers, so a Pro `01` and a classic `1` are one pad. A pad's layer and shape names keep each format's own codes (Pro writes a through-hole pad's layer as 12 where classic writes 11, and a polygon pad as `POLY` where classic writes `POLYGON`); nothing reads them as one.
+- **Pin numbers** are the numbers the symbol displays, not its SPICE field, because the displayed number is the one that matches the footprint's pads. Two parts can share a footprint and still have different symbols, so pin meaning is per part.
+- **Status.** Each parser returns `ok`, `none` or `error`, and none of them raises. The body's `success` flag decides. `true` is an answer, and an answer with an empty result is `none`. `false` is EasyEDA's refusal: with its not-found code it is `none` too. `none` means EasyEDA has nothing for the part; JLC's preview shows such a part as a checkerboard. All three per-part and per-uuid endpoints answer a part or document they do not have with HTTP 200 and `{"success": false, "code": 404, "message": "Component not found"}` (recorded under `tests/fixtures/jlcfootprint/easyeda_not_found/`). A classic footprint whose head gives no origin is `error` as well: its pads are read relative to that origin, so without it they would sit about a metre off. A refusal with no code or any other code, a body whose `success` is missing or not a boolean, and any answer that cannot be read are `error`, with the reason kept, so they are asked again later instead of being taken as EasyEDA's answer. A batch answer that is not a list of device records is an error for every code it was asked about, not a miss.
+
+`records.py` holds what the drawings and the symbol's pins say (`DrawingMarks`, `SymbolPin`, the pin-1 label sets), so that code judging a part can read it without importing the parsers.
+
+The recorded EasyEDA answers come from `tools/jlcfootprint/fetch_easyeda_fixture.py`. It paces its requests, backs off when the host refuses, and keeps an answer only when the parser reads it as `ok` or `none`.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **Readers** for EasyEDA's footprint, symbol and drawing records and for KiCad board and library files.
+- **Readers** for EasyEDA's drawings and for KiCad board and library files.
 - **The resolver and its gate**: rotation, fit and polarity per part, checked offline against parts whose rotations were read from JLC's placement preview.
 - **Background fetch and storage**: the EasyEDA client, a paced worker, the response cache and per-project verdicts.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
