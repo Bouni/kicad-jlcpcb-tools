@@ -1111,10 +1111,11 @@ class Fabrication:
             if normalize_lcsc(lcsc) in found
         }
 
-    def get_part_consistency_warnings(self) -> str:
-        """Check the plausibility of the parts, there should be just one value per LCSC number.
+    def get_part_consistency_warnings(self) -> dict[str, dict[str, list[str]]]:
+        """Find LCSC numbers assigned to parts with different values.
 
-        Returns an empty sting if all parts are ok, otherwise a otherwise a overview of parts that share a LCSC number but have different values.
+        Returns each such number with its values, and each value with the
+        references that carry it. Empty when every number has one value.
         """
         lcsc_numbers: dict[str, dict[str, list[str]]] = {}
         self.validate_generation()
@@ -1134,10 +1135,4 @@ class Fabrication:
                 continue
             values = lcsc_numbers.setdefault(item["lcsc"], {})
             values.setdefault(item["value"], []).extend(item["refs"].split(","))
-        filtered = {key: value for key, value in lcsc_numbers.items() if len(value) > 1}
-        result = ""
-        for lcsc, items in filtered.items():
-            result += f"{lcsc}:\n"
-            for value, references in items.items():
-                result += f"  - {','.join(references)} -> {value}\n"
-        return result
+        return {key: value for key, value in lcsc_numbers.items() if len(value) > 1}

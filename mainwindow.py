@@ -97,6 +97,17 @@ from .footprint_helpers import (
     iter_board_items,
 )
 from .generate_hooks import format_hook_error, run_configured_hook
+from .generation_review import (
+    Finding,
+    drc_failed_finding,
+    drc_findings,
+    empty_zone_findings,
+    log_findings,
+    needs_review,
+    placeholder_findings,
+    value_mismatch_findings,
+)
+from .generation_review_dialog import GenerationReviewDialog
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
@@ -3095,91 +3106,40 @@ class JLCPCBTools(wx.Frame):
             layer_selection = self.layer_selection.GetSelection()
             number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
             layer_count = int(number.group(0)) if number else None
-            warnings = self.run_generation_step(
-                "Checking part consistency",
-                self.fabrication.get_part_consistency_warnings,
-            )
-            if warnings:
-                result = wx.MessageBox(
-                    "There are items with identical LCSC number but different values in the list:\n"
-                    + warnings
-                    + "Continue?",
-                    "Plausibility check",
-                    wx.OK | wx.CANCEL | wx.CENTER,
+            # Every check runs before anything is asked, so one decision
+            # covers all of their findings.
+            findings = value_mismatch_findings(
+                self.run_generation_step(
+                    "Checking part consistency",
+                    self.fabrication.get_part_consistency_warnings,
                 )
-                if result == wx.CANCEL:
-                    self.report_generation_step(
-                        "Cancelled by user during plausibility check"
-                    )
-                    return
-
-            if self.settings.get("general", {}).get("order_number"):
-                count = self.run_generation_step(
+            )
+            order_number = self.settings.get("general", {}).get("order_number")
+            if order_number:
+                placeholder_count = self.run_generation_step(
                     "Checking order/serial placeholders",
                     self.count_order_number_placeholders,
                 )
-                if count == 0:
-                    result = wx.MessageBox(
-                        "JLC order/serial number placeholder not present! Continue?",
-                        "JLC order/serial number placeholder",
-                        wx.OK | wx.CANCEL | wx.CENTER,
-                    )
-                    if result == wx.CANCEL:
-                        self.report_generation_step(
-                            "Cancelled by user due to missing placeholder"
-                        )
-                        return
-                elif count > 1:
-                    result = wx.MessageBox(
-                        "Multiple order/serial number placeholders present! Continue?",
-                        "JLC order/serial number placeholder",
-                        wx.OK | wx.CANCEL | wx.CENTER,
-                    )
-                    if result == wx.CANCEL:
-                        self.report_generation_step(
-                            "Cancelled by user due to multiple placeholders"
-                        )
-                        return
-
+                findings += placeholder_findings(placeholder_count)
             refill = self.settings.get("gerber", {}).get("fill_zones", True)
-            empty_pours = self.run_generation_step(
-                "Filling copper zones" if refill else "Checking copper zone fills",
-                self.fabrication.fill_zones,
+            findings += empty_zone_findings(
+                self.run_generation_step(
+                    "Filling copper zones" if refill else "Checking copper zone fills",
+                    self.fabrication.fill_zones,
+                )
             )
-            if empty_pours:
-                listed = "\n".join(f"  {pour}" for pour in empty_pours)
-                dialog = wx.MessageDialog(
-                    self,
-                    f"These copper zones contain no filled copper:\n\n{listed}\n\n"
-                    "Plotting now ships the board without that copper.",
-                    "Empty copper zones",
-                    wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
-                )
-                try:
-                    dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
-                    result = dialog.ShowModal()
-                finally:
-                    dialog.Destroy()
-                self.logger.warning(
-                    "Copper zones with no filled copper, user chose to %s export:\n%s",
-                    "continue" if result == wx.ID_YES else "stop",
-                    listed,
-                )
-                if result != wx.ID_YES:
-                    self.report_generation_step("Export stopped by empty copper zones")
-                    return
-
-            drc_ok = self.run_generation_step(
+            findings += self.run_generation_step(
                 "Running pre-export DRC check",
-                self.run_drc_before_gerber_export,
+                self.drc_review_findings,
             )
-            if not drc_ok:
-                self.report_generation_step("Export stopped by DRC check")
+            # Named without a progress line, so a pane that fails to open is
+            # reported as the review rather than as the DRC step before it.
+            self._current_generation_step = "Reviewing findings"
+            if not self.review_generation_findings(findings):
+                self.report_generation_step("Cancelled at review")
                 return
 
-            if self.settings.get("general", {}).get("order_number"):
-                placeholder_count = count
-            else:
+            if not order_number:
                 # Only the generation hooks need the count here, but a failure
                 # must still be attributed to this step rather than the last one.
                 placeholder_count = self.run_generation_step(
@@ -3271,6 +3231,31 @@ class JLCPCBTools(wx.Frame):
                 self._ordinary_generating = False
                 self.generate_button.Enable(True)
 
+    def review_generation_findings(self, findings: Sequence[Finding]) -> bool:
+        """Ask once about the findings that need a decision; True means generate.
+
+        Every finding is logged first, so the log keeps them even if the pane
+        cannot be shown. Without an error or a warning nothing is shown.
+        """
+        log_findings(self.logger, findings)
+        if not needs_review(findings):
+            return True
+        # The pane is interactive, so it gets the ordinary cursor.
+        busy = wx.IsBusy()
+        if busy:
+            wx.EndBusyCursor()
+        try:
+            with GenerationReviewDialog(self, findings) as dialog:
+                generate = dialog.ShowModal() == wx.ID_OK
+        finally:
+            if busy:
+                wx.BeginBusyCursor()
+        self.logger.warning(
+            "Review before generating: user chose %s",
+            "Generate anyway" if generate else "Cancel",
+        )
+        return generate
+
     def save_board_for_drc(self) -> None:
         """Save the current board so DRC checks operate on latest board state."""
         board = self._get_current_board()
@@ -3280,40 +3265,31 @@ class JLCPCBTools(wx.Frame):
 
         if hasattr(board, "Save"):
             try:
-                board.Save(board_filename)
+                saved = board.Save(board_filename)
             except TypeError:
-                board.Save()
-            return
+                saved = board.Save()
+        elif hasattr(self.pcbnew, "SaveBoard"):
+            saved = self.pcbnew.SaveBoard(board_filename, board)
+        else:
+            raise RuntimeError("Unable to save board using current KiCad API")
 
-        if hasattr(self.pcbnew, "SaveBoard"):
-            self.pcbnew.SaveBoard(board_filename, board)
-            return
+        # A save that returns nothing is taken as done; only False is a refusal.
+        if saved is False:
+            raise RuntimeError(f"KiCad did not save {board_filename}")
 
-        raise RuntimeError("Unable to save board using current KiCad API")
-
-    def run_drc_before_gerber_export(self) -> bool:
-        """Run optional DRC via KiCad Python API and prompt when violations exist."""
+    def drc_review_findings(self) -> list[Finding]:
+        """Run the forced DRC; return its errors, or why it couldn't run, as findings."""
         if not self.settings.get("gerber", {}).get("force_drc", False):
-            return True
+            return []
 
         board_filename = self._get_current_board().GetFileName()
         if not board_filename:
-            wx.MessageBox(
-                "Board must be saved before DRC can be run.",
-                "DRC check",
-                style=wx.ICON_ERROR,
-            )
-            return False
+            return [drc_failed_finding("the board must be saved first")]
 
         try:
             self.save_board_for_drc()
         except Exception as exc:
-            wx.MessageBox(
-                f"Failed to save board before DRC: {exc}",
-                "DRC check",
-                style=wx.ICON_ERROR,
-            )
-            return False
+            return [drc_failed_finding(f"saving the board failed: {exc}")]
 
         try:
             drc_counter = DRCViolationCounter(
@@ -3321,34 +3297,11 @@ class JLCPCBTools(wx.Frame):
                 working_dir=self.project_path,
             )
             self.flush_generation_ui()
-            violation_count, _messages = drc_counter.get_error_violations(
-                board_filename
-            )
-
-            if violation_count > 0:
-                dialog = wx.MessageDialog(
-                    self,
-                    f"DRC found {violation_count} error violation(s).\n\n"
-                    "Resolve or exclude DRC errors before manufacturing whenever possible.",
-                    "DRC violations found",
-                    wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
-                )
-                dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
-                result = dialog.ShowModal()
-                dialog.Destroy()
-                if result != wx.ID_YES:
-                    return False
-
-            return True
+            count, messages = drc_counter.get_error_violations(board_filename)
         except Exception as exc:
             self.logger.exception("Unexpected error while running forced DRC")
-            self.report_generation_step(f"DRC check failed: {exc}")
-            wx.MessageBox(
-                f"Unexpected error while running DRC: {exc}",
-                "DRC check",
-                style=wx.ICON_ERROR,
-            )
-            return False
+            return [drc_failed_finding(str(exc))]
+        return drc_findings(count, messages)
 
     def copy_part_lcsc(self, *_: object) -> None:
         """Copy the selected assignment value to the clipboard."""

@@ -1,12 +1,13 @@
-"""Tests for empty-zone warnings during fabrication-data generation."""
+"""Tests for empty-zone findings during fabrication-data generation."""
 
 from collections.abc import Callable
-from types import SimpleNamespace
+from types import MethodType, ModuleType, SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import pytest
 
+from .modal_test_support import review_pane
 from .wx_harness import load_mainwindow, wx_stubs
 
 _PACKAGE = "mainwindow_empty_zone_tests"
@@ -31,15 +32,20 @@ def mainwindow_module():
 
 
 def _make_window(
+    mainwindow: ModuleType,
     empty_pours: list[str],
     fill_zones: Optional[bool] = None,  # noqa: UP045
 ) -> tuple[SimpleNamespace, list[str]]:
-    """Build the smallest object needed by generate_fabrication_data()."""
+    """Build the smallest object needed by generate_fabrication_data().
+
+    The review decision is the window's real method, so a test sees the pane
+    its findings open through ``mainwindow.GenerationReviewDialog``.
+    """
     fabrication = SimpleNamespace(
         begin_ordinary_generation=MagicMock(return_value=SimpleNamespace(cpl_rows=())),
         end_ordinary_generation=MagicMock(),
         validate_generation=MagicMock(),
-        get_part_consistency_warnings=MagicMock(return_value=""),
+        get_part_consistency_warnings=MagicMock(return_value={}),
         fill_zones=MagicMock(return_value=empty_pours),
         generate_geber=MagicMock(),
         generate_excellon=MagicMock(),
@@ -60,7 +66,7 @@ def _make_window(
         settings=settings,
         fabrication=fabrication,
         logger=MagicMock(),
-        run_drc_before_gerber_export=MagicMock(return_value=True),
+        drc_review_findings=MagicMock(return_value=[]),
         layer_selection=MagicMock(),
         count_order_number_placeholders=MagicMock(return_value=0),
         store=MagicMock(),
@@ -73,6 +79,9 @@ def _make_window(
     )
     window.read_valid_corrections_for_generation = (
         lambda: window.library.read_correction_data().corrections
+    )
+    window.review_generation_findings = MethodType(
+        mainwindow.JLCPCBTools.review_generation_findings, window
     )
     window.layer_selection.GetSelection.return_value = 0
     window.layer_selection.GetString.return_value = "Auto"
@@ -92,12 +101,11 @@ def _make_window(
     return window, generation_steps
 
 
-def _set_dialog_result(wx, result):
-    """Configure and return the fake empty-zone dialog."""
-    dialog = MagicMock()
-    dialog.ShowModal.return_value = result
-    wx.MessageDialog.return_value = dialog
-    return dialog
+def _install_pane(mainwindow: ModuleType, monkeypatch: pytest.MonkeyPatch, result):
+    """Replace the review pane with a double that closes with ``result``."""
+    pane = review_pane(result)
+    monkeypatch.setattr(mainwindow, "GenerationReviewDialog", pane)
+    return pane
 
 
 def _warning_text(logger):
@@ -109,17 +117,19 @@ def _warning_text(logger):
     return "\n".join(messages)
 
 
-def test_no_empty_zones_skips_warning_and_completes_generation(mainwindow_module):
-    """A board without empty fills proceeds without creating a dialog."""
+def test_no_empty_zones_generates_without_a_pane(mainwindow_module, monkeypatch):
+    """A board without empty fills proceeds without opening the review pane."""
     mainwindow, wx = mainwindow_module
-    window, steps = _make_window([])
+    pane = _install_pane(mainwindow, monkeypatch, wx.ID_CANCEL)
+    window, steps = _make_window(mainwindow, [])
 
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
     assert "Filling copper zones" in steps
+    assert pane.instances == []
     wx.MessageDialog.assert_not_called()
     window.logger.warning.assert_not_called()
-    window.run_drc_before_gerber_export.assert_called_once_with()
+    window.drc_review_findings.assert_called_once_with()
     window.fabrication.generate_geber.assert_called_once_with(None)
     window.generate_button.Enable.assert_any_call(False)
     window.generate_button.Enable.assert_any_call(True)
@@ -132,79 +142,91 @@ def test_no_empty_zones_skips_warning_and_completes_generation(mainwindow_module
         (False, "Checking copper zone fills"),
     ],
 )
-def test_continue_logs_all_zones_and_uses_refill_aware_wording(
+def test_generate_anyway_logs_all_zones_and_uses_refill_aware_wording(
     mainwindow_module,
+    monkeypatch,
     fill_zones,
     expected_step,
 ):
-    """The warning is neutral, complete, and records the continue decision."""
+    """Every empty zone is a red finding; Generate anyway is logged and exports."""
     mainwindow, wx = mainwindow_module
+    pane = _install_pane(mainwindow, monkeypatch, wx.ID_OK)
     empty_pours = ["GND on F.Cu", "VCC on In1.Cu"]
-    window, steps = _make_window(empty_pours, fill_zones=fill_zones)
-    dialog = _set_dialog_result(wx, wx.ID_YES)
+    window, steps = _make_window(mainwindow, empty_pours, fill_zones=fill_zones)
 
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
     assert expected_step in steps
-    message = wx.MessageDialog.call_args.args[1]
-    assert "contain no filled copper" in message
-    assert "poured" not in message.lower()
-    assert all(pour in message for pour in empty_pours)
-    style = wx.MessageDialog.call_args.args[3]
-    assert style & wx.NO_DEFAULT
-    assert style & wx.ICON_WARNING
+    (shown,) = pane.instances
+    assert shown.parent is window
+    assert list(shown.findings) == mainwindow.empty_zone_findings(empty_pours)
+    assert [(f.severity.name, f.title) for f in shown.findings] == [
+        ("ERROR", "Copper zone GND on F.Cu has no fill"),
+        ("ERROR", "Copper zone VCC on In1.Cu has no fill"),
+    ]
+    assert shown.lifecycle == ["show", "end modal", "exit hook", "destroy"]
     warnings = _warning_text(window.logger)
     assert all(pour in warnings for pour in empty_pours)
-    assert "chose to continue export" in warnings
-    dialog.SetYesNoLabels.assert_called_once_with("Continue Anyway", "Cancel Export")
-    dialog.Destroy.assert_called_once_with()
-    window.run_drc_before_gerber_export.assert_called_once_with()
+    assert "user chose Generate anyway" in warnings
+    wx.MessageDialog.assert_not_called()
+    window.drc_review_findings.assert_called_once_with()
     window.fabrication.generate_geber.assert_called_once_with(None)
 
 
-@pytest.mark.parametrize("result_name", ["ID_NO", "ID_CANCEL", "unexpected"])
-def test_non_affirmative_dialog_results_stop_export(
+@pytest.mark.parametrize("result_name", ["ID_CANCEL", "unexpected"])
+def test_anything_but_generate_anyway_stops_export(
     mainwindow_module,
+    monkeypatch,
     result_name,
 ):
-    """Cancel, close, and unexpected modal results all fail closed."""
+    """Cancel, Escape, the close box and unexpected results all fail closed."""
     mainwindow, wx = mainwindow_module
     result = 999 if result_name == "unexpected" else getattr(wx, result_name)
-    window, _ = _make_window(["GND on F.Cu"])
-    dialog = _set_dialog_result(wx, result)
+    pane = _install_pane(mainwindow, monkeypatch, result)
+    window, _ = _make_window(mainwindow, ["GND on F.Cu"])
 
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
-    window.run_drc_before_gerber_export.assert_not_called()
+    # Every check runs before the one decision, DRC included.
+    window.drc_review_findings.assert_called_once_with()
     window.fabrication.generate_geber.assert_not_called()
+    window.count_order_number_placeholders.assert_not_called()
+    window.build_generate_hook_env.assert_not_called()
+    window.run_generate_hook.assert_not_called()
+    window.store.increment_generation_count.assert_not_called()
     warnings = _warning_text(window.logger)
     assert "GND on F.Cu" in warnings
-    assert "chose to stop export" in warnings
-    window.report_generation_step.assert_any_call(
-        "Export stopped by empty copper zones"
-    )
-    dialog.Destroy.assert_called_once_with()
+    assert "user chose Cancel" in warnings
+    window.report_generation_step.assert_any_call("Cancelled at review")
+    assert pane.instances[0].destroyed
     window.generate_button.Enable.assert_any_call(True)
 
 
-@pytest.mark.parametrize("failing_method", ["SetYesNoLabels", "ShowModal"])
-def test_dialog_is_destroyed_when_setup_or_display_raises(
+@pytest.mark.parametrize("failing", ["construct", "show"])
+def test_pane_failure_reports_the_error_and_restores_the_window(
     mainwindow_module,
-    failing_method,
+    monkeypatch,
+    failing,
 ):
-    """A dialog exception still releases it and restores UI state."""
+    """A pane that fails is still destroyed, and the UI state is restored."""
     mainwindow, wx = mainwindow_module
-    window, _ = _make_window(["GND on F.Cu"])
-    dialog = MagicMock()
-    getattr(dialog, failing_method).side_effect = RuntimeError("dialog failed")
-    wx.MessageDialog.return_value = dialog
+    pane = _install_pane(mainwindow, monkeypatch, wx.ID_OK)
+    if failing == "construct":
+        monkeypatch.setattr(
+            mainwindow,
+            "GenerationReviewDialog",
+            MagicMock(side_effect=RuntimeError("pane failed")),
+        )
+    else:
+        pane.error = RuntimeError("pane failed")
+    window, _ = _make_window(mainwindow, ["GND on F.Cu"])
 
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
-    dialog.Destroy.assert_called_once_with()
-    window.run_drc_before_gerber_export.assert_not_called()
+    assert all(shown.destroyed for shown in pane.instances)
+    window.fabrication.generate_geber.assert_not_called()
     window.logger.exception.assert_called_once()
     wx.MessageBox.assert_called_once()
-    assert "dialog failed" in wx.MessageBox.call_args.args[0]
-    wx.EndBusyCursor.assert_called_once_with()
+    assert "pane failed" in wx.MessageBox.call_args.args[0]
+    assert wx.BeginBusyCursor.call_count == wx.EndBusyCursor.call_count == 2
     window.generate_button.Enable.assert_any_call(True)

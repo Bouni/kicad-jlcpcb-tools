@@ -194,7 +194,7 @@ def test_manager_close_refreshes_recovered_corrections_through_real_constructor(
 
 def _generation_window(runtime: SimpleNamespace) -> tuple[SimpleNamespace, list[str]]:
     """Bind real preflight methods to the established generation test harness."""
-    window, steps = _make_window([])
+    window, steps = _make_window(runtime.mainwindow, [])
     window.library = fresh_library(runtime.library)
     window.correction_status = StatusLabel()
     window.Layout = MagicMock()
@@ -473,7 +473,7 @@ def test_generation_rejects_bad_data_before_all_side_effects(
     for name, method in vars(window.fabrication).items():
         if name != "end_ordinary_generation":
             method.assert_not_called()
-    window.run_drc_before_gerber_export.assert_not_called()
+    window.drc_review_findings.assert_not_called()
     window.count_order_number_placeholders.assert_not_called()
     window.build_generate_hook_env.assert_not_called()
     window.run_generate_hook.assert_not_called()
@@ -624,13 +624,13 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     ):
         setattr(fabrication, method, MagicMock(return_value=[]))
 
-    def damage_storage_after_preflight() -> str:
+    def damage_storage_after_preflight() -> dict[str, dict[str, list[str]]]:
         """Simulate an external legacy write after the complete snapshot was read."""
         _write_sql(
             runtime.library.correctionsdb_file,
             "UPDATE correction SET rotation='47u'",
         )
-        return ""
+        return {}
 
     fabrication.get_part_consistency_warnings = MagicMock(
         side_effect=damage_storage_after_preflight
@@ -658,7 +658,7 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     row = runtime.library.read_correction_data().rows[0]
     runtime.library.save_correction_data("Device", -90, (0, 0), rowid=row.rowid)
     fabrication.get_part_consistency_warnings.side_effect = None
-    fabrication.get_part_consistency_warnings.return_value = ""
+    fabrication.get_part_consistency_warnings.return_value = {}
 
     runtime.mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
@@ -695,7 +695,7 @@ def test_generation_prepares_placements_before_any_output_or_board_changes(
     assert steps == ["Validating corrections", "Preparing placement data"]
     for method in later_steps:
         getattr(fabrication, method).assert_not_called()
-    window.run_drc_before_gerber_export.assert_not_called()
+    window.drc_review_findings.assert_not_called()
     window.run_generate_hook.assert_not_called()
     window.store.increment_generation_count.assert_not_called()
     assert destination.read_bytes() == b"previous complete CPL\x00\xff"

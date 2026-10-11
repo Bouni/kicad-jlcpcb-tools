@@ -904,7 +904,7 @@ def test_split_designator_rows_are_not_value_conflicts(
     assert len(written) > 1
     designators = [ref for row in written for ref in row["Designator"].split(",")]
     assert designators == references
-    assert runtime.exporter.get_part_consistency_warnings() == ""
+    assert runtime.exporter.get_part_consistency_warnings() == {}
     runtime.exporter.abort_generation()
 
 
