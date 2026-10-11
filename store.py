@@ -56,6 +56,16 @@ class Store:
         )
 
     @property
+    def assembly_metadata(self) -> AssemblyMetadataCache:
+        """Return the cache supplier facts are read and recorded through."""
+        return self._assembly_metadata
+
+    @assembly_metadata.setter
+    def assembly_metadata(self, cache: AssemblyMetadataCache) -> None:
+        """Use another cache, as when Settings moves the data folder."""
+        self._assembly_metadata = cache
+
+    @property
     def board(self) -> Any:
         """Retrieve a validated live board, or the independently owned board."""
         getter = getattr(self.parent, "_get_current_board", None)

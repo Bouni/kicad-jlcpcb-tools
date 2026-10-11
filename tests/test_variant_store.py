@@ -96,6 +96,20 @@ def test_saved_supplier_facts_reach_a_reopened_store(tmp_path: Path) -> None:
     assert (row["assembly_process"], row["component_product_type"]) == ("SMT", 2)
 
 
+def test_a_replaced_cache_serves_the_rows(tmp_path: Path) -> None:
+    """A data-folder switch hands the store another cache, which rows then read."""
+    store = _store(tmp_path)
+    parts = (_component("", "C100"),)
+    store.set_assembly_metadata("C100", "SMT", 2)
+    replacement = store_module.AssemblyMetadataCache(str(tmp_path / "global.db"))
+    replacement.merge("C100", "THT", 0)
+    store.assembly_metadata = replacement
+    assert store.assembly_metadata is replacement
+    row = store.assembly_rows(_snapshot(store, parts, ("",)), "")[0]
+    assert (row["assembly_process"], row["component_product_type"]) == ("THT", 0)
+    assert store.get_missing_metadata(_snapshot(store, parts, ("",))) == set()
+
+
 def test_rows_reject_foreign_snapshots_and_removed_variants(tmp_path: Path) -> None:
     store = _store(tmp_path)
     snapshot = _snapshot(store)

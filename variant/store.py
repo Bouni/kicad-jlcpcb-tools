@@ -70,6 +70,16 @@ class VariantStore:
             else AssemblyMetadataCache(None)
         )
 
+    @property
+    def assembly_metadata(self) -> AssemblyMetadataCache:
+        """Return the cache supplier facts are read and recorded through."""
+        return self._assembly_metadata
+
+    @assembly_metadata.setter
+    def assembly_metadata(self, cache: AssemblyMetadataCache) -> None:
+        """Use another cache, as when Settings moves the data folder."""
+        self._assembly_metadata = cache
+
     def ensure_current_board(self) -> None:
         """Require reopening after Save As without persisting a board registry."""
         filename = str(self.board.GetFileName())

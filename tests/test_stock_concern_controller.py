@@ -83,6 +83,9 @@ class Store:
         self.parts = {record["reference"]: dict(record) for record in records}
         self.board = board
         self._assembly_metadata: dict[str, dict[str, Any]] = {}
+        # The window compares this cache's path when Settings moves the data
+        # folder; the fixture keeps its facts in memory, so it reports none.
+        self.assembly_metadata = types.SimpleNamespace(path=None)
         for record in records:
             self.cache_lcsc_metadata(
                 record["lcsc"],

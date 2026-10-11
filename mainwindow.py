@@ -1293,17 +1293,33 @@ class JLCPCBTools(wx.Frame):
         except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
             self._set_project_storage_error(error)
 
+    def _assembly_metadata_path(self) -> Optional[str]:
+        """Return the current data folder's global.db, or None without one."""
+        path = getattr(getattr(self, "library", None), "global_db_file", "")
+        return path if isinstance(path, str) and path.strip() else None
+
     def _assembly_metadata_cache(self) -> AssemblyMetadataCache:
         """Open the supplier facts saved in the current data folder's global.db.
 
         Without a library or its database path the facts last only as long as
         the store, as they did before they were saved.
         """
-        path = getattr(getattr(self, "library", None), "global_db_file", "")
         return AssemblyMetadataCache(
-            path if isinstance(path, str) and path.strip() else None,
-            getattr(self, "logger", None),
+            self._assembly_metadata_path(), getattr(self, "logger", None)
         )
+
+    def _rebind_assembly_metadata(self) -> None:
+        """Move the open store to the facts of a newly chosen data folder.
+
+        Lookups still in flight then record their facts in the new folder,
+        which is right because the facts belong to the part, not the board.
+        """
+        store = getattr(self, "store", None)
+        if (
+            store is not None
+            and store.assembly_metadata.path != self._assembly_metadata_path()
+        ):
+            store.assembly_metadata = self._assembly_metadata_cache()
 
     @staticmethod
     def _migration_footprints(
@@ -2862,6 +2878,9 @@ class JLCPCBTools(wx.Frame):
                     self._catalog_switch_pending = True
                     self._refresh_catalog_views()
                     return
+                # Corrections and part preferences follow the new data folder
+                # at once; the supplier facts follow before the repaint below.
+                self._rebind_assembly_metadata()
                 if self.library.state == LibraryState.INITIALIZED:
                     self._publish_catalog()
                 else:

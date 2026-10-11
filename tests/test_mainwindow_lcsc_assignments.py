@@ -796,3 +796,51 @@ def test_variant_boards_open_with_the_same_saved_facts(
 
     assert [cache.get("C100") for cache in received] == [("SMT", 2)]
     assert window.store is None
+
+
+def test_switching_data_folder_moves_the_store_to_its_saved_facts(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """A data folder chosen in Settings serves its own facts before the repaint."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    old.mkdir()
+    new.mkdir()
+    mainwindow.AssemblyMetadataCache(str(new / "global.db")).merge("C100", "THT", 0)
+    window = make_window(footprints=[Footprint(lcsc="C100")])
+    window.library.global_db_file = str(old / "global.db")
+    window.init_store()
+    window.store.cache_lcsc_metadata("C100", "SMT", 2)
+    cache = window.store.assembly_metadata
+    window._rebind_assembly_metadata()
+    assert window.store.assembly_metadata is cache
+
+    def refresh() -> bool:
+        window.library.global_db_file = str(new / "global.db")
+        return True
+
+    seen = []
+    monkeypatch.setattr(
+        window.library, "refresh_library_config", refresh, raising=False
+    )
+    monkeypatch.setattr(
+        window,
+        "_publish_catalog",
+        lambda: seen.append(window.store.get_part("R1")["component_product_type"]),
+    )
+    window.library.state = mainwindow.LibraryState.INITIALIZED
+
+    window._apply_library_settings()
+
+    assert seen == [0]
+    window.store.cache_lcsc_metadata("C200", "SMT", 2)
+    assert mainwindow.AssemblyMetadataCache(str(new / "global.db")).get("C200") == (
+        "SMT",
+        2,
+    )
+    assert mainwindow.AssemblyMetadataCache(str(old / "global.db")).get("C200") == (
+        "",
+        None,
+    )

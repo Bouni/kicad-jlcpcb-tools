@@ -66,6 +66,11 @@ class AssemblyMetadataCache:
         if path:
             self._load(path)
 
+    @property
+    def path(self) -> Optional[str]:
+        """Return the database the facts are saved in, or None for memory only."""
+        return self._path
+
     def get(self, lcsc: str) -> tuple[str, Optional[int]]:
         """Return the assembly process and product type, empty when unknown."""
         process, product_type, _fetched_at = self._facts.get(
