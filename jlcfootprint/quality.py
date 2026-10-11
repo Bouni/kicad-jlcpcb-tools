@@ -31,8 +31,13 @@ def angular_rms(
     the n-th JLC centre are one pad.  ``rotation_deg`` is the turn that carries
     the KiCad side onto the JLC side, in the frame both share (the solver's
     angle).  Empty input reports zero error rather than dividing by zero, so a
-    footprint with no matching pads has no bearing error to report.
+    footprint with no matching pads has no bearing error to report.  Lists of
+    different lengths are not pairs and raise ``ValueError``.
     """
+    if len(kicad_centres) != len(jlc_centres):
+        raise ValueError(
+            f"angular_rms needs paired centres, got {len(kicad_centres)} and {len(jlc_centres)}"
+        )
     n = len(kicad_centres)
     if n == 0:
         return 0.0

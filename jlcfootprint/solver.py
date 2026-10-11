@@ -138,9 +138,16 @@ def _solve_rotation_translation(
 def solve_transform(a: PadDict, b: PadDict) -> TransformResult:
     """Compute the rigid transform aligning pad set A onto pad set B.
 
-    Pad numbers (dict keys) are matched by equality — pin 1 in A pairs
-    with pin 1 in B.  Keys may be ints, strings ("A1", "B2"), or any
+    The keys are pair labels: the point under a key in A and the point under
+    the same key in B are one pad.  Usually the label is the pad number, so pin
+    1 in A pairs with pin 1 in B; a caller whose footprints repeat a number (a
+    DPAK's tab and its cut lead are both pad 2) pairs those pads first and gives
+    each pair its own label.  Keys may be ints, strings ("A1", "B2"), or any
     hashable.  Pads present in only one side are ignored.
+
+    When every point on one side coincides, no rotation can be read, but the
+    translation still can: the result carries the centroids' offset and its
+    residual, flagged underdetermined.
     """
     common = sorted(set(a.keys()) & set(b.keys()), key=lambda k: (str(type(k)), str(k)))
     matched = len(common)
@@ -177,7 +184,30 @@ def solve_transform(a: PadDict, b: PadDict) -> TransformResult:
         return all(abs(x - x0) < eps and abs(y - y0) < eps for (x, y) in pts)
 
     if _all_coincident(a_pts) or _all_coincident(b_pts):
-        return _identity(matched, "underdetermined")
+        # No axis to turn about, but the centroids still give the translation.
+        ax = sum(x for x, _ in a_pts) / matched
+        ay = sum(y for _, y in a_pts) / matched
+        bx = sum(x for x, _ in b_pts) / matched
+        by = sum(y for _, y in b_pts) / matched
+        tx, ty = bx - ax, by - ay
+        residual = math.sqrt(
+            sum(
+                (x + tx - u) ** 2 + (y + ty - v) ** 2
+                for (x, y), (u, v) in zip(a_pts, b_pts)
+            )
+            / matched
+        )
+        return TransformResult(
+            rotation_deg_raw=0.0,
+            rotation_deg=0,
+            offset_x=tx,
+            offset_y=ty,
+            residual=residual,
+            matched_pad_count=matched,
+            is_mirrored=False,
+            is_underdetermined=True,
+            quality_flag="underdetermined",
+        )
 
     # Proper-rotation solve.
     theta, tx, ty, residual = _solve_rotation_translation(a_pts, b_pts, mirror_y=False)

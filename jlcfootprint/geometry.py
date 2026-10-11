@@ -62,7 +62,11 @@ def pad_hash(pads: list[Pad]) -> str:
     """Return a 16-hex-character fingerprint of the pads' names, positions and effective sizes.
 
     The effective size is the pad's box after its own 90-degree rotation, so
-    turning a rectangular pad on its side changes the hash.  Pin functions do not:
+    turning a rectangular pad on its side changes the hash.  A custom-shaped pad is
+    marked as such: its size is only its anchor's and the fit leaves it unjudged,
+    so turning a pad into a custom one (or back) of the same anchor size changes
+    the hash.  Other shape changes do not, because the fit judges every other pad
+    by its box alone; a custom pad's primitives are not covered.  Pin functions do not:
     the hash identifies the copper, and a part's polarity is worked out from its
     pin functions each time rather than stored under the hash.  Order independent,
     0.001 mm quantised, stable across processes and Python versions (blake2b,
@@ -73,15 +77,16 @@ def pad_hash(pads: list[Pad]) -> str:
     rows = []
     for pad in pads:
         _, _, width, height = pad_geom(pad)
-        rows.append(
-            (
-                pad.number,
-                _quantised(pad.x),
-                _quantised(pad.y),
-                _quantised(width),
-                _quantised(height),
-            )
-        )
+        row = [
+            pad.number,
+            _quantised(pad.x),
+            _quantised(pad.y),
+            _quantised(width),
+            _quantised(height),
+        ]
+        if pad.shape == "custom":
+            row.append("custom")
+        rows.append(row)
     payload = json.dumps(sorted(rows)).encode("utf-8")
     return hashlib.blake2b(payload, digest_size=8).hexdigest()
 
@@ -157,7 +162,10 @@ def pad_box_centre(pads: list[Pad]) -> Optional[tuple[float, float]]:
     paste-only, numbered or not, it is the footprint-frame counterpart of the box
     ``Fabrication.get_position`` merges in board coordinates for the CPL's Mid X/Y,
     which keeps the same pads.  No pad is dropped here, so an unnumbered soldered
-    pad (a thermal or shield tab) counts, as it does there.
+    pad (a thermal or shield tab) counts, as it does there.  The two agree only
+    where each pad's copper is its box: ``get_position`` merges KiCad's bounding
+    box, which also covers a custom pad's primitives and copper offset from the
+    drill, while a pad here is its anchor's position and size.
     """
     boxes = [pad_geom(pad) for pad in pads]
     if not boxes:

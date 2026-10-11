@@ -84,6 +84,18 @@ def test_pad_hash_ignores_pin_function_and_sign_of_zero_but_not_size_or_turn():
     ) != pad_hash(base)
 
 
+def test_pad_hash_marks_a_custom_pad_and_no_other_shape():
+    """A custom pad of the same anchor size is different copper to the fit; an oval is not."""
+    base = [Pad("1", 0.0, 0.0, 2.0, 1.0, shape="rect"), Pad("2", 1.0, 0.0, 1.0, 1.0)]
+    oval = [Pad("1", 0.0, 0.0, 2.0, 1.0, shape="oval"), Pad("2", 1.0, 0.0, 1.0, 1.0)]
+    custom = [
+        Pad("1", 0.0, 0.0, 2.0, 1.0, shape="custom"),
+        Pad("2", 1.0, 0.0, 1.0, 1.0),
+    ]
+    assert pad_hash(oval) == pad_hash(base)
+    assert pad_hash(custom) != pad_hash(base)
+
+
 def test_named_pads_keeps_every_named_pad():
     """Unnamed pads (NPTH holes, paste-only copper) are dropped; lettered names and EP stay."""
     pads = [

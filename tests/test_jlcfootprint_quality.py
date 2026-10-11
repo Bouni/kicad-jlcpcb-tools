@@ -76,3 +76,9 @@ def test_a_pad_on_the_centroid_is_excluded_from_the_average():
     kicad = ring + [(0.02, 0.0)]
     jlc = ring + [(0.0, 0.01)]
     assert angular_rms(kicad, jlc, 0) < 0.5
+
+
+def test_lists_of_different_lengths_are_not_pairs():
+    """Paired centres must pair up: a missing JLC centre is an error, not a smaller RMS."""
+    with pytest.raises(ValueError):
+        angular_rms([(0.0, 0.0), (1.0, 0.0)], [(0.0, 0.0)], 0.0)

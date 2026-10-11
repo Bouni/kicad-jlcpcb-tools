@@ -228,6 +228,17 @@ def test_two_pads_coincident_is_underdetermined():
     r = solve_transform(a, b)
     assert r.is_underdetermined
     assert r.quality_flag == "underdetermined"
+    assert (r.offset_x, r.offset_y, r.residual) == (1.0, 2.0, 0.0)
+
+
+def test_coincident_pads_on_one_side_still_give_the_translation_and_its_residual():
+    """With no axis to turn about, the offset is the centroids' and the residual how far apart the rest lies."""
+    a = {1: (0.0, 0.0), 2: (0.0, 0.0)}
+    b = {1: (-1.0, 0.0), 2: (1.0, 0.0)}
+    r = solve_transform(a, b)
+    assert r.is_underdetermined
+    assert (r.offset_x, r.offset_y) == (0.0, 0.0)
+    assert r.residual == pytest.approx(1.0)
 
 
 def test_nan_coordinate_is_underdetermined_not_an_exception():
