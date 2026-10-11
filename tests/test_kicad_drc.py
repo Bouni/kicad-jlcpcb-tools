@@ -90,6 +90,34 @@ def test_report_without_severities_counts_every_violation(
     assert counter.get_error_violations("board.kicad_pcb") == (4, [])
 
 
+UNLABELLED = """** Found 3 DRC violations **
+[clearance]: Clearance violation (netclass 'Default' clearance 0.2000 mm; actual 0.1500 mm)
+    Rule: netclass 'Default'
+    @(10.0000 mm, 20.0000 mm): Track [GND] on F.Cu, length 5.0000 mm
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; warning
+[hole_clearance]: Hole clearance violation
+    @(30.0000 mm, 40.0000 mm): Via [GND]
+
+** End of Report **
+"""
+
+
+def test_a_violation_without_a_severity_counts_as_an_error(kicad_drc, tmp_path):
+    """A block KiCad gives no severity is never taken for a clean board."""
+    written: list[Path] = []
+    counter = kicad_drc.DRCViolationCounter(_pcbnew(UNLABELLED, written), str(tmp_path))
+
+    assert counter.get_error_violations("board.kicad_pcb") == (
+        2,
+        [
+            "[clearance]: Clearance violation (netclass 'Default' clearance "
+            "0.2000 mm; actual 0.1500 mm)",
+            "[hole_clearance]: Hole clearance violation",
+        ],
+    )
+
+
 def test_failed_report_raises_and_removes_the_report(
     kicad_drc: ModuleType, tmp_path: Path
 ) -> None:
