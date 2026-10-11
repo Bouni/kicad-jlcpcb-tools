@@ -1313,8 +1313,13 @@ class JLCPCBTools(wx.Frame):
 
         Lookups still in flight then record their facts in the new folder,
         which is right because the facts belong to the part, not the board.
+        A design-variant window keeps its store on the controller while a
+        storage error has cleared ``self.store``; that store moves too, so the
+        recovery that restores it reads the new folder.
         """
-        store = getattr(self, "store", None)
+        store = getattr(self, "store", None) or getattr(
+            getattr(self, "_variant_controller", None), "cache", None
+        )
         if (
             store is not None
             and store.assembly_metadata.path != self._assembly_metadata_path()
