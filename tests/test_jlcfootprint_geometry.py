@@ -1,5 +1,7 @@
 """Tests for jlcfootprint.geometry: units, frames, hashing and the CCW conversion."""
 
+import math
+
 import pytest
 
 from jlcfootprint.geometry import (
@@ -182,6 +184,14 @@ def test_normalize_angle_is_half_open():
         170.0,
         0.0,
     ]
+
+
+def test_normalize_angle_returns_nan_for_a_non_finite_angle_and_wraps_a_large_one():
+    """An infinity or NaN comes back as NaN at once; a huge finite angle wraps in constant time."""
+    for angle in (math.inf, -math.inf, math.nan):
+        assert math.isnan(normalize_angle(angle))
+    assert normalize_angle(360.0 * 10**9 + 90.0) == 90.0
+    assert -180.0 < normalize_angle(-1e15) <= 180.0
 
 
 def test_snap_to_90_rounds_to_the_nearest_quarter_turn():

@@ -210,12 +210,21 @@ def pad_geom(pad: Pad) -> tuple[float, float, float, float]:
 
 
 def normalize_angle(degrees: float) -> float:
-    """Return the angle in degrees, normalised to the half-open interval (-180, 180]."""
-    while degrees <= -180.0:
-        degrees += 360.0
-    while degrees > 180.0:
-        degrees -= 360.0
-    return degrees
+    """Return the angle in degrees, normalised to the half-open interval (-180, 180].
+
+    A non-finite angle names no direction and comes back as NaN, which the callers'
+    comparisons carry through as they carry the solver's NaN for a non-finite pad,
+    rather than raising.  ``fmod`` is exact, so a finite angle of any size takes
+    constant time and loses no precision.
+    """
+    if not math.isfinite(degrees):
+        return math.nan
+    wrapped = math.fmod(degrees, 360.0)
+    if wrapped > 180.0:
+        return wrapped - 360.0
+    if wrapped <= -180.0:
+        return wrapped + 360.0
+    return wrapped
 
 
 def snap_to_90(degrees: float) -> int:
