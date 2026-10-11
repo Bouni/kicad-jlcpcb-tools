@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import replace
+import time
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import Mock
@@ -919,6 +920,22 @@ def test_supplier_publication_preserves_captured_drag_and_defers_layout(
             for row in range(view.GetNumberRows())
             for name in view.model.variants
         )
+
+    matrix(check)
+
+
+def test_held_group_drop_lands_on_its_target_after_a_late_release(
+    matrix: Any,
+) -> None:
+    """A still pointer on the target group drops there however late it releases."""
+
+    def check(h: MatrixHarness) -> None:
+        destination = h.start_drag("C", "B")
+        # A busy runner can take this long between the motion and the release.
+        deadline = time.monotonic() + 0.4
+        wait_until(h.wx, lambda: time.monotonic() >= deadline)
+        h.header_event(h.wx.wxEVT_LEFT_UP, destination)
+        assert h.order() == ("", "A", "C", "B", "D")
 
     matrix(check)
 

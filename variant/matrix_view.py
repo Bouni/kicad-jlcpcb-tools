@@ -1522,6 +1522,10 @@ class VariantMatrixView(gridlib.Grid):
         if not header.HasCapture():
             header.CaptureMouse()
 
+    def _header_scroll_edge(self) -> int:
+        """Width of the strip at each header end where a held drag auto-scrolls."""
+        return max(self.FromDIP(16), self.GetCharHeight())
+
     def _header_logical_x(self, x: int) -> int:
         """Convert the scrolling label child's x to the grid's column coordinates."""
         window = self.GetGridWindow()
@@ -1671,7 +1675,7 @@ class VariantMatrixView(gridlib.Grid):
                 drag.before = variant
                 drag.marker_x = left
                 break
-        edge = max(self.FromDIP(16), self.GetCharHeight())
+        edge = self._header_scroll_edge()
         if within_header and (drag.x < edge or drag.x >= width - edge):
             if not self._header_drag_timer.IsRunning():
                 self._header_drag_timer.Start(40)
@@ -1714,7 +1718,7 @@ class VariantMatrixView(gridlib.Grid):
             self._header_drag_timer.Stop()
             return
         width = drag.window.GetClientSize().width
-        edge = max(self.FromDIP(16), self.GetCharHeight())
+        edge = self._header_scroll_edge()
         direction = -1 if drag.x < edge else 1 if drag.x >= width - edge else 0
         if not direction or not 0 <= drag.y < self.GetColLabelSize():
             self._header_drag_timer.Stop()
