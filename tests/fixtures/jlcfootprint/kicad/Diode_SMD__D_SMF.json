@@ -1,0 +1,33 @@
+{
+ "library": "Diode_SMD",
+ "name": "D_SMF",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -1.45,
+   "y": 0.0,
+   "width": 1.3,
+   "height": 1.4,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 1.45,
+   "y": 0.0,
+   "width": 1.3,
+   "height": 1.4,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -2.35,
+  -1.15,
+  2.35,
+  1.15
+ ]
+}

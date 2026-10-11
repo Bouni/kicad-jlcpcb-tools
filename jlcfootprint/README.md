@@ -2,7 +2,7 @@
 
 JLC places each part by the EasyEDA footprint of the LCSC part number you picked, not by your KiCad footprint. This package works out a part's CPL rotation from that footprint: it aligns the KiCad footprint's pads onto JLC's pads, and the turn that aligns them is the rotation the CPL needs. The same alignment says whether the picked part fits the pads at all.
 
-Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx or pcbnew, and these modules use the standard library only. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers are recorded under `tests/fixtures/jlcfootprint/`.
+Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx or pcbnew, and these modules use the standard library only. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers and KiCad's library footprints are recorded under `tests/fixtures/jlcfootprint/`.
 
 | Module | What it holds |
 | --- | --- |
@@ -13,6 +13,7 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `easyeda_parse.py` | EasyEDA's answers read into records: the batch lookup, footprint and symbol documents, the classic per-part response |
 | `records.py` | The small records judging a part needs without the parsers: symbol pins, the pin-1 labels, the drawings' marks |
 | `drawing.py` | The `+` marks and the body outline read from EasyEDA's symbol and footprint drawings |
+| `boardfile.py` | Footprints, pads and courtyards read from KiCad board and footprint files, without pcbnew |
 
 ## Frames and units
 
@@ -91,11 +92,16 @@ No EasyEDA record says which terminal of a two-pad part is positive. The drawing
 
 When any of this fails, no terminal is named. The footprint's body outline (Pro layer 48, classic layer 99) is read as a box in millimetres, in the same frame as the pads. Only its straight records are boxed; an arc, a circle or a curved outline on that layer is left out, so a body drawn partly with them gives the box of its straight records, which can only understate it. A classic drawing is boxed about the origin its pads were read against, which the caller must pass.
 
+## Reading KiCad files
+
+The plugin reads a board through pcbnew. The development tools and the tests read KiCad files from plain Python instead: `boardfile.py` parses the footprints of a `.kicad_pcb` or `.kicad_mod` file into their pads (in the footprint's own frame, with the placed rotation taken off), pin functions, LCSC field and courtyard box. The LCSC field is read as the plugin reads a footprint's default assignment, `part_assignments.resolve_assignment` (`boardfile.lcsc_assignment`, and a test holds the two together): only part-number field names count (LCSC, JLC or JLCPCB, with an optional Part, Part Number, PN, Code or the like), the number is upper-cased, and two fields naming different numbers are a conflict, read as no number. The pads are the soldered ones, the same set the plugin keeps when it reads a board through pcbnew: every copper pad that is not an NPTH hole, numbered or not. A paste-only aperture is left out. The alignment pairs pads by name, so an unnumbered pad only counts in the pad-box centre. That centre is taken from the pads' positions and sizes, so it is the centre of pcbnew's pad bounding box except where the copper is not the pad's size at its position: a custom pad's extra primitives, copper offset from its drill, or a pad turned off the 90-degree grid. Over KiCad 10's library the pad sets agree on every footprint, and the centres on all but 385 of the 15,113 footprints with soldered pads: 358 with custom pads, 11 with offset copper, 2 with both and 14 with pads at other angles. The largest difference is 2.25 mm.
+
+`tools/jlcfootprint/kicad_library.py` reads a named KiCad library footprint for the tests. It uses the snapshot recorded under `tests/fixtures/jlcfootprint/kicad/` when there is one, so the tests see the same pads on every machine and run without KiCad. `tools/jlcfootprint/snapshot_kicad_footprints.py` records the snapshots from an installed KiCad, and `test_jlcfootprint_snapshots.py` compares them with the installed library where there is one.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **A reader** for KiCad board and library files.
 - **The resolver and its gate**: rotation, fit and polarity per part, checked offline against parts whose rotations were read from JLC's placement preview.
 - **Background fetch and storage**: the EasyEDA client, a paced worker, the response cache and per-project verdicts.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.

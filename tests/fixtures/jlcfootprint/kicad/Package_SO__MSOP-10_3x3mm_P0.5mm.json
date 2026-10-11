@@ -1,0 +1,113 @@
+{
+ "library": "Package_SO",
+ "name": "MSOP-10_3x3mm_P0.5mm",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -2.1,
+   "y": -1.0,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": -2.1,
+   "y": -0.5,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "3",
+   "x": -2.1,
+   "y": 0.0,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "4",
+   "x": -2.1,
+   "y": 0.5,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "5",
+   "x": -2.1,
+   "y": 1.0,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "6",
+   "x": 2.1,
+   "y": 1.0,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "7",
+   "x": 2.1,
+   "y": 0.5,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "8",
+   "x": 2.1,
+   "y": 0.0,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "9",
+   "x": 2.1,
+   "y": -0.5,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "10",
+   "x": 2.1,
+   "y": -1.0,
+   "width": 1.5,
+   "height": 0.35,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -3.1,
+  -1.75,
+  3.1,
+  1.75
+ ]
+}

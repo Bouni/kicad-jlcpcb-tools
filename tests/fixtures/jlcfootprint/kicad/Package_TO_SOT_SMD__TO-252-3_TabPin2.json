@@ -1,0 +1,53 @@
+{
+ "library": "Package_TO_SOT_SMD",
+ "name": "TO-252-3_TabPin2",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -5.04,
+   "y": -2.28,
+   "width": 2.2,
+   "height": 1.2,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": -5.04,
+   "y": 0.0,
+   "width": 2.2,
+   "height": 1.2,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 1.26,
+   "y": 0.0,
+   "width": 6.4,
+   "height": 5.8,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "3",
+   "x": -5.04,
+   "y": 2.28,
+   "width": 2.2,
+   "height": 1.2,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -6.39,
+  -3.5,
+  4.71,
+  3.5
+ ]
+}
