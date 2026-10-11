@@ -46,9 +46,11 @@ class Pad(NamedTuple):
 def named_pads(pads: list[Pad]) -> list[Pad]:
     """Return the pads that carry a name, the only pads that can be paired.
 
-    Unnamed pads are NPTH holes and paste-only copper.  Pads are paired between
-    two footprints by name, compared as strings, so lettered pads (A1, B12) pair
-    too.
+    Pads are paired between two footprints by name, compared as strings, so
+    lettered pads (A1, B12) pair too, and a pad with no name has nothing to pair
+    by: an NPTH hole, paste-only copper, or an unnumbered soldered pad such as a
+    thermal or shield tab.  Leaving a pad out here keeps it out of the pairing
+    only; :func:`pad_box_centre` still counts an unnumbered soldered pad.
     """
     return [pad for pad in pads if pad.number]
 

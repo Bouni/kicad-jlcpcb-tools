@@ -31,7 +31,7 @@ JLC's placement preview is the evidence. A SOIC-8 whose package name carries a -
 
 - It is the closed-form 2D Kabsch fit: the best proper rotation comes straight from the cross-covariance of the two centred sets through `atan2`. There is no SVD and no numpy.
 - `rotation_deg_raw` is the exact angle and `rotation_deg` the nearest multiple of 90. `residual` is the RMS distance between paired pads at the raw angle.
-- Pads are paired by equal names. A `Pad`'s number is a string, so lettered pads (A1, B12) pair too. A pad on only one side is ignored. Unnamed pads (NPTH holes, paste-only copper) cannot be paired; `geometry.named_pads` leaves them out.
+- Pads are paired by equal names. A `Pad`'s number is a string, so lettered pads (A1, B12) pair too. A pad on only one side is ignored. A pad with no name (an NPTH hole, paste-only copper, an unnumbered thermal or shield tab) has nothing to pair by, so `geometry.named_pads` leaves it out of the pairing; the pad-box centre still counts an unnumbered soldered pad.
 - **The mirror flag.** The solver also fits the mirror image of the first set. When that fit's residual is under a tenth of the best rotation's, the result is flagged `is_mirrored`, but the reflection is never applied: a mirrored pin order is a finding about the footprint, never a rotation. A two-pad part fits both ways exactly, and a small floor keeps that from counting as a mirror.
 - Fewer than two paired pads, pads that all sit on one point, or a non-finite coordinate give an underdetermined result instead of an exception.
 
