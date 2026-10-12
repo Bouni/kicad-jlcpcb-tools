@@ -156,11 +156,26 @@ force-sort-within-sections = true
 combine-as-imports = true
 split-on-trailing-comma = false
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pcbnew".msg = "Reach KiCad through kicad_backend; only plugin.py imports pcbnew and hands it to the backend."
+
 [tool.ruff.lint.per-file-ignores]
 "db_build/jlcparts_db_convert.py" = ["T201"]
 "common/filemgr.py" = ["T201"]
 "common/partsdb.py" = ["T201"]
 "common/progress.py" = ["T201"]
+# The action plugin and the tests may import pcbnew. The SWIG backend imports
+# nothing: it is handed the module. A leading "./" anchors a pattern at the
+# repository root, so a file of the same name elsewhere is not exempt.
+"./plugin.py" = ["TID251"]
+"./tests/**" = ["TID251"]
+# Modules that still import pcbnew themselves. Each migration to kicad_backend
+# removes its module from this list until none is left; a module that does not
+# import pcbnew is never listed, so the ban covers it.
+"./fabrication.py" = ["TID251"]
+"./mainwindow.py" = ["TID251"]
+"./schematicexport.py" = ["TID251"]
+"./variant/native.py" = ["TID251"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25
