@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 import json
+import os
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -9,6 +10,12 @@ from typing import Any
 import pytest
 
 from .wx_harness import load_siblings
+
+# Plotting needs a desktop session; native lanes enable it explicitly.
+requires_native_plotting = pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native KiCad plotting requires an explicitly enabled desktop session",
+)
 
 
 @pytest.fixture

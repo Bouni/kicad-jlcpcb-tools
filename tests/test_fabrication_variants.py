@@ -9,7 +9,6 @@ from contextlib import ExitStack, closing
 import csv
 from dataclasses import replace
 from functools import partial
-import os
 from pathlib import Path
 import re
 import sqlite3
@@ -35,6 +34,7 @@ from tests.fabrication_test_support import (
 from tests.native_kicad_support import (
     native_bindings as kicad_bindings,
     native_runtime as kicad_runtime,
+    requires_native_plotting,
 )
 from tests.native_window_support import window_ui
 from tests.variant_model_test_support import Snapshot, State
@@ -1003,12 +1003,6 @@ def test_recovery_cleanup_preserves_publication_result(
     assert str(recovery) in caplog.text
 
 
-_requires_native_plotting = pytest.mark.skipif(
-    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
-    reason="native KiCad plotting requires an explicitly enabled desktop session",
-)
-
-
 def _plot(
     pcbnew: ModuleType,
     board: Any,
@@ -1061,7 +1055,7 @@ def _gerber_content(text: str) -> str:
 
 @pytest.mark.native_kicad
 @pytest.mark.kicad_variants
-@_requires_native_plotting
+@requires_native_plotting
 def test_native_variant_text_project_variables_and_dnp_marks(
     native_runtime: SimpleNamespace, tmp_path: Path
 ) -> None:
@@ -1084,7 +1078,7 @@ def test_native_variant_text_project_variables_and_dnp_marks(
 
 @pytest.mark.native_kicad
 @pytest.mark.kicad_variants
-@_requires_native_plotting
+@requires_native_plotting
 def test_native_serialization_and_production_plot_clone_preserve_rendering(
     native_runtime: SimpleNamespace, tmp_path: Path
 ) -> None:
@@ -1133,7 +1127,7 @@ def _read_csv(path: str) -> list[dict[str, str]]:
 
 @pytest.mark.native_kicad
 @pytest.mark.kicad_variants
-@_requires_native_plotting
+@requires_native_plotting
 def test_native_exports_publish_each_variant_with_shared_physical_corrections(
     native_runtime: SimpleNamespace,
 ) -> None:

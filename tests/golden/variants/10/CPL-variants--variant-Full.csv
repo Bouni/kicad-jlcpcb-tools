@@ -1,0 +1,6 @@
+Designator,Val,Package,Mid X,Mid Y,Rotation,Layer
+C1,100n,C_0603_1608Metric,14.000000,14.000000,0.0,top
+J1,Conn_01x02,PinHeader_1x02_P2.54mm_Vertical,24.770000,14.250000,0.0,top
+Q1,MMBT3904,SOT-23,14.000000,8.000000,0.0,bottom
+R1,4k7,R_0603_1608Metric,6.000000,14.000000,0.0,top
+R2,10k,R_0603_1608Metric,6.000000,9.000000,90.0,top
