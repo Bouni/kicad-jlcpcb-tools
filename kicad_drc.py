@@ -28,25 +28,34 @@ def _load_board_from_path(pcbnew_module: Any, board_filename: str):
     raise RuntimeError("KiCad Python module does not expose GetBoard() or LoadBoard()")
 
 
+# KiCad 9.0.1 renamed EDA_UNITS::MILLIMETRES to MM; KiCad 7.0 to 9.0.0 have the old name.
+_MILLIMETRE_UNIT_NAMES = ("EDA_UNITS_MM", "EDA_UNITS_MILLIMETRES")
+
+
+def _millimetre_units(pcbnew_module: Any) -> tuple[str, Any]:
+    """Return the name and value of the bindings' millimetre unit."""
+    for name in _MILLIMETRE_UNIT_NAMES:
+        if hasattr(pcbnew_module, name):
+            return name, getattr(pcbnew_module, name)
+    raise RuntimeError(
+        "KiCad Python module exposes neither EDA_UNITS_MM nor EDA_UNITS_MILLIMETRES"
+    )
+
+
 def run_drc(pcbnew_module: Any, board_filename: str, output_path: str) -> bool:
     """Run DRC using `pcbnew.WriteDRCReport` and write a text report."""
     if not hasattr(pcbnew_module, "WriteDRCReport"):
         raise RuntimeError("KiCad Python module does not expose WriteDRCReport()")
+    units_name, units = _millimetre_units(pcbnew_module)
 
     board = _load_board_from_path(pcbnew_module, board_filename)
     logger.info(
-        "Running SWIG DRC: WriteDRCReport(board=%s, report=%s, units=EDA_UNITS_MM, report_all_track_errors=False)",
+        "Running SWIG DRC: WriteDRCReport(board=%s, report=%s, units=%s, report_all_track_errors=False)",
         board_filename,
         output_path,
+        units_name,
     )
-    return bool(
-        pcbnew_module.WriteDRCReport(
-            board,
-            output_path,
-            pcbnew_module.EDA_UNITS_MM,
-            False,
-        )
-    )
+    return bool(pcbnew_module.WriteDRCReport(board, output_path, units, False))
 
 
 def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
