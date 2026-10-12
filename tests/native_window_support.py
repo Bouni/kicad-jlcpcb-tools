@@ -421,18 +421,22 @@ def window_ui(
     package = "_variant_windows"
     if request.node.get_closest_marker("native_kicad"):
         pcbnew = request.getfixturevalue("native_bindings").pcbnew
-        board = pcbnew.BOARD()
-        for name in ("A", "B", "Default"):
-            board.AddVariant(name)
-        for index in range(3):
-            fp = pcbnew.FOOTPRINT(board)
-            fp.SetReference(f"R{index + 1}")
-            fp.SetValue("10k")
-            fp.SetFPID(pcbnew.LIB_ID("Resistor_SMD", "R_0603_1608Metric"))
-            fp.SetField("LCSC", "C1")
-            board.Add(fp)
-        board.SetFileName(str(tmp_path / "native-dialog.kicad_pcb"))
-        assert pcbnew.SaveBoard(board.GetFileName(), board, True)
+        if "native_window_board" in request.fixturenames:
+            # The test supplies its own saved board instead of the variant one.
+            board = request.getfixturevalue("native_window_board")
+        else:
+            board = pcbnew.BOARD()
+            for name in ("A", "B", "Default"):
+                board.AddVariant(name)
+            for index in range(3):
+                fp = pcbnew.FOOTPRINT(board)
+                fp.SetReference(f"R{index + 1}")
+                fp.SetValue("10k")
+                fp.SetFPID(pcbnew.LIB_ID("Resistor_SMD", "R_0603_1608Metric"))
+                fp.SetField("LCSC", "C1")
+                board.Add(fp)
+            board.SetFileName(str(tmp_path / "native-dialog.kicad_pcb"))
+            assert pcbnew.SaveBoard(board.GetFileName(), board, True)
     else:
 
         class ActionPlugin:
