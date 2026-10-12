@@ -870,7 +870,7 @@ def test_selector_spacer_preserves_query_fields_row_alignment_and_sorting(
     selector.populate_part_list(
         [tuple(db_row[field] for field in partselector.DB_FIELDS)], 0
     )
-    row = selector.part_list_model.AddEntry.call_args.args[0]
+    (row,) = selector.part_list_model.ReplaceAll.call_args.args[0]
     assert len(row) == len(columns)
     assert row[0] == "C123" and row[5] == "25"
     assert row[-2:] == ["1 parts: $0.5 each / $0.5 total", ""]
@@ -1250,7 +1250,8 @@ def test_retarget_and_search_keep_the_current_size_and_column_widths(
 
     assert selector.keyword.GetValue() == "C321"
     assert parent.library.search.call_args.args[0]["keyword"] == "C321"
-    assert selector.part_list_model.AddEntry.call_args.args[0][0] == "C321"
+    (row,) = selector.part_list_model.ReplaceAll.call_args.args[0]
+    assert row[0] == "C321"
     assert selector.GetSize() == (2400, 1600)
     assert [column.GetWidth() for column in selector.part_list.GetColumns()] == widths
 

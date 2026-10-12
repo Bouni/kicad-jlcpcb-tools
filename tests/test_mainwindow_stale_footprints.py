@@ -23,9 +23,8 @@ def test_populate_footprint_list_skips_deleted_and_retains_live_row(
 
     mainwindow.JLCPCBTools.populate_footprint_list(window)
 
-    assert [
-        call.args[0][0] for call in window.partlist_data_model.AddEntry.call_args_list
-    ] == ["R2"]
+    entries = window.partlist_data_model.ReplaceAll.call_args.args[0]
+    assert [row[0] for row, _part, _pending in entries] == ["R2"]
     assert window.store.get_part("R1") is None
 
 

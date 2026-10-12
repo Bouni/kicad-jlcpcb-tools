@@ -42,6 +42,33 @@ def _populate_selector(selector: Any) -> Any:
     return selector.part_list_model.ObjectToItem(selector.part_list_model.data[0])
 
 
+def test_search_results_reach_the_view_as_resets_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A search empties the list and refills it with one Cleared(), never per row."""
+    with stock_modules() as modules:
+        monkeypatch.setattr(
+            layout_ui.partselector,
+            "PartSelectorDataModel",
+            modules.datamodel.PartSelectorDataModel,
+        )
+        selector = layout_ui._open_selector(monkeypatch, {})
+        selector.parts = {"R1": ""}
+        model = selector.part_list_model
+        fields = layout_ui.partselector.DB_FIELDS
+        for lcscs in (["C1", "C2", "C3"], ["C4"], []):
+            model.notifications.clear()
+            selector.populate_part_list(
+                [
+                    tuple({"LCSC Part": lcsc}.get(field, "") for field in fields)
+                    for lcsc in lcscs
+                ],
+                search_duration=0,
+            )
+            assert model.notifications == [("cleared", ()), ("cleared", ())]
+            assert [row[model.columns["lcsc"]] for row in model.data] == lcscs
+
+
 def _stock_label(model: Any, item: Any, key: str) -> str:
     """Read rendered stock through the real model's public view interface."""
     return model.GetValue(item, model.columns[key])
