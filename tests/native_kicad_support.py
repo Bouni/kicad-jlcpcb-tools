@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 
@@ -48,6 +48,48 @@ def native_field(footprint: Any, name: str) -> Any:
     return next(
         (field for field in footprint.GetFields() if field.GetName() == name), None
     )
+
+
+def set_native_field(footprint: Any, name: str, value: str) -> None:
+    """Set a footprint field's text through the API the running KiCad has.
+
+    KiCad 7 keeps a footprint's fields in a property map, without visibility.
+    """
+    if hasattr(footprint, "SetField"):
+        footprint.SetField(name, value)
+    else:
+        footprint.SetProperty(name, value)
+
+
+def native_fields(footprint: Any) -> dict[str, str]:
+    """Read every field's text from KiCad 8's fields or KiCad 7's property map."""
+    if hasattr(footprint, "GetFields"):
+        return {
+            str(field.GetName()): str(field.GetText())
+            for field in footprint.GetFields()
+        }
+    return {
+        str(name): str(text) for name, text in dict(footprint.GetProperties()).items()
+    }
+
+
+def native_field_text(footprint: Any, name: str) -> Optional[str]:
+    """Read a footprint field's text on any KiCad; None when there is no field."""
+    return native_fields(footprint).get(name)
+
+
+def place_native_pad(pad: Any, position: Any) -> None:
+    """Put a pad at a position relative to its footprint's origin and rotation.
+
+    KiCad 7 has no SetFPRelativePosition. It stores the relative position as
+    Pos0 and recomputes the board position from it when the footprint turns,
+    so both are set there.
+    """
+    if hasattr(pad, "SetFPRelativePosition"):
+        pad.SetFPRelativePosition(position)
+    else:
+        pad.SetPos0(position)
+        pad.SetDrawCoord()
 
 
 def _native_board(

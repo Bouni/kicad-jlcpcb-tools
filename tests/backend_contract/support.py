@@ -45,10 +45,18 @@ def uuid_owner(parts: Sequence[Part], index: int) -> int:
 
 @dataclass
 class Board:
-    """A backend holding the described parts, and how to close its board."""
+    """A backend holding the described parts, and how to close its board.
+
+    The rest says what the backend's KiCad holds: the fields every footprint
+    has, in order, whether a footprint has a DNP flag, and whether it keeps
+    two fields with one name. The defaults are KiCad 9's and 10's.
+    """
 
     backend: Any
     close: Callable[[], None]
+    builtin_fields: tuple[str, ...] = ("Reference", "Value", "Datasheet", "Description")
+    holds_dnp: bool = True
+    keeps_repeated_fields: bool = True
 
 
 def fake_board(modules: SimpleNamespace, parts: Sequence[Part], _request: Any) -> Board:

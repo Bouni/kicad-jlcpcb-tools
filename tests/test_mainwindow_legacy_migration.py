@@ -13,7 +13,7 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 
 from . import part_preferences_test_support as support
-from .native_kicad_support import native_bindings, native_field
+from .native_kicad_support import native_bindings, native_field_text, set_native_field
 
 __all__ = ["native_bindings"]
 
@@ -605,11 +605,11 @@ def test_native_disk_parser_keeps_unsaved_override_out_of_archive_proof(
     footprint.SetReference("R1")
     footprint.SetValue("10k")
     footprint.SetFPID(pcbnew.LIB_ID("R", "R_0603"))
-    footprint.SetField("LCSC", "C123")
+    set_native_field(footprint, "LCSC", "C123")
     board.Add(footprint)
     assert pcbnew.SaveBoard(filename, board)
     disk_before = Path(filename).read_bytes()
-    footprint.SetField("LCSC", "C456")
+    set_native_field(footprint, "LCSC", "C456")
     window.pcbnew.GetBoard = lambda: board
     window._board_identity = mainwindow.board_identity(board)
     cached_loader = MagicMock(return_value=board)
@@ -623,7 +623,7 @@ def test_native_disk_parser_keeps_unsaved_override_out_of_archive_proof(
 
     cached_loader.assert_not_called()
     save.assert_not_called()
-    assert native_field(footprint, "LCSC").GetText() == "C456"
+    assert native_field_text(footprint, "LCSC") == "C456"
     assert Path(filename).read_bytes() == disk_before
     with closing(sqlite3.connect(database)) as connection:
         assert connection.execute("SELECT lcsc FROM part_info").fetchall() == [

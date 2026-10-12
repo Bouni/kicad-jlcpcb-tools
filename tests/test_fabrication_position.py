@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from tests.fabrication_test_support import Point, modules as fabrication_modules
+from tests.native_kicad_support import place_native_pad
 from tests.wx_harness import load_siblings
 
 modules = fabrication_modules
@@ -125,9 +126,7 @@ def test_native_position_ignores_npth_and_paste_only_pads(tmp_path: Path) -> Non
             pad.SetSize(pcbnew.VECTOR2I(pcbnew.FromMM(1.5), pcbnew.FromMM(1.5)))
             if attribute != pcbnew.PAD_ATTRIB_SMD:
                 pad.SetDrillSize(pcbnew.VECTOR2I(pcbnew.FromMM(1), pcbnew.FromMM(1)))
-            pad.SetFPRelativePosition(
-                pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y))
-            )
+            place_native_pad(pad, pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
             footprint.Add(pad)
         fabrication = loaded["fabrication"].Fabrication(
             SimpleNamespace(settings={}), board

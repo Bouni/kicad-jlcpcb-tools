@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import pytest
 
-from .native_kicad_support import native_field
+from .native_kicad_support import native_field, native_field_text, set_native_field
 from .wx_harness import load_siblings
 
 
@@ -527,7 +527,7 @@ def test_native_fields_save_reload_and_rollback(
     board = pcbnew.BOARD()
     first = pcbnew.FOOTPRINT(board)
     first.SetReference("R1")
-    first.SetField("JLCPCB Rotation", "90")
+    set_native_field(first, "JLCPCB Rotation", "90")
     board.Add(first)
     second = Footprint({"LCSC": "C200"})
     second.fail_after = "LCSC"
@@ -535,13 +535,17 @@ def test_native_fields_save_reload_and_rollback(
         edits.apply_board_part_edits(
             [(first, {"lcsc": "C999"}), (second, {"lcsc": "C999"})]
         )
-    assert native_field(first, "LCSC") is None
+    assert native_field_text(first, "LCSC") is None
     edits.apply_board_part_edits([(first, {"lcsc": "C123", "exclude_from_bom": True})])
-    assert native_field(first, "LCSC").IsVisible() is False
+    if hasattr(first, "GetFields"):
+        assert native_field(first, "LCSC").IsVisible() is False
+    else:
+        # KiCad 7's property map has no visibility, so the new entry is all there is.
+        assert dict(first.GetProperties()) == {"JLCPCB Rotation": "90", "LCSC": "C123"}
     filename = str(tmp_path / "ordinary.kicad_pcb")
     assert pcbnew.SaveBoard(filename, board)
     loaded_board = pcbnew.LoadBoard(filename)
     loaded = loaded_board.FindFootprintByReference("R1")
-    assert native_field(loaded, "LCSC").GetText() == "C123"
-    assert native_field(loaded, "JLCPCB Rotation").GetText() == "90"
+    assert native_field_text(loaded, "LCSC") == "C123"
+    assert native_field_text(loaded, "JLCPCB Rotation") == "90"
     assert loaded.IsExcludedFromBOM() is True
