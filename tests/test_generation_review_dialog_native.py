@@ -171,6 +171,39 @@ def test_rows_group_under_headings_and_opening_selects_nothing(
     run_native(exercise)
 
 
+def _dominant_colour(wx: Any, icon: Any) -> tuple[int, int, int]:
+    """Return the most common opaque colour of a list cell's icon."""
+    bitmap = wx.Bitmap()
+    bitmap.CopyFromIcon(icon)
+    image = bitmap.ConvertToImage()
+    counts: dict[tuple[int, int, int], int] = {}
+    for y in range(image.GetHeight()):
+        for x in range(image.GetWidth()):
+            if not image.HasAlpha() or image.GetAlpha(x, y) > 200:
+                colour = (image.GetRed(x, y), image.GetGreen(x, y), image.GetBlue(x, y))
+                counts[colour] = counts.get(colour, 0) + 1
+    return max(counts, key=counts.__getitem__)
+
+
+def test_every_row_carries_its_severity_colour(native: SimpleNamespace) -> None:
+    """Red, amber and blue on every platform, headings included."""
+    red, amber, blue = (211, 47, 47), (242, 153, 0), (30, 136, 229)
+
+    def exercise(frame: Any, wx: Any) -> None:
+        dialog = native.pane.GenerationReviewDialog(frame, _findings(native))
+        try:
+            control = dialog.findings_list
+            colours = [
+                _dominant_colour(wx, control.GetValue(row, 0).GetIcon())
+                for row in range(control.GetItemCount())
+            ]
+        finally:
+            dialog.Destroy()
+        assert colours == [red] * 3 + [amber] * 3 + [blue] * 2
+
+    run_native(exercise)
+
+
 def test_selecting_a_row_shows_its_detail(native: SimpleNamespace) -> None:
     """A finding shows its detail; a heading or no selection shows the prompt."""
 

@@ -17,13 +17,17 @@ from .generation_review import (
     group_findings,
     summary_text,
 )
-from .helpers import HighResWxSize
+from .helpers import HighResWxSize, loadIconScaled
 
 NO_SELECTION = "Select a finding to see its detail."
+# Bundled coloured icons look the same everywhere. wxWidgets 3.3 on macOS
+# draws the art provider's error, warning and information icons as
+# monochrome SF Symbols, which lose the colours and have crashed AppKit when
+# drawn in a list cell.
 _ICONS = {
-    Severity.ERROR: wx.ART_ERROR,
-    Severity.WARNING: wx.ART_WARNING,
-    Severity.INFO: wx.ART_INFORMATION,
+    Severity.ERROR: "mdi-alert-circle-color.png",
+    Severity.WARNING: "mdi-alert-color.png",
+    Severity.INFO: "mdi-information-color.png",
 }
 
 
@@ -73,8 +77,9 @@ class GenerationReviewDialog(wx.Dialog):
             width=HighResWxSize(self, wx.Size(480, -1)).GetWidth(),
             mode=dv.DATAVIEW_CELL_INERT,
         )
+        scale = getattr(parent, "scale_factor", 1.0)
         for severity, group in group_findings(findings):
-            icon = wx.ArtProvider.GetIcon(_ICONS[severity], wx.ART_LIST)
+            icon = loadIconScaled(_ICONS[severity], scale)
             # Headings carry their group's icon as well: under wxGTK, rows
             # without an icon at the top can leave no room for those below.
             self._store.headings.add(len(self._rows))
