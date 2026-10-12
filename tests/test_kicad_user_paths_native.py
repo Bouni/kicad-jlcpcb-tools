@@ -26,6 +26,7 @@ from .native_kicad_support import (
     set_native_field,
 )
 from .native_window_support import window_ui
+from .native_wx_support import isolated_native
 from .wx_harness import ROOT, load_siblings, temporary_modules
 
 __all__ = ["native_bindings", "window_ui"]
@@ -486,3 +487,71 @@ def test_generate_writes_the_fabrication_files(
         ["Conn_01x02", "J1", "PinHeader_1x02_P2.54mm_Vertical", "C2337", "1"],
         ["LED", "D1", "LED_0603_1608Metric", "", "1"],
     ]
+
+
+def _violating_copy(pcbnew: ModuleType, source: Path) -> Path:
+    """Copy the board with two tracks of different nets closer than its clearance."""
+    board = pcbnew.LoadBoard(str(source))
+    # The default net class keeps 0.2 mm between copper; these edges are 0.15 mm apart.
+    for net, y in (("A", 26.0), ("B", 26.35)):
+        track = pcbnew.PCB_TRACK(board)
+        track.SetStart(_point(pcbnew, 4, y))
+        track.SetEnd(_point(pcbnew, 12, y))
+        track.SetWidth(pcbnew.FromMM(0.2))
+        track.SetLayer(pcbnew.F_Cu)
+        track.SetNet(_net(pcbnew, board, net))
+        board.Add(track)
+    path = source.with_name("violating.kicad_pcb")
+    assert pcbnew.SaveBoard(str(path), board), "KiCad could not save the copy"
+    return path
+
+
+def _open_for_drc(pcbnew: ModuleType, path: Path) -> Any:
+    """Open a board as the PCB editor holds it when the plugin runs its DRC.
+
+    KiCad 7 and 8 never initialise BOARD::m_DRCMaxClearance, and their DRC
+    widens each clearance query by the larger of it and the real clearance.
+    A stale value overflows those queries: KiCad 7 then misses clearance
+    errors, and KiCad 8 asserts, which outside KiCad can stop the process.
+    The DRC clears the value when it moves the board's timestamp on, but
+    only once a board cache is filled, as drawing the board in the editor
+    fills them; a board fresh from LoadBoard has none. KiCad 9 initialises
+    the value.
+    """
+    board = pcbnew.LoadBoard(str(path))
+    for zone in board.Zones():
+        zone.GetBoundingBox()
+    board.IncrementTimeStamp()
+    return board
+
+
+@pytest.mark.native_kicad
+@pytest.mark.kicad_standalone_drc
+def test_forced_drc_counts_the_errors_in_this_kicads_report(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The report is written and parsed: no errors on the board, one on a copy.
+
+    It runs in a fresh process without a wx application. KiCad 8's standalone
+    DRC can assert on a worker thread, and wxPython's assert handler would then
+    wait for the interpreter lock that the DRC call holds.
+    """
+    if isolated_native(request, "KICAD_JLCPCB_DRC_CHILD", native="kicad"):
+        return
+    pcbnew = pytest.importorskip("pcbnew", reason="KiCad pcbnew is unavailable")
+    project = tmp_path / "project"
+    project.mkdir()
+    board = build_board(pcbnew, project)
+    with load_siblings("_user_paths_drc_test", ("kicad_drc",), {}) as modules:
+        counter = modules["kicad_drc"].DRCViolationCounter(
+            pcbnew_module=pcbnew, working_dir=str(tmp_path)
+        )
+        for path, errors in ((board, 0), (_violating_copy(pcbnew, board), 1)):
+            # The plugin's DRC runs on the board the editor has open.
+            opened = _open_for_drc(pcbnew, path)
+            assert opened.GetFileName() == str(path)
+            monkeypatch.setattr(pcbnew, "GetBoard", lambda opened=opened: opened)
+            count, messages = counter.get_error_violations(str(path))
+            assert count == errors
+            codes = [text.partition(":")[0] for text in messages]
+            assert codes == ["[clearance]"] * errors

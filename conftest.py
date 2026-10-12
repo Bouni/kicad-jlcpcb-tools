@@ -76,6 +76,7 @@ def pytest_report_header(config: pytest.Config) -> Optional[str]:
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Reject a green run in which none of the promised native tests would run."""
     _skip_variant_tests_without_the_api(session.items)
+    _skip_standalone_drc_where_it_crashes(session.items)
     _skip_golden_tests_without_recorded_outputs(session.items)
     mode = session.config.getoption("require_native")
     if mode and not any(
@@ -118,7 +119,7 @@ def _skip_variant_tests_without_the_api(items: list[pytest.Item]) -> None:
     """Skip tests of KiCad design variants where the running KiCad has none.
 
     The skip follows the API a test needs, not a version number. A required
-    native KiCad lane accepts it and the golden-output skip below, no other.
+    native KiCad lane accepts it and the two skips below, no other.
     """
     marked = [item for item in items if item.get_closest_marker("kicad_variants")]
     if not marked:
@@ -135,6 +136,35 @@ def _skip_variant_tests_without_the_api(items: list[pytest.Item]) -> None:
         for item in marked:
             item.stash[_CAPABILITY_SKIP] = True
             item.add_marker(pytest.mark.skip(reason=reason))
+
+
+def _skip_standalone_drc_where_it_crashes(items: list[pytest.Item]) -> None:
+    """Skip tests that run KiCad's DRC outside KiCad on KiCad 10, where it crashes.
+
+    KiCad 10's WriteDRCReport runs the library-parity check, which asks
+    Pgm() for the library manager; outside the KiCad process Pgm() is null,
+    and the call segfaults. The function exists and crashes, so no API check
+    can tell, and this is the one skip keyed to the running version number.
+    The plugin itself runs inside KiCad, where Pgm() exists.
+    """
+    marked = [item for item in items if item.get_closest_marker("kicad_standalone_drc")]
+    if not marked:
+        return
+    try:
+        pcbnew = importlib.import_module("pcbnew")
+    except ImportError:
+        return  # The tests' own fixtures report a missing KiCad.
+    if _kicad_major(str(pcbnew.GetBuildVersion())) != "10":
+        return
+    reason = (
+        "KiCad 10's standalone WriteDRCReport segfaults: its library-parity check "
+        "calls PROJECT_PCB::FootprintLibAdapter, which dereferences a null Pgm() "
+        "outside the KiCad process (KiCad issue #25755: "
+        "https://gitlab.com/kicad/code/kicad/-/issues/25755)"
+    )
+    for item in marked:
+        item.stash[_CAPABILITY_SKIP] = True
+        item.add_marker(pytest.mark.skip(reason=reason))
 
 
 def _skip_golden_tests_without_recorded_outputs(items: list[pytest.Item]) -> None:

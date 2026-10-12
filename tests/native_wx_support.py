@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 import os
+import re
 import subprocess
 import sys
 import time
@@ -16,9 +17,17 @@ def isolated_native(
     """Run one native case in a fresh process, rejecting missing/skipped coverage."""
     if os.environ.get(marker) == "1":
         return False
+    env = dict(os.environ, **{marker: "1", "KICAD_JLCPCB_REQUIRE_NATIVE": native})
+    if native == "kicad" and "KICAD_JLCPCB_KICAD_MAJOR" not in env:
+        # Only a required lane names its KiCad major. Elsewhere the child
+        # requires the KiCad installed here, and without one the test skips.
+        pcbnew = pytest.importorskip("pcbnew", reason="KiCad pcbnew is unavailable")
+        found = re.match(r"\s*(\d+)\.", str(pcbnew.GetBuildVersion()))
+        if found:
+            env["KICAD_JLCPCB_KICAD_MAJOR"] = found.group(1)
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", request.node.nodeid],
-        env=dict(os.environ, **{marker: "1", "KICAD_JLCPCB_REQUIRE_NATIVE": native}),
+        env=env,
         capture_output=True,
         text=True,
         check=False,

@@ -33,7 +33,7 @@ def run_lane(
     shutil.copyfile(hooks, tmp_path / "conftest.py")
     (tmp_path / "pytest.ini").write_text(
         "[pytest]\nmarkers =\n    native_wx\n    native_kicad\n    os_input\n"
-        "    kicad_variants\n    kicad_golden\n"
+        "    kicad_variants\n    kicad_standalone_drc\n    kicad_golden\n"
     )
     (tmp_path / "wx").mkdir()
     (tmp_path / "wx" / "__init__.py").write_text(
@@ -43,7 +43,7 @@ def run_lane(
     )
     (tmp_path / "wx" / "grid.py").write_text("class Grid: pass\n")
     (tmp_path / "pcbnew.py").write_text(
-        "raise ImportError('missing pcbnew binding')\n"
+        "raise ModuleNotFoundError('missing pcbnew binding')\n"
         if broken == "pcbnew"
         else "class BOARD:\n"
         + (
@@ -288,6 +288,35 @@ def test_an_isolated_rerun_in_the_kicad9_lane_accepts_kicad9(
     assert "1 passed" in result.stdout
 
 
+@pytest.mark.parametrize("broken", ["variants", "pcbnew"])
+def test_an_optional_run_isolates_a_kicad_test_on_the_kicad_it_has(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str
+) -> None:
+    """Outside a lane, an isolated KiCad test runs on KiCad 9, or skips without KiCad."""
+    support = Path(__file__).with_name("native_wx_support.py")
+    shutil.copyfile(support, tmp_path / "native_wx_support.py")
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        None,
+        "from native_wx_support import isolated_native\n"
+        "@pytest.mark.native_kicad\n"
+        "def test_board(request):\n"
+        "    if isolated_native(request, 'LANE_CHILD', native='kicad'):\n"
+        "        return\n"
+        "    import pcbnew\n"
+        "    assert pcbnew.GetBuildVersion() == '9.0.9'\n",
+        broken,
+        version="9.0.9",
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    if broken == "pcbnew":
+        assert "1 skipped" in result.stdout
+        assert "KiCad pcbnew is unavailable" in result.stdout
+    else:
+        assert "1 passed" in result.stdout
+
+
 def test_variant_tests_collect_where_kicad_is_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -339,6 +368,92 @@ def test_a_variant_test_skipped_for_another_reason_fails_the_lane(
     else:
         assert "2 failed" in result.stdout
         assert "variant fixture unavailable" in result.stdout
+
+
+def test_kicad10_lane_skips_only_the_standalone_drc_tests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KiCad 10's standalone DRC crashes, so its test skips and names the defect."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_standalone_drc\n"
+        "def test_drc(): raise AssertionError('standalone DRC ran on KiCad 10')\n"
+        "@pytest.mark.native_kicad\n"
+        "def test_board(): pass\n",
+        version="10.0.7-10.0.7~ubuntu24.04.1",
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 passed, 1 skipped" in result.stdout
+    assert "standalone WriteDRCReport segfaults" in result.stdout
+    assert "dereferences a null Pgm()" in result.stdout
+    assert "KiCad issue #25755" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "version, kicad_major",
+    [
+        ("9.0.9-9.0.9~ubuntu24.04.1", "9"),
+        ("8.0.9-8.0.9-0~ubuntu24.04.1", "8"),
+        ("7.0.11+dfsg-1build4", "7"),
+    ],
+)
+def test_the_standalone_drc_tests_run_before_kicad_10(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, kicad_major: str
+) -> None:
+    """The DRC skip is keyed to KiCad 10 alone; earlier lanes must run the test."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_standalone_drc\n"
+        "def test_drc(): pass\n",
+        "variants",
+        version=version,
+        kicad_major=kicad_major,
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 passed" in result.stdout and "skipped" not in result.stdout
+
+
+def test_a_kicad10_lane_of_only_standalone_drc_tests_runs_nothing_and_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipped DRC tests are not native tests that ran."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_standalone_drc\n"
+        "def test_drc(): pass\n",
+        version="10.0.7-10.0.7~ubuntu24.04.1",
+    )
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, (
+        result.stdout + result.stderr
+    )
+    assert "No native_kicad tests selected that would run" in result.stderr
+
+
+def test_a_standalone_drc_test_skipped_for_another_reason_fails_the_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Before KiCad 10 the DRC marker excuses no skip at all."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_standalone_drc\n"
+        "def test_drc(): pytest.skip('report unavailable')\n",
+        "variants",
+        version="9.0.9",
+        kicad_major="9",
+    )
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, (
+        result.stdout + result.stderr
+    )
+    assert "Required native test skipped" in result.stdout
+    assert "report unavailable" in result.stdout
 
 
 def _record_golden_outputs(tmp_path: Path, *majors: str) -> None:
