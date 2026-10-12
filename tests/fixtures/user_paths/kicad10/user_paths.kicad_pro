@@ -1,0 +1,15 @@
+{
+  "meta": {
+    "filename": "user_paths.kicad_pro",
+    "version": 3
+  },
+  "schematic": {
+    "top_level_sheets": [
+      {
+        "filename": "user_paths.kicad_sch",
+        "name": "Root",
+        "uuid": "6d2a9e3f-7c1b-4e85-9a3d-2f4b6c8e0a11"
+      }
+    ]
+  }
+}

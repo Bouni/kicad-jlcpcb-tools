@@ -11,9 +11,12 @@ from dataclasses import dataclass
 import importlib.util
 import json
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 import zipfile
 
 import pytest
@@ -231,6 +234,9 @@ def plugin(native_bindings: SimpleNamespace) -> Iterator[SimpleNamespace]:
             "fabrication",
             "kicad_backend.swig.read",
             "footprint_helpers",
+            "schematic_discovery",
+            "schematic_safety",
+            "schematicexport",
             "store",
         ),
         {},
@@ -555,3 +561,167 @@ def test_forced_drc_counts_the_errors_in_this_kicads_report(
             assert count == errors
             codes = [text.partition(":")[0] for text in messages]
             assert codes == ["[clearance]"] * errors
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "user_paths"
+# Every fixture project uses these UUIDs; see the fixtures' README.
+ROOT_SHEET = "6d2a9e3f-7c1b-4e85-9a3d-2f4b6c8e0a11"
+SYMBOLS = {
+    "R1": "1b3c5d7e-9f1a-4b2c-8d3e-5f7a9b1c3d21",
+    "R2": "2c4d6e8f-a0b1-4c3d-9e4f-6a8b0c2d4e32",
+}
+
+
+def _parse_sexpr(text: str) -> list[Any]:
+    """Read one S-expression document into nested lists of unquoted atoms."""
+    stack: list[list[Any]] = [[]]
+    for token in re.findall(r'\(|\)|"(?:\\.|[^"\\])*"|[^\s()"]+', text):
+        if token == "(":
+            stack.append([])
+        elif token == ")":
+            closed = stack.pop()
+            stack[-1].append(closed)
+        else:
+            stack[-1].append(token[1:-1] if token.startswith('"') else token)
+    assert len(stack) == 1 and len(stack[0]) == 1, "Unbalanced S-expression"
+    return stack[0][0]
+
+
+def _kicad_cli(major: str) -> str:
+    """Find kicad-cli and check that it belongs to the KiCad running the test.
+
+    A newer kicad-cli reads older schematics too, so one from another KiCad
+    on PATH would not prove that this KiCad reads its own format.
+    """
+    cli = shutil.which("kicad-cli")
+    if cli is None:
+        pytest.skip("kicad-cli is not on PATH")
+    version = subprocess.run(
+        [cli, "version"], capture_output=True, text=True, timeout=120, check=False
+    ).stdout.strip()
+    found = re.match(r"\s*(\d+)\.", version)
+    assert found and found.group(1) == major, (
+        f"{cli} reports KiCad {version!r}, but the running KiCad is {major}"
+    )
+    return cli
+
+
+def _netlist_lcsc(cli: str, schematic: Path) -> dict[str, Optional[str]]:
+    """Export a netlist with kicad-cli and read each part's LCSC field."""
+    netlist = schematic.with_suffix(".net")
+    result = subprocess.run(
+        [
+            cli,
+            "sch",
+            "export",
+            "netlist",
+            "--format",
+            "kicadsexpr",
+            "--output",
+            str(netlist),
+            str(schematic),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    document = _parse_sexpr(netlist.read_text(encoding="utf-8"))
+    components = next(item for item in document if item[0] == "components")
+    parts = {}
+    for component in components[1:]:
+        reference = next(item[1] for item in component if item[0] == "ref")
+        properties = {
+            item[1][1]: item[2][1] for item in component if item[0] == "property"
+        }
+        parts[reference] = properties.get("LCSC")
+    return parts
+
+
+def _without_new_field(text: str, value: str) -> str:
+    """Remove the property the export adds, with the line break placed before it."""
+    start = text.index(f'(property "LCSC" "{value}"')
+    depth = 0
+    for end in range(start, len(text)):
+        depth += {"(": 1, ")": -1}.get(text[end], 0)
+        if depth == 0:
+            break
+    line_start = len(text[:start].rstrip(" \t")) - 1
+    assert text[line_start] == "\n"
+    return text[:line_start] + text[end + 1 :]
+
+
+@pytest.mark.native_kicad
+def test_assignments_export_to_this_kicads_own_schematic(
+    plugin: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Board assignments reach both symbols; everything else in the file stays."""
+    pcbnew = plugin.pcbnew
+    found = re.match(r"\s*(\d+)\.", str(pcbnew.GetBuildVersion()))
+    assert found, pcbnew.GetBuildVersion()
+    fixture = FIXTURES / f"kicad{found.group(1)}"
+    assert fixture.is_dir(), f"No schematic fixture for KiCad {found.group(1)}"
+    cli = _kicad_cli(found.group(1))
+    project = tmp_path / "user_paths"
+    project.mkdir()
+    board_path = build_board(pcbnew, project)
+    for source in fixture.iterdir():
+        shutil.copyfile(source, project / source.name)
+    schematic = project / "user_paths.kicad_sch"
+    original = schematic.read_text(encoding="utf-8")
+    assert _netlist_lcsc(cli, schematic) == {"R1": "C17414", "R2": None}
+
+    settings = json.loads((project / "user_paths.kicad_pro").read_text("utf-8"))
+    # KiCad 10 projects list their root sheets, and KiCad 10's Update PCB puts
+    # the root sheet in each footprint's path; earlier versions leave it out.
+    rooted = bool(settings.get("schematic", {}).get("top_level_sheets"))
+    board = pcbnew.LoadBoard(str(board_path))
+    for reference, symbol in SYMBOLS.items():
+        link = f"/{ROOT_SHEET}/{symbol}" if rooted else f"/{symbol}"
+        board.FindFootprintByReference(reference).SetPath(pcbnew.KIID_PATH(link))
+    plugin.footprint_helpers.set_lcsc_value(
+        board.FindFootprintByReference("R2"), "C25744"
+    )
+    host = SimpleNamespace(
+        GetBoard=lambda: board, GetSettingsManager=pcbnew.GetSettingsManager
+    )
+    parent = SimpleNamespace(
+        board_name=board_path.name,
+        project_path=str(project),
+        pcbnew=host,
+        # The window reads the live board through its backend.
+        _read_board=lambda: plugin.kicad_backend_swig_read.read_snapshot(board),
+    )
+
+    # The main window's export_to_schematic, without its dialogs.
+    project_name = plugin.schematic_safety.authenticated_project_name(
+        host, str(project)
+    )
+    assert project_name == "user_paths"
+    discovery = plugin.schematic_discovery.discover_project_schematics(
+        str(project), board_path.name, project_name
+    )
+    assert discovery.status == "present"
+    assert discovery.paths == (str(schematic),)
+    context: dict[str, Any] = {"shared_project": True}
+    if discovery.root_uuids:
+        context["root_uuids"] = dict(discovery.root_uuids)
+    outcome = plugin.schematicexport.SchematicExport(parent).load_schematic(
+        discovery.paths, **context
+    )
+
+    linked = {
+        str(board.FindFootprintByReference(reference).m_Uuid.AsString())
+        for reference in SYMBOLS
+    }
+    assert set(outcome.saved) == linked and not outcome.diagnostics
+    assert Path(f"{schematic}_old").read_text(encoding="utf-8") == original
+    exported = schematic.read_text(encoding="utf-8")
+    assert exported.count('"C25804"') == 1
+    restored = _without_new_field(exported, "C25744").replace('"C25804"', '"C17414"')
+    assert restored == original
+    before_new_field = exported[: exported.index('(property "LCSC" "C25744"')]
+    reference = before_new_field.rindex('(property "Reference" ')
+    assert before_new_field[reference:].startswith('(property "Reference" "R2"')
+    assert _netlist_lcsc(cli, schematic) == {"R1": "C25804", "R2": "C25744"}
