@@ -6,7 +6,6 @@ import csv
 from dataclasses import dataclass
 import hashlib
 from importlib import import_module
-import io
 import logging
 import math
 import os
@@ -43,6 +42,7 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
+from .bom_csv import BomGroup, plan_bom
 from .correction_data import (
     AnyCorrection,
     Correction,
@@ -59,18 +59,12 @@ from .fabrication_archive import (
 from .footprint_helpers import get_is_dnp
 from .lcsc import is_lcsc_part, normalize_lcsc
 
-# JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
-# 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
-# Quantity) so the Designator chunk alone is capped at 1920 characters.
-_BOM_ROW_MAX_LEN = 2048
-_BOM_DESIGNATOR_MAX_LEN = _BOM_ROW_MAX_LEN - 128  # padding for the other CSV fields
-
 
 @dataclass(frozen=True)
 class OutputAssemblySnapshot:
     """Keep BOM and CPL on one native assembly state throughout generation."""
 
-    bom_rows: tuple[tuple[Any, ...], ...]
+    bom_groups: tuple[BomGroup, ...]
     cpl_rows: tuple[tuple[Any, ...], ...]
 
 
@@ -115,99 +109,9 @@ def _is_soldered_pad(pad: Any) -> bool:
     return pad.GetAttribute() != PAD_ATTRIB_NPTH and pad.IsOnCopperLayer()
 
 
-def split_bom_designators(
-    designators: list,
-    max_len: int = _BOM_DESIGNATOR_MAX_LEN,
-    measure: Callable[[str], int] = len,
-) -> list:
-    """Split a list of reference designators into chunks whose joined length fits within *max_len*.
-
-    JLCPCB rejects BOM rows whose total row length exceeds 2048 characters.
-    The Designator field is capped below that limit to leave headroom for the
-    other fields (Comment, Footprint, LCSC, Quantity).  When a single part has
-    more references than fit in the limit, the row is duplicated with the
-    designators spread across copies; each copy carries only its own count.
-
-    Args:
-        designators: Ordered list of reference strings, e.g. ``["R1", "R2", ...]``.
-        max_len: Maximum allowed length of the comma-joined designator string.
-        measure: Length of one reference, in characters unless a caller
-            budgets bytes.
-
-    Returns:
-        A list of non-empty lists, each safe to pass to ``",".join()``.
-
-    """
-    if not designators:
-        return []
-    chunks = []
-    current: list = []
-    current_len = 0
-    for ref in designators:
-        # Length if this ref were appended: its own length plus the comma separator
-        added = measure(ref) if not current else measure(ref) + 1
-        if current and current_len + added > max_len:
-            chunks.append(current)
-            current = [ref]
-            current_len = measure(ref)
-        else:
-            current.append(ref)
-            current_len += added
-    if current:
-        chunks.append(current)
-    return chunks
-
-
 def _single_line(text: Any) -> str:
     """Fold catalog line breaks into spaces so each BOM row stays on one line."""
     return re.sub(r"[\r\n]+", " ", str(text or ""))
-
-
-def _utf8_len(text: str) -> int:
-    """Count UTF-8 bytes, the stricter reading of JLC's row limit."""
-    return len(text.encode("utf-8"))
-
-
-def _bom_line_bytes(row: tuple[Any, ...]) -> int:
-    """Measure a row as write_bom's csv.writer emits it, less its CRLF.
-
-    The real terminator matters: with an empty one, Python 3.9's csv leaves a
-    field holding a line break unquoted, unlike the writer being measured.
-    """
-    line = io.StringIO()
-    csv.writer(line).writerow(row)
-    return _utf8_len(line.getvalue()) - 2
-
-
-def _csv_text_bytes(text: str) -> int:
-    """Count text's UTF-8 bytes inside a quoted csv field, where each quote doubles."""
-    return _utf8_len(text) + text.count('"')
-
-
-def _fit_bom_row(
-    row: tuple[Any, ...], extra: tuple[str, str]
-) -> Optional[list[tuple[Any, ...]]]:  # noqa: UP045
-    """Split a row's designators so each line, *extra* appended, fits JLC's limit.
-
-    Returns None when a single reference cannot fit beside the row's other cells.
-    """
-    value, designators, package, lcsc, quantity = row
-    whole = (*row, *extra)
-    if _bom_line_bytes(whole) <= _BOM_ROW_MAX_LEN:
-        return [whole]
-    # A split designator cell holds commas, so csv wraps it in quotes: two bytes.
-    others = _bom_line_bytes((value, "", package, lcsc, quantity, *extra))
-    rows = [
-        (value, ",".join(chunk), package, lcsc, len(chunk), *extra)
-        for chunk in split_bom_designators(
-            designators.split(","),
-            _BOM_ROW_MAX_LEN - others - 2,
-            measure=_csv_text_bytes,
-        )
-    ]
-    if any(_bom_line_bytes(line) > _BOM_ROW_MAX_LEN for line in rows):
-        return None
-    return rows
 
 
 class Fabrication:
@@ -463,9 +367,8 @@ class Fabrication:
                     )
                 )
         bom = tuple(
-            (value, ",".join(chunk), package, lcsc, len(chunk))
+            BomGroup(value, tuple(refs), package, lcsc)
             for (value, package, lcsc), refs in sorted(groups.items())
-            for chunk in split_bom_designators(refs)
         )
         geometry = self._physical_geometry_snapshot()
         validate_source()
@@ -1096,23 +999,23 @@ class Fabrication:
         self.logger.info("Finished generating CPL file %s", cpl_path)
 
     def generate_bom(self) -> None:
-        """Prepare every BOM row before opening the output file."""
+        """Prepare every BOM group before opening the output file."""
         self.write_bom(self.prepare_bom())
 
     def prepare_bom(
         self,
         parts: Optional[Iterable[dict[str, Any]]] = None,  # noqa: UP045
-    ) -> tuple[tuple[Any, ...], ...]:
+    ) -> tuple[BomGroup, ...]:
         """Resolve current BOM groups before an output file can be truncated."""
         self._require_output_snapshot()
         if self.output_snapshot is not None:
             self.validate_generation()
-            return self.output_snapshot.bom_rows
+            return self.output_snapshot.bom_groups
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
         )
         footprints = {fp.GetReference(): fp for fp in self.board.Footprints()}
-        rows = []
+        result = []
         groups = (
             self.parent.store.read_bom_parts(parts)
             if parts is not None
@@ -1135,87 +1038,43 @@ class Fabrication:
                     )
                     continue
                 components.append(reference)
-            rows.extend(
-                (
-                    part["value"],
-                    ",".join(chunk),
-                    part["footprint"],
-                    part["lcsc"],
-                    len(chunk),
+            if components:
+                result.append(
+                    BomGroup(
+                        part["value"],
+                        tuple(components),
+                        part["footprint"],
+                        part["lcsc"],
+                    )
                 )
-                for chunk in split_bom_designators(components)
-            )
-        return tuple(rows)
+        return tuple(result)
 
-    def write_bom(self, rows: tuple[tuple[Any, ...], ...]) -> None:
-        """Validate captured source before writing its prepared BOM rows."""
+    def write_bom(self, groups: tuple[BomGroup, ...]) -> None:
+        """Plan every line from the groups, then validate their source and write.
+
+        All catalog lookups finish first, so a failing one cannot truncate the
+        previous BOM. The plan's warnings are logged: JLC's limit and the
+        optional columns never block output.
+        """
         self._require_output_snapshot()
-        header = ["Comment", "Designator", "Footprint", "LCSC", "Quantity"]
+        columns = None
         if self.parent.settings.get("gerber", {}).get(
             "bom_manufacturer_columns", False
         ):
-            enriched = self._add_manufacturer_columns(rows)
-            if enriched is not None:
-                header += ["Manufacturer", "MPN"]
-                rows = enriched
+            columns = self._manufacturer_columns(groups)
+        plan = plan_bom(groups, columns)
+        for warning in plan.warnings:
+            self.logger.warning(warning)
         self.validate_generation()
         bom_path = self.get_staged_artifact_paths()["bom_csv"]
         with open(bom_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(header)
-            writer.writerows(rows)
+            writer.writerow(plan.header)
+            writer.writerows(plan.lines)
         self.logger.info("Finished generating BOM file %s", bom_path)
 
-    def _add_manufacturer_columns(
-        self, rows: tuple[tuple[Any, ...], ...]
-    ) -> Optional[tuple[tuple[Any, ...], ...]]:  # noqa: UP045
-        """Append catalog Manufacturer and MPN cells, re-splitting rows JLC would reject.
-
-        A row whose other cells leave no room for even one reference beside its
-        manufacturer and MPN keeps those two cells blank instead. Even blank,
-        the two cells cost two commas: a row that fits only without them gives
-        None, so the whole BOM keeps the setting-off columns rather than lose
-        a row JLC accepts. A row whose comment, footprint and LCSC cells
-        overflow even without them is written as the setting-off export writes
-        it, plus the blank cells: splitting designators cannot shorten those.
-        Each case is logged, because the columns never block output.
-        """
-        columns = self._manufacturer_columns(row[3] for row in rows)
-        result = []
-        for row in rows:
-            extra = columns.get(normalize_lcsc(row[3]), ("", ""))
-            fitted = _fit_bom_row(row, extra)
-            if fitted is None:
-                fitted = _fit_bom_row(row, ("", ""))
-                if fitted is not None:
-                    self.logger.warning(
-                        "Manufacturer and MPN left blank for %s: with them its BOM "
-                        "row exceeds JLC's %d-byte limit",
-                        row[1],
-                        _BOM_ROW_MAX_LEN,
-                    )
-                elif _bom_line_bytes(row) <= _BOM_ROW_MAX_LEN:
-                    self.logger.warning(
-                        "The BOM row for %s fits JLC's %d-byte limit only without "
-                        "Manufacturer and MPN cells; BOM written without "
-                        "Manufacturer and MPN columns",
-                        row[1],
-                        _BOM_ROW_MAX_LEN,
-                    )
-                    return None
-                else:
-                    self.logger.warning(
-                        "The BOM row for %s exceeds JLC's %d-byte limit even "
-                        "without Manufacturer and MPN",
-                        row[1],
-                        _BOM_ROW_MAX_LEN,
-                    )
-                    fitted = [(*row, "", "")]
-            result.extend(fitted)
-        return tuple(result)
-
     def _manufacturer_columns(
-        self, lcsc_codes: Iterable[Any]
+        self, groups: Iterable[BomGroup]
     ) -> dict[str, tuple[str, str]]:
         """Look up each LCSC number's manufacturer and MPN once in the parts catalog.
 
@@ -1223,10 +1082,13 @@ class Fabrication:
         through the main window's catalog cache, which the part list has already
         warmed for every assigned part. A number the catalog lacks, or a catalog
         that is unavailable or failing, leaves blank cells: the columns document
-        the parts, so they never block output.
+        the parts, so they never block output. Each number is looked up in its
+        canonical form, and its cells are keyed by every group's LCSC cell as
+        written.
         """
+        written = {group.lcsc for group in groups}
         codes = sorted(
-            {code for code in map(normalize_lcsc, lcsc_codes) if is_lcsc_part(code)}
+            {code for code in map(normalize_lcsc, written) if is_lcsc_part(code)}
         )
         if not codes:
             return {}
@@ -1235,7 +1097,7 @@ class Fabrication:
                 "Parts catalog is unavailable; BOM Manufacturer and MPN left blank"
             )
             return {}
-        columns = {}
+        found = {}
         for code in codes:
             try:
                 details = self.parent._catalog_get_part_details(code, strict=True)
@@ -1248,11 +1110,15 @@ class Fabrication:
                 )
                 break
             if details:
-                columns[code] = (
+                found[code] = (
                     _single_line(details.get("manufacturer")),
                     _single_line(details.get("part_no")),
                 )
-        return columns
+        return {
+            lcsc: found[normalize_lcsc(lcsc)]
+            for lcsc in written
+            if normalize_lcsc(lcsc) in found
+        }
 
     def get_part_consistency_warnings(self) -> str:
         """Check the plausibility of the parts, there should be just one value per LCSC number.
@@ -1265,8 +1131,12 @@ class Fabrication:
             parts = self.parent.store.read_bom_parts()
         else:
             parts = [
-                {"value": row[0], "refs": row[1], "lcsc": row[3]}
-                for row in self.output_snapshot.bom_rows
+                {
+                    "value": group.comment,
+                    "refs": ",".join(group.references),
+                    "lcsc": group.lcsc,
+                }
+                for group in self.output_snapshot.bom_groups
             ]
         for item in parts:
             if not item["lcsc"]:

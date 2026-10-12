@@ -92,7 +92,10 @@ def test_mapping_change_cannot_mix_bom_with_prepared_cpl(
 
     runtime.parts[0]["lcsc"] = "C222"
 
-    assert [row[3] for row in exporter.output_snapshot.bom_rows] == ["C111", "C111"]
+    assert [group.lcsc for group in exporter.output_snapshot.bom_groups] == [
+        "C111",
+        "C111",
+    ]
     with pytest.raises(RuntimeError, match="changed.*generation"):
         exporter.generate_bom()
     assert previous.read_text() == "previous BOM\n"

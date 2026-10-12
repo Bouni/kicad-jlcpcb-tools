@@ -272,8 +272,8 @@ def test_manufacturer_columns_follow_the_frozen_output_variant(
         variant_name=variant_name,
     )
     value = "Base device" if not variant_name else "Variant device"
-    frozen = ((value, "R1", "Package:Device", lcsc, 1),)
-    assert runtime.exporter.output_snapshot.bom_rows == frozen
+    frozen = ((value, ("R1",), "Package:Device", lcsc),)
+    assert runtime.exporter.output_snapshot.bom_groups == frozen
 
     runtime.exporter.generate_bom()
 
@@ -289,8 +289,8 @@ def test_manufacturer_columns_follow_the_frozen_output_variant(
         }
     ]
     assert looked_up == [lcsc]
-    # The snapshot keeps its five source columns; only the written file grows.
-    assert runtime.exporter.output_snapshot.bom_rows == frozen
+    # The snapshot keeps its groups; only the written file grows.
+    assert runtime.exporter.output_snapshot.bom_groups == frozen
     runtime.parent.store.read_bom_parts.assert_not_called()
     runtime.exporter.abort_generation()
 
@@ -378,7 +378,7 @@ def test_existing_anchored_package_correction_keeps_matching(
     (row,) = runtime.exporter.prepare_cpl(())
     assert row[2] == "SOT-23"
     assert row[5] == 90
-    assert runtime.exporter.output_snapshot.bom_rows[0][2] == "SOT-23"
+    assert runtime.exporter.output_snapshot.bom_groups[0].footprint == "SOT-23"
     runtime.exporter.abort_generation()
 
 
@@ -892,13 +892,18 @@ def test_changed_plot_source_preserves_previous_artifacts(
 def test_split_designator_rows_are_not_value_conflicts(
     runtime: SimpleNamespace,
 ) -> None:
-    """Splitting a large identical group must not trigger a plausibility warning."""
+    """A large identical group split across lines must not look like a value conflict."""
     references = [f"R{index:05d}" for index in range(400)]
     runtime.footprints[:] = [
         make_footprint(ref, 0, 0, Point(10, 20)) for ref in references
     ]
     begin(runtime, *(part(ref) for ref in references))
-    assert len(runtime.exporter.output_snapshot.bom_rows) > 1
+    assert len(runtime.exporter.output_snapshot.bom_groups) == 1
+    runtime.exporter.generate_bom()
+    written = _read_csv(runtime.exporter.get_staged_artifact_paths()["bom_csv"])
+    assert len(written) > 1
+    designators = [ref for row in written for ref in row["Designator"].split(",")]
+    assert designators == references
     assert runtime.exporter.get_part_consistency_warnings() == ""
     runtime.exporter.abort_generation()
 

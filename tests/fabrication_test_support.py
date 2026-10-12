@@ -107,3 +107,9 @@ def read_cpl(fabrication: Any) -> list[dict[str, str]]:
     """Read the actual generated CSV through a fresh file handle."""
     with Path(fabrication.get_cpl_csv_path()).open(newline="") as stream:
         return list(csv.DictReader(stream))
+
+
+def longest_bom_line(fabrication: Any) -> int:
+    """Return the UTF-8 byte length of the written BOM's longest line."""
+    text = Path(fabrication.get_bom_csv_path()).read_text(encoding="utf-8")
+    return max(len(line.encode("utf-8")) for line in text.splitlines())
