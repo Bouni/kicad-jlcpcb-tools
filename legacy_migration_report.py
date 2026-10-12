@@ -21,6 +21,7 @@ import tempfile
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from .core.file_lock import file_lock
+from .lcsc import normalize_lcsc
 
 if TYPE_CHECKING:
     from .legacy_part_migration import LegacyMigrationPlan
@@ -385,7 +386,7 @@ def _override_messages(generation: dict[str, Any]) -> tuple[str, ...]:
         elif (
             disposition == "board_override"
             and native
-            and legacy.strip().upper() != native.strip().upper()
+            and normalize_lcsc(legacy) != normalize_lcsc(native)
         ):
             replacement = f"native value {native}"
         else:

@@ -4,6 +4,7 @@ The string helpers it is built on have their own file,
 tests/test_lcsc_normalization.py; what is covered here is the type they define.
 """
 
+from collections.abc import Mapping
 import dataclasses
 import importlib.util
 from pathlib import Path
@@ -175,3 +176,92 @@ class TestLcscDict:
         assert LcscDict() == {}
         assert LcscDict({Lcsc("C1"): 1}) == {Lcsc("C1"): 1}
         assert LcscDict({Lcsc("C1"): 1}) != {Lcsc("C1"): 2}
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param(None, id="none"),
+            pytest.param("", id="blank"),
+            pytest.param(12345, id="number"),
+            pytest.param(b"C12345", id="bytes"),
+            pytest.param(["C12345"], id="list"),
+            pytest.param({"C12345": 1}, id="dict"),
+            pytest.param({"C12345"}, id="set"),
+        ],
+    )
+    def test_it_refuses_any_other_kind_of_key_before_hashing_it(self, key):
+        """None, numbers and unhashable values get the same error as a string.
+
+        The key is checked before the underlying dict sees it, so a list is
+        reported as the wrong kind of key rather than as unhashable.
+        """
+        parts = LcscDict({Lcsc("C12345"): 0})
+
+        with pytest.raises(TypeError, match="keys are Lcsc parts"):
+            parts[key] = 1
+        with pytest.raises(TypeError, match="keys are Lcsc parts"):
+            _ = key in parts
+        assert dict(parts) == {Lcsc("C12345"): 0}
+
+    def test_a_part_it_does_not_hold_is_absent_as_in_a_dict(self):
+        """A valid part that is missing gets defaults and KeyError, not TypeError."""
+        parts = LcscDict({Lcsc("C1"): 1})
+        absent = Lcsc("C2")
+
+        assert absent not in parts
+        assert parts.get(absent) is None
+        assert parts.get(absent, "default") == "default"
+        assert parts.pop(absent, "default") == "default"
+        with pytest.raises(KeyError):
+            _ = parts[absent]
+        with pytest.raises(KeyError):
+            parts.pop(absent)
+        with pytest.raises(KeyError):
+            del parts[absent]
+        assert parts.setdefault(absent, 2) == 2
+        assert dict(parts) == {Lcsc("C1"): 1, Lcsc("C2"): 2}
+
+    @pytest.mark.parametrize("shape", ["mapping", "keys", "pairs"])
+    def test_an_update_keeps_the_entries_before_a_bad_key_and_stops_there(self, shape):
+        """update() is not atomic, as with dict.update.
+
+        The entries before the bad key are stored, the bad key raises, and
+        nothing after it is read, whether the update is a mapping, an object
+        with keys(), or an iterable of pairs.
+        """
+        entries = {Lcsc("C1"): 1, "C2": 2, Lcsc("C3"): 3}
+        read = []
+
+        def keys():
+            for key in entries:
+                read.append(key)
+                yield key
+
+        class Tracked(Mapping):
+            def __iter__(self):
+                return keys()
+
+            def __len__(self):
+                return len(entries)
+
+            def __getitem__(self, key):
+                return entries[key]
+
+        class KeysOnly:
+            def keys(self):
+                return keys()
+
+            def __getitem__(self, key):
+                return entries[key]
+
+        update = {
+            "mapping": Tracked(),
+            "keys": KeysOnly(),
+            "pairs": ((key, entries[key]) for key in keys()),
+        }[shape]
+        parts = LcscDict()
+
+        with pytest.raises(TypeError, match="keys are Lcsc parts"):
+            parts.update(update)
+        assert dict(parts) == {Lcsc("C1"): 1}
+        assert read == [Lcsc("C1"), "C2"]

@@ -239,6 +239,22 @@ def test_normalized_equal_values_do_not_create_override_messages(
     assert result.override_messages == ()
 
 
+def test_two_different_values_naming_no_part_still_create_an_override_message(
+    reports: ModuleType, tmp_path: Path
+) -> None:
+    """Values are compared as text, so two different non-part values stay different."""
+    result = record(
+        reports,
+        tmp_path,
+        AuditPlan(rows=(AuditRow(lcsc="old note", native_value="new note"),)),
+    )
+
+    assert result.override_messages == (
+        "R1 [uuid-r1]: legacy old note was superseded by native value new note; "
+        "explicit native assignment takes precedence.",
+    )
+
+
 def test_report_write_failure_is_retryable_and_never_acknowledges(
     reports: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
