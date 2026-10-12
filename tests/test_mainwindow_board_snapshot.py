@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from . import part_preferences_test_support as support
+from . import part_preferences_test_support as support, swig_doubles
 from .part_preferences_test_support import Footprint, act
 from .wx_harness import load_siblings, module
 
@@ -414,3 +414,113 @@ def test_opening_preferences_pass_over_a_part_whose_earlier_field_is_filled(
         "Skipped part preference for R2: field 'LCSC' already contains 'C100'."
         in support.info_messages(window)
     )
+
+
+def _listed_rows(window: Any) -> list[list[Any]]:
+    """Return the rows the list rebuild handed the model, in order."""
+    (entries,), _kwargs = window.partlist_data_model.ReplaceAll.call_args
+    return [row for row, _part, _pending in entries]
+
+
+def test_rows_show_each_parts_side_and_dnp_from_the_board_read(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """The DNP column and the side column (a layer number) come from the records."""
+    bottom = Footprint("R2", dnp=True)
+    bottom.flipped = True
+    window = make_window(footprints=[Footprint("R1"), bottom])
+    window.hide_bom_parts = window.hide_pos_parts = False
+
+    mainwindow.JLCPCBTools._populate_footprint_rows(window)
+
+    rows = {row[0]: row for row in _listed_rows(window)}
+    # The list's DNP and Side columns, as datamodel.PartListDataModel numbers them.
+    dnp, side = 8, 10
+    assert {reference: (row[dnp], row[side]) for reference, row in rows.items()} == {
+        "R1": (0, "0"),
+        "R2": (1, "2"),
+    }
+
+
+def test_rows_of_a_repeated_reference_show_the_first_footprints_side_and_dnp(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """Each row with a repeated reference takes DNP and side from the first match.
+
+    KiCad's lookup by reference finds the first footprint in board order; the
+    rows keep their own assignment and exclusions.
+    """
+    first = Footprint("R1", lcsc="C1")
+    second = Footprint("R1", lcsc="C2", dnp=True, bom=True)
+    second.flipped = True
+    second.uuid = "second-r1"
+    board = swig_doubles.Board([first, second, Footprint("R2")])
+    window = make_window(board=board)
+    window.hide_bom_parts = window.hide_pos_parts = False
+
+    mainwindow.JLCPCBTools._populate_footprint_rows(window)
+
+    # The list's LCSC, BOM, DNP and Side columns, as datamodel numbers them.
+    lcsc, bom, dnp, side = 3, 6, 8, 10
+    assert [
+        (row[0], row[lcsc], row[bom], row[dnp], row[side])
+        for row in _listed_rows(window)
+    ] == [
+        ("R1", "C1", False, 0, "0"),
+        ("R1", "C2", True, 0, "0"),
+        ("R2", "C100", False, 0, "0"),
+    ]
+
+
+def test_selecting_rows_selects_their_footprints_in_the_editor(
+    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each selected row's footprint, found in the board read, is selected in KiCad."""
+    footprints = [Footprint("R1"), Footprint("R2"), Footprint("R3")]
+    window = make_window(footprints=footprints)
+    board = window.pcbnew.GetBoard()
+
+    def no_reference_lookup(_reference: str) -> None:
+        raise AssertionError("looked a reference up on the live board")
+
+    monkeypatch.setattr(board, "FindFootprintByReference", no_reference_lookup)
+    selected = []
+    for footprint in footprints:
+        monkeypatch.setattr(
+            footprint,
+            "SetSelected",
+            lambda fp=footprint: selected.append(fp.reference),
+            raising=False,
+        )
+    window.select_alike_in_progress = False
+    window.auto_select_alike = False
+    window.enable_part_specific_toolbar_buttons = MagicMock()
+    window.pcbnew.GetCurrentSelection = lambda: []
+    window.pcbnew.Refresh = MagicMock()
+    window.footprint_list.GetSelections.return_value = ["R1", "R3"]
+    window.footprint_list.GetSelectedItemsCount.return_value = 2
+
+    window.OnFootprintSelected()
+
+    assert sorted(selected) == ["R1", "R3"]
+    window.pcbnew.Refresh.assert_called_once_with()
+
+
+def test_a_read_back_that_finds_another_board_stops_further_edits(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edit's read-back belongs to the edit: another board fails it as an edit."""
+    window = make_window()
+    replacement = support.Board([Footprint("R1", lcsc="C900")])
+    replacement.filename = window.pcbnew.GetBoard().filename
+
+    def run_then_replace(apply: Callable[[], None]) -> None:
+        apply()
+        window.pcbnew.GetBoard = lambda: replacement
+
+    window._board_action = run_then_replace
+
+    act("picker", window, mainwindow, monkeypatch, "C200")
+
+    assert window._board_unreliable is True
+    assert window._project_storage_unavailable is True
