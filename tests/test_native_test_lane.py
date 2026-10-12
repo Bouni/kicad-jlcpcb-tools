@@ -1,5 +1,6 @@
 """Exercise required native lanes through isolated pytest processes."""
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -32,7 +33,7 @@ def run_lane(
     shutil.copyfile(hooks, tmp_path / "conftest.py")
     (tmp_path / "pytest.ini").write_text(
         "[pytest]\nmarkers =\n    native_wx\n    native_kicad\n    os_input\n"
-        "    kicad_variants\n"
+        "    kicad_variants\n    kicad_golden\n"
     )
     (tmp_path / "wx").mkdir()
     (tmp_path / "wx" / "__init__.py").write_text(
@@ -169,7 +170,12 @@ def test_cli_option_enables_native_tests_and_propagates_to_child_processes(
 
 @pytest.mark.parametrize(
     "version, kicad_major, expected",
-    [("10.0.6", "9", "expected KiCad 9"), ("9.0.9", None, "expected KiCad 10")],
+    [
+        ("10.0.6", "9", "expected KiCad 9"),
+        ("9.0.9", None, "expected KiCad 10"),
+        ("8.0.9-8.0.9-0~ubuntu24.04.1", "7", "expected KiCad 7"),
+        ("7.0.11+dfsg-1build4", "8", "expected KiCad 8"),
+    ],
 )
 def test_kicad_lane_requires_its_own_major_version(
     tmp_path: Path,
@@ -184,7 +190,7 @@ def test_kicad_lane_requires_its_own_major_version(
         monkeypatch,
         "kicad",
         "raise AssertionError('collection happened before runtime validation')\n",
-        "variants" if version.startswith("9.") else "",
+        "" if version.startswith("10.") else "variants",
         version=version,
         kicad_major=kicad_major,
     )
@@ -194,10 +200,21 @@ def test_kicad_lane_requires_its_own_major_version(
     assert expected in result.stderr
 
 
-def test_kicad9_lane_skips_only_the_variant_tests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "version, kicad_major",
+    [
+        ("9.0.9-9.0.9~ubuntu24.04.1", "9"),
+        ("8.0.9-8.0.9-0~ubuntu24.04.1", "8"),
+        ("7.0.11+dfsg-1build4", "7"),
+    ],
+)
+def test_a_lane_without_variants_skips_only_the_variant_tests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, kicad_major: str
 ) -> None:
-    """Without the variant API a variant test skips with its reason; others run."""
+    """Without the variant API a variant test skips with its reason; others run.
+
+    The versions are the builds the KiCad 9, 8 and 7 lanes install.
+    """
     result = run_lane(
         tmp_path,
         monkeypatch,
@@ -207,10 +224,10 @@ def test_kicad9_lane_skips_only_the_variant_tests(
         "def test_variants(): raise AssertionError('variant test ran')\n"
         "@pytest.mark.native_kicad\n"
         "def test_board():\n"
-        "    assert os.environ['KICAD_JLCPCB_KICAD_MAJOR'] == '9'\n",
+        f"    assert os.environ['KICAD_JLCPCB_KICAD_MAJOR'] == {kicad_major!r}\n",
         "variants",
-        version="9.0.9-9.0.9~ubuntu24.04.1",
-        kicad_major="9",
+        version=version,
+        kicad_major=kicad_major,
     )
     assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
     assert "1 passed, 1 skipped" in result.stdout
@@ -322,6 +339,81 @@ def test_a_variant_test_skipped_for_another_reason_fails_the_lane(
     else:
         assert "2 failed" in result.stdout
         assert "variant fixture unavailable" in result.stdout
+
+
+def _record_golden_outputs(tmp_path: Path, *majors: str) -> None:
+    """Record golden outputs for these KiCad majors, as kicad_builds.json does."""
+    golden = tmp_path / "tests" / "golden"
+    golden.mkdir(parents=True)
+    (golden / "kicad_builds.json").write_text(
+        json.dumps({major: f"{major}.0.9" for major in majors}), encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize(
+    "version, kicad_major",
+    [("8.0.9-8.0.9-0~ubuntu24.04.1", "8"), ("7.0.11+dfsg-1build4", "7")],
+)
+def test_golden_tests_skip_on_a_kicad_with_no_recorded_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, kicad_major: str
+) -> None:
+    """KiCad 7 and 8 cannot open the KiCad 9 fixture boards, so none are recorded."""
+    _record_golden_outputs(tmp_path, "9", "10")
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_golden\n"
+        "def test_golden(): raise AssertionError('golden test ran')\n"
+        "@pytest.mark.native_kicad\n"
+        "def test_board(): pass\n",
+        "variants",
+        version=version,
+        kicad_major=kicad_major,
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 passed, 1 skipped" in result.stdout
+    assert f"No golden outputs are recorded for KiCad {kicad_major}" in result.stdout
+
+
+def test_golden_tests_run_where_outputs_are_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record decides, so a recorded KiCad runs its golden tests."""
+    _record_golden_outputs(tmp_path, "9", "10")
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_golden\n"
+        "def test_golden(): pass\n",
+        "variants",
+        version="9.0.9-9.0.9~ubuntu24.04.1",
+        kicad_major="9",
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 passed" in result.stdout and "skipped" not in result.stdout
+
+
+def test_a_lane_of_only_unrecorded_golden_tests_runs_nothing_and_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipped golden tests are not native tests that ran."""
+    _record_golden_outputs(tmp_path, "9", "10")
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_golden\n"
+        "def test_golden(): pass\n",
+        "variants",
+        version="7.0.11+dfsg-1build4",
+        kicad_major="7",
+    )
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, (
+        result.stdout + result.stderr
+    )
+    assert "No native_kicad tests selected that would run" in result.stderr
 
 
 @pytest.mark.parametrize("mode", [None, "wx", "kicad"])

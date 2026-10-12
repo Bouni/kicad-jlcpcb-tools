@@ -59,13 +59,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kicad: ["9", "10"]
+        include:
+          # Ubuntu 24.04's own KiCad 7.0.11, the last 7.x. The KiCad 7 PPA
+          # stops at 7.0.9 for noble, and its occt-misc breaks noble's libocct.
+          - kicad: "7"
+          - kicad: "8"
+            ppa: ppa:kicad/kicad-8.0-releases
+          - kicad: "9"
+            ppa: ppa:kicad/kicad-9.0-releases
+          - kicad: "10"
+            ppa: ppa:kicad/kicad-10.0-releases
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install KiCad ${{ matrix.kicad }} and matching system Python bindings
         run: |
-          sudo add-apt-repository --yes ppa:kicad/kicad-${{ matrix.kicad }}.0-releases
+          if [ -n "${{ matrix.ppa }}" ]; then
+            sudo add-apt-repository --yes ${{ matrix.ppa }}
+          fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends 'kicad=${{ matrix.kicad }}.*' python3-wxgtk4.0 python3-venv xvfb xauth
           /usr/bin/python3 -m venv --system-site-packages .venv-kicad

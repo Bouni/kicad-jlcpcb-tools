@@ -145,6 +145,7 @@ markers = [
     "native_wx: real wx controls, enabled with KICAD_JLCPCB_NATIVE_TESTS=1",
     "native_kicad: real KiCad bindings and disposable boards",
     "kicad_variants: needs KiCad's design-variant API; skipped on a KiCad without it",
+    "kicad_golden: compares outputs with tests/golden; skipped on a KiCad with none recorded",
     "os_input: real mouse/keyboard input; requires an isolated desktop",
 ]
 
