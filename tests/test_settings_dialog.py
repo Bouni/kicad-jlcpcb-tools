@@ -214,7 +214,6 @@ _wx = settings.wx
 
 # Checkbox attribute on the dialog -> (settings section, settings key).
 _BOOLEAN_SETTINGS = {
-    "tented_vias_setting": ("gerber", "tented_vias"),
     "fill_zones_setting": ("gerber", "fill_zones"),
     "force_drc_setting": ("gerber", "force_drc"),
     "plot_values_setting": ("gerber", "plot_values"),
@@ -239,7 +238,6 @@ _BOOLEAN_SETTINGS = {
 
 # Every label describes what happens when the box is checked.
 _EXPECTED_LABELS = {
-    "tented_vias_setting": "Tent vias",
     "fill_zones_setting": "Fill zones",
     "force_drc_setting": (
         "Force DRC check before Gerber export (saves board and fills zones)"
@@ -313,16 +311,6 @@ def test_checkbox_label_is_static_and_describes_checked_behaviour(attribute):
     assert labels == {True: expected, False: expected}
 
 
-@pytest.mark.parametrize(
-    ("flag", "icon"), [(True, "tented.png"), (False, "untented.png")]
-)
-def test_tented_vias_icon_follows_state(flag, icon):
-    """The icon keeps illustrating the effect of the current setting."""
-    dialog = _dialog(_settings(flag))
-
-    assert dialog.tented_vias_image.bitmap.filename == icon
-
-
 @pytest.mark.parametrize("priority", [None, True, False])
 def test_legacy_lcsc_priority_is_ignored(priority: Optional[bool]) -> None:
     """Old JSON values are tolerated without offering another mapping source."""
@@ -342,6 +330,81 @@ def test_legacy_lcsc_priority_is_ignored(priority: Optional[bool]) -> None:
         ("general", "order_number", False)
     ]
     assert settings_dict["general"].get("lcsc_priority") is priority
+
+
+@pytest.mark.parametrize("tented", [True, False])
+def test_a_stored_tent_vias_choice_survives_saving_another_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tented: bool
+) -> None:
+    """The dialog offers no Tent vias box, and keeps an older plugin's choice.
+
+    The setting never reached KiCad's plot options. Saving another setting
+    writes the stored choice back as it was.
+    """
+    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    stored = shipped_defaults()
+    stored["gerber"]["tented_vias"] = tented
+    plugin_dir(tmp_path, shipped_defaults(), stored)
+    window = object.__new__(JLCPCBTools)
+    window.window = object()
+    window.scale_factor = 1.0
+    window.library = types.SimpleNamespace(datadir="/data")
+    window.load_settings()
+
+    dialog = SettingsDialog(window)
+    assert not hasattr(dialog, "tented_vias_setting")
+    assert not hasattr(dialog, "tented_vias_image")
+    control = dialog.plot_values_setting
+    control.SetValue(not stored["gerber"]["plot_values"])
+    (event,) = _fire(control)
+    window.update_settings(event)
+
+    expected = json.loads(json.dumps(stored))
+    expected["gerber"]["plot_values"] = not stored["gerber"]["plot_values"]
+    saved = tmp_path / "settings.json"
+    assert json.loads(saved.read_text(encoding="utf-8")) == expected
+
+
+class _GridRecorder(_FakeWidget):
+    """FlexGridSizer stand-in that keeps its cells, an empty cell as None."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cells = []
+
+    def Add(self, item, *_args, **_kwargs):
+        self.cells.append(item)
+
+    def AddSpacer(self, _size):
+        self.cells.append(None)
+
+
+def test_settings_grid_pairs_two_settings_per_row(monkeypatch):
+    """Each row holds two settings, and each setting keeps its neighbour."""
+    grids = []
+
+    def record(*args, **kwargs):
+        grids.append(_GridRecorder(*args, **kwargs))
+        return grids[-1]
+
+    monkeypatch.setattr(_wx, "FlexGridSizer", record)
+    dialog = _dialog(_settings(True))
+    (grid,) = (g for g in grids if dialog.fill_zones_setting in g.cells)
+    names = {id(value): name for name, value in vars(dialog).items()}
+    controls = [
+        "empty" if cell is None else names.get(id(cell), "sizer")
+        for cell in grid.cells[1::2]
+    ]
+
+    assert list(zip(controls[0::2], controls[1::2])) == [
+        ("fill_zones_setting", "force_drc_setting"),
+        ("plot_values_setting", "plot_references_setting"),
+        ("subtract_mask_from_silk_setting", "lcsc_bom_cpl_setting"),
+        ("order_number_setting", "bom_manufacturer_columns_setting"),
+        ("highlight_matches_setting", "simplify_stock_setting"),
+        ("stock_concern_setting", "sizer"),
+        ("sizer", "sizer"),
+    ]
 
 
 def test_force_drc_forces_and_disables_fill_zones():

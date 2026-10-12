@@ -23,7 +23,6 @@ from pcbnew import (  # pylint: disable=import-error
     DRILL_MARKS_NO_DRILL_SHAPE,
     EXCELLON_WRITER,
     PAD_ATTRIB_NPTH,
-    PCB_VIA,
     PLOT_CONTROLLER,
     PLOT_FORMAT_GERBER,
     ZONE_FILLER,
@@ -839,14 +838,6 @@ class Fabrication:
         )
 
         popt.SetUseAuxOrigin(True)
-
-        # Tented vias or not, selcted by user in settings
-        # Only possible via settings in KiCAD < 8.99
-        # In KiCAD 8.99 this must be set in the layer settings of KiCAD
-        if hasattr(PCB_VIA, "SetPlotViaOnMaskLayer"):
-            popt.SetPlotViaOnMaskLayer(
-                not self.parent.settings.get("gerber", {}).get("tented_vias", True)
-            )
 
         popt.SetUseGerberX2format(True)
 

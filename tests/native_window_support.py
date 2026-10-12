@@ -452,7 +452,7 @@ def window_ui(
         pcbnew = module(
             "pcbnew",
             **dict.fromkeys(
-                "EXCELLON_WRITER PCB_PLOT_PARAMS PCB_VIA PLOT_CONTROLLER ZONE_FILLER".split(),
+                "EXCELLON_WRITER PCB_PLOT_PARAMS PLOT_CONTROLLER ZONE_FILLER".split(),
                 object,
             ),
             **dict.fromkeys(

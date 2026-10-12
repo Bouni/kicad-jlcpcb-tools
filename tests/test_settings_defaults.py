@@ -1,5 +1,6 @@
 """Tests for seeding runtime settings from the shipped defaults."""
 
+import copy
 import json
 from pathlib import Path
 import re
@@ -11,11 +12,12 @@ from core.settings_defaults import (
     SETTINGS_FILENAME,
     resolve_settings,
 )
+from core.settings_persistence import load_settings_document
 
 ROOT = Path(__file__).parent.parent
 
 # The idiom the plugin uses to read a setting, e.g.
-# ``self.parent.settings.get("gerber", {}).get("tented_vias", True)``.  The
+# ``self.parent.settings.get("gerber", {}).get("fill_zones", True)``.  The
 # formatter wraps that call once the setting name makes it long enough, so the
 # pattern has to tolerate newlines between the two halves -- otherwise it is
 # blind to exactly the long names most likely to be newly added.
@@ -204,6 +206,26 @@ def test_every_setting_the_plugin_reads_has_a_shipped_default():
         )
 
     assert not missing, f"no default shipped for: {sorted(missing)}"
+
+
+def test_a_stored_tent_vias_choice_is_kept(tmp_path):
+    """The setting never reached KiCad's plot options, so the plugin dropped it.
+
+    A settings file an older plugin completed still holds the choice, and
+    loading leaves that file exactly as it is. The key has no shipped default,
+    so the read-pattern check above fails if plugin code reads it again.
+    """
+    defaults = shipped_defaults()
+    stored = copy.deepcopy(defaults)
+    stored["gerber"]["tented_vias"] = False
+    plugin_path = plugin_dir(tmp_path, defaults, stored)
+    before = (plugin_path / SETTINGS_FILENAME).read_bytes()
+
+    settings = load_settings_document(plugin_path)
+
+    assert "tented_vias" not in defaults["gerber"]
+    assert settings["gerber"]["tented_vias"] is False
+    assert (plugin_path / SETTINGS_FILENAME).read_bytes() == before
 
 
 def test_part_search_includes_every_library_type_by_default():

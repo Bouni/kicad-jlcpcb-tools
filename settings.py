@@ -53,31 +53,6 @@ class SettingsDialog(wx.Dialog):
         # ------------------------- Change settings ---------------------------
         # ---------------------------------------------------------------------
 
-        ##### Tented vias #####
-
-        self.tented_vias_setting = wx.CheckBox(
-            self,
-            id=wx.ID_ANY,
-            label="Tent vias",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=0,
-            name="gerber_tented_vias",
-        )
-
-        self.tented_vias_setting.SetToolTip(wx.ToolTip("Cover vias with soldermask"))
-
-        self.tented_vias_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("tented.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.tented_vias_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
         ##### Fill zones #####
 
         self.fill_zones_setting = wx.CheckBox(
@@ -660,9 +635,6 @@ class SettingsDialog(wx.Dialog):
         settings_grid.AddGrowableCol(1, 1)
         settings_grid.AddGrowableCol(3, 1)
         self._add_setting_row(
-            settings_grid, self.tented_vias_image, self.tented_vias_setting
-        )
-        self._add_setting_row(
             settings_grid, self.fill_zones_image, self.fill_zones_setting
         )
         self._add_setting_row(
@@ -684,10 +656,6 @@ class SettingsDialog(wx.Dialog):
         self._add_setting_row(
             settings_grid, None, self.bom_manufacturer_columns_setting
         )
-        # An empty icon and control cell end the row, so the BOM settings sit
-        # together and every later setting keeps its pair.
-        settings_grid.AddSpacer(0)
-        settings_grid.AddSpacer(0)
         self._add_setting_row(settings_grid, None, self.highlight_matches_setting)
         self._add_setting_row(settings_grid, None, self.simplify_stock_setting)
         self._add_setting_row(settings_grid, None, self.stock_concern_setting)
@@ -727,14 +695,6 @@ class SettingsDialog(wx.Dialog):
             icon_cell.AddStretchSpacer()
         grid.Add(icon_cell, 0, wx.ALL, 5)
         grid.Add(control, 0, wx.ALL | flags, 5)
-
-    def update_tented_vias(self, tented):
-        """Update settings dialog according to the settings."""
-        self.tented_vias_setting.SetValue(tented)
-        icon = "tented.png" if tented else "untented.png"
-        self.tented_vias_image.SetBitmap(
-            loadBitmapScaled(icon, self.parent.scale_factor, static=True)
-        )
 
     def update_fill_zones(self, fill):
         """Update settings dialog according to the settings."""
@@ -859,9 +819,6 @@ class SettingsDialog(wx.Dialog):
 
     def load_settings(self) -> None:
         """Load settings and set checkboxes accordingly."""
-        self.update_tented_vias(
-            self.parent.settings.get("gerber", {}).get("tented_vias", True)
-        )
         self.update_fill_zones(
             self.parent.settings.get("gerber", {}).get("fill_zones", True)
         )
