@@ -157,7 +157,10 @@ def test_rows_group_under_headings_and_opening_selects_nothing(
             assert bold == [0, 3, 6]
             assert dialog.findings_list.GetSelectedRow() == wx.NOT_FOUND
             assert dialog.detail.GetValue() == native.pane.NO_SELECTION
-            assert wx.Window.FindFocus() is dialog.cancel_button
+            # macOS lets buttons take the focus only with Full Keyboard Access
+            # on; elsewhere the pane starts with Cancel focused.
+            if dialog.cancel_button.AcceptsFocus():
+                assert wx.Window.FindFocus() is dialog.cancel_button
 
         dialog.CentreOnParent()
         try:
