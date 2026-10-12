@@ -506,6 +506,7 @@ def native_pcbnew(native_bindings: SimpleNamespace) -> SimpleNamespace:
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_variants
 @native_desktop_test
 def test_native_alias_overrides_flags_and_descriptions_survive_board_reload(
     native_pcbnew: SimpleNamespace, tmp_path: Path
@@ -591,6 +592,7 @@ def test_native_alias_overrides_flags_and_descriptions_survive_board_reload(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_variants
 @native_desktop_test
 @pytest.mark.parametrize("field,mask", [("bom", 8), ("pos", 4), ("pop", 64)])
 def test_native_default_flags_survive_reload_without_changing_explicit_variants(
@@ -631,6 +633,7 @@ def test_native_default_flags_survive_reload_without_changing_explicit_variants(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_variants
 @native_desktop_test
 def test_native_failed_assignment_removes_new_field_instead_of_leaving_empty(
     native_pcbnew: SimpleNamespace, monkeypatch: pytest.MonkeyPatch

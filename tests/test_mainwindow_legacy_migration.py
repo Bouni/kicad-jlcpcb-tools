@@ -13,7 +13,7 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 
 from . import part_preferences_test_support as support
-from .native_kicad_support import native_bindings
+from .native_kicad_support import native_bindings, native_field
 
 __all__ = ["native_bindings"]
 
@@ -623,7 +623,7 @@ def test_native_disk_parser_keeps_unsaved_override_out_of_archive_proof(
 
     cached_loader.assert_not_called()
     save.assert_not_called()
-    assert footprint.GetField("LCSC").GetText() == "C456"
+    assert native_field(footprint, "LCSC").GetText() == "C456"
     assert Path(filename).read_bytes() == disk_before
     with closing(sqlite3.connect(database)) as connection:
         assert connection.execute("SELECT lcsc FROM part_info").fetchall() == [

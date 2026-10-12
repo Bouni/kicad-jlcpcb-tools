@@ -30,6 +30,7 @@ native_ui = shared_window_ui
 
 pytestmark = [
     pytest.mark.native_kicad,
+    pytest.mark.kicad_variants,
     pytest.mark.skipif(
         os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
         reason="native wx windows require an explicitly enabled desktop session",

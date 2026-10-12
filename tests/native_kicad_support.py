@@ -13,14 +13,14 @@ from .wx_harness import load_siblings
 
 @pytest.fixture
 def native_bindings() -> Iterator[SimpleNamespace]:
-    """Reuse one SWIG module per process and release only our application."""
+    """Reuse one SWIG module per process and release only our application.
+
+    Tests of design variants carry the kicad_variants marker, which skips them
+    on a KiCad without the variant API.
+    """
     # Scoped test doubles restore this import; keep one set of native wrappers
     # instead of registering another set against the same extension module.
     pcbnew = pytest.importorskip("pcbnew", reason="KiCad pcbnew is unavailable")
-    if not all(
-        hasattr(pcbnew.BOARD, name) for name in ("AddVariant", "GetVariantNamesForUI")
-    ):
-        pytest.skip("KiCad native variant APIs are unavailable")
     wx = pytest.importorskip("wx", reason="KiCad plotting requires wxPython")
     owns_app = wx.GetApp() is None
     app = wx.App(False) if owns_app else wx.GetApp()
@@ -34,6 +34,13 @@ def native_bindings() -> Iterator[SimpleNamespace]:
 def _native_position(pcbnew: ModuleType, x: float, y: float) -> Any:
     """Create a native point from millimetres."""
     return pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y))
+
+
+def native_field(footprint: Any, name: str) -> Any:
+    """Find a footprint field by name the same way on KiCad 9 and 10."""
+    return next(
+        (field for field in footprint.GetFields() if field.GetName() == name), None
+    )
 
 
 def _native_board(

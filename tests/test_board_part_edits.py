@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import pytest
 
+from .native_kicad_support import native_field
 from .wx_harness import load_siblings
 
 
@@ -534,13 +535,13 @@ def test_native_fields_save_reload_and_rollback(
         edits.apply_board_part_edits(
             [(first, {"lcsc": "C999"}), (second, {"lcsc": "C999"})]
         )
-    assert first.GetField("LCSC") is None
+    assert native_field(first, "LCSC") is None
     edits.apply_board_part_edits([(first, {"lcsc": "C123", "exclude_from_bom": True})])
-    assert first.GetField("LCSC").IsVisible() is False
+    assert native_field(first, "LCSC").IsVisible() is False
     filename = str(tmp_path / "ordinary.kicad_pcb")
     assert pcbnew.SaveBoard(filename, board)
     loaded_board = pcbnew.LoadBoard(filename)
     loaded = loaded_board.FindFootprintByReference("R1")
-    assert loaded.GetField("LCSC").GetText() == "C123"
-    assert loaded.GetField("JLCPCB Rotation").GetText() == "90"
+    assert native_field(loaded, "LCSC").GetText() == "C123"
+    assert native_field(loaded, "JLCPCB Rotation").GetText() == "90"
     assert loaded.IsExcludedFromBOM() is True

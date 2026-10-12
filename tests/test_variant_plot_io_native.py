@@ -17,6 +17,7 @@ from tests.native_wx_support import isolated_native
 
 pytestmark = [
     pytest.mark.native_kicad,
+    pytest.mark.kicad_variants,
     pytest.mark.skipif(
         os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
         reason="native KiCad plotting requires an explicitly enabled desktop session",
@@ -47,12 +48,7 @@ def test_native_temporary_board_save_load_and_ownership(
 ) -> None:
     """I/O failures reach Python cleanup; successful clones have one releasing owner."""
     if os.environ.get("KICAD_PLOT_IO_CHILD") != "1":
-        pcbnew = pytest.importorskip("pcbnew", reason="KiCad pcbnew is unavailable")
-        if not all(
-            hasattr(pcbnew.BOARD, name)
-            for name in ("AddVariant", "GetVariantNamesForUI")
-        ):
-            pytest.skip("KiCad native variant APIs are unavailable")
+        pytest.importorskip("pcbnew", reason="KiCad pcbnew is unavailable")
     if isolated_native(request, "KICAD_PLOT_IO_CHILD", native="kicad"):
         return
 

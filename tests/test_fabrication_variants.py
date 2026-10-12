@@ -1055,6 +1055,7 @@ def _gerber_content(text: str) -> str:
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_variants
 @_requires_native_plotting
 def test_native_variant_text_project_variables_and_dnp_marks(
     native_runtime: SimpleNamespace, tmp_path: Path
@@ -1077,6 +1078,7 @@ def test_native_variant_text_project_variables_and_dnp_marks(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_variants
 @_requires_native_plotting
 def test_native_serialization_and_production_plot_clone_preserve_rendering(
     native_runtime: SimpleNamespace, tmp_path: Path
@@ -1125,6 +1127,7 @@ def _read_csv(path: str) -> list[dict[str, str]]:
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_variants
 @_requires_native_plotting
 def test_native_exports_publish_each_variant_with_shared_physical_corrections(
     native_runtime: SimpleNamespace,
