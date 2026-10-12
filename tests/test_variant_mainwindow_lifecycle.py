@@ -2,6 +2,7 @@
 
 from importlib import import_module
 import sqlite3
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
@@ -667,6 +668,37 @@ def test_native_popup_copy_paste_work_before_and_after_a_modal(window_ui: Any) -
                     field: getattr(destination, field) for field in settings
                 } == settings
             assert snapshot.for_variant("") == before
+        assert not ui.messages
+
+    window_ui.run(check)
+
+
+@pytest.mark.os_input
+def test_native_popup_keys_keep_their_order_on_a_late_event_loop(
+    window_ui: Any,
+) -> None:
+    """A stalled loop releases every due key together; Return must not go first."""
+    window_ui.board.parts[0].AddVariant("A").SetFieldValue("LCSC", "C321")
+
+    def check(ui: Any) -> None:
+        controller, view, wx = ui.controller, ui.controller.view, ui.wx
+
+        def stall(event: Any) -> None:
+            # Busy runners hold the loop past the moment each key of the
+            # gesture is due, so their timers all fire on the next turn.
+            wx.CallLater(50, time.sleep, 0.4)
+            event.Skip()
+
+        view.Bind(wx.EVT_MENU_OPEN, stall)
+        try:
+            view.select_components(("component-1",), "A")
+            activate_popup(ui, "A", "lcsc", "Copy")
+        finally:
+            view.Unbind(wx.EVT_MENU_OPEN, handler=stall)
+        assert controller._clipboard_nonce, "Copy was not activated"
+        assert [dict(row.values)["lcsc"] for row in controller._clipboard.rows] == [
+            "C321"
+        ]
         assert not ui.messages
 
     window_ui.run(check)

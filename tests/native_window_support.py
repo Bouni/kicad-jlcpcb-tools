@@ -226,21 +226,24 @@ def activate_popup(ui: Any, variant: str, field: str, label: str) -> None:
     ui.dialog.Raise()
     view.SetFocus()
     wait_until(wx, ui.dialog.IsActive, reason="Plugin frame did not become active")
+    # Build the simulator once: on X11 its constructor yields to pending events,
+    # so a key timer that is already due would send its key during the yield,
+    # ahead of the key whose press is constructing it.
+    simulator = wx.UIActionSimulator()
     delivered: list[bool] = []
     timers: list[Any] = []
 
-    def press(key: int) -> None:
-        simulator = wx.UIActionSimulator()
-        delivered.append(simulator.KeyDown(key) and simulator.KeyUp(key))
+    def press(*keys: int) -> None:
+        for key in keys:
+            delivered.append(simulator.KeyDown(key) and simulator.KeyUp(key))
 
     def opened(event: Any) -> None:
         labels = [item.GetItemLabelText() for item in event.GetMenu().GetMenuItems()]
         if label in labels:
+            # One callback sends the whole sequence, so a late event loop
+            # cannot deliver Return before the Down presses that select.
             keys = [wx.WXK_DOWN] * (labels.index(label) + 1) + [wx.WXK_RETURN]
-            timers.extend(
-                wx.CallLater(100 + index * 75, press, key)
-                for index, key in enumerate(keys)
-            )
+            timers.append(wx.CallLater(100, press, *keys))
         event.Skip()
 
     view.Bind(wx.EVT_MENU_OPEN, opened)

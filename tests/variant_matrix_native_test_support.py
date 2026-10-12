@@ -332,7 +332,9 @@ class MatrixHarness:
         start = (
             max(self.bounds(variant)[0], left) + min(self.bounds(variant)[1], right)
         ) // 2 - left
-        destination = max(self.bounds(before)[0] + 3, left + 3) - left
+        # Aim past the edge strip where a held pointer auto-scrolls; a release
+        # that arrives late there would drop beyond the intended group.
+        destination = max(self.bounds(before)[0] - left, view._header_scroll_edge()) + 3
         self.header_event(self.wx.wxEVT_LEFT_DOWN, start, down=True)
         if after_press:
             after_press()

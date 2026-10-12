@@ -431,7 +431,9 @@ def test_native_physical_header_drag_survives_supplier_update(
         left, right = harness.viewport()
         source_left, source_right = harness.bounds("B")
         start = (max(source_left, left) + min(source_right, right)) // 2 - left
-        destination = max(harness.bounds("A")[0] - left + 5, 5)
+        # Release past the strip where a held drag auto-scrolls: "" sits left of
+        # the viewport, so a late release there would carry the drop past A.
+        destination = max(harness.bounds("A")[0] - left, view._header_scroll_edge()) + 5
         initial = view.model
         updated = modules[1].MatrixModel(
             initial.snapshot,

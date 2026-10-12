@@ -107,3 +107,39 @@ def test_footprint_hover_and_width_follow_mode_refresh_reopening_and_fonts(
         assert tooltip is None or tooltip.GetTip() == ""
 
     matrix(check, model=short)
+
+
+def test_each_motion_runs_one_hover_handler_however_often_the_grid_refreezes(
+    matrix: Any, modules: tuple[ModuleType, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resizes and refills re-freeze the columns; every motion still hovers once.
+
+    Refilling after an empty model also replaces the frozen-column window, and
+    its cells must keep their hover text.
+    """
+    view_class = modules[0].VariantMatrixView
+    original, motions = view_class._on_motion, [0]
+
+    def counted(self: Any, event: Any) -> None:
+        # Count only: holding the event's window would keep its wrapper alive.
+        motions[0] += 1
+        original(self, event)
+
+    monkeypatch.setattr(view_class, "_on_motion", counted)
+    short, empty = sample_model(modules[1]), sample_model(modules[1], rows=0)
+    lcsc = short.column_for("A", "lcsc")
+
+    def check(h: Any) -> None:
+        view = h.view
+        for _ in range(3):
+            resize(h, lcsc, view.GetColSize(lcsc) + 2)
+            view.set_model(empty)
+            view.set_model(short)
+            pump(h.wx)
+        for col in (1, lcsc):
+            motions[0] = 0
+            h.hover(0, col)
+            assert motions[0] == 1, f"column {col} ran {motions[0]} hover handlers"
+        assert h.hover(0, 1).endswith(short.get_value(0, 1))
+
+    matrix(check, model=short)

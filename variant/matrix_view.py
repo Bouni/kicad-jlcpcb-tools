@@ -167,6 +167,19 @@ def _status_column_width(width: int, padding: int) -> int:
     return max(1, round(previous * _STATUS_WIDTH_SCALE))
 
 
+def _bind_once(window: wx.Window, event: Any, handler: Callable[..., None]) -> None:
+    """Bind a handler exactly once to a grid child, whatever its wrapper holds.
+
+    A marker stored on the wrapper cannot tell. wxPython frees the wrapper of a
+    wx-owned child once Python drops it, so the marker is lost and the next
+    lookup would bind again. A wrapper that is still referenced is worse: when
+    FreezeTo recreates the frozen windows at the freed address, wxPython returns
+    it for the new window, marker included, and that window would stay unbound.
+    """
+    window.Unbind(event, handler=handler)
+    window.Bind(event, handler)
+
+
 def _width_key(column: Any) -> str:
     """Persist independently fitted text using an unambiguous variant identity."""
     if column.key in _READ_ONLY_STATUS_FIELDS:
@@ -1509,6 +1522,10 @@ class VariantMatrixView(gridlib.Grid):
         if not header.HasCapture():
             header.CaptureMouse()
 
+    def _header_scroll_edge(self) -> int:
+        """Width of the strip at each header end where a held drag auto-scrolls."""
+        return max(self.FromDIP(16), self.GetCharHeight())
+
     def _header_logical_x(self, x: int) -> int:
         """Convert the scrolling label child's x to the grid's column coordinates."""
         window = self.GetGridWindow()
@@ -1658,7 +1675,7 @@ class VariantMatrixView(gridlib.Grid):
                 drag.before = variant
                 drag.marker_x = left
                 break
-        edge = max(self.FromDIP(16), self.GetCharHeight())
+        edge = self._header_scroll_edge()
         if within_header and (drag.x < edge or drag.x >= width - edge):
             if not self._header_drag_timer.IsRunning():
                 self._header_drag_timer.Start(40)
@@ -1701,7 +1718,7 @@ class VariantMatrixView(gridlib.Grid):
             self._header_drag_timer.Stop()
             return
         width = drag.window.GetClientSize().width
-        edge = max(self.FromDIP(16), self.GetCharHeight())
+        edge = self._header_scroll_edge()
         direction = -1 if drag.x < edge else 1 if drag.x >= width - edge else 0
         if not direction or not 0 <= drag.y < self.GetColLabelSize():
             self._header_drag_timer.Stop()
@@ -2157,15 +2174,13 @@ class VariantMatrixView(gridlib.Grid):
         self.FreezeTo(0, count)
 
         frozen_header = self._frozen_col_label_window()
-        if frozen_header and not getattr(frozen_header, "_variant_header_bound", False):
-            frozen_header.Bind(wx.EVT_PAINT, self._on_header_paint)
+        if frozen_header:
+            _bind_once(frozen_header, wx.EVT_PAINT, self._on_header_paint)
             for mouse_event in (wx.EVT_MOTION, wx.EVT_LEFT_DOWN, wx.EVT_LEFT_DCLICK):
-                frozen_header.Bind(mouse_event, self._on_header_seam_mouse)
-            frozen_header._variant_header_bound = True
+                _bind_once(frozen_header, mouse_event, self._on_header_seam_mouse)
         for window in (self.GetGridWindow(), self.GetFrozenColGridWindow()):
-            if window and not getattr(window, "_variant_tooltip_bound", False):
-                window.Bind(wx.EVT_MOTION, self._on_motion)
-                window._variant_tooltip_bound = True
+            if window:
+                _bind_once(window, wx.EVT_MOTION, self._on_motion)
 
     def _on_size(self, event: wx.SizeEvent) -> None:
         event.Skip()
