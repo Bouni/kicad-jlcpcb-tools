@@ -12,6 +12,7 @@ import pytest
 
 from . import (
     part_preferences_test_support as database_support,
+    swig_doubles,
     test_window_layout as layout,
 )
 from .part_preferences_test_support import Board, Footprint
@@ -63,9 +64,10 @@ def workflow(
         )
         board = Board([Footprint("R1", lcsc="C100"), Footprint("R2", lcsc="C200")])
         board.filename = str(tmp_path / "board.kicad_pcb")
-        window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+        window.pcbnew = swig_doubles.editor(board)
+        window.backend = main.SwigBackend(window.pcbnew)
         window._board_identity = main.board_identity(board)
-        window.store = database_mainwindow.Store(window, str(tmp_path), board)
+        window.store = database_mainwindow.Store(window, str(tmp_path))
         window.library = MagicMock()
         window.library.get_part_details.return_value = {"type": "Basic", "stock": 100}
         window.library.read_correction_data.return_value = SimpleNamespace(
@@ -166,7 +168,6 @@ def test_saved_classes_reach_a_reopened_window_without_a_lookup(
         window.store = workflow.db.Store(
             window,
             str(tmp_path),
-            workflow.board,
             assembly_metadata=workflow.db.AssemblyMetadataCache(path),
         )
         window.populate_footprint_list()
@@ -205,7 +206,7 @@ def test_partial_cache_survives_empty_result_but_reopen_fetches_again(
     assert "unavailable" in tooltip(workflow)
     assert "Retrieving" not in tooltip(workflow)
     assert "C100" in window.store.get_assembly_enrichment_targets()
-    window.store = workflow.db.Store(window, window.store.project_path, workflow.board)
+    window.store = workflow.db.Store(window, window.store.project_path)
     window.populate_footprint_list()
     assert cell(workflow) == "?"
     assert "C100" in window.store.get_assembly_enrichment_targets()

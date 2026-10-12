@@ -1,7 +1,6 @@
 """Helpers for reading and mutating KiCad footprint and board state."""
 
 from collections.abc import Iterator
-import re
 from typing import Any, Optional
 
 from .lcsc import normalize_lcsc
@@ -74,15 +73,6 @@ def set_lcsc_value(fp: Any, lcsc: str) -> None:
                 if field.GetName() == "LCSC":
                     field.SetVisible(False)
                     break
-
-
-def get_valid_footprints(board):
-    """Get all footprints that have a valid reference."""
-    footprints = []
-    for fp in board.GetFootprints():
-        if re.match(r"[\w\d-]+", fp.GetReference()):
-            footprints.append(fp)
-    return footprints
 
 
 def iter_board_items(container: Any) -> Iterator[Any]:

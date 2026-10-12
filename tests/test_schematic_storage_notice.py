@@ -1,5 +1,7 @@
 """One-time schematic storage notice for projects that already have project.db."""
 
+from collections.abc import Iterator
+import importlib
 from pathlib import Path
 import sqlite3
 from types import MethodType, ModuleType, SimpleNamespace
@@ -8,53 +10,32 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load, load_mainwindow, package_stubs, wx_stubs
+from .wx_harness import load_mainwindow, load_siblings, wx_stubs
 
 _STORE_PACKAGE = "_schematic_storage_notice_store"
 _WINDOW_PACKAGE = "_schematic_storage_notice_window"
 
 
 @pytest.fixture
-def store_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Use the real Store with footprint adapters stubbed."""
-    module = load(
-        _STORE_PACKAGE, "store", {**package_stubs(_STORE_PACKAGE), **wx_stubs()}
-    )
-    monkeypatch.setattr(
-        module, "get_valid_footprints", lambda board: board.GetFootprints()
-    )
-    monkeypatch.setattr(
-        module,
-        "get_lcsc_assignment",
-        lambda footprint: (SimpleNamespace(status="unassigned"), ""),
-    )
-    monkeypatch.setattr(module, "get_exclude_from_bom", lambda footprint: False)
-    monkeypatch.setattr(module, "get_exclude_from_pos", lambda footprint: False)
-    monkeypatch.setattr(module, "get_is_dnp", lambda footprint: False)
-    monkeypatch.setattr(
-        module, "get_footprint_pad_metadata", lambda footprint: (2, False)
-    )
-    monkeypatch.setattr(module, "get_assembly_flags", lambda footprint: "[]")
-    return module
-
-
-def _board(project: Path, name: str = "board") -> Any:
-    """Minimal board with one footprint for Store construction."""
-    filename = project / f"{name}.kicad_pcb"
-    filename.write_text("(kicad_pcb)\n", encoding="utf-8")
-    footprint = SimpleNamespace(
-        GetReference=lambda: "R1",
-        GetValue=lambda: "10k",
-        GetFPID=lambda: SimpleNamespace(GetLibItemName=lambda: "R_0603"),
-    )
-    return SimpleNamespace(
-        GetFileName=lambda: str(filename), GetFootprints=lambda: [footprint]
-    )
+def store_module() -> Iterator[ModuleType]:
+    """Use the real Store; the board it reads is the fake backend's."""
+    with load_siblings(
+        _STORE_PACKAGE, ("store", "kicad_backend.fake"), wx_stubs()
+    ) as modules:
+        yield modules["store"]
 
 
 def _store(module: ModuleType, project: Path) -> Any:
-    """Construct an ordinary Store against project."""
-    return module.Store(SimpleNamespace(settings={}), str(project), _board(project))
+    """Construct an ordinary Store whose board holds one footprint."""
+    fake = importlib.import_module(f"{module.__package__}.kicad_backend.fake")
+
+    def read_board() -> Any:
+        return fake.FakeBackend([fake.component("R1", value="10k")]).snapshot()
+
+    parent = SimpleNamespace(
+        settings={}, _read_board=read_board, _held_board=read_board
+    )
+    return module.Store(parent, str(project))
 
 
 def _legacy_database(store: Any) -> Path:

@@ -3,6 +3,17 @@
 from typing import Optional
 
 
+class Text_Stub:
+    """Implementation of the text form of pcbnew.KIID and KIID_PATH."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def AsString(self) -> str:
+        """Return the text."""
+        return self.text
+
+
 class LIB_ID_Stub:
     """Implementation of pcbnew.LIB_ID."""
 
@@ -43,20 +54,23 @@ class Footprint_Stub:
     """Implementation of pcbnew.Footprint."""
 
     def __init__(self, reference: str, value: str, fpid: LIB_ID_Stub) -> None:
-        self.reference = reference
-        self.value = value
+        self.mandatory = {
+            "Reference": Field_Stub("Reference", reference),
+            "Value": Field_Stub("Value", value),
+        }
         self.fpid = fpid
         self.fields: dict[str, Field_Stub] = {}
         self.attributes = 0
         self.modified = False
+        self.m_Uuid = Text_Stub(f"standalone-{reference}")
 
     def GetReference(self) -> str:
         """Retrieve the reference designator string."""
-        return self.reference
+        return self.mandatory["Reference"].text
 
     def GetValue(self) -> str:
         """Value string."""
-        return self.value
+        return self.mandatory["Value"].text
 
     def GetFPID(self) -> LIB_ID_Stub:
         """Footprint LIB_ID."""
@@ -65,6 +79,22 @@ class Footprint_Stub:
     def GetProperties(self) -> dict[str, str]:
         """Properties."""
         return {name: field.GetText() for name, field in self.fields.items()}
+
+    def GetFPIDAsString(self) -> str:
+        """Footprint LIB_ID as text; the stub library has no nickname."""
+        return self.fpid.GetLibItemName()
+
+    def GetPath(self) -> Text_Stub:
+        """Return the linked symbol's path; the demo part has none."""
+        return Text_Stub("")
+
+    def IsFlipped(self) -> bool:
+        """Whether the footprint is on the bottom side."""
+        return False
+
+    def Pads(self) -> list[object]:
+        """Return the pads; the demo part has none."""
+        return []
 
     def GetAttributes(self) -> int:
         """Attributes."""
@@ -75,12 +105,14 @@ class Footprint_Stub:
         self.attributes = attributes
 
     def GetFields(self) -> list[Field_Stub]:
-        """Fields."""
-        return list(self.fields.values())
+        """Fields: Reference and Value, then the footprint's own."""
+        return [*self.mandatory.values(), *self.fields.values()]
 
     def SetField(self, name: str, text: str) -> None:
         """Set text while preserving an existing field's identity and visibility."""
-        if name in self.fields:
+        if name in self.mandatory:
+            self.mandatory[name].text = text
+        elif name in self.fields:
             self.fields[name].text = text
         else:
             self.fields[name] = Field_Stub(name, text)
@@ -114,6 +146,7 @@ class BoardStub:
         self.footprints = []
         self.footprints.append(Footprint_Stub("R1", "100", LIB_ID_Stub("resistors")))
         self.filename = "fake_test_board.kicad_pcb"
+        self.m_Uuid = Text_Stub("standalone-board")
 
     def GetFileName(self) -> str:
         """Board filename."""

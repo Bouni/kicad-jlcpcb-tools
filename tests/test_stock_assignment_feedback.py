@@ -199,7 +199,7 @@ def test_missing_catalog_explains_assignment_then_retry_survives_reopen(
     assert window.partlist_data_model.data[0][3] == "C200"
     assert window.partlist_data_model.data[0][5] == expected_stock
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C200"
-    reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
+    reopened = mainwindow.Store(window, window.project_path)
     assert reopened.get_part("R1")["lcsc"] == "C200"
     assert reopened.get_part("R1")["stock"] is None
     assert _warnings(window) == []
@@ -362,7 +362,7 @@ def test_save_preferences_and_clear_remain_available_without_catalog(
     assert window.store.get_part("R1")["lcsc"] == ""
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == ""
     assert window.partlist_data_model.data[0][3] == ""
-    reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
+    reopened = mainwindow.Store(window, window.project_path)
     assert reopened.get_part("R1")["lcsc"] == ""
     window.footprint_list.Enable.assert_called_with(True)
     window.right_toolbar.Enable.assert_called_with(True)

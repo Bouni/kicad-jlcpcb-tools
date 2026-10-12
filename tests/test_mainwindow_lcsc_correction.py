@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests import swig_doubles
 from tests.correction_test_support import seed_raw
 from tests.part_preferences_test_support import Board, Footprint
 from tests.test_corrections_import_export import install_manager_controls
@@ -80,7 +81,8 @@ def _window_with_part(runtime: SimpleNamespace, lcsc: str) -> tuple[Any, Footpri
     footprint = Footprint("U1", value="Device", footprint="SOT-23-3", lcsc=lcsc)
     board = Board([footprint])
     board.filename = window.pcbnew.GetBoard().GetFileName()
-    window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+    window.pcbnew = swig_doubles.editor(board)
+    window.backend = runtime.mainwindow.SwigBackend(window.pcbnew)
     window._board_identity = runtime.mainwindow.board_identity(board)
     # The refreshed cell, not the remembered preference, is what is under test.
     window.settings = {"part_preferences": {"remember_lcsc_assignments": False}}

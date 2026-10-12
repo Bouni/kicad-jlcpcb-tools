@@ -77,6 +77,7 @@ class _Pcbnew:
                 setattr(self, name, getattr(pcbnew_module, name))
         self.other_items: list[_SelectedItem] = []
         self.Refresh = MagicMock()
+        self.GetBuildVersion = pcbnew_module.GetBuildVersion
 
     def GetBoard(self) -> Any:
         return self.board

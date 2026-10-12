@@ -78,13 +78,13 @@ def test_board_replacement_after_assignment_disables_stale_feedback(
 def test_external_board_assignment_is_immediately_authoritative(
     make_window: Callable[..., Any], lcsc: str
 ) -> None:
-    """PCB edits, including clearing a part, never revive an older project choice."""
+    """PCB edits, including clearing a part, win at the next read of the board."""
     window = make_window()
     footprint = window.pcbnew.GetBoard().FindFootprintByReference("R1")
     footprint.SetField("LCSC", lcsc)
 
-    assert window.store.get_part("R1")["lcsc"] == lcsc
     assert window.store.read_all()[0]["lcsc"] == lcsc
+    assert window.store.get_part("R1")["lcsc"] == lcsc
     window.populate_footprint_list()
     assert window.test_rows["R1"]["lcsc"] == lcsc
 
@@ -152,7 +152,7 @@ def test_assignment_syncs_board_store_model_and_survives_store_reopen(
     assert window.store.get_part("R1")["stock"] is None
     assert window.store.get_part("R1")["assembly_process"] == ""
     assert window.store.get_part("R1")["component_product_type"] is None
-    reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
+    reopened = mainwindow.Store(window, window.project_path)
     assert reopened.get_part("R1")["lcsc"] == "C200"
     window.start_assembly_enrichment.assert_called_once_with(["R1"])
     assert mainwindow.wx.PostEvent.called or window.recompute_bom_estimate.called
@@ -245,7 +245,7 @@ def test_paste_assigns_the_whole_number_or_leaves_everything_as_it_was(
     assert fp.field.text == lcsc
     assert window.test_rows["R1"]["lcsc"] == lcsc
     assert [row["lcsc"] for row in project_rows(window)] == [lcsc]
-    reopened = mainwindow.Store(window, window.project_path, window.pcbnew.GetBoard())
+    reopened = mainwindow.Store(window, window.project_path)
     assert reopened.get_part("R1")["lcsc"] == lcsc
     assert window.library.get_part_preference("R_0603", "10k") == (expected or "C300")
     if expected is None:
@@ -713,7 +713,7 @@ def test_two_spellings_of_one_part_share_one_lookup_and_persist_canonically(
     window.library.get_part_details.assert_called_once_with("C200")
     board = window.pcbnew.GetBoard()
     assert [fp.field.text for fp in board.GetFootprints()] == ["C200", "C200"]
-    reopened = mainwindow.Store(window, window.project_path, board)
+    reopened = mainwindow.Store(window, window.project_path)
     assert [reopened.get_part(ref)["lcsc"] for ref in ("R1", "R2")] == ["C200", "C200"]
 
 

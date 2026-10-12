@@ -5,26 +5,23 @@ import contextlib
 from functools import cmp_to_key
 import os
 from pathlib import Path
-import re
 import sqlite3
 from typing import Any, Optional
 
+from .board_parts import find_component, is_listed, part_facts
 from .enrichment.cache import AssemblyMetadataCache
-from .footprint_helpers import (
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-    get_is_dnp,
-    get_lcsc_assignment,
-    get_valid_footprints,
-)
-from .footprint_metadata import get_assembly_flags, get_footprint_pad_metadata
 from .helpers import natural_sort_collation
+from .kicad_backend.records import ComponentRecord
 from .lcsc import normalize_lcsc
 from .variant.generation_counter import generation_count_transaction
 
 
 class Store:
-    """Adapt live board fields, with supplier facts cached by LCSC.
+    """Combine the board's parts with supplier facts cached by LCSC.
+
+    The parts come from the window's board snapshots: ``parent._read_board()``
+    reads the board again and ``parent._held_board()`` returns the snapshot
+    the window last read, after checking the board is still the one it opened.
 
     This adapter does not read legacy assignments. The window performs guarded
     startup recovery and archival separately. This adapter uses project SQLite
@@ -40,13 +37,11 @@ class Store:
         self,
         parent: Any,
         project_path: str,
-        board: Any,
         *,
         assembly_metadata: Optional[AssemblyMetadataCache] = None,
     ) -> None:
         self.parent = parent
         self.project_path = project_path
-        self._board = board
         self.datadir = os.path.join(project_path, "jlcpcb")
         self.dbfile = os.path.join(self.datadir, "project.db")
         self._assembly_metadata = (
@@ -64,12 +59,6 @@ class Store:
     def assembly_metadata(self, cache: AssemblyMetadataCache) -> None:
         """Use another cache, as when Settings moves the data folder."""
         self._assembly_metadata = cache
-
-    @property
-    def board(self) -> Any:
-        """Retrieve a validated live board, or the independently owned board."""
-        getter = getattr(self.parent, "_get_current_board", None)
-        return getter() if callable(getter) else self._board
 
     def get_generation_count(self) -> int:
         """Read the existing project counter without creating or upgrading files."""
@@ -99,50 +88,41 @@ class Store:
             pass
         return count
 
-    def _part_row(self, footprint: Any) -> dict[str, Any]:
-        """Capture one footprint's current native data and matching supplier facts."""
-        assignment, lcsc = get_lcsc_assignment(footprint)
-        assembly_process, component_product_type = self._assembly_metadata.get(lcsc)
-        pad_count, has_tht = get_footprint_pad_metadata(footprint)
+    def _part_row(self, component: ComponentRecord) -> dict[str, Any]:
+        """Combine one footprint's board facts with its supplier facts."""
+        facts = part_facts(component)
+        assembly_process, component_product_type = self._assembly_metadata.get(
+            facts["lcsc"]
+        )
         return {
-            "reference": footprint.GetReference(),
-            "value": footprint.GetValue(),
-            "footprint": str(footprint.GetFPID().GetLibItemName()),
-            "lcsc": lcsc,
-            "assignment_status": assignment.status,
+            **facts,
             "stock": None,
-            "exclude_from_bom": get_exclude_from_bom(footprint),
-            "exclude_from_pos": get_exclude_from_pos(footprint),
-            "is_dnp": get_is_dnp(footprint),
-            "pad_count": pad_count,
-            "has_tht": has_tht,
-            "assembly_flags": get_assembly_flags(footprint),
             "assembly_process": assembly_process,
             "component_product_type": component_product_type,
         }
 
     def read_all(self) -> list[dict[str, Any]]:
-        """Capture current native assignments, population and electrical metadata."""
-        rows = [self._part_row(fp) for fp in get_valid_footprints(self.board)]
+        """Read the board again: assignments, population and pad facts by reference."""
+        snapshot = self.parent._read_board()
+        rows = [
+            self._part_row(component)
+            for component in snapshot.components
+            if is_listed(component.reference)
+        ]
         natural_key = cmp_to_key(natural_sort_collation)
         return sorted(rows, key=lambda row: natural_key(row["reference"]))
 
     def get_part(self, ref: str) -> Optional[dict[str, Any]]:
-        """Return the current native row for a reference, if it still exists."""
-        # Preserve the same reference eligibility as get_valid_footprints without
-        # crossing the native boundary for every unrelated footprint and pad.
-        if not re.match(r"[\w\d-]+", ref):
+        """Return the row for a reference from the window's last board read.
+
+        One part is looked up without reading the whole board again; the
+        window reads it again on activation, after each edit and with each
+        ``read_all``.
+        """
+        if not is_listed(ref):
             return None
-        board = self.board
-        finder = getattr(board, "FindFootprintByReference", None)
-        if callable(finder):
-            footprint = finder(ref)
-        else:
-            footprint = next(
-                (fp for fp in get_valid_footprints(board) if fp.GetReference() == ref),
-                None,
-            )
-        return self._part_row(footprint) if footprint is not None else None
+        component = find_component(self.parent._held_board(), ref)
+        return self._part_row(component) if component is not None else None
 
     def read_bom_parts(
         self,

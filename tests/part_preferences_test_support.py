@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from . import swig_doubles
 from .wx_harness import ROOT, load_siblings, mainwindow_stubs, wx_stubs
 
 
@@ -52,32 +53,15 @@ def mainwindow(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
         yield loaded["mainwindow"]
 
 
-class Field:
-    """Retain editable KiCad field names, text and visibility."""
-
-    def __init__(self, name: str, text: str) -> None:
-        self.name, self.text = name, text
-        self.visible = True
-
-    def GetName(self) -> str:
-        """Return the native field name."""
-        return self.name
-
-    def GetText(self) -> str:
-        """Return the current text."""
-        return self.text
-
-    def SetVisible(self, visible: bool) -> None:
-        """Retain field visibility."""
-        self.visible = visible
-
-    def IsVisible(self) -> bool:
-        """Read the field visibility used when verifying native edit recovery."""
-        return self.visible
+Field = swig_doubles.Field
 
 
-class Footprint:
-    """Represent live native fields and independent assembly exclusion flags."""
+class Footprint(swig_doubles.Footprint):
+    """Represent live native fields and independent assembly exclusion flags.
+
+    The board backend reads it like a KiCad footprint; ``fields`` holds the
+    footprint's own fields, after Reference, Value, Datasheet and Description.
+    """
 
     def __init__(
         self,
@@ -91,70 +75,27 @@ class Footprint:
         bom: bool = False,
         pos: bool = False,
     ) -> None:
-        self.reference, self.value, self.footprint = reference, value, footprint
-        self.fields = {
-            name: Field(name, text)
-            for name, text in (fields if fields is not None else {"LCSC": lcsc}).items()
-        }
-        self.dnp = dnp
-        self.attributes = (int(bom) << 3) | (int(pos) << 2)
+        super().__init__(
+            reference,
+            value=value,
+            footprint=footprint,
+            fields=fields if fields is not None else {"LCSC": lcsc},
+            attributes=(int(bom) << 3) | (int(pos) << 2),
+            dnp=dnp,
+        )
 
     @property
     def field(self) -> Field:
         """Return the conventional LCSC field used by simple workflows."""
         return self.fields["LCSC"]
 
-    def GetReference(self) -> str:
-        """Return the board reference."""
-        return self.reference
 
-    def GetValue(self) -> str:
-        """Return the part value."""
-        return self.value
-
-    def GetFPID(self) -> types.SimpleNamespace:
-        """Return the footprint library item."""
-        return types.SimpleNamespace(GetLibItemName=lambda: self.footprint)
-
-    def GetFields(self) -> list[Field]:
-        """Return every editable field."""
-        return list(self.fields.values())
-
-    def SetField(self, name: str, value: str) -> None:
-        """Change only the named field."""
-        self.fields.setdefault(name, Field(name, "")).text = value
-
-    def RemoveField(self, name: str) -> None:
-        """Remove a field introduced by a native edit that was rolled back."""
-        self.fields.pop(name, None)
-
-    def GetAttributes(self) -> int:
-        """Return assembly exclusion bits."""
-        return self.attributes
-
-    def SetAttributes(self, attributes: int) -> None:
-        """Persist native assembly attributes for subsequent reads."""
-        self.attributes = attributes
-
-    def IsDNP(self) -> bool:
-        """Return the live DNP flag."""
-        return self.dnp
-
-    def GetLayer(self) -> int:
-        """Return the front layer."""
-        return 0
-
-
-class Board:
-    """Resolve references against the current board."""
+class Board(swig_doubles.Board):
+    """Resolve references against the current board, one footprint each."""
 
     def __init__(self, footprints: Iterable[Footprint]) -> None:
+        super().__init__(filename="")
         self.footprints = {fp.reference: fp for fp in footprints}
-        self.filename = ""
-
-    def GetFileName(self) -> str:
-        """Return the saved board path used to scope project assignments."""
-        return self.filename
 
     def GetFootprints(self) -> list[Footprint]:
         """Return current board footprints."""
@@ -206,7 +147,8 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
             filename = tmp_path / "board.kicad_pcb"
             filename.write_text("(kicad_pcb)\n", encoding="utf-8")
             board.filename = str(filename)
-        window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
+        window.pcbnew = swig_doubles.editor(board)
+        window.backend = mainwindow.SwigBackend(window.pcbnew)
         window._board_identity = mainwindow.board_identity(board)
         window._board_action = None
         window._board_unreliable = False
@@ -249,7 +191,7 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         # Recovery tests opt out and exercise the real constructor from init_data.
         if fabrication_initialized:
             window.fabrication = object()
-        window.store = mainwindow.Store(window, window.project_path, board)
+        window.store = mainwindow.Store(window, window.project_path)
         model = window.partlist_data_model = MagicMock()
         rows: dict[str, Any] = {}
 

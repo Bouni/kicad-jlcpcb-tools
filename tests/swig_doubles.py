@@ -84,11 +84,8 @@ class Footprint:
         self.uuid = uuid or str(uuid5(NAMESPACE_URL, f"swig-double:{reference}"))
         self.path = path
         self.modified = False
-
-    @property
-    def m_Uuid(self) -> SimpleNamespace:
-        """Return the footprint's KIID."""
-        return SimpleNamespace(AsString=lambda: self.uuid)
+        self.descriptions = {"Datasheet": "", "Description": ""}
+        self.m_Uuid = SimpleNamespace(AsString=lambda: self.uuid)
 
     def GetReference(self) -> str:
         """Return the reference."""
@@ -111,14 +108,20 @@ class Footprint:
         return [
             Field("Reference", self.reference),
             Field("Value", self.value),
-            Field("Datasheet", "", False),
-            Field("Description", "", False),
+            *(Field(name, text, False) for name, text in self.descriptions.items()),
             *self.fields.values(),
         ]
 
     def SetField(self, name: str, text: str) -> None:
-        """Change a user field, adding it when missing."""
-        self.fields.setdefault(name, Field(name, "")).text = text
+        """Change a field, adding a user field when the name is new."""
+        if name == "Reference":
+            self.reference = text
+        elif name == "Value":
+            self.value = text
+        elif name in self.descriptions:
+            self.descriptions[name] = text
+        else:
+            self.fields.setdefault(name, Field(name, "")).text = text
 
     def RemoveField(self, name: str) -> None:
         """Remove a user field."""
@@ -178,14 +181,10 @@ class Board:
         self.footprints = list(footprints)
         self.filename = filename
         self.uuid = "board-uuid"
+        self.m_Uuid = SimpleNamespace(AsString=lambda: self.uuid)
         if variants is not None:
             names = list(variants)
             self.GetVariantNamesForUI = lambda: names
-
-    @property
-    def m_Uuid(self) -> SimpleNamespace:
-        """Return the board's KIID."""
-        return SimpleNamespace(AsString=lambda: self.uuid)
 
     def GetFileName(self) -> str:
         """Return the board file."""

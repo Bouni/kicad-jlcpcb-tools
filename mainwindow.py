@@ -5,7 +5,7 @@ from __future__ import annotations
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 # ruff: noqa: I001, UP045
 
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
@@ -52,6 +52,7 @@ from .legacy_migration_report import (
 )
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
+from .board_parts import repeated_field_names
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .core.settings_persistence import (
     VariantPreferencePatch,
@@ -114,7 +115,8 @@ from .helpers import (
     getVersion,
     loadBitmapScaled,
 )
-from .kicad_backend import BoardChanged
+from .kicad_backend import BoardChanged, BoardSnapshot
+from .kicad_backend.swig import SwigBackend
 from .kicad_backend.swig.read import board_identity
 from .kicad_drc import DRCViolationCounter
 from .lcsc import Lcsc, LcscDict, extract_lcsc
@@ -219,6 +221,8 @@ class JLCPCBTools(wx.Frame):
         self._saving_on_close = False
         self._generating = False
         self.pcbnew = kicad_provider.get_pcbnew()
+        self.backend = SwigBackend(self.pcbnew)
+        self._board_snapshot: Optional[BoardSnapshot] = None
         board = self.pcbnew.GetBoard()
         self._schematic_board_identity = board_identity(board)
         self._board_identity = board_identity(board)
@@ -833,7 +837,7 @@ class JLCPCBTools(wx.Frame):
         self.bom_estimator_controller = BomEstimatorController(
             read_parts=self.read_assembly_parts,
             get_part_details=self._bom_get_part_details,
-            get_board=self._get_current_board,
+            get_board=self._held_board,
             is_force_standard_enabled=lambda: self.bom_estimator_force_standard,
             set_price_label=self.partlist_data_model.set_bom_price,
             set_standard_only_refs=self._set_standard_only_refs,
@@ -899,9 +903,63 @@ class JLCPCBTools(wx.Frame):
             )
         return board
 
+    def _read_board(self) -> BoardSnapshot:
+        """Read the open board again through the backend and hold the snapshot.
+
+        The live board is checked first, as for every board access, so the
+        snapshot is of the board this window was opened for. Inside
+        ``_reading_once`` only the first read reads the board.
+        """
+        self._get_current_board()
+        once = getattr(self, "_read_once", None)
+        if once:
+            return once[0]
+        snapshot = self.backend.snapshot()
+        self._board_snapshot = snapshot
+        if once is not None:
+            once.append(snapshot)
+        return snapshot
+
+    @contextmanager
+    def _reading_once(
+        self,
+        snapshot: Optional[BoardSnapshot] = None,  # noqa: UP045
+    ) -> Iterator[list[BoardSnapshot]]:
+        """Read the board at most once in the block; later reads take that read.
+
+        A refresh runs on the main thread and edits nothing, so nothing can
+        change the board before it ends: the parts list, enrichment, stock
+        concerns and the estimate can share one read. ``snapshot`` is a read
+        the block starts from instead. The block gets the read, once made.
+        """
+        if getattr(self, "_read_once", None) is not None:
+            yield self._read_once
+            return
+        self._read_once = [] if snapshot is None else [snapshot]
+        try:
+            yield self._read_once
+        finally:
+            self._read_once = None
+
+    def _held_board(self) -> BoardSnapshot:
+        """Return the snapshot last read, once the board is checked to be open.
+
+        The window reads the board again when the parts list is rebuilt,
+        which activation does, and after each of its own edits.
+        """
+        self._get_current_board()
+        snapshot = getattr(self, "_board_snapshot", None)
+        return snapshot if snapshot is not None else self._read_board()
+
     def on_window_activated(self, event: wx.ActivateEvent) -> None:
         """Refresh external PCB edits and undo without applying opening preferences."""
         event.Skip()
+        if not event.GetActive():
+            # The board can change while another window is active, so the
+            # next list rebuild says again what it finds, and no estimate
+            # reuses this activation's read.
+            self._repeated_fields_noted = False
+            self._activation_read = None
         if (
             not event.GetActive()
             or getattr(self, "_closing", False)
@@ -913,11 +971,14 @@ class JLCPCBTools(wx.Frame):
             return
         self._refreshing_board = True
         try:
-            self._get_current_board()
-            self._refresh_footprints_preserving_selection()
-            self.start_assembly_enrichment()
-            self.recompute_stock_concerns()
-            self.recompute_bom_estimate()
+            with self._reading_once() as read:
+                self._get_current_board()
+                self._refresh_footprints_preserving_selection()
+                self.start_assembly_enrichment()
+                self.recompute_stock_concerns()
+                self.recompute_bom_estimate()
+            # The estimate the list rebuild schedules finishes this refresh.
+            self._activation_read = read[0] if read else None
         except (BoardChanged, OSError, sqlite3.Error) as error:
             self._set_project_storage_error(error)
         finally:
@@ -958,6 +1019,7 @@ class JLCPCBTools(wx.Frame):
                 apply()
             else:
                 callback(apply)
+            self._read_board()
         except (BoardChanged, BoardEditRecoveryError) as error:
             self._board_unreliable = True
             self._set_project_storage_error(error)
@@ -1278,24 +1340,28 @@ class JLCPCBTools(wx.Frame):
                 raise ValueError(
                     "The PCB now contains variants. Reopen JLCPCB Tools to edit them."
                 )
-            store_type = Store
+            self.assembly_lookup.invalidate()
             if self._variant_mode:
                 from .variant.store import VariantStore
 
-                store_type = VariantStore
-            self.assembly_lookup.invalidate()
-            self.store = store_type(
-                self,
-                self.project_path,
-                board,
-                assembly_metadata=self._assembly_metadata_cache(),
-            )
+                self.store = VariantStore(
+                    self,
+                    self.project_path,
+                    board,
+                    assembly_metadata=self._assembly_metadata_cache(),
+                )
+            else:
+                self.store = Store(
+                    self,
+                    self.project_path,
+                    assembly_metadata=self._assembly_metadata_cache(),
+                )
             self._set_project_storage_error(None)
             self._migrate_legacy_assignments()
             if getattr(self, "_board_unreliable", False):
                 return
             self._maybe_show_schematic_storage_notice(project_db_preexisted)
-            if store_type is not Store:
+            if self._variant_mode:
                 from .variant.controller import VariantMainController
 
                 self._variant_controller = VariantMainController(self, self.store)
@@ -2260,8 +2326,15 @@ class JLCPCBTools(wx.Frame):
         self._bom_recompute_scheduled = False
         if getattr(self, "_closing", False):
             return
-        self.recompute_stock_concerns()
-        self.recompute_bom_estimate()
+        # Right after an activation, with no read since, the refresh's read
+        # still stands; otherwise stock concerns and the estimate share one.
+        snapshot = getattr(self, "_activation_read", None)
+        self._activation_read = None
+        if snapshot is not getattr(self, "_board_snapshot", None):
+            snapshot = None
+        with self._reading_once(snapshot):
+            self.recompute_stock_concerns()
+            self.recompute_bom_estimate()
 
     def recompute_stock_concerns(self) -> None:
         """Refresh Stock attributes from all live BOM parts, before view filtering."""
@@ -2533,6 +2606,29 @@ class JLCPCBTools(wx.Frame):
             entries.append((row, part, enrichment_status == "Pending"))
         self.partlist_data_model.ReplaceAll(entries)
         wx.PostEvent(self, BomDataChangedEvent(source="populate_footprint_list"))
+        self._note_repeated_field_names()
+
+    def _note_repeated_field_names(self) -> None:
+        """Log, once per activation, each footprint holding two fields of one name.
+
+        KiCad's footprint dialog accepts a second field with a name the
+        footprint already has. The list and every action keep working, so
+        this is a note in the log rather than a stop; the first list rebuild
+        after the window is activated gives it, and later rebuilds and
+        actions do not repeat it.
+        """
+        snapshot = getattr(self, "_board_snapshot", None)
+        if snapshot is None or getattr(self, "_repeated_fields_noted", False):
+            return
+        self._repeated_fields_noted = True
+        for reference, name in repeated_field_names(snapshot):
+            self.logger.warning(
+                'Footprint %s has more than one field named "%s". KiCad keeps '
+                "only the last one when the board is reopened. Remove the extra "
+                "field from the footprint.",
+                reference,
+                name,
+            )
 
     def OnBomHide(self, *_):
         """Hide all parts from the list that have 'in BOM' set to No."""
@@ -3769,6 +3865,7 @@ class JLCPCBTools(wx.Frame):
             return
         preferences = []
         try:
+            self._read_board()
             for item in self.footprint_list.GetSelections():
                 reference = self.partlist_data_model.get_reference(item)
                 if part := self.store.get_part(reference):
@@ -3786,6 +3883,7 @@ class JLCPCBTools(wx.Frame):
             return controller.apply_preferences()
         assignments = {}
         try:
+            self._read_board()
             for item in self.footprint_list.GetSelections():
                 reference = self.partlist_data_model.get_reference(item)
                 part = self.store.get_part(reference)

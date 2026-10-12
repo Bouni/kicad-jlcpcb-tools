@@ -5,14 +5,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import suppress
 
-import pcbnew  # pylint: disable=import-error
 import wx  # pylint: disable=import-error
 
+from .board_parts import placement_sides
 from .bom_estimation.assembly_mode import AssemblyModeDecision
 from .bom_estimation.view import evaluate_bom_estimate, selected_assembly_parts
 from .helpers import HighResWxSize
+from .kicad_backend.records import BoardSnapshot
 
 
 class BomEstimatorWidget:
@@ -137,7 +137,7 @@ class BomEstimatorController:
         *,
         read_parts: Callable[[], object],
         get_part_details: Callable[[str], dict],
-        get_board: Callable[[], object],
+        get_board: Callable[[], BoardSnapshot],
         is_force_standard_enabled: Callable[[], bool],
         set_price_label: Callable[[str, str], None],
         set_standard_only_refs: Callable[[set[str]], None],
@@ -153,33 +153,18 @@ class BomEstimatorController:
         self._set_summary_text = set_summary_text
         self._set_details_button_label = set_details_button_label
 
-    @staticmethod
-    def _is_on_bottom_side(footprint) -> bool:
-        """Return True when a footprint is on the bottom side.
-
-        Catches AttributeError (older pcbnew API without IsFlipped) and
-        RuntimeError (footprint object destroyed by SWIG between layout
-        rebuilds) — narrower than the previous broad suppress(Exception).
-        """
-        with suppress(AttributeError, RuntimeError):
-            if bool(footprint.IsFlipped()):
-                return True
-        return footprint.GetLayer() != pcbnew.F_Cu
-
     def recompute(self, board_count: int) -> AssemblyModeDecision:
         """Read current board facts and apply one estimate result on the UI thread."""
         raw_parts = self._read_parts()
         parts = raw_parts if isinstance(raw_parts, list) else []
         placed_parts = list(selected_assembly_parts(parts))
-        board = self._get_board() if placed_parts else None
-        sides = {}
-        for part in placed_parts:
-            reference = str(part["reference"])
-            footprint = board.FindFootprintByReference(reference) if board else None
-            if footprint:
-                sides[reference] = (
-                    "bottom" if self._is_on_bottom_side(footprint) else "top"
-                )
+        sides = (
+            placement_sides(
+                self._get_board(), (str(part["reference"]) for part in placed_parts)
+            )
+            if placed_parts
+            else {}
+        )
         result = evaluate_bom_estimate(
             parts,
             board_count,
