@@ -118,6 +118,61 @@ def test_a_violation_without_a_severity_counts_as_an_error(kicad_drc, tmp_path):
     )
 
 
+# An excerpt of the report KiCad 7.0.11 writes for a board with one clearance
+# error: KiCad 7 writes "Severity: error" where KiCad 8 and later write "error".
+KICAD7_REPORT = """** Drc report for /tmp/violation.kicad_pcb **
+** Created on 2026-10-12 20:51:21 **
+
+** Found 3 DRC violations **
+[lib_footprint_issues]: The current configuration does not include the library 'UserPaths'.
+    Local override; Severity: warning
+    @(108.0000 mm, 108.0000 mm): Footprint R1
+[clearance]: Clearance violation (netclass 'Default' clearance 0.2000 mm; actual 0.1500 mm)
+    Rule: netclass 'Default'; Severity: error
+    @(104.0000 mm, 126.0000 mm): Track [A] on F.Cu, length 8.0000 mm
+    @(104.0000 mm, 126.3500 mm): Track [B] on F.Cu, length 8.0000 mm
+[track_dangling]: Track has unconnected end
+    Local override; Severity: warning
+    @(104.0000 mm, 126.0000 mm): Track [A] on F.Cu, length 8.0000 mm
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **
+"""
+
+
+@pytest.mark.parametrize(
+    "report, expected",
+    [
+        pytest.param(
+            KICAD7_REPORT,
+            (
+                1,
+                [
+                    "[clearance]: Clearance violation (netclass 'Default' clearance "
+                    "0.2000 mm; actual 0.1500 mm)"
+                ],
+            ),
+            id="error",
+        ),
+        pytest.param(
+            KICAD7_REPORT.replace("Severity: error", "Severity: warning"),
+            (0, []),
+            id="warnings-only",
+        ),
+    ],
+)
+def test_kicad7_warnings_are_not_errors(
+    kicad_drc: ModuleType, tmp_path: Path, report: str, expected: Any
+) -> None:
+    """KiCad 7's errors count and its warnings do not, as on later KiCads."""
+    counter = kicad_drc.DRCViolationCounter(_pcbnew(report, []), str(tmp_path))
+
+    assert counter.get_error_violations("board.kicad_pcb") == expected
+
+
 def test_failed_report_raises_and_removes_the_report(
     kicad_drc: ModuleType, tmp_path: Path
 ) -> None:

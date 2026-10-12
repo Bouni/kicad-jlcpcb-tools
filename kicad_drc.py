@@ -87,7 +87,10 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
                 else len(violations_section)
             )
             block = violations_section[start:end]
-            severity_match = re.search(r";\s*(error|warning)\b", block, flags=re.IGNORECASE)
+            # KiCad 7 writes "; Severity: error"; KiCad 8 and later write "; error".
+            severity_match = re.search(
+                r";\s*(?:Severity:\s*)?(error|warning)\b", block, flags=re.IGNORECASE
+            )
             # A block without a severity counts as an error, so a report KiCad
             # writes in another format is never taken for a clean board.
             severity = severity_match.group(1).lower() if severity_match else "unknown"
