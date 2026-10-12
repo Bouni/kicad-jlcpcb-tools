@@ -2,7 +2,10 @@
 
 Shared code reads the board through ``BoardBackend`` and sees only the
 immutable records in ``records``; ``fake`` holds a board in memory for
-tests.
+tests. The ``swig`` package implements the interface over KiCad's SWIG
+bindings. Other code still works on SWIG objects, among them fabrication,
+DRC, the variant adapter and the board edits, until later changes move it
+behind the interface.
 """
 
 from typing import Protocol

@@ -134,7 +134,7 @@ def test_stale_footprint_selection_preserves_current_pcb_selection(
 
     try:
         window.OnFootprintSelected()
-    except mainwindow.BoardContextChanged as error:
+    except mainwindow.BoardChanged as error:
         errors.append(error)
 
     assert selected.selected

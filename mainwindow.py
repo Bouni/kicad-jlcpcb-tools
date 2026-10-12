@@ -23,7 +23,6 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
-from .board_context import BoardContextChanged, board_identity
 from .board_part_edits import (
     BoardEditRecoveryError,
     apply_board_part_edits,
@@ -115,6 +114,8 @@ from .helpers import (
     getVersion,
     loadBitmapScaled,
 )
+from .kicad_backend import BoardChanged
+from .kicad_backend.swig.read import board_identity
 from .kicad_drc import DRCViolationCounter
 from .lcsc import Lcsc, LcscDict, extract_lcsc
 from .lcsc_entry_dialog import LcscEntryDialog
@@ -874,7 +875,7 @@ class JLCPCBTools(wx.Frame):
                     self.library.update()
                 else:
                     self._clear_catalog_views()
-        except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
+        except (sqlite3.Error, OSError, ValueError, BoardChanged) as error:
             self._set_project_storage_error(error)
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
@@ -884,16 +885,16 @@ class JLCPCBTools(wx.Frame):
         board = self.pcbnew.GetBoard()
         identity = board_identity(board)
         if identity != getattr(self, "_board_identity", identity):
-            raise BoardContextChanged(
+            raise BoardChanged(
                 "The PCB was closed, replaced, or saved under another name. "
                 "Reopen JLCPCB Tools."
             )
         if getattr(self, "_board_unreliable", False):
-            raise BoardContextChanged(
+            raise BoardChanged(
                 "A board edit could not be restored. Inspect the PCB and reopen JLCPCB Tools."
             )
         if not getattr(self, "_variant_mode", False) and _board_has_variants(board):
-            raise BoardContextChanged(
+            raise BoardChanged(
                 "The PCB now contains variants. Reopen JLCPCB Tools to edit them."
             )
         return board
@@ -917,7 +918,7 @@ class JLCPCBTools(wx.Frame):
             self.start_assembly_enrichment()
             self.recompute_stock_concerns()
             self.recompute_bom_estimate()
-        except (BoardContextChanged, OSError, sqlite3.Error) as error:
+        except (BoardChanged, OSError, sqlite3.Error) as error:
             self._set_project_storage_error(error)
         finally:
             self._refreshing_board = False
@@ -957,7 +958,7 @@ class JLCPCBTools(wx.Frame):
                 apply()
             else:
                 callback(apply)
-        except (BoardContextChanged, BoardEditRecoveryError) as error:
+        except (BoardChanged, BoardEditRecoveryError) as error:
             self._board_unreliable = True
             self._set_project_storage_error(error)
             return False
@@ -1301,7 +1302,7 @@ class JLCPCBTools(wx.Frame):
                 self._variant_controller.start_enrichment()
                 return
             self._initialize_catalog_parts()
-        except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:
+        except (sqlite3.Error, OSError, ValueError, BoardChanged) as error:
             self._set_project_storage_error(error)
 
     def _assembly_metadata_path(self) -> Optional[str]:
@@ -1964,7 +1965,7 @@ class JLCPCBTools(wx.Frame):
             return []
         try:
             board = self._get_current_board()
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return []
         parts = {}
@@ -2014,7 +2015,7 @@ class JLCPCBTools(wx.Frame):
         for reference, footprint in footprints.items():
             try:
                 current_part = self.store.get_part(reference)
-            except BoardContextChanged as error:
+            except BoardChanged as error:
                 self._set_project_storage_error(error)
                 return []
             part = parts[reference]
@@ -2202,7 +2203,7 @@ class JLCPCBTools(wx.Frame):
         else:
             try:
                 parts = self.read_assembly_parts()
-            except (BoardContextChanged, sqlite3.Error, OSError) as error:
+            except (BoardChanged, sqlite3.Error, OSError) as error:
                 if self._why_standard_dialog is not None:
                     self._why_standard_dialog.Close()
                 self._set_project_storage_error(error)
@@ -2237,7 +2238,7 @@ class JLCPCBTools(wx.Frame):
                     self.bom_estimator_decision,
                     parts,
                 )
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
 
     def on_bom_data_changed(self, _e):
@@ -2298,7 +2299,7 @@ class JLCPCBTools(wx.Frame):
                     getattr(self, "bom_estimator_board_count", 5)
                 ),
             )
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
         except (sqlite3.Error, OSError) as error:
@@ -2332,7 +2333,7 @@ class JLCPCBTools(wx.Frame):
             return
         try:
             targets = self.store.get_assembly_enrichment_targets(references)
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
         except sqlite3.Error as error:
@@ -2352,7 +2353,7 @@ class JLCPCBTools(wx.Frame):
             return
         try:
             self._get_current_board()
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
         assembly_process = metadata.get("assembly_process", "")
@@ -2377,7 +2378,7 @@ class JLCPCBTools(wx.Frame):
                     part,
                     pending=self._get_enrichment_status_label(part) == "Pending",
                 )
-        except (sqlite3.Error, OSError, BoardContextChanged) as error:
+        except (sqlite3.Error, OSError, BoardChanged) as error:
             self._set_project_storage_error(error)
         finally:
             self._refresh_assembly_tooltip()
@@ -2483,7 +2484,7 @@ class JLCPCBTools(wx.Frame):
             return
         try:
             self._populate_footprint_rows()
-        except (sqlite3.Error, OSError, BoardContextChanged) as error:
+        except (sqlite3.Error, OSError, BoardChanged) as error:
             self._set_project_storage_error(error)
 
     def _populate_footprint_rows(self) -> None:
@@ -2609,7 +2610,7 @@ class JLCPCBTools(wx.Frame):
             return
         try:
             board = self._get_current_board()
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
 
@@ -2671,7 +2672,7 @@ class JLCPCBTools(wx.Frame):
             return
         try:
             board = self._get_current_board()
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
         selected = []
@@ -2712,7 +2713,7 @@ class JLCPCBTools(wx.Frame):
             return
         try:
             board = self._get_current_board()
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
         selected = []
@@ -3520,7 +3521,7 @@ class JLCPCBTools(wx.Frame):
                     identity is not None
                     and board_identity(self.pcbnew.GetBoard()) != identity
                 ):
-                    raise BoardContextChanged(
+                    raise BoardChanged(
                         "The PCB was closed, replaced, or saved under another name. "
                         "Reopen JLCPCB Tools before saving its schematic."
                     )
@@ -3772,7 +3773,7 @@ class JLCPCBTools(wx.Frame):
                 reference = self.partlist_data_model.get_reference(item)
                 if part := self.store.get_part(reference):
                     preferences.append((part["footprint"], part["value"], part["lcsc"]))
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
         self._save_part_preferences(preferences)
@@ -3795,7 +3796,7 @@ class JLCPCBTools(wx.Frame):
                     if preference := self.library.get_part_preference(footprint, value):
                         assignments[reference] = preference
             updated_references = self._apply_lcsc_assignments(assignments)
-        except BoardContextChanged as error:
+        except BoardChanged as error:
             self._set_project_storage_error(error)
             return
         except sqlite3.Error as error:

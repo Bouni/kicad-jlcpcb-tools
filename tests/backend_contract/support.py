@@ -51,9 +51,7 @@ class Board:
     close: Callable[[], None]
 
 
-def _fake_board(
-    modules: SimpleNamespace, parts: Sequence[Part], _request: Any
-) -> Board:
+def fake_board(modules: SimpleNamespace, parts: Sequence[Part], _request: Any) -> Board:
     """Hold the parts in memory."""
     fake = modules.fake
     backend = fake.FakeBackend(
@@ -76,6 +74,3 @@ def _fake_board(
         backend.board = None
 
     return Board(backend, close)
-
-
-BUILDERS: dict[str, Callable[..., Board]] = {"fake": _fake_board}

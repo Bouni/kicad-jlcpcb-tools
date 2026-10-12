@@ -20,23 +20,29 @@ def board(*, pointer: int = 100, filename: str = "original.kicad_pcb") -> Any:
 
 def test_identity_follows_native_lifetime_across_wrapper_objects() -> None:
     """New proxies may denote the same board; reloading a UUID is a new target."""
-    with load_siblings("_board_context_tests", ("board_context",), {}) as modules:
-        identify = modules["board_context"].board_identity
+    with load_siblings(
+        "_board_identity_tests", ("kicad_backend.swig.read", "kicad_backend"), {}
+    ) as modules:
+        identify = modules["kicad_backend.swig.read"].board_identity
         assert identify(board()) == identify(board())
         assert identify(board()) != identify(board(pointer=200))
 
 
 def test_save_as_invalidates_captured_project_context() -> None:
     """Identical native pointers and UUIDs cannot retain the old project path."""
-    with load_siblings("_board_context_tests", ("board_context",), {}) as modules:
-        identify = modules["board_context"].board_identity
+    with load_siblings(
+        "_board_identity_tests", ("kicad_backend.swig.read", "kicad_backend"), {}
+    ) as modules:
+        identify = modules["kicad_backend.swig.read"].board_identity
         assert identify(board()) != identify(board(filename="saved-as.kicad_pcb"))
 
 
 def test_missing_uuid_and_pointer_use_object_identity() -> None:
     """Stateful adapters without SWIG details remain distinct board lifetimes."""
-    with load_siblings("_board_context_tests", ("board_context",), {}) as modules:
-        identify = modules["board_context"].board_identity
+    with load_siblings(
+        "_board_identity_tests", ("kicad_backend.swig.read", "kicad_backend"), {}
+    ) as modules:
+        identify = modules["kicad_backend.swig.read"].board_identity
         first = SimpleNamespace(GetFileName=lambda: "original.kicad_pcb")
         second = SimpleNamespace(GetFileName=lambda: "original.kicad_pcb")
         assert identify(first) == identify(first)
@@ -45,16 +51,20 @@ def test_missing_uuid_and_pointer_use_object_identity() -> None:
 
 def test_missing_board_is_reported_without_dereferencing() -> None:
     """A closed editor cannot produce a target for a later mutation."""
-    with load_siblings("_board_context_tests", ("board_context",), {}) as modules:
-        context = modules["board_context"]
-        with pytest.raises(context.BoardContextChanged, match="open board"):
-            context.board_identity(None)
+    with load_siblings(
+        "_board_identity_tests", ("kicad_backend.swig.read", "kicad_backend"), {}
+    ) as modules:
+        read = modules["kicad_backend.swig.read"]
+        with pytest.raises(modules["kicad_backend"].BoardChanged, match="open board"):
+            read.board_identity(None)
 
 
 def test_dynamic_adapter_attributes_cannot_form_an_unbounded_proxy_chain() -> None:
     """Non-SWIG adapters may dynamically synthesize arbitrary attributes."""
-    with load_siblings("_board_context_tests", ("board_context",), {}) as modules:
-        identify = modules["board_context"].board_identity
+    with load_siblings(
+        "_board_identity_tests", ("kicad_backend.swig.read", "kicad_backend"), {}
+    ) as modules:
+        identify = modules["kicad_backend.swig.read"].board_identity
         first = MagicMock()
         second = MagicMock()
         first.GetFileName.return_value = second.GetFileName.return_value = "board"
