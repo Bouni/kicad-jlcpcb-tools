@@ -11,6 +11,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from . import test_window_layout as layout_support
+from .wx_harness import load_siblings
+
+with load_siblings("_filters_board", ("kicad_backend.fake",), {}) as _loaded:
+    fake = _loaded["kicad_backend.fake"]
 
 mainwindow = layout_support.mainwindow
 FILTERS = (mainwindow.ID_HIDE_BOM, mainwindow.ID_HIDE_POS)
@@ -108,13 +112,14 @@ def open_window(
         ]
         window.store = SimpleNamespace(
             read_all=lambda: parts,
+            rows=lambda _board: parts,
             dbfile=str(tmp_path / "jlcpcb" / "project.db"),
         )
         window.library.read_correction_data = lambda: SimpleNamespace(corrections=())
-        footprints = {part["reference"]: MagicMock() for part in parts}
-        for footprint in footprints.values():
-            footprint.GetLayer.return_value = 0
-        window.pcbnew.GetBoard().FindFootprintByReference.side_effect = footprints.get
+        window.backend = fake.FakeBackend(
+            [fake.component(part["reference"]) for part in parts],
+            info=fake.board_info(token=window._board_identity),
+        )
         window.pcbnew.GetCurrentSelection.return_value = []
         selections: list[str] = []
         rows: dict[str, list[Any]] = {}

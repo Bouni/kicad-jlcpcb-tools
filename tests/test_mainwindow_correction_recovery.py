@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable, Iterator
 from contextlib import closing
+import importlib
 import logging
 from pathlib import Path
 import sqlite3
@@ -128,14 +129,22 @@ def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
         }
         for reference in ("C1", "C2")
     ]
-    footprint = SimpleNamespace(GetLayer=lambda: 0)
     board = SimpleNamespace(
-        FindFootprintByReference=lambda _reference: footprint,
         GetFileName=lambda: str(
             Path(runtime.library.parent.project_path) / "board.kicad_pcb"
         ),
     )
     window.pcbnew = SimpleNamespace(GetBoard=lambda: board)
+    # The board holds one footprint for each row the store lists.
+    fake = importlib.import_module(
+        f"{runtime.mainwindow.__package__}.kicad_backend.fake"
+    )
+    window.backend = SimpleNamespace(
+        snapshot=lambda: fake.FakeBackend(
+            fake.component(row["reference"]) for row in window.store.read_all()
+        ).snapshot()
+    )
+    window.store.rows.side_effect = lambda _board: window.store.read_all()
     window.hide_bom_parts = False
     window.hide_pos_parts = False
     window._get_enrichment_status_label = lambda _part: ""
@@ -250,7 +259,7 @@ def _generation_fabrication(
 
     fabrication.parent.store.read_all = read_all
     fabrication.parent.store.read_bom_parts = read_bom_parts
-    window._get_current_board = lambda: fabrication.board
+    window._legacy_board = lambda: fabrication.board
     return fabrication
 
 

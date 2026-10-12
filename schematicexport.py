@@ -125,9 +125,16 @@ class SchematicExport:
         parts: Optional[Iterable[Mapping[str, Any]]],
         snapshot: Optional[DefaultSchematicSnapshot],
     ) -> DefaultSchematicSnapshot:
-        """Guard the live board, then capture Default fields without a store view."""
-        get_board = getattr(self.parent, "_get_current_board", None)
-        board = get_board() if callable(get_board) else None
+        """Guard the board, then capture Default fields without a store view.
+
+        Supplied records need only the window's ``_legacy_board`` check that
+        the board is still the one it opened; a capture reads the board
+        through ``_read_board``, which checks it too.
+        """
+        if parts is not None or snapshot is not None:
+            legacy_board = getattr(self.parent, "_legacy_board", None)
+            if callable(legacy_board):
+                legacy_board()
         if parts is not None and snapshot is not None:
             raise ValueError("Supply one Default snapshot source")
         if snapshot is not None:
@@ -136,13 +143,8 @@ class SchematicExport:
             return snapshot
         if parts is not None:
             return capture_rows(parts)
-        if board is None:
-            board = getattr(self.parent, "board", None)
-        if board is None:
-            pcbnew = getattr(self.parent, "pcbnew", None)
-            getter = getattr(pcbnew, "GetBoard", None)
-            if callable(getter):
-                board = getter()
+        read_board = getattr(self.parent, "_read_board", None)
+        board = read_board() if callable(read_board) else None
         if board is None:
             raise ValueError("Default schematic export requires the live PCB")
         return capture_board(board)

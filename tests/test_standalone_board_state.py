@@ -26,6 +26,11 @@ def modules() -> Iterator[dict[str, ModuleType]]:
         yield loaded
 
 
+def _fields(footprint: object) -> dict[str, str]:
+    """Read a stub footprint's own fields by name, after Reference and Value."""
+    return {field.GetName(): field.GetText() for field in footprint.GetFields()[2:]}
+
+
 def test_the_store_reads_the_standalone_board(
     modules: dict[str, ModuleType], tmp_path: Path
 ) -> None:
@@ -54,7 +59,6 @@ def test_assignment_and_clear_survive_board_lookup(
 ) -> None:
     """Assignment writes update the same footprint returned on each board read."""
     board = modules["standalone_impl"].BoardStub()
-    helpers = modules["footprint_helpers"]
     apply = modules["board_part_edits"].apply_board_part_edits
     footprint = board.GetFootprints()[0]
     assert board.FindFootprintByReference("R1") is footprint
@@ -63,7 +67,7 @@ def test_assignment_and_clear_survive_board_lookup(
 
     apply([(board.FindFootprintByReference("R1"), {"lcsc": " c123 "})])
 
-    assert helpers.get_lcsc_value(board.GetFootprints()[0]) == "C123"
+    assert _fields(board.GetFootprints()[0])["LCSC"] == "C123"
     field = footprint.GetFieldByName("LCSC")
     assert field.GetText() == "C123"
     assert field.IsVisible() is False
@@ -72,7 +76,7 @@ def test_assignment_and_clear_survive_board_lookup(
 
     apply([(board.FindFootprintByReference("R1"), {"lcsc": ""})])
 
-    assert helpers.get_lcsc_value(footprint) == ""
+    assert _fields(footprint)["LCSC"] == ""
     assert footprint.GetFields()[2:] == [field]
     assert field.GetText() == ""
     assert field.IsVisible() is False
@@ -105,10 +109,8 @@ def test_alias_clear_preserves_identity_visibility_and_unrelated_metadata(
     assert original_fields[2].IsVisible() is True
     assert original_fields[3].IsVisible() is False
     assert footprint.GetAttributes() == 77
-    helpers = modules["footprint_helpers"]
-    assert helpers.get_lcsc_value(board.FindFootprintByReference("R1")) == ""
-    assert helpers.get_exclude_from_bom(board.FindFootprintByReference("R1")) is True
-    assert helpers.get_exclude_from_pos(board.FindFootprintByReference("R1")) is True
+    assert _fields(board.FindFootprintByReference("R1"))["LCSC"] == ""
+    assert board.FindFootprintByReference("R1").GetAttributes() & 0b1100 == 0b1100
 
 
 def test_failed_batch_removes_new_field_and_restores_existing_aliases(

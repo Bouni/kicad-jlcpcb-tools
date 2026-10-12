@@ -37,7 +37,7 @@ def test_ordinary_callbacks_disable_stale_board_view(
     window.bom_estimator_controller = BomEstimatorController(
         read_parts=window.read_assembly_parts,
         get_part_details=window.library.get_part_details,
-        get_board=window._get_current_board,
+        get_board=window._held_board,
         is_force_standard_enabled=lambda: False,
         set_price_label=MagicMock(),
         set_standard_only_refs=MagicMock(),

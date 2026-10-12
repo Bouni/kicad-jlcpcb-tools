@@ -168,7 +168,7 @@ def test_board_context_is_validated_before_capture_and_writes(
         calls.append(True)
         return exporter.board
 
-    runtime.parent._get_current_board = current_board
+    runtime.parent._legacy_board = current_board
     exporter.begin_ordinary_generation(runtime.corrections)
     assert calls
 
@@ -176,7 +176,7 @@ def test_board_context_is_validated_before_capture_and_writes(
         """Reject the replaced live editor board before native reads."""
         raise RuntimeError("Board ownership changed")
 
-    runtime.parent._get_current_board = changed_board
+    runtime.parent._legacy_board = changed_board
     with pytest.raises(RuntimeError, match="Board ownership changed"):
         exporter.generate_bom()
     assert not Path(exporter.get_bom_csv_path()).exists()

@@ -10,7 +10,11 @@ import re
 from typing import Any, Optional
 
 from .kicad_backend.records import BoardSnapshot, ComponentRecord, ComponentState
-from .part_assignments import ResolvedAssignment, resolve_assignment
+from .part_assignments import (
+    ResolvedAssignment,
+    is_assignment_alias,
+    resolve_assignment,
+)
 
 # The parts list shows footprints whose reference starts with a letter, digit,
 # underscore or hyphen.
@@ -30,16 +34,47 @@ def find_component(
     return found[0] if found else None
 
 
+def find_components(
+    snapshot: BoardSnapshot, references: Iterable[str]
+) -> dict[str, ComponentRecord]:
+    """Return the footprint each reference finds, for the references on the board."""
+    found = {}
+    for reference in references:
+        component = find_component(snapshot, reference)
+        if component is not None:
+            found[reference] = component
+    return found
+
+
 def placement_sides(
     snapshot: BoardSnapshot, references: Iterable[str]
 ) -> dict[str, str]:
     """Return "top" or "bottom" for each reference the board has a footprint for."""
-    sides = {}
-    for reference in references:
-        component = find_component(snapshot, reference)
+    return {
+        reference: component.side
+        for reference, component in find_components(snapshot, references).items()
+    }
+
+
+def with_current_flags(
+    rows: Iterable[dict[str, Any]], snapshot: BoardSnapshot
+) -> list[dict[str, Any]]:
+    """Return the rows still on the board, with their footprint's BOM and DNP flags.
+
+    A reference that repeats takes the flags of the footprint a lookup finds.
+    """
+    current = []
+    for row in rows:
+        component = find_component(snapshot, row["reference"])
         if component is not None:
-            sides[reference] = component.side
-    return sides
+            current.append(
+                {
+                    **row,
+                    "exclude_from_bom": component.default.exclude_from_bom,
+                    "is_dnp": component.default.dnp,
+                }
+            )
+    return current
 
 
 def repeated_field_names(snapshot: BoardSnapshot) -> list[tuple[str, str]]:
@@ -73,6 +108,31 @@ def library_item_name(lib_id: str) -> str:
     return lib_id.split(":", 1)[1] if ":" in lib_id else lib_id
 
 
+def value_text(component: ComponentRecord) -> str:
+    """Return the text of the footprint's Value field, KiCad's own."""
+    return first_field_text(component.default, "Value")
+
+
+def occupied_assignment(
+    component: ComponentRecord,
+) -> Optional[tuple[str, str]]:  # noqa: UP045
+    """Return the first assignment field holding any text, as (name, text).
+
+    Any text occupies the field, including whitespace or a number that is not
+    valid, so a preference never fills it. Every field of a name the
+    footprint holds twice counts, the earlier first.
+    """
+    state = component.default
+    for name, field in state.fields.items():
+        if not is_assignment_alias(name):
+            continue
+        replaced = (record for record in state.replaced_fields if record.name == name)
+        for record in (*replaced, field):
+            if record.text != "":
+                return name, record.text
+    return None
+
+
 def default_assignment(component: ComponentRecord) -> tuple[ResolvedAssignment, str]:
     """Resolve the footprint's Default assignment fields and its LCSC number."""
     fields = {name: field.text for name, field in component.default.fields.items()}
@@ -95,7 +155,7 @@ def part_facts(component: ComponentRecord) -> dict[str, Any]:
     }
     return {
         "reference": component.reference,
-        "value": first_field_text(state, "Value"),
+        "value": value_text(component),
         "footprint": library_item_name(component.footprint_lib_id),
         "lcsc": lcsc,
         "assignment_status": assignment.status,

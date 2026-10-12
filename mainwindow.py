@@ -38,6 +38,7 @@ from .legacy_board_coverage import (
 from .legacy_part_migration import (
     LegacyMigrationPlan,
     MigrationFootprint,
+    migration_footprints,
     MigrationLink,
     plan_legacy_migration,
 )
@@ -52,7 +53,15 @@ from .legacy_migration_report import (
 )
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
-from .board_parts import repeated_field_names
+from .board_parts import (
+    find_component,
+    find_components,
+    library_item_name,
+    occupied_assignment,
+    repeated_field_names,
+    value_text,
+    with_current_flags,
+)
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
 from .core.settings_persistence import (
     VariantPreferencePatch,
@@ -89,13 +98,7 @@ from .events import (
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
-from .footprint_helpers import (
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-    get_is_dnp,
-    find_lcsc_assignment_text,
-    iter_board_items,
-)
+from .footprint_helpers import iter_board_items
 from .generate_hooks import format_hook_error, run_configured_hook
 from .generation_review import (
     Finding,
@@ -117,6 +120,7 @@ from .helpers import (
 )
 from .kicad_backend import BoardChanged, BoardSnapshot
 from .kicad_backend.swig import SwigBackend
+from .kicad_backend.swig.legacy import live_footprints
 from .kicad_backend.swig.read import board_identity
 from .kicad_drc import DRCViolationCounter
 from .lcsc import Lcsc, LcscDict, extract_lcsc
@@ -884,8 +888,13 @@ class JLCPCBTools(wx.Frame):
 
         self.logger.debug("kicad version: %s", kicad_pcbnew.GetBuildVersion())
 
-    def _get_current_board(self) -> Any:
-        """Validate the native board lifetime before accessing modeless state."""
+    def _legacy_board(self) -> Any:
+        """Return the live SWIG board, after checking it is still the one opened.
+
+        Transitional: for code that still plots, saves, runs DRC, reads
+        drawings and variants, or checks the board through SWIG. Reads of
+        footprints go through ``_read_board`` instead.
+        """
         board = self.pcbnew.GetBoard()
         identity = board_identity(board)
         if identity != getattr(self, "_board_identity", identity):
@@ -910,7 +919,7 @@ class JLCPCBTools(wx.Frame):
         snapshot is of the board this window was opened for. Inside
         ``_reading_once`` only the first read reads the board.
         """
-        self._get_current_board()
+        self._legacy_board()
         once = getattr(self, "_read_once", None)
         if once:
             return once[0]
@@ -941,13 +950,20 @@ class JLCPCBTools(wx.Frame):
         finally:
             self._read_once = None
 
+    def _legacy_footprints(self, keys: Iterable[str]) -> dict[str, Any]:
+        """Return live SWIG footprints by key, for edits and the editor selection.
+
+        Transitional, until edits and selection go through the backend.
+        """
+        return live_footprints(self._legacy_board(), keys)
+
     def _held_board(self) -> BoardSnapshot:
         """Return the snapshot last read, once the board is checked to be open.
 
         The window reads the board again when the parts list is rebuilt,
         which activation does, and after each of its own edits.
         """
-        self._get_current_board()
+        self._legacy_board()
         snapshot = getattr(self, "_board_snapshot", None)
         return snapshot if snapshot is not None else self._read_board()
 
@@ -972,7 +988,7 @@ class JLCPCBTools(wx.Frame):
         self._refreshing_board = True
         try:
             with self._reading_once() as read:
-                self._get_current_board()
+                self._legacy_board()
                 self._refresh_footprints_preserving_selection()
                 self.start_assembly_enrichment()
                 self.recompute_stock_concerns()
@@ -1004,14 +1020,14 @@ class JLCPCBTools(wx.Frame):
     ) -> bool:
         """Execute one native edit before publishing its dependent UI state."""
         try:
-            self._get_current_board()
+            self._legacy_board()
             if getattr(self, "_ordinary_generating", False):
                 raise RuntimeError("Finish generation before editing part assignments.")
             if needs_change is not None and not needs_change():
                 return True
 
             def apply() -> None:
-                self._get_current_board()
+                self._legacy_board()
                 change()
 
             callback = getattr(self, "_board_action", None)
@@ -1335,7 +1351,7 @@ class JLCPCBTools(wx.Frame):
         try:
             if getattr(self, "fabrication", None) is None:
                 self.init_fabrication()
-            board = self._get_current_board()
+            board = self._legacy_board()
             if not self._variant_mode and _board_has_variants(board):
                 raise ValueError(
                     "The PCB now contains variants. Reopen JLCPCB Tools to edit them."
@@ -1404,29 +1420,14 @@ class JLCPCBTools(wx.Frame):
         ):
             store.assembly_metadata = self._assembly_metadata_cache()
 
-    @staticmethod
     def _migration_footprints(
-        board: Any,
+        self, board: BoardSnapshot
     ) -> tuple[tuple[MigrationFootprint, ...], Any, dict[str, Any]]:
-        """Capture detached recovery values from a live or independently loaded PCB."""
+        """Capture detached recovery values, and the live footprints to edit."""
         snapshot = capture_board(board)
-        footprints = {
-            str(footprint.m_Uuid.AsString()): footprint
-            for footprint in board.GetFootprints()
-        }
-        parts = tuple(
-            MigrationFootprint(
-                part.component_id,
-                part.reference,
-                str(footprints[part.component_id].GetValue()),
-                str(footprints[part.component_id].GetFPID().GetLibItemName()),
-                not part.exclude_from_bom,
-                not get_exclude_from_pos(footprints[part.component_id]),
-                part.assignment,
-                part.lcsc,
-            )
-            for part in snapshot.parts
-        )
+        parts = migration_footprints(snapshot.parts, board)
+        # The capture refuses footprints sharing a UUID, so each UUID is a key.
+        footprints = self._legacy_footprints(part.component_id for part in parts)
         return parts, snapshot, footprints
 
     def _legacy_migration_state(
@@ -1439,12 +1440,12 @@ class JLCPCBTools(wx.Frame):
             return initial, (), {}
         if not initial.rows or all(row.status == "ignored" for row in initial.rows):
             return initial, ((),), {}
-        board = self._get_current_board()
+        board = self._read_board()
         parts, snapshot, footprints = self._migration_footprints(board)
         project_name = authenticated_project_name(self.pcbnew, self.project_path)
         discovery = discover_project_schematics(
             self.project_path,
-            getattr(self, "board_name", os.path.basename(board.GetFileName())),
+            getattr(self, "board_name", os.path.basename(board.info.file_name)),
             project_name,
         )
         if discovery.status == "unresolved":
@@ -1840,7 +1841,7 @@ class JLCPCBTools(wx.Frame):
 
     def init_fabrication(self) -> None:
         """Initialize the fabrication."""
-        self.fabrication = Fabrication(self, self._get_current_board())
+        self.fabrication = Fabrication(self, self._legacy_board())
 
     def reset_gauge(self, *_):
         """Initialize the gauge."""
@@ -2030,7 +2031,7 @@ class JLCPCBTools(wx.Frame):
         if self.store is None or (require_catalog and not self.is_catalog_available()):
             return []
         try:
-            board = self._get_current_board()
+            board = self._read_board()
         except BoardChanged as error:
             self._set_project_storage_error(error)
             return []
@@ -2044,11 +2045,7 @@ class JLCPCBTools(wx.Frame):
                 )
             else:
                 parts[reference] = part
-        footprints = {
-            reference: footprint
-            for reference in parts
-            if (footprint := board.FindFootprintByReference(reference)) is not None
-        }
+        footprints = find_components(board, parts)
         if not footprints:
             return []
         # The caller's details are keyed by whatever string it holds, so they
@@ -2069,7 +2066,10 @@ class JLCPCBTools(wx.Frame):
             self.logger.warning("Unable to apply LCSC assignments: %s", error)
             return []
 
-        edits = [(fp, {"lcsc": str(parts[ref])}) for ref, fp in footprints.items()]
+        live = self._legacy_footprints(fp.key for fp in footprints.values())
+        edits = [
+            (live[fp.key], {"lcsc": str(parts[ref])}) for ref, fp in footprints.items()
+        ]
         if not self._apply_board_change(
             lambda: apply_board_part_edits(edits),
             "apply LCSC assignments",
@@ -2104,7 +2104,11 @@ class JLCPCBTools(wx.Frame):
                     pending=current_part["lcsc"] in self.assembly_lookup.pending,
                 )
             preferences.append(
-                (str(footprint.GetFPID().GetLibItemName()), footprint.GetValue(), lcsc)
+                (
+                    library_item_name(footprint.footprint_lib_id),
+                    value_text(footprint),
+                    lcsc,
+                )
             )
         if remember_part_preferences and self.settings.get("part_preferences", {}).get(
             "remember_lcsc_assignments", True
@@ -2149,31 +2153,30 @@ class JLCPCBTools(wx.Frame):
             self, "_legacy_migration_block_preferences", False
         ):
             return
-        board = self._get_current_board()
+        board = self._read_board()
         part_preferences = {}
         assignments = {}
         try:
-            for part in self.store.read_all():
+            for part in self.store.rows(board):
                 if part["lcsc"] or not part["footprint"] or not part["value"]:
                     continue
-                footprint = board.FindFootprintByReference(part["reference"])
+                footprint = find_component(board, part["reference"])
                 if (
                     footprint is None
                     or (
                         getattr(self, "_legacy_migration_blocked_ids", ())
-                        and str(footprint.m_Uuid.AsString())
-                        in self._legacy_migration_blocked_ids
+                        and footprint.uuid in self._legacy_migration_blocked_ids
                     )
-                    or get_exclude_from_bom(footprint)
-                    or get_exclude_from_pos(footprint)
-                    or get_is_dnp(footprint)
+                    or footprint.default.exclude_from_bom
+                    or footprint.default.exclude_from_pos
+                    or footprint.default.dnp
                 ):
                     continue
                 key = (part["footprint"], part["value"])
                 if key not in part_preferences:
                     part_preferences[key] = self.library.get_part_preference(*key)
                 if lcsc := part_preferences[key]:
-                    occupied = find_lcsc_assignment_text(footprint)
+                    occupied = occupied_assignment(footprint)
                     if occupied:
                         self.logger.info(
                             "Skipped part preference for %s: field %r already contains %r.",
@@ -2352,19 +2355,8 @@ class JLCPCBTools(wx.Frame):
             model.set_stock_concern_refs(set())
             return
         try:
-            board = self._get_current_board()
-            parts = []
-            if board is not None:
-                for part in self.store.read_all():
-                    fp = board.FindFootprintByReference(part["reference"])
-                    if fp is not None:
-                        parts.append(
-                            {
-                                **part,
-                                "exclude_from_bom": get_exclude_from_bom(fp),
-                                "is_dnp": get_is_dnp(fp),
-                            }
-                        )
+            board = self._read_board()
+            parts = with_current_flags(self.store.rows(board), board)
             refs = stock_concern_references(
                 parts,
                 lambda lcsc: self._catalog_get_part_details(lcsc).get("stock"),
@@ -2425,7 +2417,7 @@ class JLCPCBTools(wx.Frame):
         if getattr(self, "_closing", False) or self.store is None:
             return
         try:
-            self._get_current_board()
+            self._legacy_board()
         except BoardChanged as error:
             self._set_project_storage_error(error)
             return
@@ -2562,18 +2554,18 @@ class JLCPCBTools(wx.Frame):
 
     def _populate_footprint_rows(self) -> None:
         """Read a complete project view, allowing the caller to recover storage errors."""
-        board = self._get_current_board()
+        board = self._read_board()
         self.partlist_data_model.RemoveAll()
-        parts = self.store.read_all()
+        parts = self.store.rows(board)
         snapshot = self.library.read_correction_data()
         self.update_correction_status(snapshot)
         corrections = snapshot.corrections
         entries = []
         for part in parts:
-            fp = board.FindFootprintByReference(part["reference"])
-            if fp is None:
-                continue
-            is_dnp = get_is_dnp(fp)
+            # Each row comes from this read, so its reference finds a footprint:
+            # the first with that reference, whose DNP and side the row shows.
+            fp = find_component(board, part["reference"])
+            is_dnp = fp.default.dnp
             # Warm all live assignments before view filters, for every stock consumer.
             details = self._catalog_get_part_details(part["lcsc"])
             # don't show the part if hide BOM is set
@@ -2598,7 +2590,8 @@ class JLCPCBTools(wx.Frame):
                     if corrections is not None
                     else "Unresolved"
                 ),
-                str(fp.GetLayer()),
+                # The side column takes a layer number: F.Cu is 0, B.Cu is 2.
+                "0" if fp.side == "top" else "2",
                 params_for_part(details),
                 enrichment_status,
                 "",  # bom price label
@@ -2705,7 +2698,7 @@ class JLCPCBTools(wx.Frame):
         ):
             return
         try:
-            board = self._get_current_board()
+            board = self._held_board()
         except BoardChanged as error:
             self._set_project_storage_error(error)
             return
@@ -2724,11 +2717,13 @@ class JLCPCBTools(wx.Frame):
 
         # select all of the selected items in the footprint_list
         if self.footprint_list.GetSelectedItemsCount() > 0:
-            for item in self.footprint_list.GetSelections():
-                ref = self.partlist_data_model.get_reference(item)
-                fp = board.FindFootprintByReference(ref)
-                if fp:
-                    fp.SetSelected()
+            references = [
+                self.partlist_data_model.get_reference(item)
+                for item in self.footprint_list.GetSelections()
+            ]
+            selected = find_components(board, references).values()
+            for fp in self._legacy_footprints(fp.key for fp in selected).values():
+                fp.SetSelected()
             # cause pcbnew to refresh the board with the changes to the selected footprint(s)
             self.pcbnew.Refresh()
 
@@ -2767,7 +2762,7 @@ class JLCPCBTools(wx.Frame):
         if self.store is None:
             return
         try:
-            board = self._get_current_board()
+            board = self._read_board()
         except BoardChanged as error:
             self._set_project_storage_error(error)
             return
@@ -2775,17 +2770,18 @@ class JLCPCBTools(wx.Frame):
         selections = self.footprint_list.GetSelections()
         for item in selections:
             reference = self.partlist_data_model.get_reference(item)
-            footprint = board.FindFootprintByReference(reference)
+            footprint = find_component(board, reference)
             if footprint is not None:
                 selected.append((item, footprint))
+        live = self._legacy_footprints(footprint.key for _item, footprint in selected)
         edits = []
         for _item, footprint in selected:
             changes = {}
             if bom:
-                changes["exclude_from_bom"] = not bool(get_exclude_from_bom(footprint))
+                changes["exclude_from_bom"] = not footprint.default.exclude_from_bom
             if pos:
-                changes["exclude_from_pos"] = not bool(get_exclude_from_pos(footprint))
-            edits.append((footprint, changes))
+                changes["exclude_from_pos"] = not footprint.default.exclude_from_pos
+            edits.append((live[footprint.key], changes))
         if not edits or not self._apply_board_change(
             lambda: apply_board_part_edits(edits),
             "change assembly exclusions",
@@ -2808,7 +2804,7 @@ class JLCPCBTools(wx.Frame):
         if self.store is None:
             return
         try:
-            board = self._get_current_board()
+            board = self._read_board()
         except BoardChanged as error:
             self._set_project_storage_error(error)
             return
@@ -2818,13 +2814,14 @@ class JLCPCBTools(wx.Frame):
         selections = self.footprint_list.GetSelections()
         for item in selections:
             ref = self.partlist_data_model.get_reference(item)
-            fp = board.FindFootprintByReference(ref)
+            fp = find_component(board, ref)
             if fp is None:
                 continue
             selected.append((item, ref, fp))
         if not selected:
             return
-        edits = [(fp, {"lcsc": ""}) for _, _, fp in selected]
+        live = self._legacy_footprints(fp.key for _, _, fp in selected)
+        edits = [(live[fp.key], {"lcsc": ""}) for _, _, fp in selected]
         if not self._apply_board_change(
             lambda: apply_board_part_edits(edits),
             "clear LCSC assignments",
@@ -3051,7 +3048,7 @@ class JLCPCBTools(wx.Frame):
     def count_order_number_placeholders(self):
         """Count the JLC order/serial number placeholders."""
         count = 0
-        for drawing in iter_board_items(self._get_current_board().Drawings()):
+        for drawing in iter_board_items(self._legacy_board().Drawings()):
             if drawing.IsOnLayer(kicad_pcbnew.F_SilkS) or drawing.IsOnLayer(
                 kicad_pcbnew.B_SilkS
             ):
@@ -3109,7 +3106,7 @@ class JLCPCBTools(wx.Frame):
         self, stage: str, placeholder_count: int, generation_count: int
     ) -> dict[str, str]:
         """Build environment variables for configured generation hooks."""
-        board_filename = self._get_current_board().GetFileName()
+        board_filename = self._legacy_board().GetFileName()
         artifact_paths = self.fabrication.get_artifact_paths()
         env = os.environ.copy()
         env.update(
@@ -3192,7 +3189,7 @@ class JLCPCBTools(wx.Frame):
                     corrections,
                 )
             else:
-                self._get_current_board()
+                self._legacy_board()
                 self._ordinary_generating = True
                 output = self.run_generation_step(
                     "Preparing placement data",
@@ -3355,7 +3352,7 @@ class JLCPCBTools(wx.Frame):
 
     def save_board_for_drc(self) -> None:
         """Save the current board so DRC checks operate on latest board state."""
-        board = self._get_current_board()
+        board = self._legacy_board()
         board_filename = board.GetFileName()
         if not board_filename:
             raise RuntimeError("Board must be saved before running DRC checks")
@@ -3379,7 +3376,7 @@ class JLCPCBTools(wx.Frame):
         if not self.settings.get("gerber", {}).get("force_drc", False):
             return []
 
-        board_filename = self._get_current_board().GetFileName()
+        board_filename = self._legacy_board().GetFileName()
         if not board_filename:
             return [drc_failed_finding("the board must be saved first")]
 
@@ -3535,7 +3532,7 @@ class JLCPCBTools(wx.Frame):
                     f"Legacy assignment retained for {row.reference} "
                     f"[{', '.join(row.component_ids)}]: {row.reason}"
                 )
-        board = self._get_current_board()
+        board = self._legacy_board()
         # The schematic may have been replaced after the exporter returned. Only
         # still-present, unambiguous values can substitute for a saved PCB.
         saved_ids = frozenset(outcome.saved) if outcome is not None else frozenset()
@@ -3576,7 +3573,7 @@ class JLCPCBTools(wx.Frame):
         if eligible:
 
             def sources_unchanged() -> bool:
-                self._get_current_board()
+                self._legacy_board()
                 current_plan, current_state, _current_footprints = (
                     self._legacy_migration_state()
                 )

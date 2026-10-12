@@ -471,14 +471,16 @@ def test_population_read_failure_survives_recovery_until_storage_retry_succeeds(
         """Create real project storage before failing its first population read."""
         store = real_store(*args, **kwargs)
         store.read_all = MagicMock(side_effect=sqlite3.OperationalError(error))
+        store.rows = MagicMock(side_effect=sqlite3.OperationalError(error))
         return store
 
     with monkeypatch.context() as failure:
-        failure.setattr(
-            window.store,
-            "read_all",
-            MagicMock(side_effect=sqlite3.OperationalError(error)),
-        )
+        for read in ("read_all", "rows"):
+            failure.setattr(
+                window.store,
+                read,
+                MagicMock(side_effect=sqlite3.OperationalError(error)),
+            )
         failure.setattr(context.module, "Store", unreadable_store)
         for recover in (
             window.populate_footprint_list,

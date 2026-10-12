@@ -109,6 +109,10 @@ class Store:
             if (record := self.get_part(reference)) is not None
         ]
 
+    def rows(self, _snapshot: Any) -> list[dict[str, Any]]:
+        """Return the rows of the board read the window passes; it is the live board."""
+        return self.read_all()
+
     def get_part(self, reference: str) -> Optional[dict[str, Any]]:
         """Observe native edits and removals without a second mapping authority."""
         record = self.parts.get(reference)
@@ -177,6 +181,7 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             )
             for reference, footprint in window.footprints.items():
                 footprint.reference = reference
+                footprint.uuid = f"footprint-{reference}"
             board = Board(window.footprints)
             window.store = Store(records, board)
             window.pcbnew = swig_doubles.editor(board)

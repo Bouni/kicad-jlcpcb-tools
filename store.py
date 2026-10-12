@@ -11,7 +11,7 @@ from typing import Any, Optional
 from .board_parts import find_component, is_listed, part_facts
 from .enrichment.cache import AssemblyMetadataCache
 from .helpers import natural_sort_collation
-from .kicad_backend.records import ComponentRecord
+from .kicad_backend.records import BoardSnapshot, ComponentRecord
 from .lcsc import normalize_lcsc
 from .variant.generation_counter import generation_count_transaction
 
@@ -101,9 +101,8 @@ class Store:
             "component_product_type": component_product_type,
         }
 
-    def read_all(self) -> list[dict[str, Any]]:
-        """Read the board again: assignments, population and pad facts by reference."""
-        snapshot = self.parent._read_board()
+    def rows(self, snapshot: BoardSnapshot) -> list[dict[str, Any]]:
+        """Return the listed parts of one board read, ordered by reference."""
         rows = [
             self._part_row(component)
             for component in snapshot.components
@@ -111,6 +110,10 @@ class Store:
         ]
         natural_key = cmp_to_key(natural_sort_collation)
         return sorted(rows, key=lambda row: natural_key(row["reference"]))
+
+    def read_all(self) -> list[dict[str, Any]]:
+        """Read the board again: assignments, population and pad facts by reference."""
+        return self.rows(self.parent._read_board())
 
     def get_part(self, ref: str) -> Optional[dict[str, Any]]:
         """Return the row for a reference from the window's last board read.

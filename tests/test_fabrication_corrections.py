@@ -166,7 +166,6 @@ def test_parts_table_reports_the_correction_used_by_cpl(
     fabrication.parent.store.get_part = lambda _reference: part
     window = _population_window(runtime)
     window.store.read_all.return_value = [part]
-    fabrication.board.FindFootprintByReference = lambda _reference: fp
     window.pcbnew = SimpleNamespace(GetBoard=lambda: fabrication.board)
 
     window.populate_footprint_list()
@@ -288,7 +287,6 @@ def test_part_rules_share_the_display_and_cpl_policy(
     # no parts database here, and that lookup is not what is under test.
     window.library.get_part_details = lambda _lcsc: {}
     window.store.read_all.return_value = [part]
-    fabrication.board.FindFootprintByReference = lambda _reference: fp
     window.pcbnew = SimpleNamespace(GetBoard=lambda: fabrication.board)
 
     window.populate_footprint_list()

@@ -4,7 +4,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from .footprint_helpers import EXCLUDE_FROM_BOM, _iter_assignment_fields
+from .board_parts import default_assignment
+from .kicad_backend.records import BoardSnapshot
 from .lcsc import is_lcsc_part
 from .part_assignments import (
     AssignmentAlias,
@@ -55,30 +56,24 @@ class DefaultSchematicSnapshot:
         object.__setattr__(self, "parts", parts)
 
 
-def capture_board(board: Any) -> DefaultSchematicSnapshot:
-    """Read each native footprint's fields, UUID, link, and flags exactly once."""
+def capture_board(snapshot: BoardSnapshot) -> DefaultSchematicSnapshot:
+    """Take each footprint's Default assignment, UUID, link and BOM flag.
+
+    A footprint holding two fields of one name is refused: which of them
+    the schematic should receive is ambiguous.
+    """
     parts = []
-    for footprint in board.GetFootprints():
-        fields: dict[str, str] = {}
-        for name, text in _iter_assignment_fields(footprint):
-            if not isinstance(name, str) or not isinstance(text, str):
-                raise TypeError("Default PCB field names and values must be text")
-            if name in fields:
-                raise ValueError(f"Duplicate Default PCB field {name!r}")
-            fields[name] = text
-        assignment, lcsc = resolve_assignment(fields, {}, "")
-        component_id = str(footprint.m_Uuid.AsString())
-        get_path = getattr(footprint, "GetPath", None)
-        native_path = get_path() if callable(get_path) else None
-        schematic_path = str(native_path.AsString()) if native_path is not None else ""
+    for component in snapshot.components:
+        repeated = component.default.duplicate_names
+        if repeated:
+            raise ValueError(f"Duplicate Default PCB field {repeated[0]!r}")
         parts.append(
             FootprintAssignment(
-                component_id,
-                str(footprint.GetReference()),
-                schematic_path,
-                assignment,
-                lcsc,
-                bool(footprint.GetAttributes() & (1 << EXCLUDE_FROM_BOM)),
+                component.uuid,
+                component.reference,
+                component.schematic_path,
+                *default_assignment(component),
+                component.default.exclude_from_bom,
             )
         )
     return DefaultSchematicSnapshot(tuple(parts))
