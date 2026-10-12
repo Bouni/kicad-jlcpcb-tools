@@ -27,6 +27,13 @@ jobs:
       - name: Create archive
         run: sh ./PCM/create_pcm_archive.sh ${{ steps.latest-release.outputs.tag }}
 
+      - name: Read the KiCad version range from the archive metadata
+        run: |
+          jq -r '.versions[0]
+            | "KICAD_VERSION=\(.kicad_version)",
+              "KICAD_VERSION_MAX=\(.kicad_version_max // "")"' \
+            PCM/archive/metadata.json >> "$GITHUB_ENV"
+
       - name: Upload zip as asset to release
         uses: svenstaro/upload-release-action@v2
         with:
@@ -43,4 +50,4 @@ jobs:
           ref: refs/heads/main
           repo: Bouni/bouni-kicad-repository
           token: ${{ secrets.PERSONAL_TOKEN }}
-          inputs: '{ "VERSION": "${{env.VERSION}}", "DOWNLOAD_SHA256": "${{env.DOWNLOAD_SHA256}}", "DOWNLOAD_SIZE": "${{env.DOWNLOAD_SIZE}}", "DOWNLOAD_URL": "${{env.DOWNLOAD_URL}}", "INSTALL_SIZE": "${{env.INSTALL_SIZE}}" }'
+          inputs: '{ "VERSION": "${{env.VERSION}}", "DOWNLOAD_SHA256": "${{env.DOWNLOAD_SHA256}}", "DOWNLOAD_SIZE": "${{env.DOWNLOAD_SIZE}}", "DOWNLOAD_URL": "${{env.DOWNLOAD_URL}}", "INSTALL_SIZE": "${{env.INSTALL_SIZE}}", "KICAD_VERSION": "${{env.KICAD_VERSION}}", "KICAD_VERSION_MAX": "${{env.KICAD_VERSION_MAX}}" }'
