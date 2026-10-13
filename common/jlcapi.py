@@ -299,9 +299,11 @@ class CategoryFetch:
                 f"No page {self.currentPage} of {self.category!r}: JLC serves only "
                 "the first 100,000 results of a query"
             )
+        # Read the page before moving on, so that a retry asks for the same page.
+        components = pageInfo["list"]
         self.lastPage = pageInfo.get("pages")
         self.currentPage += 1
-        return pageInfo["list"]
+        return components
 
     def fetchAll(self) -> Generator[list[Any], None, None]:
         """Fetch all components in the category, yielding each page.

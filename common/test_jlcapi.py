@@ -707,6 +707,52 @@ class TestCategoryFetch:
         with pytest.raises(RuntimeError, match="100,000"):
             list(fetch.fetchAll())
 
+    @staticmethod
+    def _pages_with_malformed_page_2(malformed_attempts):
+        """Serve three one-item pages, page 2 without its list on its first attempts."""
+        requested = []
+
+        def respond(token, request):
+            page = request["currentPage"]
+            requested.append(page)
+            pageInfo: dict[str, object] = {"pages": 3}
+            if page != 2 or requested.count(2) > malformed_attempts:
+                pageInfo["list"] = [{"componentCode": f"C{page}"}]
+            return {"data": {"componentPageInfo": pageInfo}}
+
+        return respond, requested
+
+    @mock.patch("retry.api.time.sleep")
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.JlcApi.componentList")
+    def test_category_fetch_retries_a_malformed_page(
+        self, mock_component_list, _mock_get_token, _mock_sleep
+    ):
+        """A page whose response lacks its item list is requested again, not skipped."""
+        respond, requested = self._pages_with_malformed_page_2(malformed_attempts=1)
+        mock_component_list.side_effect = respond
+        fetch = CategoryFetch(ApiCategory("Test", "Cat", 3), rateLimit=False)
+
+        pages = list(fetch.fetchAll())
+
+        assert [page[0]["componentCode"] for page in pages] == ["C1", "C2", "C3"]
+        assert requested == [1, 2, 2, 3]
+
+    @mock.patch("retry.api.time.sleep")
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.JlcApi.componentList")
+    def test_category_fetch_raises_once_retries_are_exhausted(
+        self, mock_component_list, _mock_get_token, _mock_sleep
+    ):
+        """A page that stays malformed ends the fetch with an error, not a gap."""
+        respond, requested = self._pages_with_malformed_page_2(malformed_attempts=99)
+        mock_component_list.side_effect = respond
+        fetch = CategoryFetch(ApiCategory("Test", "Cat", 3), rateLimit=False)
+
+        with pytest.raises(KeyError):
+            list(fetch.fetchAll())
+        assert requested == [1, 2, 2, 2, 2, 2]
+
     @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
     @mock.patch("common.jlcapi.JlcApi.componentList", return_value={})
     def test_category_fetch_requests_only_its_packages(
