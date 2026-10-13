@@ -72,7 +72,6 @@ def zone_harness(
     for name in (
         "EXCELLON_WRITER",
         "PAD_ATTRIB_NPTH",
-        "PCB_VIA",
         "PLOT_CONTROLLER",
         "VECTOR2I",
         "FromMM",

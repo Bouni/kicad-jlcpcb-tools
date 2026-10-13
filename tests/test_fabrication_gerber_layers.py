@@ -68,7 +68,6 @@ def plotted_layers(
     for name in (
         "EXCELLON_WRITER",
         "PAD_ATTRIB_NPTH",
-        "PCB_VIA",
         "VECTOR2I",
         "ZONE_FILLER",
         "FromMM",

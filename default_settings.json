@@ -14,8 +14,7 @@
     "lcsc_bom_cpl": true,
     "plot_references": true,
     "plot_values": true,
-    "subtract_mask_from_silk": true,
-    "tented_vias": true
+    "subtract_mask_from_silk": true
   },
   "highlighting": {
     "matches": true,
