@@ -70,7 +70,7 @@ def test_two_fields_of_one_name_list_their_assignment_and_kicads_value(
     record = fake.component(
         "R1",
         value="10k",
-        fields=(("LCSC", "C1"), ("LCSC", "C2"), ("Value", "10k"), ("Value", "22k")),
+        fields=(("LCSC", "C1"), ("LCSC", "C2"), ("Value", "22k")),
     )
     snapshot = fake.FakeBackend([fake.component("C1"), record]).snapshot()
 
@@ -245,7 +245,7 @@ def test_window_lookups_keep_kicads_first_match(parts: SimpleNamespace) -> None:
         "",
     ]
     # KiCad's own Value field comes before one a user adds with its name.
-    repeated = fake.component("R2", fields=(("Value", "10k"), ("Value", "22k")))
+    repeated = fake.component("R2", value="10k", fields={"Value": "22k"})
     assert board_parts.value_text(repeated) == "10k"
     rows = [{"reference": ref, "lcsc": ""} for ref in ("R1", "R1", "C1", "R9")]
     assert board_parts.with_current_flags(rows, snapshot) == [

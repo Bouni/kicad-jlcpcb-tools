@@ -172,6 +172,16 @@ def test_fake_components_can_repeat_a_field_name(backend: SimpleNamespace) -> No
     assert state.duplicate_names == ("LCSC",)
 
 
+def test_fake_fields_named_like_a_mandatory_field_repeat_it(
+    backend: SimpleNamespace,
+) -> None:
+    """A footprint field named "Value" comes after KiCad's own Value, as a repeat."""
+    state = backend.fake.component("R1", value="10k", fields={"Value": "22k"}).default
+    assert state.fields["Value"].text == "22k"
+    assert state.replaced_fields == (backend.records.FieldRecord("Value", "10k"),)
+    assert state.duplicate_names == ("Value",)
+
+
 def test_a_records_states_cannot_change_after_it_is_made(
     backend: SimpleNamespace,
 ) -> None:

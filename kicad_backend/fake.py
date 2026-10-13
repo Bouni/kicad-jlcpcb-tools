@@ -53,13 +53,14 @@ def component(
     """Build a footprint with Default only, fields in KiCad's order.
 
     KiCad lists Reference, Value, Datasheet and Description, then the
-    footprint's own fields: here ``fields`` in order. Given as (name, text)
-    pairs, a name that comes again adds another field of that name after the
-    others, as KiCad's footprint dialog can. The UUID defaults to one derived
-    from the reference, so two footprints sharing a reference need their own.
+    footprint's own fields: here ``fields`` in order. A name already listed,
+    one of those four or one that comes again in (name, text) pairs, adds
+    another field of that name after the others, as a KiCad footprint can
+    hold. The UUID defaults to one derived from the reference, so two
+    footprints sharing a reference need their own.
     """
     texts = {"Reference": reference, "Value": value, "Datasheet": "", "Description": ""}
-    given = set()
+    given = set(texts)
     repeated = []
     pairs = fields.items() if isinstance(fields, Mapping) else fields or ()
     for name, text in pairs:
