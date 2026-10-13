@@ -29,7 +29,17 @@ def update_components_db_from_api() -> None:
     print("Fetching categories...")
     initial_categories = JlcApi.fetchCategories(instockOnly=True)
     categories = JlcApi.collapseCategories(initial_categories, limit=50000)
-    print(f"Found {len(initial_categories)} categories, collaped to {len(categories)}.")
+    # JLC serves only the first 100,000 results of a query, so split any category
+    # close to that by package, with headroom for stock that changes during the run.
+    categories = [
+        query
+        for category in categories
+        for query in JlcApi.splitByPackage(category, limit=90000)
+    ]
+    print(
+        f"Found {len(initial_categories)} categories, collapsed and split into "
+        f"{len(categories)} queries."
+    )
 
     progress = (
         TqdmNestedProgressBar()
