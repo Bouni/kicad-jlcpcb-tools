@@ -532,3 +532,47 @@ class TestCategoryFetch:
 
         # Check that currentPage was incremented twice (1 -> 2 on first fetch, 2 -> 3 on second empty fetch)
         assert fetch.currentPage == 3
+
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.JlcApi.componentList")
+    def test_category_fetch_stops_at_last_reported_page(
+        self, mock_component_list, _mock_get_token
+    ):
+        """CategoryFetch.fetchAll requests no page past the last one the API reports.
+
+        JLC serves only the first 100,000 results of a query, so the page after
+        a short last page can lie past that window.
+        """
+        pages = [
+            [{"componentCode": "C1"}, {"componentCode": "C2"}],
+            [{"componentCode": "C3"}],
+        ]
+
+        def respond(token, request):
+            index = request["currentPage"] - 1
+            items = pages[index] if index < len(pages) else []
+            return {"data": {"componentPageInfo": {"list": items, "pages": 2}}}
+
+        mock_component_list.side_effect = respond
+        fetch = CategoryFetch(
+            ApiCategory("Test", "Cat", 3), rateLimit=False, pageSize=2
+        )
+
+        assert list(fetch.fetchAll()) == pages
+        assert mock_component_list.call_count == 2
+
+    @mock.patch("retry.api.time.sleep")
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.JlcApi.componentList")
+    def test_category_fetch_missing_page_info_raises(
+        self, mock_component_list, _mock_get_token, _mock_sleep
+    ):
+        """A page served without page info raises an error naming the result window."""
+        mock_component_list.return_value = {
+            "code": 200,
+            "data": {"componentPageInfo": None},
+        }
+        fetch = CategoryFetch(ApiCategory("Test", "Cat", 100), rateLimit=False)
+
+        with pytest.raises(RuntimeError, match="100,000"):
+            list(fetch.fetchAll())

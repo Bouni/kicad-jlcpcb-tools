@@ -170,6 +170,8 @@ class CategoryFetch:
         self.pageSize = pageSize
         self.rateLimit = rateLimit
         self.currentPage = 1
+        # Page count reported by the last response, once there has been one.
+        self.lastPage: int | None = None
         self.token = JlcApi.getToken()
 
     @sleep_and_retry
@@ -192,9 +194,16 @@ class CategoryFetch:
         body = JlcApi.componentList(self.token, request)
         if not body:
             return []
-        components = body["data"]["componentPageInfo"]["list"]
+        pageInfo = body["data"]["componentPageInfo"]
+        if pageInfo is None:
+            # The API's answer to a page past the first 100,000 results.
+            raise RuntimeError(
+                f"No page {self.currentPage} of {self.category!r}: JLC serves only "
+                "the first 100,000 results of a query"
+            )
+        self.lastPage = pageInfo.get("pages")
         self.currentPage += 1
-        return components
+        return pageInfo["list"]
 
     def fetchAll(self) -> Generator[list[Any], None, None]:
         """Fetch all components in the category, yielding each page.
@@ -203,7 +212,9 @@ class CategoryFetch:
             List of component dicts for each page fetched from the API.
 
         """
-        while True:
+        # Never ask for the page after the last one: past the first 100,000 results
+        # the API returns no page at all rather than an empty one.
+        while self.lastPage is None or self.currentPage <= self.lastPage:
             components = (
                 self._rateLimitedNextPage() if self.rateLimit else self._fetchNextPage()
             )
