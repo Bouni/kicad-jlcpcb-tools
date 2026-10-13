@@ -53,22 +53,26 @@ jobs:
             .venv-wx/bin/python -m pytest -rs --require-native=wx -m "$1"
           ' sh '${{ matrix.selection }}'
   native-kicad:
-    name: Native KiCad 10
+    name: Native KiCad ${{ matrix.kicad }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        kicad: ["9", "10"]
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      - name: Install KiCad 10 and matching system Python bindings
+      - name: Install KiCad ${{ matrix.kicad }} and matching system Python bindings
         run: |
-          sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
+          sudo add-apt-repository --yes ppa:kicad/kicad-${{ matrix.kicad }}.0-releases
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends 'kicad=10.*' python3-wxgtk4.0 python3-venv xvfb xauth
+          sudo apt-get install -y --no-install-recommends 'kicad=${{ matrix.kicad }}.*' python3-wxgtk4.0 python3-venv xvfb xauth
           /usr/bin/python3 -m venv --system-site-packages .venv-kicad
       - name: Install test dependencies
         run: .venv-kicad/bin/python -m pip install '.[dev]'
-      - name: Require native variant editing, windows, and fabrication checks
+      - name: Require the native KiCad checks
         run: >-
           timeout 300s xvfb-run -a -s '-screen 0 1920x1080x24'
           .venv-kicad/bin/python -m pytest -rs
-          --require-native=kicad -m native_kicad
+          --require-native=kicad --kicad-major=${{ matrix.kicad }} -m native_kicad

@@ -20,12 +20,19 @@ def run_lane(
     broken: str = "",
     collection_skip: bool = False,
     cli: bool = False,
+    version: str = "10.0.6",
+    kicad_major: Optional[str] = None,  # noqa: UP045
 ) -> subprocess.CompletedProcess[str]:
-    """Run the real pytest hooks with isolated, deliberately limited bindings."""
+    """Run the real pytest hooks with isolated, deliberately limited bindings.
+
+    ``broken="variants"`` gives a KiCad without the design-variant API, as
+    KiCad 9 is; ``kicad_major`` is the lane's ``--kicad-major``.
+    """
     hooks = Path(__file__).parents[1] / "conftest.py"
     shutil.copyfile(hooks, tmp_path / "conftest.py")
     (tmp_path / "pytest.ini").write_text(
         "[pytest]\nmarkers =\n    native_wx\n    native_kicad\n    os_input\n"
+        "    kicad_variants\n"
     )
     (tmp_path / "wx").mkdir()
     (tmp_path / "wx" / "__init__.py").write_text(
@@ -44,7 +51,7 @@ def run_lane(
             else "    def GetVariantNamesForUI(self): return ['', 'A']\n"
             "    def AddVariant(self, name): pass\n"
         )
-        + "def GetBuildVersion(): return '10.0.6'\n"
+        + f"def GetBuildVersion(): return {version!r}\n"
     )
     (tmp_path / "test_probe.py").write_text("import pytest\n" + source)
     if collection_skip:
@@ -56,11 +63,14 @@ def run_lane(
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
     monkeypatch.delenv("KICAD_JLCPCB_NATIVE_TESTS", raising=False)
     monkeypatch.delenv("KICAD_JLCPCB_REQUIRE_NATIVE", raising=False)
+    monkeypatch.delenv("KICAD_JLCPCB_KICAD_MAJOR", raising=False)
     if mode and not cli:
         monkeypatch.setenv("KICAD_JLCPCB_REQUIRE_NATIVE", mode)
-    command = [sys.executable, "-m", "pytest", "-q"]
+    command = [sys.executable, "-m", "pytest", "-q", "-rs"]
     if cli:
         command.append(f"--require-native={mode}")
+    if kicad_major:
+        command.append(f"--kicad-major={kicad_major}")
     return subprocess.run(
         command,
         cwd=tmp_path,
@@ -155,6 +165,163 @@ def test_cli_option_enables_native_tests_and_propagates_to_child_processes(
         cli=True,
     )
     assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "version, kicad_major, expected",
+    [("10.0.6", "9", "expected KiCad 9"), ("9.0.9", None, "expected KiCad 10")],
+)
+def test_kicad_lane_requires_its_own_major_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    kicad_major: Optional[str],  # noqa: UP045
+    expected: str,
+) -> None:
+    """Each KiCad lane fails before collection when another KiCad is installed."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "raise AssertionError('collection happened before runtime validation')\n",
+        "variants" if version.startswith("9.") else "",
+        version=version,
+        kicad_major=kicad_major,
+    )
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, (
+        result.stdout + result.stderr
+    )
+    assert expected in result.stderr
+
+
+def test_kicad9_lane_skips_only_the_variant_tests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the variant API a variant test skips with its reason; others run."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "import os\n"
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_variants\n"
+        "def test_variants(): raise AssertionError('variant test ran')\n"
+        "@pytest.mark.native_kicad\n"
+        "def test_board():\n"
+        "    assert os.environ['KICAD_JLCPCB_KICAD_MAJOR'] == '9'\n",
+        "variants",
+        version="9.0.9-9.0.9~ubuntu24.04.1",
+        kicad_major="9",
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 passed, 1 skipped" in result.stdout
+    assert (
+        "KiCad has no design variants (BOARD.GetVariantNamesForUI is unavailable)"
+        in result.stdout
+    )
+
+
+def test_a_kicad9_lane_of_only_variant_tests_runs_nothing_and_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Variant tests skipped for the missing API are not native tests that ran."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_variants\n"
+        "def test_variants(): raise AssertionError('variant test ran')\n",
+        "variants",
+        version="9.0.9",
+        kicad_major="9",
+    )
+    assert result.returncode == pytest.ExitCode.USAGE_ERROR, (
+        result.stdout + result.stderr
+    )
+    assert "No native_kicad tests selected that would run" in result.stderr
+
+
+def test_an_isolated_rerun_in_the_kicad9_lane_accepts_kicad9(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A test rerun in a fresh process, as isolated native tests are, keeps the lane."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "import os, subprocess, sys\n"
+        "@pytest.mark.native_kicad\n"
+        "def test_board(request):\n"
+        "    if os.environ.get('LANE_CHILD') == '1':\n"
+        "        return\n"
+        "    child = subprocess.run(\n"
+        "        [sys.executable, '-m', 'pytest', '-q', request.node.nodeid],\n"
+        "        env=dict(\n"
+        "            os.environ, LANE_CHILD='1', KICAD_JLCPCB_REQUIRE_NATIVE='kicad'\n"
+        "        ),\n"
+        "        capture_output=True,\n"
+        "        text=True,\n"
+        "        check=False,\n"
+        "    )\n"
+        "    assert child.returncode == 0, child.stdout + child.stderr\n",
+        "variants",
+        version="9.0.9",
+        kicad_major="9",
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+def test_variant_tests_collect_where_kicad_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without pcbnew the capability check leaves variant tests to their fixtures."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        None,
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_variants\n"
+        "def test_variants(): pytest.skip('KiCad pcbnew is unavailable')\n",
+        "pcbnew",
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 skipped" in result.stdout
+    assert "KiCad pcbnew is unavailable" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "version, kicad_major, broken",
+    [("9.0.9", "9", "variants"), ("10.0.6", None, "")],
+)
+def test_a_variant_test_skipped_for_another_reason_fails_the_lane(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    kicad_major: Optional[str],  # noqa: UP045
+    broken: str,
+) -> None:
+    """Only the missing variant API excuses a skip, and only where it is missing."""
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n"
+        "def test_board(): pytest.skip('board fixture unavailable')\n"
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_variants\n"
+        "def test_variants(): pytest.skip('variant fixture unavailable')\n",
+        broken,
+        version=version,
+        kicad_major=kicad_major,
+    )
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, (
+        result.stdout + result.stderr
+    )
+    assert "Required native test skipped" in result.stdout
+    assert "board fixture unavailable" in result.stdout
+    if broken:
+        assert "1 failed, 1 skipped" in result.stdout
+    else:
+        assert "2 failed" in result.stdout
+        assert "variant fixture unavailable" in result.stdout
 
 
 @pytest.mark.parametrize("mode", [None, "wx", "kicad"])
