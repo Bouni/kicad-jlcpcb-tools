@@ -2590,7 +2590,8 @@ class JLCPCBTools(wx.Frame):
                     if corrections is not None
                     else "Unresolved"
                 ),
-                # The side column takes a layer number: F.Cu is 0, B.Cu is 2.
+                # The model shows layer "0" as TOP and any other as BOT. B.Cu
+                # is 2 from KiCad 9 on (31 before), but only the zero matters.
                 "0" if fp.side == "top" else "2",
                 params_for_part(details),
                 enrichment_status,
