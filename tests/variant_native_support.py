@@ -9,6 +9,8 @@ import sys
 from types import ModuleType, SimpleNamespace
 from typing import Any, Optional
 
+from . import swig_doubles
+
 PACKAGE = "_variant_test"
 package = sys.modules.setdefault(PACKAGE, ModuleType(PACKAGE))
 package.__path__ = [str(Path(__file__).resolve().parents[1])]
@@ -70,6 +72,9 @@ class Field:
     def SetVisible(self, visible: bool) -> None:
         self.fp.visible[self.name] = visible
 
+    def IsVisible(self) -> bool:
+        return self.fp.visible.get(self.name, True)
+
 
 class Footprint:
     def __init__(self, board: Any, component: str, ref: str = "R1") -> None:
@@ -114,6 +119,12 @@ class Footprint:
     def GetOrientationDegrees(self) -> float:
         return 90.0
 
+    def GetOrientation(self) -> Any:
+        return SimpleNamespace(AsDegrees=self.GetOrientationDegrees)
+
+    def GetPath(self) -> Any:
+        return SimpleNamespace(AsString=lambda: "")
+
     def IsFlipped(self) -> bool:
         return False
 
@@ -121,10 +132,7 @@ class Footprint:
         return 31 if self.IsFlipped() else 0
 
     def Pads(self) -> list[Any]:
-        return [
-            SimpleNamespace(GetAttribute=lambda: 1, HasHole=lambda: False)
-            for _ in range(2)
-        ]
+        return [swig_doubles.Pad(str(number)) for number in (1, 2)]
 
     def GetAttributes(self) -> int:
         return self.attributes
@@ -183,7 +191,7 @@ class Footprint:
         self.board.modified = True
 
 
-class Board:
+class Board(swig_doubles.Board):
     def __init__(self) -> None:
         self.m_Uuid = SimpleNamespace(AsString=lambda: "board-uuid")
         self.names = ["A", "B"]

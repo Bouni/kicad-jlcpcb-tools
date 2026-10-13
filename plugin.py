@@ -8,8 +8,9 @@ from typing import Any, Optional
 import pcbnew  # pylint: disable=import-error
 import wx
 
-from .board_context import BoardContextChanged, board_identity
 from .core.version import is_supported_version
+from .kicad_backend import BoardChanged
+from .kicad_backend.swig.read import board_identity
 
 
 class JLCPCBPlugin(pcbnew.ActionPlugin):
@@ -120,7 +121,7 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
             raise RuntimeError("A JLCPCB Tools board edit is already running")
         frame, board_id = context
         if not frame or frame.IsBeingDeleted() or self._board_id() != board_id:
-            raise BoardContextChanged(
+            raise BoardChanged(
                 "The original PCB is no longer open; reopen JLCPCB Tools"
             )
         if not frame.IsEnabled():
@@ -140,7 +141,7 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
 
         def apply_to_original_board() -> None:
             if self._board_id() != board_id:
-                raise BoardContextChanged(
+                raise BoardChanged(
                     "The original PCB is no longer open; reopen JLCPCB Tools"
                 )
             action()

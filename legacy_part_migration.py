@@ -14,6 +14,8 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Optional, Union
 
+from .board_parts import library_item_name, value_text
+from .kicad_backend.records import BoardSnapshot
 from .lcsc import is_lcsc_part, normalize_lcsc
 from .legacy_part_storage import legacy_part_info_digest, legacy_part_info_generation
 from .part_assignments import ResolvedAssignment, safe_assignment_value
@@ -74,6 +76,31 @@ class MigrationFootprint:
     pos: bool
     assignment: ResolvedAssignment
     lcsc: str
+
+
+def migration_footprints(
+    parts: Sequence[Any], snapshot: BoardSnapshot
+) -> tuple[MigrationFootprint, ...]:
+    """Combine captured Default assignments with each footprint's own values.
+
+    ``parts`` are the Default capture's FootprintAssignments of ``snapshot``.
+    """
+    footprints = []
+    for part in parts:
+        component = snapshot.get(part.component_id)
+        footprints.append(
+            MigrationFootprint(
+                part.component_id,
+                part.reference,
+                value_text(component),
+                library_item_name(component.footprint_lib_id),
+                not part.exclude_from_bom,
+                not component.default.exclude_from_pos,
+                part.assignment,
+                part.lcsc,
+            )
+        )
+    return tuple(footprints)
 
 
 @dataclass(frozen=True)

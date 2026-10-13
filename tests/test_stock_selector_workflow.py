@@ -205,9 +205,7 @@ def test_selector_assignment_keeps_exact_stock_in_catalog_and_native_mapping(
         assert _stock_label(model, model.data[0], "STOCK_COL") == (
             "22 k" if simplified else "22095"
         )
-        reopened = mainwindow.Store(
-            window, window.project_path, window.pcbnew.GetBoard()
-        )
+        reopened = mainwindow.Store(window, window.project_path)
         assert reopened.get_part("R1")["stock"] is None
         assert reopened.get_part("R1")["lcsc"] == "C200"
         layout_ui._drain_callbacks()

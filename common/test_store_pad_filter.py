@@ -15,10 +15,14 @@ from tests.wx_harness import load_siblings, wx_stubs
 # Keep the real Store and metadata helpers without leaving fake wx installed
 # for unrelated tests that need native grid geometry.
 with load_siblings(
-    "store_pad_tests", ("store", "footprint_metadata"), wx_stubs()
+    "store_pad_tests",
+    ("store", "footprint_metadata", "board_parts", "kicad_backend.fake"),
+    wx_stubs(),
 ) as _modules:
     store_module = _modules["store"]
     footprint_metadata_module = _modules["footprint_metadata"]
+    board_parts = _modules["board_parts"]
+    fake = _modules["kicad_backend.fake"]
 
 Store = store_module.Store
 count_pad = footprint_metadata_module.count_pad
@@ -112,21 +116,44 @@ class _BoardFootprint(_FootprintPads):
     def SetDNP(self, is_dnp: bool) -> None:
         self._is_dnp = is_dnp
 
+    def record(self) -> Any:
+        """Return the footprint as the board backend reports it now."""
+        kinds = ("pth", "smd", "conn", "npth")
+        return fake.component(
+            self._reference,
+            value=self._value,
+            footprint="Lib:R_0603",
+            fields={"LCSC": self._lcsc},
+            dnp=self._is_dnp,
+            exclude_from_bom=bool(self._attributes & 8),
+            exclude_from_pos=bool(self._attributes & 4),
+            pads=[
+                fake.pad(kind=kinds[pad.GetAttribute()], has_hole=pad.HasHole())
+                for pad in self._pads
+            ],
+        )
+
+
+class _Parent:
+    """The window's side of the Store, reading the current footprints each time."""
+
+    settings: dict[str, Any] = {}
+
+    def __init__(self, footprints: tuple[Any, ...]) -> None:
+        self.footprints = footprints
+
+    def _read_board(self) -> Any:
+        return fake.FakeBackend(fp.record() for fp in self.footprints).snapshot()
+
+    _held_board = _read_board
+
 
 def _saved_store(
     tmp_path: Path, footprints: tuple[Any, ...] = (), assembly_metadata: Any = None
 ) -> Any:
-    """Construct a real ordinary Store using a saved-board fixture."""
-    filename = tmp_path / "board.kicad_pcb"
-    filename.write_text("(kicad_pcb)\n", encoding="utf-8")
-    board = types.SimpleNamespace(
-        GetFileName=lambda: str(filename), GetFootprints=lambda: footprints
-    )
+    """Construct a real ordinary Store over the given footprints."""
     return Store(
-        types.SimpleNamespace(settings={}),
-        str(tmp_path),
-        board,
-        assembly_metadata=assembly_metadata,
+        _Parent(footprints), str(tmp_path), assembly_metadata=assembly_metadata
     )
 
 
@@ -211,7 +238,7 @@ def test_live_pad_metadata_reflects_board_edits_and_reopening(
     assert (updated["pad_count"], updated["has_tht"]) == (0, 0)
     assert store.read_all() == [updated]
 
-    reopened = Store(store.parent, str(tmp_path), store.board).get_part("R1")
+    reopened = Store(store.parent, str(tmp_path)).get_part("R1")
     assert (reopened["pad_count"], reopened["has_tht"]) == (0, 0)
     assert reopened["lcsc"] == "C1"
 
@@ -259,7 +286,7 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path: Path) -> None:
     footprint.SetProperty("LCSC", "C2")
     assert _part_state(store) == ("C2", "10k", "SMT", 0)
 
-    reopened = Store(store.parent, str(tmp_path), store.board)
+    reopened = Store(store.parent, str(tmp_path))
     assert _part_state(reopened) == ("C2", "10k", "", None)
     assert reopened.get_assembly_enrichment_targets() == {"C2": ["R1"]}
 
@@ -361,7 +388,7 @@ def test_assembly_flags_follow_native_board_changes(
     assert bool(changed["exclude_from_bom"]) is expected_bom
     assert bool(changed["exclude_from_pos"]) is expected_pos
     assert store.read_all() == [changed]
-    reopened = Store(store.parent, str(tmp_path), store.board)
+    reopened = Store(store.parent, str(tmp_path))
     assert parse_assembly_flags(reopened.get_part("R1")) == expected_flags
 
     footprint.SetAttributes(0)
@@ -375,9 +402,9 @@ def test_assembly_flags_follow_native_board_changes(
 
 
 def test_assembly_flags_round_trip_writer_keys_match_reader_expectations() -> None:
-    """Keys produced by footprint_metadata.get_assembly_flags must parse back via pricing.get_assembly_flags."""
+    """Keys the parts rows write in assembly_flags parse back via pricing.get_assembly_flags."""
     fp = _BoardFootprint(reference="R1", pads=[_Pad()], is_dnp=True)
-    flags_json = footprint_metadata_module.get_assembly_flags(fp)
+    flags_json = board_parts.part_facts(fp.record())["assembly_flags"]
 
     parsed = parse_assembly_flags({"assembly_flags": flags_json})
 

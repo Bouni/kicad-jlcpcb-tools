@@ -8,33 +8,14 @@ from .wx_harness import load_siblings, module
 
 with load_siblings(
     "_bom_estimator_controller",
-    ["bom_widget"],
+    ["bom_widget", "kicad_backend.fake"],
     {
         "wx": module("wx"),
-        "pcbnew": module("pcbnew", F_Cu=0),
         "_bom_estimator_controller.helpers": module("helpers", HighResWxSize=object),
     },
 ) as loaded:
     BomEstimatorController = loaded["bom_widget"].BomEstimatorController
-
-
-class _Footprint:
-    def __init__(self, layer=0):
-        self.layer = layer
-
-    def IsFlipped(self):
-        return False
-
-    def GetLayer(self):
-        return self.layer
-
-
-class _Board:
-    def __init__(self, footprints=None):
-        self.footprints = footprints or {}
-
-    def FindFootprintByReference(self, reference):
-        return self.footprints.get(reference)
+    fake = loaded["kicad_backend.fake"]
 
 
 _MISSING = object()
@@ -58,15 +39,11 @@ def _part(reference="R1", *, component_product_type=0, **values):
     return part
 
 
-def _board(**layers):
-    """Build a board from ``reference=layer`` entries; ``None`` means absent."""
-    return _Board(
-        {
-            reference: _Footprint(layer)
-            for reference, layer in layers.items()
-            if layer is not None
-        }
-    )
+def _board(**sides: str) -> Any:
+    """Read a board holding one footprint per ``reference=side`` entry."""
+    return fake.FakeBackend(
+        fake.component(reference, side=side) for reference, side in sides.items()
+    ).snapshot()
 
 
 def _details(**prices):
@@ -87,7 +64,7 @@ def _make_controller(*, parts, board=None, details=None, force_standard=False):
     controller = BomEstimatorController(
         read_parts=lambda: parts,
         get_part_details=lambda lcsc: (details or {}).get(lcsc, {}),
-        get_board=lambda: board or _Board(),
+        get_board=lambda: board or _board(),
         is_force_standard_enabled=lambda: force_standard,
         set_price_label=lambda *args: captured["prices"].append(args),
         set_standard_only_refs=lambda refs: captured["standard_refs"].append(set(refs)),
@@ -112,7 +89,7 @@ def test_recompute_empty_states_clear_outputs(
     parts: list[dict[str, Any]], board_count: int, expected: str
 ) -> None:
     """Initial and later empty BOMs clear every output, including Standard refs."""
-    controller, captured = _make_controller(parts=parts, board=_board(U1=0))
+    controller, captured = _make_controller(parts=parts, board=_board(U1="top"))
 
     controller.recompute(board_count)
     empty_outputs = {
@@ -137,7 +114,7 @@ def test_recompute_dnp_part_still_receives_a_price_label():
     """Keep the table's price label current even when its part is DNP."""
     controller, captured = _make_controller(
         parts=[_part(assembly_flags='{"is_dnp": true}')],
-        board=_board(R1=0),
+        board=_board(R1="top"),
         details=_details(C1="0.10"),
     )
 
@@ -152,7 +129,7 @@ def test_recompute_uses_one_catalog_result_for_summary_and_prices() -> None:
     """Every mixed-BOM row and the summary use the same single read of each LCSC."""
     controller, captured = _make_controller(
         parts=[_part("R1"), _part("R2"), _part("U1", lcsc="C2", pad_count=8)],
-        board=_board(R1=0, R2=0, U1=0),
+        board=_board(R1="top", R2="top", U1="top"),
     )
     fetched: list[str] = []
 
@@ -175,10 +152,13 @@ def test_recompute_uses_one_catalog_result_for_summary_and_prices() -> None:
 
 @pytest.mark.parametrize(
     ("board", "expected"),
-    [(_board(R1=0, R2=0), False), (_board(R1=0, R2=31), True)],
+    [
+        (_board(R1="top", R2="top"), False),
+        (_board(R1="top", R2="bottom"), True),
+    ],
     ids=("one-side", "two-sides"),
 )
-def test_board_context_detects_populated_sides(board: _Board, expected: bool) -> None:
+def test_board_context_detects_populated_sides(board: Any, expected: bool) -> None:
     """Distinguish one-sided from two-sided placement."""
     parts = [_part("R1"), _part("R2", lcsc="C2")]
     controller, _ = _make_controller(parts=parts, board=board)
@@ -216,7 +196,7 @@ def test_board_context_uses_direct_pos_and_filters_dnp_and_absent_footprints() -
     ]
     controller, _ = _make_controller(
         parts=parts,
-        board=_board(R1=0, U1=0, U2=0, U3=0),
+        board=_board(R1="top", U1="top", U2="top", U3="top"),
     )
 
     decision = controller.recompute(board_count=5)

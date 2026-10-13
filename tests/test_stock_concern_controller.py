@@ -13,6 +13,7 @@ import pytest
 
 from bom_estimation.assembly_mode import classify_component_product_type
 
+from . import swig_doubles
 from .stock_test_support import stock_modules
 from .test_settings_defaults import plugin_dir, shipped_defaults
 from .test_settings_dialog import _dialog, _fire, _settings, _wx
@@ -20,7 +21,7 @@ from .test_stock_concern import CellAttr, part
 from .wx_harness import load_mainwindow, wx_stubs
 
 
-class Footprint:
+class Footprint(swig_doubles.Footprint):
     """Live footprint whose assignment, BOM and DNP state really change."""
 
     def __init__(
@@ -32,48 +33,38 @@ class Footprint:
         dnp: bool = False,
         reference: str = "R1",
     ) -> None:
-        self.lcsc = lcsc
-        self.reference = reference
-        self.attributes = (int(bom) << 3) | (int(pos) << 2)
-        self.dnp = dnp
+        super().__init__(
+            reference,
+            fields={"LCSC": lcsc},
+            attributes=(int(bom) << 3) | (int(pos) << 2),
+            dnp=dnp,
+        )
 
-    def GetReference(self) -> str:
-        """Return the identity used by the native edit batch."""
-        return self.reference
+    @property
+    def lcsc(self) -> str:
+        """Return the current assignment."""
+        return self.fields["LCSC"].text
 
-    def GetAttributes(self) -> int:
-        """Read flags used by the real footprint helpers."""
-        return self.attributes
+    @lcsc.setter
+    def lcsc(self, value: str) -> None:
+        """Change the assignment as a PCB edit would."""
+        self.fields["LCSC"].text = value
 
-    def SetAttributes(self, value: int) -> None:
-        """Persist flags so the subsequent regroup sees the changed BOM."""
-        self.attributes = value
 
-    def IsDNP(self) -> bool:
-        """Expose live DNP independently of stale database snapshots."""
-        return self.dnp
+class Board(swig_doubles.Board):
+    """The window's live footprints, by reference."""
 
-    def GetFields(self) -> list[types.SimpleNamespace]:
-        """Expose the current assignment as an existing LCSC field."""
-        return [
-            types.SimpleNamespace(GetName=lambda: "LCSC", GetText=lambda: self.lcsc)
-        ]
+    def __init__(self, footprints: dict[str, Footprint]) -> None:
+        super().__init__(filename="")
+        self.live = footprints
 
-    def SetField(self, _name: str, value: str) -> None:
-        """Keep the live board assignment in sync with successful transactions."""
-        self.lcsc = value
+    def GetFootprints(self) -> list[Footprint]:
+        """Return the live footprints."""
+        return list(self.live.values())
 
-    def GetLayer(self) -> int:
-        """Place the fixture on the top side."""
-        return 0
-
-    def GetFPID(self) -> types.SimpleNamespace:
-        """Supply the identity consumed by the real assignment workflow."""
-        return types.SimpleNamespace(GetLibItemName=lambda: "R_0603")
-
-    def GetValue(self) -> str:
-        """Supply the value consumed by the real assignment workflow."""
-        return "10k"
+    def FindFootprintByReference(self, reference: str) -> Optional[Footprint]:  # noqa: UP045
+        """Return the footprint with this reference."""
+        return self.live.get(reference)
 
 
 class Store:
@@ -117,6 +108,10 @@ class Store:
             for reference in self.parts
             if (record := self.get_part(reference)) is not None
         ]
+
+    def rows(self, _snapshot: Any) -> list[dict[str, Any]]:
+        """Return the rows of the board read the window passes; it is the live board."""
+        return self.read_all()
 
     def get_part(self, reference: str) -> Optional[dict[str, Any]]:
         """Observe native edits and removals without a second mapping authority."""
@@ -186,13 +181,11 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             )
             for reference, footprint in window.footprints.items():
                 footprint.reference = reference
-            board = types.SimpleNamespace(
-                FindFootprintByReference=window.footprints.get,
-                GetFootprints=lambda: list(window.footprints.values()),
-                GetFileName=lambda: "",
-            )
+                footprint.uuid = f"footprint-{reference}"
+            board = Board(window.footprints)
             window.store = Store(records, board)
-            window.pcbnew = types.SimpleNamespace(GetBoard=lambda: board)
+            window.pcbnew = swig_doubles.editor(board)
+            window.backend = mainwindow.SwigBackend(window.pcbnew)
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
             window.library = MagicMock()
             window.library.is_download_running.return_value = False

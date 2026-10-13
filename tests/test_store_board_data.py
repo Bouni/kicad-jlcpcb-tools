@@ -3,7 +3,7 @@
 from contextlib import closing
 from pathlib import Path
 import sqlite3
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from unittest.mock import Mock
 
 import pytest
@@ -104,18 +104,24 @@ def test_boards_in_one_directory_keep_distinct_assignments(
     assert first.get_part("R2")["lcsc"] == "C200"
 
 
-def test_parent_board_accessor_is_rechecked_for_every_read(
+def test_whole_board_reads_read_again_and_lookups_use_the_last_snapshot(
     store_module: ModuleType, tmp_path: Path
 ) -> None:
-    """A validated live-board accessor takes precedence over the original wrapper."""
+    """Every whole-board read asks the window to read the board; a lookup does not."""
     store = make_store(store_module, tmp_path, Board(Footprint()))
-    current = Board(Footprint("R9", "C900"))
-    store.parent._get_current_board = lambda: current
-    assert store.get_part("R1") is None
-    assert store.get_part("R9")["lcsc"] == "C900"
-    store.parent._get_current_board = Mock(side_effect=RuntimeError("board changed"))
+    store.read_all()
+    store.read_bom_parts()
+    store.get_assembly_enrichment_targets()
+    assert (store.parent.reads, store.parent.held_reads) == (3, 0)
+    assert store.get_part("R1")["lcsc"] == "C100"
+    assert store.set_assembly_metadata("R1", "SMT", 2)
+    assert (store.parent.reads, store.parent.held_reads) == (3, 2)
+    store.parent._read_board = Mock(side_effect=RuntimeError("board changed"))
     with pytest.raises(RuntimeError, match="board changed"):
         store.read_all()
+    store.parent._held_board = Mock(side_effect=RuntimeError("board changed"))
+    with pytest.raises(RuntimeError, match="board changed"):
+        store.get_part("R1")
 
 
 def test_bom_groups_one_captured_native_snapshot_and_filters_population(
@@ -162,26 +168,14 @@ def test_duplicate_native_references_cannot_silently_collapse_bom_rows(
         store.read_bom_parts()
 
 
-@pytest.mark.parametrize("native_finder", [True, False])
-def test_single_part_lookup_does_not_extract_unrelated_native_parts(
-    store_module: ModuleType, tmp_path: Path, native_finder: bool
+@pytest.mark.parametrize("reference", ["", "?", "*"])
+def test_unlisted_references_are_not_looked_up(
+    store_module: ModuleType, tmp_path: Path, reference: str
 ) -> None:
-    """Reading one live row never scans the pad geometry of unrelated footprints."""
-    footprints = [Footprint(f"R{index}") for index in range(1, 49)]
-    board = Board(*footprints)
-    source = (
-        board if native_finder else SimpleNamespace(GetFootprints=board.GetFootprints)
-    )
-    store = make_store(store_module, tmp_path, source)
-    target = footprints[23]
-    assert store.get_part("R24")["lcsc"] == "C100"
-    assert board.inventory_reads == (0 if native_finder else 1)
-    assert target.pad_reads == 1
-    assert sum(fp.pad_reads for fp in footprints) == 1
-    assert board.reference_lookups == (["R24"] if native_finder else [])
-
-    target.lcsc = "C200"
-    assert store.get_part("R24")["lcsc"] == "C200"
+    """References the parts list does not show need no board read at all."""
+    footprint = Footprint(reference)
+    store = make_store(store_module, tmp_path, Board(footprint, Footprint("R2")))
+    assert store.get_part(reference) is None
+    assert store.parent.held_reads == 0
+    assert [row["reference"] for row in store.read_all()] == ["R2"]
     assert store.get_part("R99") is None
-    assert target.pad_reads == 2
-    assert sum(fp.pad_reads for fp in footprints) == 2

@@ -32,50 +32,38 @@ class AssignmentStore:
 
 
 class Footprint:
-    """Retain live native fields and count each Default field read."""
+    """A footprint's live fields and its link to a placed symbol."""
 
     def __init__(self, reference: str, root: str) -> None:
+        self.uuid = f"footprint-{reference}"
         self.reference = reference
         self.fields = {"LCSC": "C123"}
-        self.field_reads = 0
-        self.attributes = 0
         self.schematic_path = f"/{root}/{SYMBOL}"
-        self.m_Uuid = SimpleNamespace(AsString=lambda: f"footprint-{reference}")
-
-    def GetReference(self) -> str:
-        """Return the native display label."""
-        return self.reference
-
-    def GetPath(self) -> Any:
-        """Return the persisted footprint-to-symbol identity link."""
-        return SimpleNamespace(AsString=lambda: self.schematic_path)
-
-    def GetFields(self) -> list[Any]:
-        """Read the real current fields rather than record setter calls."""
-        self.field_reads += 1
-        return [
-            SimpleNamespace(GetName=lambda: "LCSC", GetText=lambda: self.fields["LCSC"])
-        ]
-
-    def GetAttributes(self) -> int:
-        """Return the live BOM/POS flags."""
-        return self.attributes
 
 
 class Board:
-    """Change subsequent native reads to expose mixed export snapshots."""
+    """Serve snapshots through the fake backend; a second read sees new data."""
 
-    def __init__(self) -> None:
+    def __init__(self, fake: Any) -> None:
+        self.fake = fake
         self.footprints = [Footprint("R1", ROOT_FIRST), Footprint("R2", ROOT_SECOND)]
-        self.inventory_reads = 0
+        self.reads = 0
 
-    def GetFootprints(self) -> list[Footprint]:
-        """Return changed data on a second inventory read."""
-        self.inventory_reads += 1
-        if self.inventory_reads > 1:
+    def read(self) -> Any:
+        """Read the whole board, changing every assignment after the first read."""
+        self.reads += 1
+        if self.reads > 1:
             for footprint in self.footprints:
                 footprint.fields["LCSC"] = "C456"
-        return self.footprints
+        return self.fake.FakeBackend(
+            self.fake.component(
+                footprint.reference,
+                uuid=footprint.uuid,
+                fields=dict(footprint.fields),
+                schematic_path=footprint.schematic_path,
+            )
+            for footprint in self.footprints
+        ).snapshot()
 
 
 def _part(reference: str, **changes: Any) -> dict[str, Any]:
@@ -132,22 +120,23 @@ def source(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNam
     """Open production capture/export against live native state and two roots."""
     version = getattr(request, "param", "10.0.6")
     store = AssignmentStore()
-    board = Board()
     paths = [tmp_path / f"{name}.kicad_sch" for name in ("first", "second")]
     originals = [_schematic(version, root) for root in (ROOT_FIRST, ROOT_SECOND)]
     for path, original in zip(paths, originals):
         path.write_text(original, encoding="utf-8")
-    parent = SimpleNamespace(
-        store=store,
-        board=board,
-        board_name="board.kicad_pcb",
-        project_path=str(tmp_path),
-    )
     with load_siblings(
         "_schematic_variant_tests",
-        ("schematicexport", "schematic_snapshot"),
+        ("schematicexport", "schematic_snapshot", "kicad_backend.fake"),
         {"pcbnew": module("pcbnew", GetBuildVersion=lambda: version)},
     ) as loaded:
+        board = Board(loaded["kicad_backend.fake"])
+        parent = SimpleNamespace(
+            store=store,
+            board_name="board.kicad_pcb",
+            project_path=str(tmp_path),
+            _read_board=board.read,
+            _legacy_board=lambda: None,
+        )
         yield SimpleNamespace(
             exporter=loaded["schematicexport"].SchematicExport(parent),
             capture=loaded["schematic_snapshot"].capture_board,
@@ -193,7 +182,7 @@ def test_invalid_sources_preserve_every_original_and_backup(
         source.exporter.load_schematic(map(str, source.paths), **arguments)
 
     assert source.store.read_count == 0
-    assert source.board.inventory_reads == 0
+    assert source.board.reads == 0
     assert all(
         path.read_text(encoding="utf-8") == original
         for path, original in zip(source.paths, source.originals)
@@ -214,11 +203,7 @@ def test_default_source_is_captured_once_for_all_files(
         map(str, source.paths), parts=[_part("R1"), _part("R2")] if explicit else None
     )
     assert source.store.read_count == 0
-    assert source.board.inventory_reads == (0 if explicit else 1)
-    assert [footprint.field_reads for footprint in source.board.footprints] == [
-        0 if explicit else 1,
-        0 if explicit else 1,
-    ]
+    assert source.board.reads == (0 if explicit else 1)
     for path, original in zip(source.paths, source.originals):
         written = path.read_text(encoding="utf-8")
         assert '(property "LCSC" "C123"' in written
@@ -232,7 +217,7 @@ def test_explicit_snapshot_is_detached_from_later_board_edits(
     source: SimpleNamespace,
 ) -> None:
     """A captured Default snapshot retains its fields and links for the whole save."""
-    snapshot = source.capture(source.board)
+    snapshot = source.capture(source.board.read())
     for footprint in source.board.footprints:
         footprint.fields["LCSC"] = "C456"
         footprint.schematic_path = "/unrelated/symbol"
@@ -240,7 +225,7 @@ def test_explicit_snapshot_is_detached_from_later_board_edits(
 
     source.exporter.load_schematic(map(str, source.paths), snapshot=snapshot)
 
-    assert source.board.inventory_reads == 1
+    assert source.board.reads == 1
     assert source.store.read_count == 0
     for path in source.paths:
         written = path.read_text(encoding="utf-8")
@@ -248,26 +233,22 @@ def test_explicit_snapshot_is_detached_from_later_board_edits(
         assert "C456" not in written
 
 
-def test_native_default_uses_the_guarded_current_board(source: SimpleNamespace) -> None:
-    """Use the verified board handle once when the window owns a context guard."""
-    stale_board = Board()
-    for footprint in stale_board.footprints:
-        footprint.fields["LCSC"] = "C999"
-    source.exporter.parent.board = stale_board
-    guard_calls = []
+def test_native_default_is_read_once(source: SimpleNamespace) -> None:
+    """The window's read checks its board and reads it once for the whole capture."""
+    calls = []
+    source.exporter.parent._legacy_board = lambda: calls.append("guard")
+    read = source.exporter.parent._read_board
 
-    def current_board() -> Board:
-        """Return the owning window's verified board identity."""
-        guard_calls.append(True)
-        return source.board
+    def read_board() -> Any:
+        calls.append("read")
+        return read()
 
-    source.exporter.parent._get_current_board = current_board
+    source.exporter.parent._read_board = read_board
 
     source.exporter.load_schematic(map(str, source.paths))
 
-    assert guard_calls == [True]
-    assert stale_board.inventory_reads == 0
-    assert source.board.inventory_reads == 1
+    assert calls == ["read"]
+    assert source.board.reads == 1
     for path in source.paths:
         assert '(property "LCSC" "C123"' in path.read_text(encoding="utf-8")
 
@@ -358,7 +339,10 @@ def test_export_rejects_replaced_board_before_native_read_or_file_write(
         """Model the owning window's stale native board guard."""
         raise RuntimeError("Board context changed; reopen the plugin")
 
-    source.exporter.parent._get_current_board = changed_board
+    # The window's read checks its board first, and so does its check before
+    # rows supplied by the caller.
+    source.exporter.parent._legacy_board = changed_board
+    source.exporter.parent._read_board = changed_board
     with pytest.raises(RuntimeError, match="Board context changed"):
         source.exporter.load_schematic(
             [str(path) for path in source.paths],
@@ -366,7 +350,7 @@ def test_export_rejects_replaced_board_before_native_read_or_file_write(
         )
 
     assert source.store.read_count == 0
-    assert source.board.inventory_reads == 0
+    assert source.board.reads == 0
     for path, original in zip(source.paths, source.originals):
         assert path.read_text(encoding="utf-8") == original
         assert not path.with_name(path.name + "_old").exists()

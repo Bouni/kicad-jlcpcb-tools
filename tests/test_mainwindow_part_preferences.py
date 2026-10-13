@@ -211,19 +211,14 @@ def test_manual_part_preference_actions_work_with_automatic_settings_disabled(
 
 
 def test_part_preferences_skip_footprint_deleted_after_board_reconciliation(
-    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
+    make_window: Callable[..., Any],
 ) -> None:
-    """A deletion between board sync and part preference lookup must not interrupt opening."""
+    """A footprint deleted after the list was shown must not interrupt opening."""
     window = make_window(
         footprints=[Footprint(lcsc=""), Footprint("R2", lcsc="")],
         part_preferences={("R_0603", "10k"): "C200"},
     )
-    board = window.pcbnew.GetBoard()
-    monkeypatch.setattr(
-        board,
-        "FindFootprintByReference",
-        lambda ref: (board.footprints.get(ref) if ref != "R1" else None),
-    )
+    del window.pcbnew.GetBoard().footprints["R1"]
 
     window.init_store()
 

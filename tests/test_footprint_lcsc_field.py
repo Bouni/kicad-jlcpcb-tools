@@ -1,4 +1,7 @@
-"""Tests for reading and writing the LCSC field on a footprint (issue #773)."""
+"""Tests for writing the LCSC field on a footprint (issue #773).
+
+Reading it is board_parts' job, tested over board records in test_board_parts.
+"""
 
 import importlib.util
 from pathlib import Path
@@ -26,9 +29,14 @@ _fh.__package__ = "kicadplugin"
 sys.modules["kicadplugin.footprint_helpers"] = _fh
 _spec.loader.exec_module(_fh)
 
-get_lcsc_value = _fh.get_lcsc_value
 set_lcsc_value = _fh.set_lcsc_value
-find_lcsc_assignment_text = _fh.find_lcsc_assignment_text
+resolve_assignment = sys.modules["kicadplugin.part_assignments"].resolve_assignment
+
+
+def get_lcsc_value(footprint) -> str:
+    """Read the Default assignment back the way the board records resolve it."""
+    fields = {field.GetName(): field.GetText() for field in footprint.GetFields()}
+    return resolve_assignment(fields, {}, "")[1]
 
 
 class FakeField:
@@ -91,96 +99,6 @@ class LegacyFootprint:
 
 
 # ---------------------------------------------------------------------------
-# Reading
-# ---------------------------------------------------------------------------
-
-
-class TestReadingTheField:
-    """A part number is recognised whatever spacing or case it was typed in."""
-
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "C12345",
-            "C12345 ",
-            " C12345",
-            "  C12345  ",
-            "C12345\n",
-            "\tC12345",
-            "c12345",
-        ],
-    )
-    def test_a_part_number_is_found(self, text):
-        r"""Stray whitespace or lower case no longer hides the part.
-
-        Reported as issue #773: a schematic field of "C12345 " left the part
-        blank in the parts list, because the value went straight into
-        re.match(r"^C\\d+$", ...) which a trailing space fails. Lower case
-        failed the same test, and a trailing newline passed it, since $ also
-        matches before a final newline.
-        """
-        footprint = FakeFootprint(FakeField("LCSC Part #", text))
-        assert get_lcsc_value(footprint) == "C12345"
-
-    @pytest.mark.parametrize(
-        "text", ["", "  ", "not a part", "C", "12345", "CC12345", "C１２３"]
-    )
-    def test_a_non_part_number_is_still_rejected(self, text):
-        """Values that do not name a part are still ignored."""
-        footprint = FakeFootprint(FakeField("LCSC Part #", text))
-        assert get_lcsc_value(footprint) == ""
-
-    def test_disagreeing_normalized_aliases_remain_unassigned(self) -> None:
-        """Conflicting user/plugin fields cannot select different parts by mode."""
-        footprint = FakeFootprint(
-            FakeField("LCSC Part #", "C12345 "),
-            FakeField("LCSC", "C99999"),
-        )
-        assert get_lcsc_value(footprint) == ""
-
-    @pytest.mark.parametrize(
-        "fields,expected",
-        [
-            ({"LCSC": "", "JLCPCB": "C100"}, ""),
-            ({"LCSC": "  ", "JLCPCB": "C100"}, ""),
-            ({"LCSC": "C100", "JLCPCB": "C200"}, ""),
-            ({"LCSC": "C100", "JLCPCB": "invalid"}, ""),
-            ({"JLCPCB Customer ID": "C100"}, ""),
-            ({"JLCPCB Rotation": "C100"}, ""),
-            ({"LCSC": " c100 ", "JLCPCB Part #": "C100"}, "C100"),
-            ({"LCSC": "C100", "JLCPCB": ""}, "C100"),
-        ],
-    )
-    @pytest.mark.parametrize("legacy", [False, True])
-    def test_default_assignment_semantics_are_independent_of_api_generation(
-        self, fields: dict[str, str], expected: str, legacy: bool
-    ) -> None:
-        """Ordinary boards follow Default's blank/conflict/metadata interpretation."""
-        footprint = (
-            LegacyFootprint(fields)
-            if legacy
-            else FakeFootprint(
-                *(FakeField(name, text) for name, text in fields.items())
-            )
-        )
-        assert get_lcsc_value(footprint) == expected
-
-    def test_legacy_properties_are_normalised_too(self):
-        """The KiCad <= 7 properties path gets the same treatment."""
-        footprint = LegacyFootprint({"LCSC Part #": " c12345 "})
-        assert get_lcsc_value(footprint) == "C12345"
-
-    def test_preferences_only_treat_recognized_assignment_text_as_occupied(
-        self,
-    ) -> None:
-        """Unrelated C-shaped metadata is preserved without blocking an empty mapping."""
-        footprint = FakeFootprint(FakeField("JLCPCB Customer ID", "C100"))
-        assert find_lcsc_assignment_text(footprint) is None
-        footprint.fields.append(FakeField("LCSC Part Number", "invalid"))
-        assert find_lcsc_assignment_text(footprint) == ("LCSC Part Number", "invalid")
-
-
-# ---------------------------------------------------------------------------
 # Writing
 # ---------------------------------------------------------------------------
 
@@ -203,7 +121,7 @@ class TestWritingTheField:
         assert field.GetText() == "C99999"
 
     def test_it_writes_the_field_that_reading_will_use(self):
-        """Assignment lands in the field get_lcsc_value reads back.
+        """Assignment lands in the field a read resolves.
 
         A footprint can carry more than one matching field -- the duplicate
         pair older releases created is exactly that. Reading takes the first

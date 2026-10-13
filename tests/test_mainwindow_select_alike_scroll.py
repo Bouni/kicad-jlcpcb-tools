@@ -23,7 +23,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load_mainwindow, wx_stubs
+from .wx_harness import load_mainwindow, load_siblings, wx_stubs
+
+with load_siblings("_select_alike_board", ("kicad_backend.fake",), {}) as _loaded:
+    fake = _loaded["kicad_backend.fake"]
 
 mainwindow = load_mainwindow(
     "mainwindow_select_alike_tests",
@@ -197,6 +200,7 @@ def _window(footprint_list, alike_rows):
     window.select_alike_in_progress = False
     window.right_toolbar = MagicMock()
     window.pcbnew = MagicMock()
+    window.backend = fake.FakeBackend()
     window.partlist_data_model = MagicMock()
     window.partlist_data_model.select_alike.return_value = [
         footprint_list.items[row] for row in alike_rows

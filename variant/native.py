@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any, Optional, Union
 
 from ..footprint_metadata import get_footprint_pad_metadata
+from ..kicad_backend.records import VariantDefinition
 from ..lcsc import is_lcsc_part, normalize_lcsc
 from ..part_assignments import (
     AssignmentAlias,  # noqa: F401 -- Retain the public native adapter import.
@@ -35,15 +36,6 @@ class NativeVariantError(RuntimeError):
 
 class StaleVariantTarget(NativeVariantError):
     """A captured board, component, or source revision is no longer current."""
-
-
-@dataclass(frozen=True)
-class VariantDefinition:
-    """Native canonical name plus its independent presentation strings."""
-
-    name: str
-    label: str
-    description: str = ""
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,7 @@
 """Preserve native assignment meaning through ordinary and variant auto-save."""
 
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -18,34 +18,16 @@ from .variant_data_support import SavedNativeBoard, _native_session
 store_module = _store_module
 
 
-class AssignmentFootprint(Footprint):
-    """Expose the actual raw fields, with counted native reads."""
-
-    def __init__(self, fields: dict[str, str]) -> None:
-        super().__init__()
-        self.fields = fields
-        self.field_reads = 0
-
-    def GetFields(self) -> list[Any]:
-        """Read each alias's name and current text exactly as native controls do."""
-        self.field_reads += 1
-        return [
-            SimpleNamespace(
-                GetName=lambda name=name: name,
-                GetText=lambda name=name: self.fields[name],
-            )
-            for name in self.fields
-        ]
-
-
 def _rows(
     tmp_path: Path, module: ModuleType, mode: str, fields: dict[str, str]
 ) -> list[dict[str, Any]]:
     """Use the real source adapter and snapshot path for the chosen UI mode."""
     if mode == "ordinary":
-        footprint = AssignmentFootprint(fields)
-        rows = make_store(module, tmp_path, Board(footprint)).read_all()
-        assert footprint.field_reads == 1
+        footprint = Footprint()
+        footprint.fields = fields
+        store = make_store(module, tmp_path, Board(footprint))
+        rows = store.read_all()
+        assert store.parent.reads == 1
         return rows
     board = SavedNativeBoard(tmp_path)
     board.parts[0].fields = {"Reference": "R1", "Value": "10k", **fields}

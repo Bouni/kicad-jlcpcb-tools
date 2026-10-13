@@ -53,6 +53,6 @@ def test_supplier_result_before_assignment_is_shared_only_with_matching_code(
     assert store.get_part("R1")["component_product_type"] is None
     footprint.lcsc = "C100"
     assert store.get_part("R1")["component_product_type"] == 2
-    reopened = make_store(store_module, tmp_path, store.board)
+    reopened = make_store(store_module, tmp_path, store.parent.board)
     assert reopened.get_part("R1")["component_product_type"] is None
     assert reopened.get_assembly_enrichment_targets() == {"C100": ["R1"]}

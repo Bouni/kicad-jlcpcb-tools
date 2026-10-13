@@ -146,7 +146,7 @@ class Fabrication:
 
     def _validate_ordinary_board(self) -> None:
         """Ask the owning window to reject replaced or unavailable editor boards."""
-        get_board = getattr(self.parent, "_get_current_board", None)
+        get_board = getattr(self.parent, "_legacy_board", None)
         if callable(get_board):
             get_board()
 

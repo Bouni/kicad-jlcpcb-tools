@@ -37,7 +37,7 @@ def test_ordinary_callbacks_disable_stale_board_view(
     window.bom_estimator_controller = BomEstimatorController(
         read_parts=window.read_assembly_parts,
         get_part_details=window.library.get_part_details,
-        get_board=window._get_current_board,
+        get_board=window._held_board,
         is_force_standard_enabled=lambda: False,
         set_price_label=MagicMock(),
         set_standard_only_refs=MagicMock(),
@@ -134,7 +134,7 @@ def test_stale_footprint_selection_preserves_current_pcb_selection(
 
     try:
         window.OnFootprintSelected()
-    except mainwindow.BoardContextChanged as error:
+    except mainwindow.BoardChanged as error:
         errors.append(error)
 
     assert selected.selected

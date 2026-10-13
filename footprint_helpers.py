@@ -1,48 +1,13 @@
 """Helpers for reading and mutating KiCad footprint and board state."""
 
 from collections.abc import Iterator
-import re
-from typing import Any, Optional
+from typing import Any
 
 from .lcsc import normalize_lcsc
-from .part_assignments import (
-    ResolvedAssignment,
-    is_assignment_alias,
-    resolve_assignment,
-)
+from .part_assignments import is_assignment_alias
 
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
-
-
-def _iter_assignment_fields(fp: Any) -> Iterator[tuple[str, str]]:
-    """Yield (name, text) for every field, whichever KiCad API the board has."""
-    try:
-        return ((field.GetName(), field.GetText()) for field in fp.GetFields())
-    except AttributeError:
-        return iter(fp.GetProperties().items())
-
-
-def find_lcsc_assignment_text(fp: Any) -> Optional[tuple[str, str]]:
-    """Check raw assignment fields independently of identifier validation.
-
-    Any text occupies the field, including whitespace or an identifier the
-    legacy reader does not recognize. Inspect every alias before filling.
-    """
-    for name, text in _iter_assignment_fields(fp):
-        if is_assignment_alias(name) and text != "":
-            return name, text
-    return None
-
-
-def get_lcsc_assignment(fp: Any) -> tuple[ResolvedAssignment, str]:
-    """Capture assignment provenance and its normalized value in one native read."""
-    return resolve_assignment(dict(_iter_assignment_fields(fp)), {}, "")
-
-
-def get_lcsc_value(fp: Any) -> str:
-    """Read the same normalized, unambiguous assignment as variant Default."""
-    return get_lcsc_assignment(fp)[1]
 
 
 def set_lcsc_value(fp: Any, lcsc: str) -> None:
@@ -76,15 +41,6 @@ def set_lcsc_value(fp: Any, lcsc: str) -> None:
                     break
 
 
-def get_valid_footprints(board):
-    """Get all footprints that have a valid reference."""
-    footprints = []
-    for fp in board.GetFootprints():
-        if re.match(r"[\w\d-]+", fp.GetReference()):
-            footprints.append(fp)
-    return footprints
-
-
 def iter_board_items(container: Any) -> Iterator[Any]:
     """Yield the concrete board items held by a pcbnew container."""
     try:
@@ -106,22 +62,6 @@ def get_bit(value, bit):
 def toggle_bit(value, bit):
     """Toggle the nth bit of a byte."""
     return value ^ (1 << bit)
-
-
-def get_exclude_from_pos(footprint):
-    """Get the 'exclude from POS' property of a footprint."""
-    if not footprint:
-        return None
-    val = footprint.GetAttributes()
-    return bool(get_bit(val, EXCLUDE_FROM_POS))
-
-
-def get_exclude_from_bom(footprint):
-    """Get the 'exclude from BOM' property of a footprint."""
-    if not footprint:
-        return None
-    val = footprint.GetAttributes()
-    return bool(get_bit(val, EXCLUDE_FROM_BOM))
 
 
 def get_is_dnp(footprint):

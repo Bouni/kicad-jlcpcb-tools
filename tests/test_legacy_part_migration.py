@@ -868,3 +868,40 @@ def test_all_shared_group_peers_stay_blocked_from_preference_fallback(
     plan = migration.plan_legacy_migration(str(database), parts, links.__getitem__)
     assert not plan.assignments
     assert plan.blocked_component_ids == ("uuid-r1", "uuid-r2", "uuid-r3")
+
+
+def test_migration_footprints_take_values_from_the_board_records() -> None:
+    """Value, footprint name and placement come from each footprint's own record."""
+    with load_siblings(
+        "_migration_footprint_tests",
+        ("legacy_part_migration", "schematic_snapshot", "kicad_backend.fake"),
+        {},
+    ) as modules:
+        fake = modules["kicad_backend.fake"]
+        snapshot = fake.FakeBackend(
+            [
+                fake.component(
+                    "R1",
+                    uuid="u1",
+                    value="10k",
+                    footprint="Resistor_SMD:R_0603",
+                    fields={"LCSC": "C1"},
+                    exclude_from_pos=True,
+                ),
+                fake.component("R2", uuid="u2", exclude_from_bom=True),
+            ]
+        ).snapshot()
+        default = modules["schematic_snapshot"].capture_board(snapshot)
+
+        parts = modules["legacy_part_migration"].migration_footprints(
+            default.parts, snapshot
+        )
+
+        assert [
+            (part.component_id, part.value, part.footprint, part.bom, part.pos)
+            for part in parts
+        ] == [
+            ("u1", "10k", "R_0603", True, False),
+            ("u2", "", "Footprint", False, True),
+        ]
+        assert (parts[0].lcsc, parts[0].assignment.status) == ("C1", "valid")

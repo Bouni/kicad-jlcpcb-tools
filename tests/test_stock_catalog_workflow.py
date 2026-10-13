@@ -70,7 +70,7 @@ def catalog_window(
         window.bom_estimator_controller = estimator.BomEstimatorController(
             read_parts=window.store.read_all,
             get_part_details=window._bom_get_part_details,
-            get_board=window.pcbnew.GetBoard,
+            get_board=window._held_board,
             is_force_standard_enabled=lambda: window.bom_estimator_force_standard,
             set_price_label=window.partlist_data_model.set_bom_price,
             set_standard_only_refs=window.partlist_data_model.set_standard_only_refs,

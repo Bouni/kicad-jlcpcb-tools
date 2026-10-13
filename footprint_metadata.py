@@ -1,10 +1,7 @@
 """Helpers for deriving estimator metadata from KiCad footprints."""
 
 from collections.abc import Iterable
-import json
 from typing import Any
-
-from .footprint_helpers import get_exclude_from_bom, get_exclude_from_pos, get_is_dnp
 
 # PAD_ATTRIB in KiCad's padstack.h: PTH=0, SMD=1, CONN=2, NPTH=3.
 # pcbnew exposes these enum values as integers, not enum-name strings.
@@ -47,13 +44,3 @@ def get_footprint_pad_metadata(footprint: Any) -> tuple[int, bool]:
 def footprint_has_tht(footprint: Any) -> bool:
     """Determine whether a footprint contains a plated through-hole pad."""
     return get_footprint_pad_metadata(footprint)[1]
-
-
-def get_assembly_flags(footprint: Any) -> str:
-    """Build assembly-related footprint flags for estimator persistence."""
-    flags = {
-        "exclude_from_bom": bool(get_exclude_from_bom(footprint)),
-        "exclude_from_pos": bool(get_exclude_from_pos(footprint)),
-        "is_dnp": bool(get_is_dnp(footprint)),
-    }
-    return json.dumps(flags, sort_keys=True)

@@ -170,3 +170,36 @@ def test_release_dispatch_passes_the_archive_kicad_range(tmp_path: Path) -> None
         f"KICAD_VERSION={version['kicad_version']}",
         f"KICAD_VERSION_MAX={version['kicad_version_max']}",
     ]
+
+
+# Packages in the repository that the plugin does not import yet, so the
+# archive leaves them out until it does.
+_NOT_YET_IMPORTED = {"jlcfootprint"}
+
+
+def test_archive_copies_every_plugin_package() -> None:
+    """A package the plugin imports but the archive leaves out breaks a PCM install.
+
+    The plugin's registration swallows ImportError, so a missing package only
+    shows as a plugin that never appears in KiCad. A package nothing in the
+    plugin imports may stay out, until the plugin first imports it.
+    """
+    script = (_PCM / "create_pcm_archive.sh").read_text(encoding="utf-8")
+    copied = set(script.split("for dir in ", 1)[1].split(";", 1)[0].split())
+    packages = {path.parent.name for path in _ROOT.glob("*/__init__.py")}
+    sources = [
+        *_ROOT.glob("*.py"),
+        *(path for name in copied - {"lib"} for path in (_ROOT / name).rglob("*.py")),
+    ]
+    imports = re.compile(
+        rf"^\s*(?:from\s+\.*|import\s+)({'|'.join(sorted(_NOT_YET_IMPORTED))})\b",
+        re.MULTILINE,
+    )
+
+    assert packages - {"tests", "db_build"} - _NOT_YET_IMPORTED <= copied
+    assert "kicad_backend" in copied
+    assert not [
+        path.relative_to(_ROOT).as_posix()
+        for path in sources
+        if imports.search(path.read_text(encoding="utf-8"))
+    ]

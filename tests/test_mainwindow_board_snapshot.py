@@ -1,0 +1,526 @@
+"""The window reads the board through its backend and holds the last snapshot."""
+
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
+
+from . import part_preferences_test_support as support, swig_doubles
+from .part_preferences_test_support import Footprint, act
+from .wx_harness import load_siblings, module
+
+mainwindow = support.mainwindow
+make_window = support.make_window
+
+with load_siblings(
+    "_board_snapshot_estimator",
+    ["bom_widget"],
+    {
+        "wx": module("wx"),
+        "_board_snapshot_estimator.helpers": module("helpers", HighResWxSize=object),
+    },
+) as _loaded:
+    BomEstimatorController = _loaded["bom_widget"].BomEstimatorController
+
+# What the window logs once R2 has two fields named LCSC.
+REPEATED_FIELD_NOTE = (
+    'Footprint R2 has more than one field named "LCSC". KiCad keeps only the '
+    "last one when the board is reopened. Remove the extra field from the "
+    "footprint."
+)
+
+
+class CountingBackend:
+    """Count the full board reads a window makes."""
+
+    def __init__(self, backend: Any) -> None:
+        self.backend = backend
+        self.snapshots = 0
+
+    def snapshot(self) -> Any:
+        """Read the whole board, counting the read."""
+        self.snapshots += 1
+        return self.backend.snapshot()
+
+
+def _counted(window: Any) -> CountingBackend:
+    """Count the window's board reads from now on."""
+    window.backend = CountingBackend(window.backend)
+    return window.backend
+
+
+def test_lookups_answer_from_the_last_read_until_the_board_is_read_again(
+    make_window: Callable[..., Any],
+) -> None:
+    """A PCB edit shows once the list is rebuilt; single lookups read nothing."""
+    window = make_window()
+    backend = _counted(window)
+    footprint = window.pcbnew.GetBoard().FindFootprintByReference("R1")
+    footprint.SetField("LCSC", "C200")
+
+    assert window.store.get_part("R1")["lcsc"] == "C100"
+    assert window.store.get_part("R1")["lcsc"] == "C100"
+    assert backend.snapshots == 0
+    window.populate_footprint_list()
+    assert backend.snapshots == 1
+    assert window.store.get_part("R1")["lcsc"] == "C200"
+    assert backend.snapshots == 1
+
+
+@pytest.mark.parametrize("action", ["picker", "paste", "apply", "clear"])
+def test_each_edit_is_read_back_once_before_its_rows_are_published(
+    action: str,
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The snapshot an edit publishes from already holds the edit."""
+    window = make_window(part_preferences={("R_0603", "10k"): "C200"})
+    backend = _counted(window)
+    published = []
+    window.partlist_data_model.set_lcsc.side_effect = lambda ref, lcsc, *_: (
+        published.append((lcsc, window.store.get_part(ref)["lcsc"]))
+    )
+
+    act(action, window, mainwindow, monkeypatch, "C200")
+
+    expected = "" if action == "clear" else "C200"
+    assert (
+        window._board_snapshot.by_reference("R1")[0].default.fields["LCSC"].text
+        == expected
+    )
+    assert all(lcsc == stored for lcsc, stored in published)
+    # Each action reads the board when it starts and again after its edit;
+    # Apply reads it once more to look its selection up.
+    assert backend.snapshots == (3 if action == "apply" else 2)
+
+
+def test_held_board_checks_the_live_board_before_answering(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """A replaced board fails a lookup instead of answering from the old snapshot."""
+    window = make_window(footprints=[Footprint("R1")])
+    window._read_board()
+    replacement = support.Board([Footprint("R1", lcsc="C900")])
+    replacement.filename = window.pcbnew.GetBoard().filename
+    window.pcbnew.GetBoard = lambda: replacement
+
+    with pytest.raises(mainwindow.BoardChanged):
+        window.store.get_part("R1")
+    with pytest.raises(mainwindow.BoardChanged):
+        window._held_board()
+
+
+def _shared_uuid_window(make_window: Callable[..., Any]) -> Any:
+    """Open a window on a board where R2 has R1's UUID.
+
+    KiCad gives every footprint its own, but a board file can hold two
+    footprints with one, and KiCad keeps both when it opens the file.
+    """
+    footprints = [Footprint("R1", lcsc=""), Footprint("R2", lcsc="C200")]
+    footprints[1].uuid = footprints[0].uuid
+    return make_window(footprints=footprints)
+
+
+def test_footprints_sharing_a_uuid_list_like_any_other(
+    make_window: Callable[..., Any],
+) -> None:
+    """Both rows show, each with its own assignment, and nothing stops."""
+    window = _shared_uuid_window(make_window)
+    _real(window, "populate_footprint_list")
+
+    window.populate_footprint_list()
+
+    assert {
+        reference: window.store.get_part(reference)["lcsc"]
+        for reference in ("R1", "R2")
+    } == {"R1": "", "R2": "C200"}
+    assert window._project_storage_unavailable is False
+
+
+def _repeated_field_window(make_window: Callable[..., Any]) -> Any:
+    """Open a window, then give R2 a second LCSC field in the PCB editor.
+
+    KiCad's footprint dialog accepts a second field with a name the footprint
+    already has, and keeps both until the board is reopened.
+    """
+    window = make_window(footprints=[Footprint("R1", lcsc=""), Footprint("R2")])
+    footprint = window.pcbnew.GetBoard().footprints["R2"]
+    footprint.fields["Second LCSC"] = support.Field("LCSC", "C555")
+    return window
+
+
+def _notes(window: Any) -> list[str]:
+    """Return the repeated-field notes the window has logged, as users read them."""
+    return [
+        call.args[0] % call.args[1:]
+        for call in window.logger.warning.call_args_list
+        if "more than one field" in call.args[0]
+    ]
+
+
+def _activate(window: Any, active: bool) -> None:
+    """Activate or deactivate the window, as switching windows does."""
+    window.on_window_activated(
+        SimpleNamespace(Skip=lambda: None, GetActive=lambda: active)
+    )
+
+
+def _real(window: Any, name: str) -> None:
+    """Run the window's own method where the harness put a stand-in."""
+    delattr(window, name)
+
+
+def _refreshing_window(make_window: Callable[..., Any]) -> Any:
+    """Open a window whose activation runs the list, enrichment, stock and estimate.
+
+    Enrichment works out its targets but fetches nothing.
+    """
+    window = make_window(footprints=[Footprint("R1"), Footprint("R2", lcsc="C200")])
+    window.assembly_lookup.request = MagicMock()
+    window._why_standard_dialog = None
+    window._bom_recompute_scheduled = False
+    window.is_catalog_available = lambda: True
+    for name in (
+        "populate_footprint_list",
+        "start_assembly_enrichment",
+        "recompute_bom_estimate",
+    ):
+        _real(window, name)
+    window.bom_estimator_board_count = 5
+    window.bom_estimator_controller = BomEstimatorController(
+        read_parts=window.read_assembly_parts,
+        get_part_details=lambda _lcsc: {},
+        get_board=window._held_board,
+        is_force_standard_enabled=lambda: False,
+        set_price_label=MagicMock(),
+        set_standard_only_refs=MagicMock(),
+        set_summary_text=MagicMock(),
+        set_details_button_label=MagicMock(),
+    )
+    return window
+
+
+def test_an_activation_reads_the_board_once(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An activation's refresh and the estimate it schedules share one read.
+
+    The list, enrichment, stock concerns and both estimates run on the main
+    thread, where nothing can change the board meanwhile. An action still
+    reads the board when it starts, and once the window was deactivated a
+    scheduled estimate reads it again.
+    """
+    window = _refreshing_window(make_window)
+    backend = _counted(window)
+
+    _activate(window, True)
+    window._run_coalesced_bom_recompute()
+    assert backend.snapshots == 1
+
+    window.footprint_list.GetSelections.return_value = ["R1"]
+    act("paste", window, mainwindow, monkeypatch, "C300")
+    assert window.pcbnew.GetBoard().footprints["R1"].field.text == "C300"
+    after_paste = backend.snapshots
+    assert after_paste > 1
+
+    _activate(window, True)
+    assert backend.snapshots == after_paste + 1
+    _activate(window, False)
+    window._run_coalesced_bom_recompute()
+    assert backend.snapshots == after_paste + 2
+
+
+def test_two_fields_of_one_name_are_noted_once_per_activation(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The list keeps working and shows the later field; the log says so once.
+
+    The first list rebuild after an activation notes it. Rebuilds and
+    actions within the same activation do not repeat it.
+    """
+    window = _repeated_field_window(make_window)
+    _real(window, "populate_footprint_list")
+    board = window.pcbnew.GetBoard()
+
+    window.populate_footprint_list()
+    assert _notes(window) == [REPEATED_FIELD_NOTE]
+    assert window.store.get_part("R2")["lcsc"] == "C555"
+
+    # Showing the window activates it; Hide BOM rebuilds the list.
+    _activate(window, True)
+    window.populate_footprint_list()
+    window.footprint_list.GetSelections.return_value = ["R1"]
+    act("paste", window, mainwindow, monkeypatch, "C200")
+    assert board.footprints["R1"].field.text == "C200"
+    assert _notes(window) == [REPEATED_FIELD_NOTE]
+
+    _activate(window, False)
+    _activate(window, True)
+    assert _notes(window) == [REPEATED_FIELD_NOTE] * 2
+    assert window._project_storage_unavailable is False
+    window.project_storage_status.SetLabel.assert_not_called()
+
+
+@pytest.mark.parametrize("action", ["picker", "paste", "enter", "apply", "clear"])
+def test_actions_resolve_references_in_the_snapshot(
+    action: str,
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """References resolve in the board read; only the edit touches SWIG objects."""
+    window = make_window(part_preferences={("R_0603", "10k"): "C200"})
+    board = window.pcbnew.GetBoard()
+
+    def no_reference_lookup(_reference: str) -> None:
+        raise AssertionError("looked a reference up on the live board")
+
+    monkeypatch.setattr(board, "FindFootprintByReference", no_reference_lookup)
+
+    act(action, window, mainwindow, monkeypatch, "C200")
+
+    assert board.footprints["R1"].field.text == ("" if action == "clear" else "C200")
+
+
+@pytest.mark.parametrize("bom, pos, bits", [(True, False, 8), (False, True, 4)])
+def test_toggles_flip_the_flags_the_snapshot_read(
+    make_window: Callable[..., Any], bom: bool, pos: bool, bits: int
+) -> None:
+    """Exclusion toggles start from the board read and edit the footprint it named."""
+    window = make_window(footprints=[Footprint("R1", bom=True, pos=True)])
+    footprint = window.pcbnew.GetBoard().footprints["R1"]
+
+    window._toggle_exclusions(bom=bom, pos=pos)
+
+    assert footprint.attributes == 12 - bits
+    assert window._board_snapshot.by_reference("R1")[0].default.exclude_from_bom is (
+        not bom
+    )
+
+
+@pytest.mark.parametrize("action", ["picker", "paste", "enter", "clear", "toggle"])
+def test_an_edit_of_a_footprint_with_two_fields_of_one_name_is_refused(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    """The edit refuses the whole batch, writes nothing and says why in the log.
+
+    The edit cannot tell which of R2's LCSC fields to write. The window
+    stays usable: the list and every other action keep working.
+    """
+    window = _repeated_field_window(make_window)
+    board = window.pcbnew.GetBoard()
+
+    if action == "toggle":
+        window._toggle_exclusions(bom=True, pos=False)
+    else:
+        act(action, window, mainwindow, monkeypatch, "C200")
+
+    assert [
+        (footprint.field.text, footprint.GetAttributes())
+        for footprint in board.footprints.values()
+    ] == [("", 0), ("C100", 0)]
+    assert any(
+        message.endswith(": Duplicate native footprint field: LCSC")
+        for message in (
+            call.args[0] % call.args[1:]
+            for call in window.logger.warning.call_args_list
+        )
+    )
+    assert window._project_storage_unavailable is False
+
+
+@pytest.mark.parametrize(
+    "action", ["picker", "paste", "enter", "clear", "toggle", "select"]
+)
+def test_actions_reach_the_footprint_their_row_names_when_uuids_are_shared(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    """R2 has R1's UUID; acting on R2 edits or selects R2, and R1 stays as it was.
+
+    The part selector assigns to both footprints it is given.
+    """
+    window = _shared_uuid_window(make_window)
+    board = window.pcbnew.GetBoard()
+    window.footprint_list.GetSelections.return_value = ["R2"]
+    selected = []
+    for footprint in board.footprints.values():
+        monkeypatch.setattr(
+            footprint,
+            "SetSelected",
+            lambda fp=footprint: selected.append(fp.reference),
+            raising=False,
+        )
+
+    if action == "toggle":
+        window._toggle_exclusions(bom=True, pos=False)
+    elif action == "select":
+        window.select_alike_in_progress = False
+        window.auto_select_alike = False
+        window.enable_part_specific_toolbar_buttons = MagicMock()
+        window.pcbnew.GetCurrentSelection = lambda: []
+        window.pcbnew.Refresh = MagicMock()
+        window.footprint_list.GetSelectedItemsCount.return_value = 1
+        window.OnFootprintSelected()
+    else:
+        act(action, window, mainwindow, monkeypatch, "C300")
+
+    expected = {
+        "picker": [("C300", 0), ("C300", 0)],
+        "paste": [("", 0), ("C300", 0)],
+        "enter": [("", 0), ("C300", 0)],
+        "clear": [("", 0), ("", 0)],
+        "toggle": [("", 0), ("C200", 8)],
+        "select": [("", 0), ("C200", 0)],
+    }[action]
+    assert [
+        (footprint.field.text, footprint.GetAttributes())
+        for footprint in board.footprints.values()
+    ] == expected
+    assert selected == (["R2"] if action == "select" else [])
+    assert window._project_storage_unavailable is False
+
+
+def test_opening_preferences_pass_over_a_part_whose_earlier_field_is_filled(
+    make_window: Callable[..., Any],
+) -> None:
+    """Text in any field of a repeated name occupies the part, so the rest still fill.
+
+    R2's later LCSC field is empty, so the list shows no number for it, but
+    its first one holds C100, which a preference must not overwrite.
+    """
+    window = make_window(
+        footprints=[Footprint("R1", lcsc=""), Footprint("R2")],
+        part_preferences={("R_0603", "10k"): "C200"},
+    )
+    board = window.pcbnew.GetBoard()
+    board.footprints["R2"].fields["Second LCSC"] = support.Field("LCSC", "")
+
+    window._fill_empty_lcsc_assignments_from_part_preferences()
+
+    assert [footprint.field.text for footprint in board.footprints.values()] == [
+        "C200",
+        "C100",
+    ]
+    assert (
+        "Skipped part preference for R2: field 'LCSC' already contains 'C100'."
+        in support.info_messages(window)
+    )
+
+
+def _listed_rows(window: Any) -> list[list[Any]]:
+    """Return the rows the list rebuild handed the model, in order."""
+    (entries,), _kwargs = window.partlist_data_model.ReplaceAll.call_args
+    return [row for row, _part, _pending in entries]
+
+
+def test_rows_show_each_parts_side_and_dnp_from_the_board_read(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """The DNP column and the side column (a layer number) come from the records."""
+    bottom = Footprint("R2", dnp=True)
+    bottom.flipped = True
+    window = make_window(footprints=[Footprint("R1"), bottom])
+    window.hide_bom_parts = window.hide_pos_parts = False
+
+    mainwindow.JLCPCBTools._populate_footprint_rows(window)
+
+    rows = {row[0]: row for row in _listed_rows(window)}
+    # The list's DNP and Side columns, as datamodel.PartListDataModel numbers them.
+    dnp, side = 8, 10
+    assert {reference: (row[dnp], row[side]) for reference, row in rows.items()} == {
+        "R1": (0, "0"),
+        "R2": (1, "2"),
+    }
+
+
+def test_rows_of_a_repeated_reference_show_the_first_footprints_side_and_dnp(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """Each row with a repeated reference takes DNP and side from the first match.
+
+    KiCad's lookup by reference finds the first footprint in board order; the
+    rows keep their own assignment and exclusions.
+    """
+    first = Footprint("R1", lcsc="C1")
+    second = Footprint("R1", lcsc="C2", dnp=True, bom=True)
+    second.flipped = True
+    second.uuid = "second-r1"
+    board = swig_doubles.Board([first, second, Footprint("R2")])
+    window = make_window(board=board)
+    window.hide_bom_parts = window.hide_pos_parts = False
+
+    mainwindow.JLCPCBTools._populate_footprint_rows(window)
+
+    # The list's LCSC, BOM, DNP and Side columns, as datamodel numbers them.
+    lcsc, bom, dnp, side = 3, 6, 8, 10
+    assert [
+        (row[0], row[lcsc], row[bom], row[dnp], row[side])
+        for row in _listed_rows(window)
+    ] == [
+        ("R1", "C1", False, 0, "0"),
+        ("R1", "C2", True, 0, "0"),
+        ("R2", "C100", False, 0, "0"),
+    ]
+
+
+def test_selecting_rows_selects_their_footprints_in_the_editor(
+    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each selected row's footprint, found in the board read, is selected in KiCad."""
+    footprints = [Footprint("R1"), Footprint("R2"), Footprint("R3")]
+    window = make_window(footprints=footprints)
+    board = window.pcbnew.GetBoard()
+
+    def no_reference_lookup(_reference: str) -> None:
+        raise AssertionError("looked a reference up on the live board")
+
+    monkeypatch.setattr(board, "FindFootprintByReference", no_reference_lookup)
+    selected = []
+    for footprint in footprints:
+        monkeypatch.setattr(
+            footprint,
+            "SetSelected",
+            lambda fp=footprint: selected.append(fp.reference),
+            raising=False,
+        )
+    window.select_alike_in_progress = False
+    window.auto_select_alike = False
+    window.enable_part_specific_toolbar_buttons = MagicMock()
+    window.pcbnew.GetCurrentSelection = lambda: []
+    window.pcbnew.Refresh = MagicMock()
+    window.footprint_list.GetSelections.return_value = ["R1", "R3"]
+    window.footprint_list.GetSelectedItemsCount.return_value = 2
+
+    window.OnFootprintSelected()
+
+    assert sorted(selected) == ["R1", "R3"]
+    window.pcbnew.Refresh.assert_called_once_with()
+
+
+def test_a_read_back_that_finds_another_board_stops_further_edits(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edit's read-back belongs to the edit: another board fails it as an edit."""
+    window = make_window()
+    replacement = support.Board([Footprint("R1", lcsc="C900")])
+    replacement.filename = window.pcbnew.GetBoard().filename
+
+    def run_then_replace(apply: Callable[[], None]) -> None:
+        apply()
+        window.pcbnew.GetBoard = lambda: replacement
+
+    window._board_action = run_then_replace
+
+    act("picker", window, mainwindow, monkeypatch, "C200")
+
+    assert window._board_unreliable is True
+    assert window._project_storage_unavailable is True

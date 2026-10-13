@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from contextlib import closing
+import importlib
 from pathlib import Path
 import sqlite3
 from types import ModuleType, SimpleNamespace
@@ -14,22 +15,24 @@ from .variant_native_support import Footprint, native
 from .wx_harness import load_siblings, package_stubs, wx_stubs
 
 
-class TransitionFootprint(Footprint):
-    """Expose both ordinary and variant readers over the same native state."""
-
-    def GetFPID(self) -> SimpleNamespace:
-        """Return the library identifier used by ordinary-mode board reads."""
-        return SimpleNamespace(GetLibItemName=lambda: "R0603")
-
-
 @pytest.fixture
 def ordinary_store_module() -> Iterator[ModuleType]:
     """Load the actual Store and footprint readers with only wx imports isolated."""
     package = "_board_mapping_transition_tests"
     with load_siblings(
-        package, ("store",), {**package_stubs(package), **wx_stubs()}
+        package,
+        ("store", "kicad_backend.swig"),
+        {**package_stubs(package), **wx_stubs()},
     ) as modules:
         yield modules["store"]
+
+
+def _ordinary_store(module: ModuleType, parent: Any, project: Path, board: Any) -> Any:
+    """Open an ordinary Store whose window reads ``board`` through the SWIG backend."""
+    swig = importlib.import_module(f"{module.__package__}.kicad_backend.swig")
+    backend = swig.SwigBackend(SimpleNamespace(GetBoard=lambda: board))
+    parent._read_board = parent._held_board = backend.snapshot
+    return module.Store(parent, str(project))
 
 
 def _seed_legacy_assignments(project: Path) -> Path:
@@ -84,15 +87,15 @@ def test_default_assignment_survives_removing_all_named_variants(
     board.names.clear()
     board.current = ""
     board.parts = [
-        TransitionFootprint(board, "component-1", "R1"),
-        TransitionFootprint(board, "component-2", "R2"),
+        Footprint(board, "component-1", "R1"),
+        Footprint(board, "component-2", "R2"),
     ]
     board.parts[0].SetField("LCSC", "C100")
     board.parts[1].SetField("LCSC", "C300")
     database = _seed_legacy_assignments(tmp_path)
     legacy = _legacy_rows(database)
     parent = SimpleNamespace(settings={"general": {"lcsc_priority": legacy_priority}})
-    ordinary = ordinary_store_module.Store(parent, str(tmp_path), board)
+    ordinary = _ordinary_store(ordinary_store_module, parent, tmp_path, board)
     assert _assignments(ordinary) == {"R1": "C100", "R2": "C300"}
 
     # KiCad adds a named assembly; a fresh variant session edits the same PCB.
@@ -122,7 +125,7 @@ def test_default_assignment_survives_removing_all_named_variants(
     for footprint in board.parts:
         footprint.DeleteVariant("A")
     for _ in range(2):
-        reopened = ordinary_store_module.Store(parent, str(tmp_path), board)
+        reopened = _ordinary_store(ordinary_store_module, parent, tmp_path, board)
         assert _assignments(reopened) == {"R1": edited, "R2": "C300"}
         assert board.parts[0].GetField("LCSC").GetText() == edited
         assert _legacy_rows(database) == legacy
@@ -155,7 +158,7 @@ def test_default_alias_resolution_is_unchanged_by_adding_or_removing_variants(
     board = SavedNativeBoard(tmp_path)
     board.names.clear()
     board.current = ""
-    footprint = TransitionFootprint(board, "component-1", "R1")
+    footprint = Footprint(board, "component-1", "R1")
     footprint.fields.pop("LCSC")
     footprint.fields.update(fields)
     footprint.fields["JLCPCB Rotation"] = "90"
@@ -164,7 +167,7 @@ def test_default_alias_resolution_is_unchanged_by_adding_or_removing_variants(
     original_fields = dict(footprint.fields)
     parent = SimpleNamespace(settings={})
 
-    ordinary = ordinary_store_module.Store(parent, str(tmp_path), board)
+    ordinary = _ordinary_store(ordinary_store_module, parent, tmp_path, board)
     resolved = [_assignments(ordinary)["R1"]]
     assert footprint.fields == original_fields
 
@@ -177,7 +180,7 @@ def test_default_alias_resolution_is_unchanged_by_adding_or_removing_variants(
     assert not footprint.variants
 
     board.names.clear()
-    reopened = ordinary_store_module.Store(parent, str(tmp_path), board)
+    reopened = _ordinary_store(ordinary_store_module, parent, tmp_path, board)
     resolved.append(_assignments(reopened)["R1"])
 
     assert footprint.fields == original_fields

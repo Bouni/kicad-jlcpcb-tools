@@ -202,9 +202,7 @@ def _drc_window(mainwindow: Any, monkeypatch: pytest.MonkeyPatch, filename: str)
     """Bind the real forced-DRC findings method to a window with DRC on."""
     window, _ = _make_window(mainwindow, [])
     window.settings["gerber"]["force_drc"] = True
-    window._get_current_board.return_value = SimpleNamespace(
-        GetFileName=lambda: filename
-    )
+    window._legacy_board.return_value = SimpleNamespace(GetFileName=lambda: filename)
     window.save_board_for_drc = MagicMock()
     window.flush_generation_ui = MagicMock()
     window.pcbnew = object()
@@ -251,7 +249,7 @@ def test_a_refused_save_is_drc_that_couldnt_run(
     else:
         board = SimpleNamespace(GetFileName=lambda: filename)
         window.pcbnew = SimpleNamespace(SaveBoard=save)
-    window._get_current_board.return_value = board
+    window._legacy_board.return_value = board
     counter.return_value.get_error_violations.return_value = (0, [])
     _bind(mainwindow, window, "save_board_for_drc")
 
