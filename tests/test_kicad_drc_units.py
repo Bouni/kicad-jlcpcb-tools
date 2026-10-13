@@ -71,7 +71,7 @@ def test_drc_without_a_millimetre_unit_fails_before_running(tmp_path: Path) -> N
     with pytest.raises(
         RuntimeError, match="neither EDA_UNITS_MM nor EDA_UNITS_MILLIMETRES"
     ):
-        counter.get_violation_count(board_filename)
+        counter.get_error_violations(board_filename)
 
     assert pcbnew.calls == []
     assert list(tmp_path.glob("*.rpt")) == []
