@@ -268,6 +268,9 @@ def mainwindow_stubs(
     # taken here -- even where wxPython is installed.  Loading the real module
     # keeps its event names from drifting out of step with a copy.
     stubs[f"{package}.events"] = load(package, "events", stubs)
+    # The findings module has no GUI or board imports; the real one lets
+    # generation tests assert on the findings a check produced.
+    stubs[f"{package}.generation_review"] = load(package, "generation_review", stubs)
     footprint_helpers = load(package, "footprint_helpers", stubs)
 
     symbols = {
@@ -308,6 +311,7 @@ def mainwindow_stubs(
             "format_hook_error": str,
             "run_configured_hook": lambda **_kwargs: None,
         },
+        "generation_review_dialog": {"GenerationReviewDialog": object},
         "helpers": {
             "PLUGIN_PATH": str(ROOT),
             "GetScaleFactor": lambda _window: 1,

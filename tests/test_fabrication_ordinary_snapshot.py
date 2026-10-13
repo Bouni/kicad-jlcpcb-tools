@@ -86,7 +86,9 @@ def test_mapping_change_cannot_mix_bom_with_prepared_cpl(
     exporter.begin_ordinary_generation(runtime.corrections)
     placements = exporter.prepare_cpl()
     assert [row[5] for row in placements] == [90, 90]
-    assert "R1 -> 10k" in exporter.get_part_consistency_warnings()
+    assert exporter.get_part_consistency_warnings() == {
+        "C111": {"10k": ["R1"], "20k": ["R2"]}
+    }
     previous = Path(exporter.get_bom_csv_path())
     previous.write_text("previous BOM\n")
 
@@ -118,7 +120,7 @@ def test_generation_end_discards_mapping_and_refreshes_correction_choice(
 
     assert [row[3] for row in exporter.prepare_bom()] == ["C222", "C111"]
     assert [row[5] for row in exporter.prepare_cpl()] == [180, 90]
-    assert exporter.get_part_consistency_warnings() == ""
+    assert exporter.get_part_consistency_warnings() == {}
     exporter.end_ordinary_generation()
 
 

@@ -1,4 +1,4 @@
-"""Exercise catalog recovery through real generation preflight before stopping at DRC."""
+"""Exercise catalog recovery through real generation preflight up to the review."""
 
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import closing
@@ -133,7 +133,7 @@ def generation_window(
     monkeypatch.setattr(mainwindow, "Fabrication", fabrication.Fabrication)
     constructors: list[Any] = []
     placements: list[tuple[tuple[Any, ...], ...]] = []
-    consistency_checks: list[str] = []
+    consistency_checks: list[dict[str, dict[str, list[str]]]] = []
     zone_checks: list[list[Any]] = []
     real_init = fabrication.Fabrication.__init__
     real_prepare = fabrication.Fabrication.prepare_cpl
@@ -156,7 +156,7 @@ def generation_window(
             placements.append(rows)
         return rows
 
-    def consistency(generator: Any) -> str:
+    def consistency(generator: Any) -> dict[str, dict[str, list[str]]]:
         """Observe the real assignment consistency check."""
         result = real_consistency(generator)
         consistency_checks.append(result)
@@ -239,8 +239,8 @@ def generation_window(
             )
             window.gauge = MagicMock()
             window.flush_generation_ui = lambda: None
-            # The DRC boundary deliberately cancels before exports or board saves.
-            window.run_drc_before_gerber_export = MagicMock(return_value=False)
+            # The review cancels before any export; forced DRC is off, so no board save.
+            window.review_generation_findings = MagicMock(return_value=False)
             window._part_selector = None
             window._catalog_ready = False
             window._invalidate_catalog_details()
@@ -296,7 +296,7 @@ def assert_ready(context: SimpleNamespace) -> None:
     assert window.pcbnew.GetBoard().FindFootprintByReference("R1").field.text == "C100"
 
 
-def assert_generate_reaches_drc(context: SimpleNamespace) -> None:
+def assert_generate_reaches_review(context: SimpleNamespace) -> None:
     """Run real generation preflight and verify placements before the deliberate stop."""
     window = context.window
     generation_count = window.store.get_generation_count()
@@ -305,9 +305,9 @@ def assert_generate_reaches_drc(context: SimpleNamespace) -> None:
     assert context.placements == [
         (("R1", "10k", "R_0603", "10.000000", "-20.000000", 0.0, "top"),)
     ]
-    assert context.consistency_checks == [""]
+    assert context.consistency_checks == [{}]
     assert context.zone_checks == [[]]
-    window.run_drc_before_gerber_export.assert_called_once_with()
+    window.review_generation_findings.assert_called_once_with([])
     assert window.store.get_generation_count() == generation_count
     for pattern in ("*.csv", "*.zip", "*.gbr", "*.drl", "*.kicad_pcb"):
         assert not list(context.project.rglob(pattern))
@@ -372,7 +372,7 @@ def test_catalog_recovery_initializes_fabrication_before_enabling_generate(
     assert window.is_catalog_available()
     assert_ready(context)
     assert len(context.constructors) == 1
-    assert_generate_reaches_drc(context)
+    assert_generate_reaches_review(context)
 
 
 @pytest.mark.parametrize("first_directory", ["production_files", "gerber"])
@@ -399,7 +399,7 @@ def test_output_directory_retries_remain_disabled_until_both_folders_are_ready(
     retry_settings(context)
     assert_ready(context)
     assert len(context.constructors) == 4
-    assert_generate_reaches_drc(context)
+    assert_generate_reaches_review(context)
 
 
 def test_healthy_initialization_reuses_the_existing_generator_on_store_retry(
@@ -413,7 +413,7 @@ def test_healthy_initialization_reuses_the_existing_generator_on_store_retry(
     retry_settings(context)
     assert context.window.fabrication is original
     assert context.constructors == [original]
-    assert_generate_reaches_drc(context)
+    assert_generate_reaches_review(context)
 
 
 def test_settings_recovery_from_missing_library_constructs_real_fabrication(
@@ -429,7 +429,7 @@ def test_settings_recovery_from_missing_library_constructs_real_fabrication(
     assert not context.workers
     assert_ready(context)
     assert len(context.constructors) == 1
-    assert_generate_reaches_drc(context)
+    assert_generate_reaches_review(context)
 
 
 @pytest.mark.parametrize("failure", ["corrupt", "metadata"])
@@ -453,7 +453,7 @@ def test_settings_recovery_to_unfetched_catalog_preserves_generation(
     assert getattr(window, "fabrication", None) is not None
     assert_ready(context)
     assert len(context.constructors) == 1
-    assert_generate_reaches_drc(context)
+    assert_generate_reaches_review(context)
 
 
 def test_population_read_failure_survives_recovery_until_storage_retry_succeeds(
@@ -502,4 +502,4 @@ def test_population_read_failure_survives_recovery_until_storage_retry_succeeds(
     assert_ready(context)
     assert window.fabrication is original_generator
     assert context.constructors == [original_generator]
-    assert_generate_reaches_drc(context)
+    assert_generate_reaches_review(context)

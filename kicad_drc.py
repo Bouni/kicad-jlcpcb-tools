@@ -88,13 +88,13 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
             )
             block = violations_section[start:end]
             severity_match = re.search(r";\s*(error|warning)\b", block, flags=re.IGNORECASE)
+            # A block without a severity counts as an error, so a report KiCad
+            # writes in another format is never taken for a clean board.
+            severity = severity_match.group(1).lower() if severity_match else "unknown"
 
-            if not severity_match:
+            if severity == "unknown":
                 unknown_count += 1
-                continue
-
-            severity = severity_match.group(1).lower()
-            if severity == "error":
+            if severity in ("error", "unknown"):
                 code = header.group("code").strip()
                 message = header.group("message").strip()
                 error_messages.append(f"[{code}]: {message}")
@@ -104,7 +104,7 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
         logger.info(
             "Parsed %d DRC violation blocks; %d error-severity, %d warning-severity, %d unknown-severity",
             len(header_matches),
-            len(error_messages),
+            len(error_messages) - unknown_count,
             warning_count,
             unknown_count,
         )
@@ -122,7 +122,7 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
 
 
 class DRCViolationCounter:
-    """Run KiCad SWIG DRC and return the count of violations."""
+    """Run KiCad SWIG DRC and return its error violations."""
 
     def __init__(
         self,
@@ -132,8 +132,14 @@ class DRCViolationCounter:
         self._pcbnew_module = pcbnew_module
         self._working_dir = working_dir
 
-    def get_violation_count(self, board_filename: str) -> int:
-        """Run DRC and return violation count, raising RuntimeError on failure."""
+    def get_error_violations(self, board_filename: str) -> tuple[int, list[str]]:
+        """Run DRC and return the error count with the error messages.
+
+        A violation the report gives no severity counts as an error. The
+        messages are empty, while the count is not, when the report lists the
+        violation total but no violations. Raises RuntimeError when DRC cannot
+        run.
+        """
         if self._pcbnew_module is None:
             raise RuntimeError(
                 "No KiCad Python module provided. Cannot run SWIG DRC without pcbnew."
@@ -161,14 +167,14 @@ class DRCViolationCounter:
                         logger.warning("First %d DRC error(s):", min(10, len(error_messages)))
                         for message in error_messages[:10]:
                             logger.warning("  %s", message)
-                    return error_count
+                    return error_count, error_messages
                 except Exception as exc:
                     raise RuntimeError("Failed to parse DRC report") from exc
 
             if os.path.exists(report_path):
                 raise RuntimeError("DRC report file was created but empty")
 
-            return 0
+            return 0, []
         finally:
             if report_path and os.path.exists(report_path):
                 with contextlib.suppress(OSError):

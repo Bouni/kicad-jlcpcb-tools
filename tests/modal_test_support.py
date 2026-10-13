@@ -1,6 +1,6 @@
 """Strict modal-loop and caller-owned destruction for headless dialog tests."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Optional
 
 
@@ -53,3 +53,23 @@ class ModalDialog:
         assert not self.destroyed, "The caller must destroy its child exactly once"
         self.destroyed = True
         self.lifecycle.append("destroy")
+
+
+def review_pane(result: int) -> type[ModalDialog]:
+    """Return a generation review pane double that closes with ``result``.
+
+    Each instance keeps the findings and parent it was given, and the returned class lists its instances, so a test can check
+    how many panes opened and what each one was shown.
+    """
+
+    class ReviewPane(ModalDialog):
+        instances: list[ModalDialog] = []
+
+        def __init__(self, parent: object, findings: Sequence[object]) -> None:
+            self.parent = parent
+            self.findings = tuple(findings)
+
+        def quit_dialog(self) -> None:
+            self.EndModal(result)
+
+    return ReviewPane

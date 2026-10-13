@@ -13,6 +13,7 @@ from zipfile import ZipFile
 import pytest
 
 from .fabrication_test_support import Point, modules as fabrication_modules
+from .modal_test_support import review_pane
 from .test_mainwindow_empty_zone_warning import (
     _make_window,
     mainwindow_module as handler_module,
@@ -93,7 +94,7 @@ def generation(mainwindow_module: Any, modules: Any, tmp_path: Path) -> Generati
     session.refresh()
     session.set_output_variant("A")
 
-    window, _steps = _make_window([])
+    window, _steps = _make_window(window_module, [])
     window.store = store
     exporter = modules.fabrication.Fabrication(window, board)
     window.fabrication = exporter
@@ -408,6 +409,58 @@ def test_success_commits_once_and_releases_writer_before_post_hook(
     generation.wx.MessageBox.assert_not_called()
     generation.assert_generated_outputs()
     assert generation.store.get_generation_count() == 2
+    assert generation.hooks == ["pre", "post"]
+    generation.assert_released()
+
+
+def _published(generation: Generation) -> dict[str, Any]:
+    """Read every published artifact: ZIP members by name, CSVs as bytes."""
+    with ZipFile(generation.paths["gerber_zip"]) as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+    return {
+        "gerber_zip": members,
+        "bom_csv": generation.paths["bom_csv"].read_bytes(),
+        "cpl_csv": generation.paths["cpl_csv"].read_bytes(),
+    }
+
+
+def test_cancel_at_review_writes_nothing_and_releases_publication(
+    generation: Generation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finding cancelled at the pane leaves every earlier artifact in place."""
+    pane = review_pane(generation.wx.ID_CANCEL)
+    monkeypatch.setattr(generation.module, "GenerationReviewDialog", pane)
+    generation.exporter.fill_zones = lambda: ["GND on B.Cu"]
+
+    generation.run()
+
+    (shown,) = pane.instances
+    assert [f.title for f in shown.findings] == ["Copper zone GND on B.Cu has no fill"]
+    generation.window.report_generation_step.assert_any_call("Cancelled at review")
+    generation.wx.MessageBox.assert_not_called()
+    generation.assert_previous_outputs()
+    assert generation.store.get_generation_count() == 1
+    assert generation.hooks == []
+    generation.assert_released()
+
+
+def test_generate_anyway_publishes_what_a_clean_board_publishes(
+    generation: Generation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Going on past findings writes what a board without findings writes."""
+    generation.run()
+    clean = _published(generation)
+    pane = review_pane(generation.wx.ID_OK)
+    monkeypatch.setattr(generation.module, "GenerationReviewDialog", pane)
+    generation.exporter.fill_zones = lambda: ["GND on B.Cu"]
+    generation.hooks.clear()
+
+    generation.run()
+
+    assert len(pane.instances) == 1
+    assert _published(generation) == clean
+    generation.wx.MessageBox.assert_not_called()
+    assert generation.store.get_generation_count() == 3
     assert generation.hooks == ["pre", "post"]
     generation.assert_released()
 
