@@ -44,6 +44,12 @@ class TestApiCategory:
         result = repr(cat)
         assert result == ""
 
+    def test_api_category_repr_with_packages(self):
+        """ApiCategory repr names the first few packages a query is limited to."""
+        packages = ("0603", "0805", "0402", "1206", "2512", "0201")
+        cat = ApiCategory("Resistors", "Chip", 100, sort_id=2980, packages=packages)
+        assert repr(cat) == "Resistors | Chip [0603, 0805, 0402, 1206, +2 more] (100)"
+
 
 # ============================================================================
 # LcscId Tests
@@ -321,7 +327,9 @@ class TestJlcApi:
         mock_response.text = "Internal Server Error"
         mock_post.return_value = mock_response
 
-        with pytest.raises(RuntimeError, match="Cannot fetch component list"):
+        with pytest.raises(
+            RuntimeError, match="Cannot fetch .*/selectSmtComponentList"
+        ):
             JlcApi.componentList("token123", {})
 
     @pytest.mark.parametrize(
@@ -352,6 +360,57 @@ class TestJlcApi:
 
         with pytest.raises(RuntimeError, match="400"):
             JlcApi.componentList("token123", {})
+
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.JlcApi.componentList")
+    def test_fetch_categories_keeps_category_ids(
+        self, mock_component_list, _mock_get_token
+    ):
+        """JlcApi.fetchCategories records each secondary category's JLC id."""
+        mock_component_list.return_value = {
+            "data": {
+                "sortAndCountVoList": [
+                    {
+                        "sortName": "Resistors",
+                        "componentSortKeyId": 1,
+                        "childSortList": [
+                            {
+                                "sortName": "Chip Resistor - Surface Mount",
+                                "componentSortKeyId": 2980,
+                                "componentCount": 99344,
+                            },
+                        ],
+                    },
+                ]
+            }
+        }
+        assert JlcApi.fetchCategories(instockOnly=True) == [
+            ApiCategory("Resistors", "Chip Resistor - Surface Mount", 99344, 2980)
+        ]
+
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.requests.post")
+    def test_fetch_package_counts(self, mock_post, _mock_get_token):
+        """JlcApi.fetchPackageCounts reads the in-stock part count of each package."""
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {
+            "code": 200,
+            "data": {
+                "total": 30,
+                "componentSpecificationList": [
+                    {"key": "0402", "name": "0402", "docCount": 20},
+                    {"key": "-", "name": "-", "docCount": 10},
+                ],
+            },
+        }
+        category = ApiCategory("Resistors", "Chip Resistor - Surface Mount", 30, 2980)
+
+        assert JlcApi.fetchPackageCounts(category) == (30, {"0402": 20, "-": 10})
+        url = mock_post.call_args.args[0]
+        request = mock_post.call_args.kwargs["json"]
+        assert url.endswith("/v1/componentSearch/filterComponentAttribute")
+        assert request["baseQueryDto"]["componentTypeIdList"] == [2980]
+        assert request["baseQueryDto"]["presaleTypes"] == ["stock"]
 
     def test_collapse_categories_no_collapse_needed(self):
         """JlcApi.collapseCategories keeps categories above limit."""
@@ -404,6 +463,77 @@ class TestJlcApi:
         assert len(a_collapsed) == 1
         assert a_collapsed[0].count == 25000
         assert a_collapsed[0].secondary == ""
+
+
+class TestSplitByPackage:
+    """Tests for JlcApi.splitByPackage."""
+
+    CHIP_RESISTORS = ApiCategory(
+        "Resistors", "Chip Resistor - Surface Mount", 100, 2980
+    )
+
+    def test_split_by_package_keeps_category_within_limit(self):
+        """A category no larger than the limit is fetched as one query."""
+        category = ApiCategory("Diodes", "", 60)
+        with mock.patch.object(JlcApi, "fetchPackageCounts") as package_counts:
+            assert JlcApi.splitByPackage(category, limit=60) == [category]
+        package_counts.assert_not_called()
+
+    def test_split_by_package_packs_largest_packages_first(self):
+        """Packages are packed largest first into queries no larger than the limit."""
+        counts = {"-": 5, "0402": 20, "0603": 40, "0805": 30, "MELF": 5}
+        with mock.patch.object(
+            JlcApi, "fetchPackageCounts", return_value=(100, counts)
+        ):
+            result = JlcApi.splitByPackage(self.CHIP_RESISTORS, limit=60)
+
+        assert result == [
+            self.CHIP_RESISTORS._replace(count=60, packages=("0603", "0402")),
+            self.CHIP_RESISTORS._replace(count=40, packages=("0805", "-", "MELF")),
+        ]
+
+    def test_split_by_package_refuses_incomplete_package_counts(self):
+        """Package counts that miss part of the category raise instead of dropping it."""
+        counts = {"0402": 50, "0603": 40}
+        with (
+            mock.patch.object(JlcApi, "fetchPackageCounts", return_value=(100, counts)),
+            pytest.raises(RuntimeError, match="90 of 100"),
+        ):
+            JlcApi.splitByPackage(self.CHIP_RESISTORS, limit=60)
+
+    def test_split_by_package_refuses_package_larger_than_limit(self):
+        """A single package too large for one query raises."""
+        counts = {"0603": 70, "0402": 30}
+        with (
+            mock.patch.object(JlcApi, "fetchPackageCounts", return_value=(100, counts)),
+            pytest.raises(RuntimeError, match="0603"),
+        ):
+            JlcApi.splitByPackage(self.CHIP_RESISTORS, limit=60)
+
+    @pytest.mark.parametrize(
+        "total, counts",
+        [(0, {}), (50, {"0603": 30, "-": 20})],
+        ids=["empty", "other-items"],
+    )
+    def test_split_by_package_refuses_counts_for_other_items(self, total, counts):
+        """Package counts that don't describe the category raise instead of dropping it."""
+        with (
+            mock.patch.object(
+                JlcApi, "fetchPackageCounts", return_value=(total, counts)
+            ),
+            pytest.raises(RuntimeError, match="not 100"),
+        ):
+            JlcApi.splitByPackage(self.CHIP_RESISTORS, limit=60)
+
+    def test_split_by_package_allows_stock_drift(self):
+        """Stock that changed since the category count was taken is no error."""
+        counts = {"0603": 41, "0805": 30, "0402": 30}
+        with mock.patch.object(
+            JlcApi, "fetchPackageCounts", return_value=(101, counts)
+        ):
+            result = JlcApi.splitByPackage(self.CHIP_RESISTORS, limit=60)
+
+        assert [query.count for query in result] == [41, 60]
 
 
 # ============================================================================
@@ -576,3 +706,27 @@ class TestCategoryFetch:
 
         with pytest.raises(RuntimeError, match="100,000"):
             list(fetch.fetchAll())
+
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.JlcApi.componentList", return_value={})
+    def test_category_fetch_requests_only_its_packages(
+        self, mock_component_list, _mock_get_token
+    ):
+        """A category limited to packages sends them as componentSpecificationList."""
+        category = ApiCategory("Resistors", "Chip", 100, 2980, ("0402", "0603"))
+        list(CategoryFetch(category, rateLimit=False).fetchAll())
+
+        request = mock_component_list.call_args.args[1]
+        assert request["componentSpecificationList"] == ["0402", "0603"]
+
+    @mock.patch("common.jlcapi.JlcApi.getToken", return_value="test_token")
+    @mock.patch("common.jlcapi.JlcApi.componentList", return_value={})
+    def test_category_fetch_without_packages_sends_no_package_filter(
+        self, mock_component_list, _mock_get_token
+    ):
+        """A category not limited to packages fetches every package."""
+        category = ApiCategory("Resistors", "Chip", 100, 2980)
+        list(CategoryFetch(category, rateLimit=False).fetchAll())
+
+        request = mock_component_list.call_args.args[1]
+        assert "componentSpecificationList" not in request

@@ -17,11 +17,19 @@ class ApiCategory(NamedTuple):
     primary: str
     secondary: str
     count: int
+    # JLC's id for the secondary category, its componentSortKeyId.
+    sort_id: int = 0
+    # Packages the query is limited to; empty means every package.
+    packages: tuple[str, ...] = ()
 
     def __repr__(self) -> str | None:
         """Return the string representation of the ApiCategory."""
+        packages = ""
+        if self.packages:
+            more = len(self.packages) - 4
+            packages = f" [{', '.join(self.packages[:4])}{f', +{more} more' if more > 0 else ''}]"
         return (
-            f"{self.primary} {f'| {self.secondary}' if self.secondary else ''} ({self.count})"
+            f"{self.primary} {f'| {self.secondary}' if self.secondary else ''}{packages} ({self.count})"
             if self.primary
             else ""
         )
@@ -34,6 +42,8 @@ class JlcApi:
     """
 
     BASE_URL = "https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood"
+    # The query behind the filter panel of JLC's parts search page.
+    FILTER_URL = "https://jlcpcb.com/api/overseas-pcb-order/v1/componentSearch/filterComponentAttribute"
 
     @cached(cache=TTLCache(maxsize=1, ttl=180))
     @retry(Exception, tries=5, delay=2, backoff=2)
@@ -59,14 +69,21 @@ class JlcApi:
             Parsed JSON response body
 
         """
-        url = f"{JlcApi.BASE_URL}/selectSmtComponentList"
+        return JlcApi._post(f"{JlcApi.BASE_URL}/selectSmtComponentList", token, request)
+
+    @staticmethod
+    def _post(url: str, token: str, request: dict[str, Any]) -> Any:
+        """POST a request to a JLCPCB API endpoint and return the parsed body.
+
+        Returns an empty dict for the API's "no data" responses.
+        """
         headers = {
             "Content-Type": "application/json",
             "X-XSRF-TOKEN": token,
         }
         resp = requests.post(url, headers=headers, json=request)
         if resp.status_code != 200:
-            raise RuntimeError(f"Cannot fetch component list: {resp.text}")
+            raise RuntimeError(f"Cannot fetch {url}: {resp.text}")
         body = resp.json()
         if body["code"] in [563, 564, 404, 429]:
             # Intentionally don't raise an exception here - these are effectively
@@ -103,7 +120,10 @@ class JlcApi:
             for secondary in primary["childSortList"]:
                 secondaryName = secondary["sortName"]
                 count = secondary["componentCount"]
-                categories.append(ApiCategory(primaryName, secondaryName, count))
+                sort_id = secondary["componentSortKeyId"]
+                categories.append(
+                    ApiCategory(primaryName, secondaryName, count, sort_id)
+                )
         return categories
 
     @staticmethod
@@ -112,11 +132,11 @@ class JlcApi:
     ) -> list[ApiCategory]:
         """Collapse small secondary categories into their primary category.
 
-        JLC's API limits the size of a page to 1000 items, and allows only 100 pages per
-        query, so categories with more than 100,000 items need to be split by subcategory.
-        However, most top-level categories don't need to be split to stay under this limit.
-        (I have no idea what will happen if a single secondary category exceeds this limit -
-        The SMD resistor category has ~90K in-stock items as of early 2026)
+        JLC's API serves only the first 100,000 results of a query, so categories with
+        more than 100,000 items need to be split by subcategory.  However, most
+        top-level categories don't need to be split to stay under this limit.  A
+        single secondary category that comes near it is split further by package,
+        see splitByPackage.
 
         For each primary category, if the sum of all secondary categories under it
         is less than the limit, replace them all with a single category with an
@@ -150,6 +170,82 @@ class JlcApi:
                 # Keep as-is
                 result.extend(cats)
         return result
+
+    @retry(Exception, tries=5, delay=30, backoff=2)
+    @staticmethod
+    def fetchPackageCounts(category: ApiCategory) -> tuple[int, dict[str, int]]:
+        """Fetch the in-stock item count of each package in a secondary category.
+
+        Args:
+            category: ApiCategory with its sort_id set
+
+        Returns:
+            The category's in-stock item total, and the item count of each package
+
+        """
+        token = JlcApi.getToken()
+        request = {
+            "baseQueryDto": {
+                "componentTypeIdList": [category.sort_id],
+                "presaleTypes": ["stock"],
+            },
+            "catalogLevel": 2,
+        }
+        data = JlcApi._post(JlcApi.FILTER_URL, token, request)["data"]
+        counts = {
+            spec["key"]: spec["docCount"] for spec in data["componentSpecificationList"]
+        }
+        return data["total"], counts
+
+    @staticmethod
+    def splitByPackage(category: ApiCategory, limit: int) -> list[ApiCategory]:
+        """Split a category too large for one query into queries by package.
+
+        JLC's API serves only the first 100,000 results of a query.  A category
+        with more than `limit` items is fetched as several queries, each limited
+        to a set of packages holding at most `limit` items between them: the
+        largest packages first, with the long tail packed in behind them.  The
+        package counts come from the same query as JLC's parts search filters, and
+        must add up to the category's total so that no package is left out.
+
+        Args:
+            category: ApiCategory to split
+            limit: Largest item count for one query
+
+        Returns:
+            The category itself if within the limit, otherwise one ApiCategory per query
+
+        """
+        if category.count <= limit:
+            return [category]
+        total, counts = JlcApi.fetchPackageCounts(category)
+        # The two counts are taken moments apart, so allow 1% for stock changes.
+        if abs(total - category.count) > category.count // 100:
+            raise RuntimeError(
+                f"Package counts for {category!r} total {total}, not {category.count}"
+            )
+        if sum(counts.values()) != total:
+            raise RuntimeError(
+                f"Package counts for {category!r} cover {sum(counts.values())} of "
+                f"{total} items"
+            )
+        queries: list[tuple[int, list[str]]] = []
+        for package, count in sorted(counts.items(), key=lambda item: -item[1]):
+            if count > limit:
+                raise RuntimeError(
+                    f"Package {package} of {category!r} has {count} items, "
+                    f"more than one query's limit of {limit}"
+                )
+            for index, (queryCount, packages) in enumerate(queries):
+                if queryCount + count <= limit:
+                    queries[index] = (queryCount + count, [*packages, package])
+                    break
+            else:
+                queries.append((count, [package]))
+        return [
+            category._replace(count=count, packages=tuple(packages))
+            for count, packages in queries
+        ]
 
 
 class CategoryFetch:
@@ -191,6 +287,8 @@ class CategoryFetch:
         }
         if self.category.secondary:
             request["secondSortName"] = self.category.secondary
+        if self.category.packages:
+            request["componentSpecificationList"] = list(self.category.packages)
         body = JlcApi.componentList(self.token, request)
         if not body:
             return []
