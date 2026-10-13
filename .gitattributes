@@ -1,0 +1,3 @@
+# The golden tests compare these files byte for byte, CRLF line endings
+# included, so no checkout or commit may convert them.
+tests/golden/** -text

@@ -12,16 +12,18 @@ import weakref
 
 import pytest
 
-from tests.native_kicad_support import _native_board, native_bindings, native_runtime
+from tests.native_kicad_support import (
+    _native_board,
+    native_bindings,
+    native_runtime,
+    requires_native_plotting,
+)
 from tests.native_wx_support import isolated_native
 
 pytestmark = [
     pytest.mark.native_kicad,
     pytest.mark.kicad_variants,
-    pytest.mark.skipif(
-        os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
-        reason="native KiCad plotting requires an explicitly enabled desktop session",
-    ),
+    requires_native_plotting,
 ]
 
 __all__ = ["native_bindings", "native_runtime"]

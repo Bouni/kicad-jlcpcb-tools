@@ -1,0 +1,4 @@
+Designator,Val,Package,Mid X,Mid Y,Rotation,Layer
+C1,1u,C_0603_1608Metric,14.000000,14.000000,0.0,top
+Q1,MMBT3904,SOT-23,14.000000,8.000000,0.0,bottom
+R1,10k,R_0603_1608Metric,6.000000,14.000000,0.0,top

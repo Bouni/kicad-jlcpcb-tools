@@ -1,0 +1,5 @@
+Comment,Designator,Footprint,LCSC,Quantity
+100n,C1,C_0603_1608Metric,C14663,1
+10k,"R1,R2",R_0603_1608Metric,C25804,2
+Conn_01x02,J1,PinHeader_1x02_P2.54mm_Vertical,C49257,1
+MMBT3904,Q1,SOT-23,C20526,1
