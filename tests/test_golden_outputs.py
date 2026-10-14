@@ -8,9 +8,10 @@ where a zip archive is a directory of its members. Only creation dates and the
 KiCad build in file headers are normalised (``normalise``), and the expected
 files are stored normalised.
 
-The expected files are captured from the Ubuntu builds that tests.yml installs
-from the KiCad release PPAs, and tests/golden/kicad_builds.json records which
-build each major's files came from. On that build any difference fails.
+The expected files are captured from the Ubuntu builds that tests.yml installs,
+KiCad 7 from Ubuntu's own archive and later majors from the KiCad release PPAs,
+and tests/golden/kicad_builds.json records which build each major's files came
+from. On that build any difference fails.
 
 On any other build of the major, such as a newer PPA release or KiCad on macOS,
 only the files KiCad plots may differ: a changed gerber, drill file or drill
