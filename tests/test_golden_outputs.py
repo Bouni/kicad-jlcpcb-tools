@@ -36,7 +36,11 @@ KICAD_JLCPCB_GOLDEN_UPDATE to that build's exact pcbnew.GetBuildVersion()
 string instead of 1 and run the command on that build; it rewrites the
 expected files and records the new build.
 
-The boards themselves are written by tests/golden/make_boards.py.
+The boards themselves are written by tests/golden/make_boards.py. A KiCad
+cannot open a newer major's board, so KiCad 7 and 8 export the copies KiCad 7
+wrote of the boards without design variants (``fixture_board``). KiCad 7 has
+no do-not-populate flag, so two_layer's DNP part, R5, is fitted in its copy,
+and the KiCad 7 and 8 BOM and CPL list it.
 """
 
 from collections.abc import Iterator, Mapping
@@ -352,11 +356,26 @@ def _corrections(correction_data: ModuleType) -> tuple[Any, ...]:
     )
 
 
-def _copy_board(name: str, directory: Path) -> Path:
-    """Copy a fixture board into its own project folder under the test's tmp."""
+def fixture_board(name: str, pcbnew: ModuleType) -> Path:
+    """Return the fixture board file that the running KiCad can open.
+
+    Each KiCad major saves boards in a newer file format and refuses a newer
+    major's files, so the running major chooses: KiCad 7 and 8 open the copy
+    KiCad 7 wrote, and KiCad 9 and 10 the board KiCad 9 or 10 wrote.
+    """
+    major = int(str(pcbnew.GetMajorMinorVersion()).split(".")[0])
+    filename = f"{name}.kicad7.kicad_pcb" if major < 9 else f"{name}.kicad_pcb"
+    return GOLDEN / name / filename
+
+
+def _copy_board(name: str, directory: Path, pcbnew: ModuleType) -> Path:
+    """Copy a fixture board into its own project folder under the test's tmp.
+
+    The copy takes the board's own name, after which the plugin names its files.
+    """
     project = directory / name
     project.mkdir()
-    return Path(shutil.copy(GOLDEN / name / f"{name}.kicad_pcb", project))
+    return Path(shutil.copy(fixture_board(name, pcbnew), project / f"{name}.kicad_pcb"))
 
 
 @pytest.fixture
@@ -465,7 +484,9 @@ def test_board_outputs_match_their_expected_files(
     golden_modules: SimpleNamespace, tmp_path: Path, board: str
 ) -> None:
     """BOM, CPL, gerbers and drill files of a board without variants."""
-    outputdir = export_ordinary(golden_modules, _copy_board(board, tmp_path))
+    outputdir = export_ordinary(
+        golden_modules, _copy_board(board, tmp_path, golden_modules.pcbnew)
+    )
     check_golden(board, golden_modules.pcbnew, published_files(outputdir))
 
 
@@ -478,7 +499,9 @@ def test_variant_outputs_match_their_expected_files(
 ) -> None:
     """Default and each design variant publish their own complete set of files."""
     outputdir = export_variants(
-        golden_modules, _copy_board("variants", tmp_path), ("", "Lite", "Full")
+        golden_modules,
+        _copy_board("variants", tmp_path, golden_modules.pcbnew),
+        ("", "Lite", "Full"),
     )
     check_golden("variants", golden_modules.pcbnew, published_files(outputdir))
 
@@ -490,7 +513,7 @@ def test_repeated_references_are_refused_before_any_output(
     golden_modules: SimpleNamespace, tmp_path: Path
 ) -> None:
     """Two footprints named R1 stop generation before a file is written."""
-    board_path = _copy_board("repeated_references", tmp_path)
+    board_path = _copy_board("repeated_references", tmp_path, golden_modules.pcbnew)
     with pytest.raises(ValueError, match="duplicate component references"):
         export_ordinary(golden_modules, board_path)
     outputs = board_path.parent / "jlcpcb"

@@ -171,9 +171,10 @@ def _skip_golden_tests_without_recorded_outputs(items: list[pytest.Item]) -> Non
     """Skip golden-output tests on a KiCad whose outputs are not recorded.
 
     tests/golden/kicad_builds.json lists the KiCad majors with recorded
-    outputs. The fixture boards are KiCad 9 files, which KiCad 7 and 8 cannot
-    open, so those majors have none. The skip follows the record, so
-    recording a major's outputs brings its golden tests back.
+    outputs. The skip follows the record, so recording a major's outputs
+    brings its golden tests back. Update mode (KICAD_JLCPCB_GOLDEN_UPDATE)
+    runs them on any major, since that is how a major's outputs are first
+    recorded.
     """
     marked = [item for item in items if item.get_closest_marker("kicad_golden")]
     if not marked:
@@ -187,12 +188,14 @@ def _skip_golden_tests_without_recorded_outputs(items: list[pytest.Item]) -> Non
         recorded = json.loads(_GOLDEN_BUILDS.read_text(encoding="utf-8"))
     except FileNotFoundError:
         recorded = {}
-    if major is None or major in recorded:
+    # As tests/test_golden_outputs.py reads it: unset, empty or "0" compares.
+    update = os.environ.get("KICAD_JLCPCB_GOLDEN_UPDATE", "").strip()
+    if major is None or major in recorded or update not in ("", "0"):
         return
     reason = (
-        f"No golden outputs are recorded for KiCad {major}: the fixture boards "
-        "are KiCad 9 files, and tests/golden/kicad_builds.json lists the KiCad "
-        "majors whose outputs are recorded"
+        f"No golden outputs are recorded for KiCad {major}: "
+        "tests/golden/kicad_builds.json lists the KiCad majors whose outputs "
+        "are recorded"
     )
     for item in marked:
         item.stash[_CAPABILITY_SKIP] = True
