@@ -458,6 +458,7 @@ def export_variants(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_golden
 @requires_native_plotting
 @pytest.mark.parametrize("board", ["two_layer", "four_layer"])
 def test_board_outputs_match_their_expected_files(
@@ -469,6 +470,7 @@ def test_board_outputs_match_their_expected_files(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_golden
 @pytest.mark.kicad_variants
 @requires_native_plotting
 def test_variant_outputs_match_their_expected_files(
@@ -482,6 +484,7 @@ def test_variant_outputs_match_their_expected_files(
 
 
 @pytest.mark.native_kicad
+@pytest.mark.kicad_golden
 @requires_native_plotting
 def test_repeated_references_are_refused_before_any_output(
     golden_modules: SimpleNamespace, tmp_path: Path

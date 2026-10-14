@@ -397,8 +397,11 @@ python -m pytest -rs --require-native=kicad -m native_kicad
 ```
 
 The required native modes reject missing libraries, empty native selections, and
-skipped native tests. Run them with Python libraries matching the installed KiCad
-or wx packages. Mouse/keyboard tests require an isolated desktop with a window
+skipped native tests. The KiCad mode accepts three skips: tests of design variants
+on a KiCad without them, the forced-DRC test on KiCad 10, whose DRC crashes
+outside KiCad, and the golden-output tests on a KiCad with no outputs recorded
+in `tests/golden/kicad_builds.json`. Run them with Python libraries matching
+the installed KiCad or wx packages. Mouse/keyboard tests require an isolated desktop with a window
 manager; Linux native tests can use Xvfb.
 
 To reproduce CI locally, use an Ubuntu 24.04 Docker container with the same CPU

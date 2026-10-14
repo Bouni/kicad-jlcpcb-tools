@@ -29,22 +29,26 @@ def test_a_snapshot_names_its_board(board: MakeBoard) -> None:
 
 
 def test_default_fields_and_flags_read_back(board: MakeBoard) -> None:
-    """Fields keep KiCad's order; the three flags are independent."""
+    """Fields keep KiCad's order; the three flags are independent.
+
+    Each KiCad gives a footprint its own built-in fields, and KiCad 7 has no
+    DNP flag, so a part marked DNP reads as fitted there.
+    """
     parts = [
         Part("R1", fields=(("LCSC", "C25804"), ("MPN", "RC0603"))),
         Part("R2", dnp=True),
         Part("R3", exclude_from_bom=True),
         Part("R4", exclude_from_pos=True),
     ]
-    snapshot = board(parts).backend.snapshot()
+    made = board(parts)
+    snapshot = made.backend.snapshot()
 
     assert [variant.name for variant in snapshot.variants] == [""]
     first = snapshot.components[0]
     assert _fields(first) == [
         ("Reference", "R1"),
         ("Value", "10k"),
-        ("Datasheet", ""),
-        ("Description", ""),
+        *((name, "") for name in made.builtin_fields[2:]),
         ("LCSC", "C25804"),
         ("MPN", "RC0603"),
     ]
@@ -57,7 +61,7 @@ def test_default_fields_and_flags_read_back(board: MakeBoard) -> None:
         for record in snapshot.components
     ] == [
         (False, False, False),
-        (True, False, False),
+        (made.holds_dnp, False, False),
         (False, True, False),
         (False, False, True),
     ]
@@ -105,21 +109,28 @@ def test_a_repeated_field_name_reads_as_kicad_reopens_the_board(
 
     KiCad's footprint dialog accepts a second field with a name the
     footprint already has, and keeps both until the board is reopened.
+    KiCad 7 keeps fields in a property map, where the second text simply
+    replaces the first.
     """
-    snapshot = board(
+    made = board(
         [
             Part("R1", fields=(("LCSC", "C1"), ("MPN", "X"), ("LCSC", "C2"))),
             Part("R2", fields=(("LCSC", "C2"), ("MPN", "X"))),
         ]
-    ).backend.snapshot()
+    )
+    snapshot = made.backend.snapshot()
 
     repeated, plain = snapshot.components
-    assert _fields(repeated)[4:] == [("LCSC", "C2"), ("MPN", "X")]
-    assert _fields(repeated)[1:] == _fields(plain)[1:]
-    assert [(field.name, field.text) for field in repeated.default.replaced_fields] == [
-        ("LCSC", "C1")
+    kept = made.keeps_repeated_fields
+    assert _fields(repeated)[len(made.builtin_fields) :] == [
+        ("LCSC", "C2"),
+        ("MPN", "X"),
     ]
-    assert repeated.default.duplicate_names == ("LCSC",)
+    assert _fields(repeated)[1:] == _fields(plain)[1:]
+    assert [(field.name, field.text) for field in repeated.default.replaced_fields] == (
+        [("LCSC", "C1")] if kept else []
+    )
+    assert repeated.default.duplicate_names == (("LCSC",) if kept else ())
     assert plain.default.duplicate_names == ()
 
 
