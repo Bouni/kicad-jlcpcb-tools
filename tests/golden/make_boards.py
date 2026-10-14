@@ -1,15 +1,20 @@
 """Write the fixture boards that the golden fabrication tests export.
 
-Run it with KiCad's own Python from the repository root, once under KiCad 9
-and once under KiCad 10:
+Run it with KiCad's own Python from the repository root, once each under
+KiCad 7, KiCad 9 and KiCad 10:
 
     python3 tests/golden/make_boards.py
 
-KiCad 10 opens a KiCad 9 board but KiCad 9 cannot open a KiCad 10 one, so
-KiCad 9 writes every board both versions test, and KiCad 10 writes only the
-design-variant board. Each board's UUIDs come from a fixed seed, so an
-unchanged script writes the same files again. Footprints are drawn here and
-saved inside each board, so the tests need no footprint libraries.
+A KiCad opens the boards its own and older majors save, never a newer
+major's. KiCad 9 writes <board>.kicad_pcb for every board without design
+variants, which KiCad 9 and 10 test. KiCad 7 writes a copy of each of
+those, <board>.kicad7.kicad_pcb, which KiCad 7 and 8 test. KiCad 10 writes
+only the design-variant board, which only KiCad 10 tests. KiCad 7 has no
+do-not-populate flag, so two_layer's DNP part is fitted in its KiCad 7 copy.
+
+Each board's UUIDs come from a fixed seed, so an unchanged script writes the
+same files again. Footprints are drawn here and saved inside each board, so
+the tests need no footprint libraries.
 
 After changing a board, regenerate the expected outputs as described in
 tests/test_golden_outputs.py.
@@ -27,6 +32,9 @@ GOLDEN = Path(__file__).resolve().parent
 
 # The board's top-left corner on KiCad's canvas, in millimetres.
 LEFT, TOP = 100.0, 100.0
+
+# KiCad 7 and 8 flip a footprint with a flag, KiCad 9 and later with a direction.
+FLIP_LEFT_RIGHT = getattr(pcbnew, "FLIP_DIRECTION_LEFT_RIGHT", True)
 
 
 @dataclass(frozen=True)
@@ -137,6 +145,28 @@ def offset(x: float, y: float) -> Any:
     return pcbnew.VECTOR2I(mm(x), mm(y))
 
 
+def keep_footprint_relative(item: Any) -> None:
+    """Record where a footprint's item sits relative to it, if KiCad keeps that.
+
+    KiCad 7 stores each pad, text and drawing's position relative to its
+    footprint apart from its board position, saves that one, and redraws the
+    item from it when the footprint turns. Items are placed while their
+    footprint sits unturned at the origin, so both positions are the same.
+    Later KiCads work the relative position out when they need it.
+    """
+    if hasattr(item, "SetLocalCoord"):
+        item.SetLocalCoord()
+
+
+def board_filename(name: str, major: int) -> str:
+    """Name the file a KiCad major writes a board to.
+
+    KiCad 7's copy carries its major in the name, beside the board that
+    KiCad 9 or 10 writes.
+    """
+    return f"{name}.kicad7.kicad_pcb" if major == 7 else f"{name}.kicad_pcb"
+
+
 class BoardWriter:
     """Build one board in memory, then save it beside this script."""
 
@@ -184,14 +214,11 @@ class BoardWriter:
         if part.exclude_from_pos:
             attributes |= pcbnew.FP_EXCLUDE_FROM_POS_FILES
         footprint.SetAttributes(attributes)
-        footprint.SetDNP(part.dnp)
+        # KiCad 7 has no do-not-populate flag, so its copy fits every part.
+        if hasattr(footprint, "SetDNP"):
+            footprint.SetDNP(part.dnp)
         if part.lcsc:
-            footprint.SetField("LCSC", part.lcsc)
-            field = next(
-                item for item in footprint.GetFields() if item.GetName() == "LCSC"
-            )
-            field.SetVisible(False)
-            field.SetLayer(pcbnew.F_Fab)
+            self._lcsc(footprint, part.lcsc)
         nets = iter(part.nets)
         for pad in pads:
             self._pad(footprint, pad, "" if pad.kind == "npth" else next(nets, ""))
@@ -200,8 +227,23 @@ class BoardWriter:
         footprint.SetPosition(point(part.x, part.y))
         footprint.SetOrientationDegrees(part.rotation)
         if part.back:
-            footprint.Flip(footprint.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
+            footprint.Flip(footprint.GetPosition(), FLIP_LEFT_RIGHT)
         return footprint
+
+    @staticmethod
+    def _lcsc(footprint: Any, lcsc: str) -> None:
+        """Give the footprint a hidden LCSC field.
+
+        KiCad 7 keeps a footprint's fields in a property map, which is never
+        drawn.
+        """
+        if not hasattr(footprint, "SetField"):
+            footprint.SetProperty("LCSC", lcsc)
+            return
+        footprint.SetField("LCSC", lcsc)
+        field = next(item for item in footprint.GetFields() if item.GetName() == "LCSC")
+        field.SetVisible(False)
+        field.SetLayer(pcbnew.F_Fab)
 
     def _pad(self, footprint: Any, pad: Pad, net: str) -> None:
         """Add one pad while the footprint still sits at the canvas origin."""
@@ -225,6 +267,7 @@ class BoardWriter:
             )
             item.SetDrillSize(offset(pad.drill, pad.drill))
         item.SetPosition(offset(pad.x, pad.y))
+        keep_footprint_relative(item)
         if net:
             item.SetNet(self.net(net))
         footprint.Add(item)
@@ -241,15 +284,19 @@ class BoardWriter:
         reference.SetTextSize(offset(0.8, 0.8))
         reference.SetTextThickness(mm(0.12))
         reference.SetPosition(offset((left + right) / 2, top - 0.8))
+        keep_footprint_relative(reference)
         value = footprint.Value()
         value.SetLayer(pcbnew.F_Fab)
         value.SetTextSize(offset(0.6, 0.6))
         value.SetTextThickness(mm(0.1))
         value.SetPosition(offset((left + right) / 2, bottom + 0.6))
-        outline = pcbnew.PCB_SHAPE(footprint)
+        keep_footprint_relative(value)
+        # KiCad 7 draws in a footprint with its own shape class.
+        outline = getattr(pcbnew, "FP_SHAPE", pcbnew.PCB_SHAPE)(footprint)
         outline.SetShape(pcbnew.SHAPE_T_RECT)
         outline.SetStart(offset(left, top))
         outline.SetEnd(offset(right, bottom))
+        keep_footprint_relative(outline)
         outline.SetLayer(pcbnew.F_SilkS)
         outline.SetWidth(mm(0.12))
         footprint.Add(outline)
@@ -298,18 +345,23 @@ class BoardWriter:
             outline.Append(corner.x, corner.y)
         self.board.Add(item)
 
-    def save(self) -> Path:
-        """Write the board file into its own directory."""
+    def save(self, major: int) -> Path:
+        """Write the board file into its own directory, named for its KiCad."""
         directory = GOLDEN / self.name
         directory.mkdir(exist_ok=True)
-        path = directory / f"{self.name}.kicad_pcb"
+        path = directory / board_filename(self.name, major)
         self.board.SetFileName(str(path))
-        pcbnew.PCB_IO_MGR.Save(pcbnew.PCB_IO_MGR.KICAD_SEXP, str(path), self.board)
+        # KiCad 7 names its board file manager IO_MGR.
+        manager = getattr(pcbnew, "PCB_IO_MGR", None) or pcbnew.IO_MGR
+        manager.Save(manager.KICAD_SEXP, str(path), self.board)
         return path
 
 
 def two_layer() -> BoardWriter:
-    """Mix SMD and THT on both sides, with every exclusion and unfilled pours."""
+    """Mix SMD and THT on both sides, with every exclusion and unfilled pours.
+
+    KiCad 7 has no do-not-populate flag, so R5 is fitted in its copy.
+    """
     writer = BoardWriter("two_layer", 50, 36, 2)
     for part in (
         # Three identical resistors share one BOM row.
@@ -469,12 +521,12 @@ def variants() -> BoardWriter:
     return writer
 
 
-# Each board, the KiCad major that writes it, and its UUID seed.
-BOARDS: tuple[tuple[Callable[[], BoardWriter], int, int], ...] = (
-    (two_layer, 9, 1),
-    (four_layer, 9, 2),
-    (repeated_references, 9, 3),
-    (variants, 10, 4),
+# Each board, the KiCad majors that write it, and its UUID seed.
+BOARDS: tuple[tuple[Callable[[], BoardWriter], tuple[int, ...], int], ...] = (
+    (two_layer, (7, 9), 1),
+    (four_layer, (7, 9), 2),
+    (repeated_references, (7, 9), 3),
+    (variants, (10,), 4),
 )
 
 
@@ -482,11 +534,11 @@ def main() -> int:
     """Write the boards the running KiCad is responsible for."""
     major = int(str(pcbnew.GetMajorMinorVersion()).split(".")[0])
     written = []
-    for build, writer_major, seed in BOARDS:
-        if writer_major != major:
+    for build, writer_majors, seed in BOARDS:
+        if major not in writer_majors:
             continue
         pcbnew.KIID.SeedGenerator(seed)
-        written.append(build().save())
+        written.append(build().save(major))
     for path in written:
         sys.stdout.write(f"wrote {path.relative_to(GOLDEN.parent.parent)}\n")
     if not written:

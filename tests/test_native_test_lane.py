@@ -23,11 +23,14 @@ def run_lane(
     cli: bool = False,
     version: str = "10.0.6",
     kicad_major: Optional[str] = None,  # noqa: UP045
+    golden_update: str = "",
 ) -> subprocess.CompletedProcess[str]:
     """Run the real pytest hooks with isolated, deliberately limited bindings.
 
     ``broken="variants"`` gives a KiCad without the design-variant API, as
-    KiCad 9 is; ``kicad_major`` is the lane's ``--kicad-major``.
+    KiCad 9 is; ``kicad_major`` is the lane's ``--kicad-major``, and
+    ``golden_update`` its ``KICAD_JLCPCB_GOLDEN_UPDATE``, which the child
+    otherwise runs without.
     """
     hooks = Path(__file__).parents[1] / "conftest.py"
     shutil.copyfile(hooks, tmp_path / "conftest.py")
@@ -65,6 +68,9 @@ def run_lane(
     monkeypatch.delenv("KICAD_JLCPCB_NATIVE_TESTS", raising=False)
     monkeypatch.delenv("KICAD_JLCPCB_REQUIRE_NATIVE", raising=False)
     monkeypatch.delenv("KICAD_JLCPCB_KICAD_MAJOR", raising=False)
+    monkeypatch.delenv("KICAD_JLCPCB_GOLDEN_UPDATE", raising=False)
+    if golden_update:
+        monkeypatch.setenv("KICAD_JLCPCB_GOLDEN_UPDATE", golden_update)
     if mode and not cli:
         monkeypatch.setenv("KICAD_JLCPCB_REQUIRE_NATIVE", mode)
     command = [sys.executable, "-m", "pytest", "-q", "-rs"]
@@ -472,7 +478,7 @@ def _record_golden_outputs(tmp_path: Path, *majors: str) -> None:
 def test_golden_tests_skip_on_a_kicad_with_no_recorded_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, kicad_major: str
 ) -> None:
-    """KiCad 7 and 8 cannot open the KiCad 9 fixture boards, so none are recorded."""
+    """A KiCad with no recorded outputs skips its golden tests."""
     _record_golden_outputs(tmp_path, "9", "10")
     result = run_lane(
         tmp_path,
@@ -505,6 +511,26 @@ def test_golden_tests_run_where_outputs_are_recorded(
         "variants",
         version="9.0.9-9.0.9~ubuntu24.04.1",
         kicad_major="9",
+    )
+    assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
+    assert "1 passed" in result.stdout and "skipped" not in result.stdout
+
+
+def test_update_mode_runs_golden_tests_to_record_a_new_major(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recording a major's first outputs needs its golden tests to run."""
+    _record_golden_outputs(tmp_path, "9", "10")
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "kicad",
+        "@pytest.mark.native_kicad\n@pytest.mark.kicad_golden\n"
+        "def test_golden(): pass\n",
+        "variants",
+        version="7.0.11+dfsg-1build4",
+        kicad_major="7",
+        golden_update="1",
     )
     assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
     assert "1 passed" in result.stdout and "skipped" not in result.stdout
