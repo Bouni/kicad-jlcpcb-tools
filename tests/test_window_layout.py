@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import MagicMock
@@ -544,6 +545,7 @@ def _open_main(
     provider = MagicMock()
     assert _board_path is not None
     provider.get_pcbnew().GetBoard().GetFileName.return_value = str(_board_path)
+    provider.get_pcbnew().GetMajorMinorVersion.return_value = "10.0"
     window = object.__new__(mainwindow.JLCPCBTools)
     if fail_at:
         with pytest.raises(RuntimeError, match="UI construction failed"):
@@ -554,6 +556,21 @@ def _open_main(
     window._catalog_ready = True
     window.save_settings = MagicMock()
     return window
+
+
+def test_a_kicad_with_no_dialect_is_refused_before_the_window_opens() -> None:
+    """The window names the KiCad versions it works with instead of opening."""
+    provider = MagicMock()
+    assert _board_path is not None
+    provider.get_pcbnew().GetBoard().GetFileName.return_value = str(_board_path)
+    provider.get_pcbnew().GetMajorMinorVersion.return_value = "11.0"
+    backend = sys.modules[f"{mainwindow.__package__}.kicad_backend"]
+    window = object.__new__(mainwindow.JLCPCBTools)
+
+    with pytest.raises(
+        backend.Unsupported, match=r"KiCad 7 to 10; this is KiCad 11\.0"
+    ):
+        mainwindow.JLCPCBTools.__init__(window, None, provider)
 
 
 def test_main_type_hover_uses_existing_column_and_live_assembly_metadata(

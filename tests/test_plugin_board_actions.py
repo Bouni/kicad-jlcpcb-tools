@@ -151,6 +151,7 @@ def harness() -> Iterator[Any]:
             "pcbnew",
             ActionPlugin=ActionPlugin,
             GetBuildVersion=lambda: "10.0.6",
+            GetMajorMinorVersion=lambda: "10.0",
             GetBoard=lambda: state.editor.board,
             IsActionRunning=lambda: state.editor.running,
         ),

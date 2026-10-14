@@ -33,13 +33,19 @@ def backend_modules() -> Iterator[SimpleNamespace]:
     """Load the backend package once per module, under a scoped name."""
     with load_siblings(
         "_backend_contract_tests",
-        ("kicad_backend", "kicad_backend.fake", "kicad_backend.swig"),
+        (
+            "kicad_backend",
+            "kicad_backend.fake",
+            "kicad_backend.swig",
+            "kicad_backend.swig.dialects",
+        ),
         {},
     ) as modules:
         yield SimpleNamespace(
             api=modules["kicad_backend"],
             fake=modules["kicad_backend.fake"],
             swig=modules["kicad_backend.swig"],
+            dialects=modules["kicad_backend.swig.dialects"],
         )
 
 

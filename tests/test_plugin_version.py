@@ -15,21 +15,24 @@ from tests.wx_harness import module, temporary_modules, wx_stubs
 @pytest.mark.parametrize(
     "version, supported",
     [
-        ("6.0.11", False),
-        ("6.99.0", False),
+        ("6.0", False),
+        ("6.99", False),
         ("unknown", False),
-        ("7.0.0", True),
-        ("7.0.2-2.fc42", True),
-        ("8.0.9", True),
-        ("9.0.6", True),
-        ("10.0.6", True),
-        ("10.99.0-1234-gabcdef-dirty", True),
+        ("7.0", True),
+        ("8.0", True),
+        ("9.0", True),
+        ("10.0", True),
+        ("10.99", True),
+        ("11.0", False),
     ],
 )
 def test_package_launch_checks_version_before_loading_window(
     monkeypatch: pytest.MonkeyPatch, version: str, supported: bool
 ) -> None:
-    """Manual installs reject old hosts without importing project-facing code."""
+    """A KiCad with no dialect is told the supported range; the window never loads.
+
+    ``version`` is what pcbnew.GetMajorMinorVersion() reports.
+    """
     package = "_plugin_version_test"
     root = Path(__file__).resolve().parents[1]
     registered = []
@@ -79,7 +82,7 @@ def test_package_launch_checks_version_before_loading_window(
         "pcbnew": module(
             "pcbnew",
             ActionPlugin=ActionPlugin,
-            GetBuildVersion=lambda: version,
+            GetMajorMinorVersion=lambda: version,
             GetBoard=lambda: board,
         ),
         **wx,
@@ -103,4 +106,7 @@ def test_package_launch_checks_version_before_loading_window(
             assert window_imports == []
             window.assert_not_called()
             assert wx["wx"].MessageBox.call_count == 2
-            assert "KiCad 7.0 or newer" in wx["wx"].MessageBox.call_args.args[0]
+            assert wx["wx"].MessageBox.call_args.args[:2] == (
+                f"JLCPCB Tools works with KiCad 7 to 10; this is KiCad {version}.",
+                "Unsupported KiCad version",
+            )

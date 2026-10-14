@@ -200,5 +200,9 @@ class Board:
 
 
 def editor(board: Any, version: str = "10.0.4") -> SimpleNamespace:
-    """Return a pcbnew module whose editor has ``board`` open."""
-    return SimpleNamespace(GetBoard=lambda: board, GetBuildVersion=lambda: version)
+    """Return a pcbnew module of this KiCad version whose editor has ``board`` open."""
+    return SimpleNamespace(
+        GetBoard=lambda: board,
+        GetBuildVersion=lambda: version,
+        GetMajorMinorVersion=lambda: ".".join(version.split(".")[:2]),
+    )

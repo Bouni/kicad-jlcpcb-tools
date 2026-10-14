@@ -8,8 +8,8 @@ from typing import Any, Optional
 import pcbnew  # pylint: disable=import-error
 import wx
 
-from .core.version import is_supported_version
-from .kicad_backend import BoardChanged
+from .kicad_backend import BoardChanged, Unsupported
+from .kicad_backend.swig.dialects import select
 from .kicad_backend.swig.read import board_identity
 
 
@@ -34,11 +34,11 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
 
     def Run(self) -> None:
         """Open the modeless window or execute one native menu-dispatched edit."""
-        if not is_supported_version(pcbnew.GetBuildVersion()):
+        try:
+            select(pcbnew)
+        except Unsupported as error:
             wx.MessageBox(
-                "JLCPCB Tools requires KiCad 7.0 or newer.",
-                "Unsupported KiCad version",
-                wx.OK | wx.ICON_ERROR,
+                str(error), "Unsupported KiCad version", wx.OK | wx.ICON_ERROR
             )
             return
 

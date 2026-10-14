@@ -78,6 +78,7 @@ class _Pcbnew:
         self.other_items: list[_SelectedItem] = []
         self.Refresh = MagicMock()
         self.GetBuildVersion = pcbnew_module.GetBuildVersion
+        self.GetMajorMinorVersion = pcbnew_module.GetMajorMinorVersion
 
     def GetBoard(self) -> Any:
         return self.board
@@ -484,6 +485,7 @@ def window_ui(
             IsCopperLayer=lambda layer: layer in (0, 31),
             Refresh=lambda: None,
             GetBuildVersion=lambda: "10.0-test",
+            GetMajorMinorVersion=lambda: "10.0",
             FOOTPRINT_VARIANT=Variant,
             ActionPlugin=ActionPlugin,
         )

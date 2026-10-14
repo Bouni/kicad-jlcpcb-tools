@@ -31,6 +31,10 @@ class BoardChanged(BackendError):
     """The board was closed, or another board is open in its place."""
 
 
+class Unsupported(BackendError):
+    """The running KiCad cannot do what was asked: its major has no dialect."""
+
+
 class BoardBackend(Protocol):
     """The board operations shared code may use."""
 
@@ -52,6 +56,7 @@ __all__ = [
     "ComponentState",
     "FieldRecord",
     "PadRecord",
+    "Unsupported",
     "VariantDefinition",
     "component_state",
     "footprint_keys",

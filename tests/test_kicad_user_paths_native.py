@@ -232,6 +232,7 @@ def plugin(native_bindings: SimpleNamespace) -> Iterator[SimpleNamespace]:
             "board_part_edits",
             "board_parts",
             "fabrication",
+            "kicad_backend.swig.dialects",
             "kicad_backend.swig.read",
             "footprint_helpers",
             "schematic_discovery",
@@ -257,12 +258,12 @@ def native_window_board(native_bindings: SimpleNamespace, user_board: Path) -> A
 def test_the_plugin_loads_on_this_kicad(
     native_bindings: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The version check passes, the package registers its action, the UI imports."""
+    """A dialect speaks this KiCad, the package registers its action, the UI imports."""
     pcbnew, wx = native_bindings.pcbnew, native_bindings.wx
     with load_siblings(
         "_user_paths_load_test",
         (
-            "core.version",
+            "kicad_backend.swig.dialects",
             "mainwindow",
             "partselector",
             "schematicexport",
@@ -270,7 +271,8 @@ def test_the_plugin_loads_on_this_kicad(
         ),
         {},
     ) as modules:
-        assert modules["core.version"].is_supported_version(pcbnew.GetBuildVersion())
+        major = str(pcbnew.GetBuildVersion()).split(".", 1)[0]
+        assert modules["kicad_backend.swig.dialects"].select(pcbnew).major == int(major)
         assert modules["mainwindow"].kicad_pcbnew is pcbnew
         assert issubclass(modules["mainwindow"].JLCPCBTools, wx.Frame)
         assert issubclass(modules["partselector"].PartSelectorDialog, wx.Dialog)
@@ -368,7 +370,9 @@ def test_assignments_save_in_the_board_and_leave_other_fields_alone(
         for part in PARTS
     }
     # Read the assignments back the way the parts list does.
-    snapshot = plugin.kicad_backend_swig_read.read_snapshot(reloaded)
+    snapshot = plugin.kicad_backend_swig_read.read_snapshot(
+        reloaded, plugin.kicad_backend_swig_dialects.select(pcbnew)
+    )
     components = {
         part.reference: plugin.board_parts.find_component(snapshot, part.reference)
         for part in PARTS
@@ -414,8 +418,9 @@ def test_generate_writes_the_fabrication_files(
     parent = SimpleNamespace(settings={"gerber": defaults["gerber"]})
     # The window reads the editor's board through its backend. This board is
     # loaded rather than open in an editor, so it is read directly.
+    dialect = plugin.kicad_backend_swig_dialects.select(plugin.pcbnew)
     parent._read_board = parent._held_board = (
-        lambda: plugin.kicad_backend_swig_read.read_snapshot(board)
+        lambda: plugin.kicad_backend_swig_read.read_snapshot(board, dialect)
     )
     parent.store = plugin.store.Store(parent, str(user_board.parent))
     fabrication = plugin.fabrication.Fabrication(parent, board)
@@ -691,7 +696,9 @@ def test_assignments_export_to_this_kicads_own_schematic(
         project_path=str(project),
         pcbnew=host,
         # The window reads the live board through its backend.
-        _read_board=lambda: plugin.kicad_backend_swig_read.read_snapshot(board),
+        _read_board=lambda: plugin.kicad_backend_swig_read.read_snapshot(
+            board, plugin.kicad_backend_swig_dialects.select(pcbnew)
+        ),
     )
 
     # The main window's export_to_schematic, without its dialogs.

@@ -164,7 +164,7 @@ def test_kicad7_footprints_read_their_property_maps(swig: SimpleNamespace) -> No
     """Reference and Value stand first, then the property map; no DNP."""
     footprint = _KiCad7Footprint({"LCSC": " c25804 ", "MPN": "RC0603"})
 
-    (record,) = swig.backend(editor(Board([footprint]))).snapshot().components
+    (record,) = swig.backend(editor(Board([footprint]), "7.0.11")).snapshot().components
 
     assert [(f.name, f.text) for f in record.default.fields.values()] == [
         ("Reference", "R7"),

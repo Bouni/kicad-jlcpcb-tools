@@ -1,8 +1,9 @@
 """Read the board open in KiCad's PCB editor into records.
 
 The snapshot's reads of the board and its footprints are made here, and
-nothing returned holds a SWIG object. Code outside the backend still makes
-its own SWIG reads for what the records do not hold yet.
+nothing returned holds a SWIG object. What differs between KiCad majors is
+read through the caller's dialect. Code outside the backend still makes its
+own SWIG reads for what the records do not hold yet.
 """
 
 from contextlib import suppress
@@ -15,14 +16,14 @@ from ..records import (
     BoardInfo,
     BoardSnapshot,
     ComponentRecord,
-    FieldRecord,
     PadRecord,
     VariantDefinition,
     component_state,
 )
+from .dialects import Dialect
 
 # FOOTPRINT_ATTR_T bits, the same in KiCad 7 to 10. KiCad 10 moved FP_DNP,
-# so DNP is read through IsDNP() instead.
+# so the dialect reads DNP instead.
 _EXCLUDE_FROM_POS = 0x04
 _EXCLUDE_FROM_BOM = 0x08
 # PAD_ATTRIB values: PTH=0, SMD=1, CONN=2, NPTH=3.
@@ -67,38 +68,13 @@ def _pad(pad: Any) -> PadRecord:
     return PadRecord(_PAD_KINDS[int(pad.GetAttribute())], bool(pad.HasHole()))
 
 
-def _fields(footprint: Any) -> list[FieldRecord]:
-    """Read a footprint's fields in KiCad's order, every one of them.
-
-    KiCad 7 has no field objects: Reference and Value stand apart, and the
-    other fields are a property map that is never drawn. KiCad's footprint
-    dialog accepts a second field with a name the footprint already has, and
-    the footprint keeps both until the board is reopened; the state built
-    from them resolves the name as reopening does.
-    """
-    try:
-        fields = footprint.GetFields()
-    except AttributeError:
-        return [
-            FieldRecord("Reference", str(footprint.GetReference())),
-            FieldRecord("Value", str(footprint.GetValue())),
-            *(
-                FieldRecord(str(name), str(text))
-                for name, text in footprint.GetProperties().items()
-            ),
-        ]
-    return [FieldRecord(str(field.GetName()), str(field.GetText())) for field in fields]
-
-
-def _component(footprint: Any) -> ComponentRecord:
+def _component(footprint: Any, dialect: Dialect) -> ComponentRecord:
     """Read one footprint with its Default state."""
     reference = str(footprint.GetReference())
     attributes = int(footprint.GetAttributes())
-    # KiCad 7 has no DNP flag.
-    is_dnp = getattr(footprint, "IsDNP", None)
     state = component_state(
-        _fields(footprint),
-        dnp=bool(is_dnp()) if callable(is_dnp) else False,
+        dialect.fields(footprint),
+        dnp=dialect.is_dnp(footprint),
         exclude_from_bom=bool(attributes & _EXCLUDE_FROM_BOM),
         exclude_from_pos=bool(attributes & _EXCLUDE_FROM_POS),
     )
@@ -113,11 +89,16 @@ def _component(footprint: Any) -> ComponentRecord:
     )
 
 
-def read_snapshot(board: Any) -> BoardSnapshot:
-    """Read every footprint of the open board in its Default state."""
+def read_snapshot(board: Any, dialect: Dialect) -> BoardSnapshot:
+    """Read every footprint of the open board in its Default state.
+
+    ``dialect`` is the running KiCad's, from ``dialects.select``.
+    """
     info = read_info(board)
     names = getattr(board, "GetVariantNamesForUI", None)
     # KiCad 10 lists its translated label for Default first.
     label = str(tuple(names())[0]) if callable(names) else "Default"
-    components = tuple(_component(footprint) for footprint in board.GetFootprints())
+    components = tuple(
+        _component(footprint, dialect) for footprint in board.GetFootprints()
+    )
     return BoardSnapshot(info, (VariantDefinition("", label),), components)

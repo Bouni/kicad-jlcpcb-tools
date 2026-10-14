@@ -30,7 +30,9 @@ def ordinary_store_module() -> Iterator[ModuleType]:
 def _ordinary_store(module: ModuleType, parent: Any, project: Path, board: Any) -> Any:
     """Open an ordinary Store whose window reads ``board`` through the SWIG backend."""
     swig = importlib.import_module(f"{module.__package__}.kicad_backend.swig")
-    backend = swig.SwigBackend(SimpleNamespace(GetBoard=lambda: board))
+    backend = swig.SwigBackend(
+        SimpleNamespace(GetBoard=lambda: board, GetMajorMinorVersion=lambda: "10.0")
+    )
     parent._read_board = parent._held_board = backend.snapshot
     return module.Store(parent, str(project))
 
