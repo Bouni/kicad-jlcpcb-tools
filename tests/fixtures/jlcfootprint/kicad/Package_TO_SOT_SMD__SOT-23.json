@@ -1,0 +1,43 @@
+{
+ "library": "Package_TO_SOT_SMD",
+ "name": "SOT-23",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -0.9375,
+   "y": -0.95,
+   "width": 1.475,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": -0.9375,
+   "y": 0.95,
+   "width": 1.475,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "3",
+   "x": 0.9375,
+   "y": 0.0,
+   "width": 1.475,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -1.93,
+  -1.7,
+  1.93,
+  1.7
+ ]
+}

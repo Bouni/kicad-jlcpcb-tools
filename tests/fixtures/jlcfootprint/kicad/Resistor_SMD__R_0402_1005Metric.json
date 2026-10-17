@@ -1,0 +1,33 @@
+{
+ "library": "Resistor_SMD",
+ "name": "R_0402_1005Metric",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -0.51,
+   "y": 0.0,
+   "width": 0.54,
+   "height": 0.64,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 0.51,
+   "y": 0.0,
+   "width": 0.54,
+   "height": 0.64,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -0.93,
+  -0.47,
+  0.93,
+  0.47
+ ]
+}

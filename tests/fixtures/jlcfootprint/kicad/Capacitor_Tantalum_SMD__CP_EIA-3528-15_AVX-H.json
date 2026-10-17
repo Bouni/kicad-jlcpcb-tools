@@ -1,0 +1,33 @@
+{
+ "library": "Capacitor_Tantalum_SMD",
+ "name": "CP_EIA-3528-15_AVX-H",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -1.54,
+   "y": 0.0,
+   "width": 1.34,
+   "height": 2.39,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 1.54,
+   "y": 0.0,
+   "width": 1.34,
+   "height": 2.39,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -2.46,
+  -1.65,
+  2.46,
+  1.65
+ ]
+}

@@ -1,0 +1,33 @@
+{
+ "library": "Diode_SMD",
+ "name": "D_SMA",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -2.0,
+   "y": 0.0,
+   "width": 2.5,
+   "height": 1.8,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 2.0,
+   "y": 0.0,
+   "width": 2.5,
+   "height": 1.8,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -3.5,
+  -1.75,
+  3.5,
+  1.75
+ ]
+}

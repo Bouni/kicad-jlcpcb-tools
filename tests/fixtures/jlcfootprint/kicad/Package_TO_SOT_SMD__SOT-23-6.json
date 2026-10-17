@@ -1,0 +1,73 @@
+{
+ "library": "Package_TO_SOT_SMD",
+ "name": "SOT-23-6",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": -1.1375,
+   "y": -0.95,
+   "width": 1.325,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": -1.1375,
+   "y": 0.0,
+   "width": 1.325,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "3",
+   "x": -1.1375,
+   "y": 0.95,
+   "width": 1.325,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "4",
+   "x": 1.1375,
+   "y": 0.95,
+   "width": 1.325,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "5",
+   "x": 1.1375,
+   "y": 0.0,
+   "width": 1.325,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "6",
+   "x": 1.1375,
+   "y": -0.95,
+   "width": 1.325,
+   "height": 0.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  }
+ ],
+ "courtyard": [
+  -2.05,
+  -1.7,
+  2.05,
+  1.7
+ ]
+}

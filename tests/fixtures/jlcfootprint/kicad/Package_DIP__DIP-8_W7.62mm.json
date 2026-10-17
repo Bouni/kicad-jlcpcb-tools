@@ -1,0 +1,93 @@
+{
+ "library": "Package_DIP",
+ "name": "DIP-8_W7.62mm",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "1",
+   "x": 0.0,
+   "y": 0.0,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "2",
+   "x": 0.0,
+   "y": 2.54,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "circle"
+  },
+  {
+   "number": "3",
+   "x": 0.0,
+   "y": 5.08,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "circle"
+  },
+  {
+   "number": "4",
+   "x": 0.0,
+   "y": 7.62,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "circle"
+  },
+  {
+   "number": "5",
+   "x": 7.62,
+   "y": 7.62,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "circle"
+  },
+  {
+   "number": "6",
+   "x": 7.62,
+   "y": 5.08,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "circle"
+  },
+  {
+   "number": "7",
+   "x": 7.62,
+   "y": 2.54,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "circle"
+  },
+  {
+   "number": "8",
+   "x": 7.62,
+   "y": 0.0,
+   "width": 1.6,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "circle"
+  }
+ ],
+ "courtyard": [
+  -1.06,
+  -1.52,
+  8.67,
+  9.14
+ ]
+}
