@@ -92,7 +92,7 @@ def test_initial_preparation_failure_keeps_correction_unknown_until_refresh(
 def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
     window_ui: Any, database_state: str
 ) -> None:
-    """Startup and close verify recovery; edits and supplier delivery leave storage untouched."""
+    """Recovery and impedance discovery preserve storage across edits and reopening."""
     path = window_ui.path / "jlcpcb" / "project.db"
     if database_state != "absent":
         path.parent.mkdir()
@@ -119,6 +119,7 @@ def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
     close_read_counts: list[int] = []
 
     def connect(database: Any, *args: Any, **kwargs: Any) -> sqlite3.Connection:
+        """Allow read-only recovery and feature discovery without changing storage."""
         name = str(database)
         uri = urlsplit(name)
         actual = unquote(uri.path) if name.startswith("file:") else name
@@ -158,6 +159,9 @@ def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
         c = ui.controller
         startup_read_counts.append(len(project_reads))
         assert bool(project_reads) is (database_state != "absent")
+        assert ui.dialog._impedance.checkbox.IsEnabled() is (
+            database_state != "invalid"
+        )
         corrections = Path(ui.catalog.correctionsdb_file)
         global_data = _global_data_but_supplier_facts(corrections)
         assert Path(ui.cache.dbfile) == path
@@ -193,6 +197,9 @@ def test_native_workflow_only_reads_legacy_database_during_recovery_boundaries(
         previous_reads = close_read_counts[-1]
         startup_read_counts.append(len(project_reads))
         assert (len(project_reads) > previous_reads) is (database_state != "absent")
+        assert ui.dialog._impedance.checkbox.IsEnabled() is (
+            database_state != "invalid"
+        )
         assert c.session.snapshot.get("component-1", "").lcsc == "C100"
         part = c.session.snapshot.get("component-1", "A")
         assert part.lcsc == "" and not part.bom and not part.pop

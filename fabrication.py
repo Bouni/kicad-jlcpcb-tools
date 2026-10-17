@@ -1,6 +1,6 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 import csv
 from dataclasses import dataclass
@@ -14,7 +14,7 @@ import re
 import sqlite3
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 import unicodedata
 import weakref
 
@@ -42,6 +42,7 @@ from pcbnew import (  # pylint: disable=import-error
 )
 
 from .bom_csv import BomGroup, plan_bom
+from .copper_zones import EmptyCopperZone, collect_empty_copper_zones
 from .correction_data import (
     AnyCorrection,
     Correction,
@@ -51,12 +52,16 @@ from .correction_data import (
     resolve_shared_corrections,
 )
 from .fabrication_archive import (
+    ArchiveEntry,
     artifact_publication,
     build_archive,
     collect_gerber_entries,
 )
 from .footprint_helpers import get_is_dnp
 from .lcsc import is_lcsc_part, normalize_lcsc
+
+if TYPE_CHECKING:
+    from .impedance.board_copy import NativeBoardOwner
 
 
 @dataclass(frozen=True)
@@ -532,6 +537,59 @@ class Fabrication:
             )
         )
 
+    def get_report_board(self) -> Any:
+        """Use the same explicit variant and board copy for reports and plotting."""
+        return self._get_plot_board()
+
+    @staticmethod
+    def _release_board_copy(board: Any) -> None:
+        """Release a parser-owned borrowed allocation through its existing owner."""
+        release = getattr(board, "_jlcpcb_release", None)
+        if callable(release):
+            release()
+
+    def _copy_variant_board(
+        self, variant_name: str, temporary_path: Path
+    ) -> tuple[Any, str]:
+        """Use one verified parser/project path for plotting and impedance review."""
+        source_digest = self._serialize_board(temporary_path)
+        clone = self._load_board_copy(temporary_path, source_digest)
+        try:
+            if clone is None or not hasattr(clone, "SetCurrentVariant"):
+                raise RuntimeError("Installed KiCad cannot isolate variant plotting")
+            clone.SetCurrentVariant(variant_name)
+            if str(clone.GetCurrentVariant()) != variant_name:
+                raise RuntimeError(
+                    f"KiCad could not select plot variant {variant_name!r}"
+                )
+            clone.SetFileName(self.board.GetFileName())
+            project = self.board.GetProject()
+            if project is not None:
+                # Reference-only attachment preserves native variant/project text
+                # without replacing shared project settings. Never reattach.
+                clone.SetProject(project, True)
+            return clone, source_digest
+        except BaseException:
+            if clone is not None:
+                self._release_board_copy(clone)
+            raise
+
+    def copy_variant_board(self, variant_name: str) -> "NativeBoardOwner":
+        """Own a read-only review copy without starting generation or writing settings."""
+        from .impedance.board_copy import NativeBoardOwner
+
+        with TemporaryDirectory(prefix="jlcpcb-variant-review-") as directory:
+            clone, _digest = self._copy_variant_board(
+                variant_name, Path(directory) / "review-source.kicad_pcb"
+            )
+        owner = NativeBoardOwner(clone, self._release_board_copy)
+        try:
+            self._capture_plot_project_properties(clone)
+            return owner
+        except BaseException:
+            owner.close()
+            raise
+
     def _get_plot_board(self) -> Any:
         """Plot a serialized copy in the explicit variant without switching the editor."""
         self._require_output_snapshot()
@@ -541,55 +599,39 @@ class Fabrication:
             return self.board
         if operation.plot_board is None:
             temporary_path = Path(operation.directory.name) / "plot-source.kicad_pcb"
-            source_digest = self._serialize_board(temporary_path)
-            # Public LoadBoard changes global drawing-sheet and layer contexts.
-            # Parsing the verified buffer leaves that editor state intact.
-            clone = self._load_board_copy(temporary_path, source_digest)
-            if clone is None or not hasattr(clone, "SetCurrentVariant"):
-                raise RuntimeError("Installed KiCad cannot isolate variant plotting")
-            clone.SetCurrentVariant(self.variant_name)
-            if str(clone.GetCurrentVariant()) != self.variant_name:
-                raise RuntimeError(
-                    f"KiCad could not select plot variant {self.variant_name!r}"
-                )
-            clone.SetFileName(self.board.GetFileName())
-            project = self.board.GetProject()
-            if project is not None:
-                # Reference-only attachment retains live project text variables
-                # without replacing its board settings. Never ClearProject or
-                # reattach this clone: that API mutates shared project settings.
-                clone.SetProject(project, True)
-            self.validate_generation()
+            clone, source_digest = self._copy_variant_board(
+                self.variant_name, temporary_path
+            )
+            try:
+                self.validate_generation()
+                properties = self._capture_plot_project_properties(clone)
+            except BaseException:
+                self._release_board_copy(clone)
+                raise
             operation.plot_board = clone
             operation.plot_source_digest = source_digest
-            operation.plot_project_properties = self._capture_plot_project_properties(
-                clone
-            )
+            operation.plot_project_properties = properties
         return operation.plot_board
 
-    def fill_zones(self):
+    def fill_zones(self, board: Any = None) -> list[str]:
         """Refill copper zones, returning the zone layers that poured no copper."""
-        zones = self.board.Zones()
+        return [region.label for region in self.fill_zone_regions(board)]
+
+    def fill_zone_regions(self, board: Any = None) -> list[EmptyCopperZone]:
+        """Refill once and return detached intended boundaries of empty copper pours."""
+        board = self.board if board is None else board
+        zones = board.Zones()
         # Refilling mutates the board, reporting does not, so only the refill is optional.
         if self.parent.settings.get("gerber", {}).get("fill_zones", True):
-            ZONE_FILLER(self.board).Fill(zones)
-            Refresh()
+            try:
+                if ZONE_FILLER(board).Fill(zones) is False:
+                    raise RuntimeError(
+                        "Copper zone filling failed. Refill zones and retry."
+                    )
+            finally:
+                Refresh()
 
-        empty_pours = []
-        for zone in zones:
-            # Rule areas are keepouts, so they never hold copper.
-            if zone.GetIsRuleArea():
-                continue
-            # The filler pours each layer of a zone separately, so check them the same way.
-            for layer in zone.GetLayerSet().Seq():
-                # Zones on technical layers are graphics, not copper.
-                if not IsCopperLayer(layer):
-                    continue
-                if zone.GetFilledPolysList(layer).Area() > 0:
-                    continue
-                name = self.board.GetLayerName(layer)
-                empty_pours.append(f"{zone.GetNetname() or 'no net'} on {name}")
-        return empty_pours
+        return collect_empty_copper_zones(board, IsCopperLayer)
 
     def _correction_for_footprint(
         self, footprint: Any, lcsc: str = ""
@@ -856,12 +898,12 @@ class Fabrication:
             raise RuntimeError("Could not generate complete drill and map files")
         self.logger.info("Finished generating Excellon files")
 
-    def zip_gerber_excellon(self) -> Path:
+    def zip_gerber_excellon(self, extra_entries: Sequence[ArchiveEntry] = ()) -> Path:
         """Zip Gerber and Excellon files, ready for upload to JLCPCB."""
         self._require_output_snapshot()
         self.validate_generation()
         zip_path = Path(self.get_staged_artifact_paths()["gerber_zip"])
-        entries = collect_gerber_entries(Path(self.gerberdir))
+        entries = collect_gerber_entries(Path(self.gerberdir)) + tuple(extra_entries)
         build_archive(zip_path, entries)
         self.logger.info("Finished generating ZIP file %s", zip_path)
         return zip_path
