@@ -31,6 +31,7 @@ def _dialog() -> Any:
     dialog.data_list = Mock()
     dialog.openpdf_button = Mock()
     dialog.openpage_button = Mock()
+    dialog.savepdf_button = Mock()
     return dialog
 
 
