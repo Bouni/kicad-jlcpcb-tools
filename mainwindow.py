@@ -1001,13 +1001,24 @@ class JLCPCBTools(wx.Frame):
             self._refreshing_board = False
 
     def _refresh_footprints_preserving_selection(self) -> None:
-        """Rebuild native rows while retaining selected component references."""
+        """Rebuild native rows while retaining selected component references.
+
+        A rebuild that keeps the rows, rewriting them in place, leaves the
+        view and its selection as they are. One that replaces them resets the
+        view, so the selection is put back.
+        """
         selected = {
             self.partlist_data_model.get_reference(item)
             for item in self.footprint_list.GetSelections()
         }
+        before = list(self.partlist_data_model.get_all())
         self.populate_footprint_list()
-        for row in self.partlist_data_model.get_all():
+        after = self.partlist_data_model.get_all()
+        if len(after) == len(before) and all(
+            new is old for new, old in zip(after, before)
+        ):
+            return
+        for row in after:
             if row[PartListDataModel.columns["REF_COL"]] in selected:
                 self.footprint_list.Select(self.partlist_data_model.ObjectToItem(row))
 
@@ -1086,9 +1097,18 @@ class JLCPCBTools(wx.Frame):
         self._catalog_details = LcscDict()
 
     def _catalog_get_part_details(
-        self, lcsc: Union[Lcsc, str], *, strict: bool = False
+        self,
+        lcsc: Union[Lcsc, str],
+        *,
+        strict: bool = False,
+        refresh_rows: bool = True,
     ) -> dict[str, Any]:
-        """Reuse raw catalog records, distinguishing confirmed misses from failures."""
+        """Reuse raw catalog records, distinguishing confirmed misses from failures.
+
+        A record read for the first time is shown in the rows that carry its
+        number, unless ``refresh_rows`` is false: a list rebuild passes that,
+        since it is about to rewrite every row with the records it reads.
+        """
         # Keyed on the parsed part, so every key names a part and a value that
         # names none is neither looked up nor cached.
         part = Lcsc.parse(lcsc)
@@ -1112,12 +1132,13 @@ class JLCPCBTools(wx.Frame):
                 self.logger.warning("Unable to read catalog part %s: %s", part, error)
                 return {}
             details = self._catalog_details[part]
-            self.partlist_data_model.set_catalog_details(
-                str(part),
-                details.get("type", ""),
-                details.get("stock", ""),
-                params_for_part(details),
-            )
+            if refresh_rows:
+                self.partlist_data_model.set_catalog_details(
+                    str(part),
+                    details.get("type", ""),
+                    details.get("stock", ""),
+                    params_for_part(details),
+                )
         return deepcopy(self._catalog_details[part])
 
     def _bom_get_part_details(self, lcsc: str) -> dict[str, Any]:
@@ -2555,7 +2576,6 @@ class JLCPCBTools(wx.Frame):
     def _populate_footprint_rows(self) -> None:
         """Read a complete project view, allowing the caller to recover storage errors."""
         board = self._read_board()
-        self.partlist_data_model.RemoveAll()
         parts = self.store.rows(board)
         snapshot = self.library.read_correction_data()
         self.update_correction_status(snapshot)
@@ -2567,7 +2587,7 @@ class JLCPCBTools(wx.Frame):
             fp = find_component(board, part["reference"])
             is_dnp = fp.default.dnp
             # Warm all live assignments before view filters, for every stock consumer.
-            details = self._catalog_get_part_details(part["lcsc"])
+            details = self._catalog_get_part_details(part["lcsc"], refresh_rows=False)
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
