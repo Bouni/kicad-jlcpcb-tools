@@ -52,6 +52,47 @@ def test_activation_refreshes_native_edits_without_refilling_cleared_assignments
     assert window._refreshing_board is False
 
 
+def test_activation_leaves_the_view_alone_when_the_rows_are_kept(
+    make_window: Callable[..., Any],
+) -> None:
+    """Rows rewritten in place keep their native selection and scroll position."""
+    window = make_window()
+    rows = [["R1"], ["R2"]]
+    window.partlist_data_model.get_all.side_effect = lambda: rows
+
+    window.on_window_activated(
+        SimpleNamespace(Skip=MagicMock(), GetActive=lambda: True)
+    )
+
+    window.populate_footprint_list.assert_called_once_with()
+    window.footprint_list.Select.assert_not_called()
+
+
+def test_activation_selects_replaced_rows_again(
+    make_window: Callable[..., Any],
+) -> None:
+    """Rows replaced by a reset get their selection back."""
+    window = make_window()
+    rows = [["R1"], ["R2"]]
+    window.partlist_data_model.get_all.side_effect = lambda: rows
+    populate = window.populate_footprint_list.side_effect
+
+    def replace_rows() -> None:
+        populate()
+        rows[:] = [["R1"], ["R2"]]
+
+    window.populate_footprint_list.side_effect = replace_rows
+    window.footprint_list.GetSelections.return_value = ["R2"]
+
+    window.on_window_activated(
+        SimpleNamespace(Skip=MagicMock(), GetActive=lambda: True)
+    )
+
+    assert [call.args[0] for call in window.footprint_list.Select.call_args_list] == [
+        "R2"
+    ]
+
+
 @pytest.mark.parametrize("blocked", ["inactive", "closing", "refreshing", "generating"])
 def test_activation_skips_unusable_or_nested_events(
     make_window: Callable[..., Any], blocked: str

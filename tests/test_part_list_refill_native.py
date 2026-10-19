@@ -138,7 +138,9 @@ def test_footprint_refresh_with_a_cold_catalog_keeps_rows_and_metadata(
         pump(ui.wx)
 
         assert sorted(ui.catalog.reads[reads:]) == ["C1", "C2"]
-        assert view.GetSelectedItemsCount() == 0
+        # The rows are rewritten in place, so the view keeps their selection.
+        assert view.GetSelectedItemsCount() == 1
+        assert view.GetSelection() == item
         columns = model.columns
         rows = {
             row[columns["REF_COL"]]: model.ObjectToItem(row) for row in model.get_all()
