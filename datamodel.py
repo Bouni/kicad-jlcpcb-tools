@@ -459,16 +459,64 @@ class PartListDataModel(_StockDataModel):
 
         wxOSX reloads and re-sorts the whole list on every ItemAdded, which
         makes a row-by-row fill quadratic; one Cleared() reloads it once.
+
+        Cleared() also scrolls a wxOSX list back to its first row. So when the
+        new rows have the same references in the same order as the rows shown,
+        which is what refreshing an unchanged board gives, each row is
+        rewritten in place instead. Only the rows whose cells or styling
+        changed are repainted, and the list stays where the user left it.
         """
+        entries = list(entries)
+        reference = self.columns["REF_COL"]
+        if self.data and [data[reference] for data, _, _ in entries] == [
+            row[reference] for row in self.data
+        ]:
+            self._rewrite_rows(entries)
+            return
         self.data.clear()
-        self.standard_only_refs.clear()
-        self._assembly_metadata.clear()
-        self.stock_concern_refs.clear()
+        self._reset_row_state()
         for data, part, pending in entries:
             row = self._prepare_entry(data)
             self.data.append(row)
             self._store_assembly_metadata(row, part, pending=pending)
         self.Cleared()
+
+    def _rewrite_rows(
+        self, entries: list[tuple[list, Mapping[str, object], bool]]
+    ) -> None:
+        """Leave the model as a reset would, reusing each row and its item.
+
+        A row is repainted when one of its cells changed, its assembly
+        metadata changed, or the reset drops a Standard-only or stock-concern
+        mark it had. The estimator and stock check set those marks again
+        afterwards, and repaint the rows they mark.
+        """
+        before = [
+            (list(row), self._assembly_metadata_for_row(row)) for row in self.data
+        ]
+        marked = self._reset_row_state()
+        changed = []
+        for row, (data, part, pending), (cells, metadata) in zip(
+            self.data, entries, before
+        ):
+            row[:] = self._prepare_entry(data)
+            self._store_assembly_metadata(row, part, pending=pending)
+            if (
+                row != cells
+                or self._assembly_metadata_for_row(row) != metadata
+                or str(row[self.columns["REF_COL"]] or "") in marked
+            ):
+                changed.append(row)
+        for row in changed:
+            self.ItemChanged(self.ObjectToItem(row))
+
+    def _reset_row_state(self) -> set[str]:
+        """Forget every row's metadata and marks, returning the marked references."""
+        marked = self.standard_only_refs | self.stock_concern_refs
+        self.standard_only_refs.clear()
+        self._assembly_metadata.clear()
+        self.stock_concern_refs.clear()
+        return marked
 
     def RemoveAll(self) -> None:
         """Remove all entries from the data model."""
