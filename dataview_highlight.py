@@ -12,11 +12,18 @@ except ImportError:  # pragma: no cover - test environments may not have wx
     wx = None  # type: ignore[assignment]
     dv = None  # type: ignore[assignment]
 
+try:
+    from .value_normalize import canonicalize, quantity_for_reference
+except ImportError:  # pragma: no cover - test import fallback
+    from value_normalize import canonicalize, quantity_for_reference
+
 
 _HIGHLIGHT_FG = (180, 120, 0)
 _HIGHLIGHT_FG_SELECTED = (255, 215, 64)
 _MIN_HIGHLIGHT_TERM_LENGTH = 2
 _HIGHLIGHT_VALUE_SEPARATOR = "\x1f"
+_NUMBER_CHARS = frozenset("0123456789.")
+_BARE_NUMBER_RE = re.compile(r"[0-9]*\.?[0-9]+")
 
 # Package families the catalog actually uses, as
 #
@@ -126,8 +133,18 @@ def normalize_highlight_terms(query: str) -> list[str]:
     return terms
 
 
-def find_highlight_spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
-    """Return merged `(start, end)` spans for all term matches in `text`."""
+def find_highlight_spans(
+    text: str, terms: list[str], *, whole_values: bool = False
+) -> list[tuple[int, int]]:
+    """Return merged `(start, end)` spans for all term matches in `text`.
+
+    With `whole_values`, a term that starts with a digit or a point only
+    matches where no digit or point comes before it, the boundary the catalog
+    search puts before a whole value, so a board value of 4k7 does not light
+    the end of 14.7kΩ, nor .1uF the end of 10.1uF.  Case is still ignored, so
+    100mΩ lights 100MΩ.  The part selector leaves it off: there a match shows
+    why its substring search returned the row.
+    """
     if not text or not terms:
         return []
 
@@ -135,11 +152,17 @@ def find_highlight_spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
 
     for term in terms:
+        bounded = whole_values and term[:1] in _NUMBER_CHARS
         start = 0
         while True:
             match_start = lowered_text.find(term, start)
             if match_start == -1:
                 break
+            preceding = lowered_text[match_start - 1 : match_start]
+            if bounded and preceding in _NUMBER_CHARS:
+                # A later match may begin inside this one.
+                start = match_start + 1
+                continue
             match_end = match_start + len(term)
             spans.append((match_start, match_end))
             start = match_end
@@ -201,6 +224,11 @@ def expand_value(reference: str, value: str) -> list[str]:
     `390R` can also match `390Ω`, and `10K` can also match `10KΩ`.
     For capacitor references (`C*`), include `u`/`µ` interchangeable variants
     and optional `F`-suffixed forms.
+    Every value of a known quantity also gets the catalog's spelling, the one
+    the part selector's prefill searches for, so `2n2` matches `2.2nF`, `4k7`
+    matches `4.7kΩ` and `0.1uF` matches `100nF`.  A bare resistance is given
+    its Ω rather than kept bare: `100` matches `100Ω`, not `100kΩ`, and `0.1`
+    matches `0.1Ω` as well as `100mΩ`.  A thermistor keeps its bare value.
     """
     raw = "" if value is None else str(value).strip()
     if not raw:
@@ -232,9 +260,21 @@ def expand_value(reference: str, value: str) -> list[str]:
             else:
                 variants.extend([raw, swapped, f"{raw}F", f"{swapped}F"])
 
+    canonical = canonicalize(raw, quantity_for_reference(ref))
+    if canonical is not None:
+        if _BARE_NUMBER_RE.fullmatch(raw) and not upper_ref.startswith("TH"):
+            # A bare 100 is a resistor's 100Ω, which the catalog always writes
+            # with its Ω.  Left bare, it would light the start of 100kΩ.  A
+            # thermistor's params show its part number instead, where a code
+            # such as 103 is the thing to match.
+            number = f"0{raw}" if raw.startswith(".") else raw
+            variants = [f"{number}Ω"]
+        variants.append(canonical)
+
+    # Highlighting folds case, so 10KΩ already covers the catalog's 10kΩ.
     deduped = []
     for variant in variants:
-        if variant not in deduped:
+        if variant.casefold() not in (kept.casefold() for kept in deduped):
             deduped.append(variant)
     return deduped
 
@@ -460,7 +500,7 @@ if wx is not None and dv is not None:  # pragma: no branch
             spans = (
                 self._query_cache.get_spans(text)
                 if self._value_decoder is None
-                else find_highlight_spans(text, terms)
+                else find_highlight_spans(text, terms, whole_values=True)
             )
             text_height = dc.GetTextExtent("Hg")[1]
             x = rect.x + 4
