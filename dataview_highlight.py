@@ -141,9 +141,12 @@ def find_highlight_spans(
     With `whole_values`, a term that starts with a digit or a point only
     matches where no digit or point comes before it, the boundary the catalog
     search puts before a whole value, so a board value of 4k7 does not light
-    the end of 14.7kΩ, nor .1uF the end of 10.1uF.  Case is still ignored, so
-    100mΩ lights 100MΩ.  The part selector leaves it off: there a match shows
-    why its substring search returned the row.
+    the end of 14.7kΩ, nor .1uF the end of 10.1uF.  A bare number is not a
+    value but a code, such as a thermistor's 103 inside NTCS0603E3103FMT, so it
+    still matches anywhere; a resistor's bare value has been given its Ω by
+    then.  Case is still ignored, so 100mΩ lights 100MΩ.  The part selector
+    leaves it off: there a match shows why its substring search returned the
+    row.
     """
     if not text or not terms:
         return []
@@ -152,7 +155,11 @@ def find_highlight_spans(
     spans: list[tuple[int, int]] = []
 
     for term in terms:
-        bounded = whole_values and term[:1] in _NUMBER_CHARS
+        bounded = (
+            whole_values
+            and term[:1] in _NUMBER_CHARS
+            and not _BARE_NUMBER_RE.fullmatch(term)
+        )
         start = 0
         while True:
             match_start = lowered_text.find(term, start)
