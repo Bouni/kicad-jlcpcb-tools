@@ -6,8 +6,8 @@ from contextlib import suppress
 import logging
 from pathlib import Path
 import threading
-from typing import Any
-import webbrowser
+from typing import Any, Optional
+from urllib.parse import quote, urlsplit
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
@@ -15,6 +15,29 @@ import wx.dataview  # pylint: disable=import-error
 from .events import MessageEvent
 from .helpers import HighResWxSize, loadBitmapScaled
 from .lcsc_api import LCSC_API
+
+# Characters a URL may carry as they are. CoreFoundation, which wx hands the
+# link to on macOS, rejects the others, and part records' datasheet links
+# contain some ("|" and "\"), so those are percent-encoded. "%" is kept so
+# links that are already encoded are not encoded twice.
+_URL_SAFE = ":/?#[]@!$&'()*+,;=%~"
+
+
+def _web_link(value: Any) -> Optional[str]:  # noqa: UP045
+    """Return a part record's link if it is a web address, else None.
+
+    Some records hold a placeholder instead ("1", "/", "N/A") or a path on
+    the uploader's own disk. wx would open those as a local folder or a
+    made-up host, so they count as no link, as does a value urlsplit cannot
+    parse (an unbalanced "[" in the host).
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        scheme = urlsplit(value).scheme
+    except ValueError:
+        return None
+    return value if scheme in ("http", "https") else None
 
 
 class PartDetailsDialog(wx.Dialog):
@@ -123,6 +146,10 @@ class PartDetailsDialog(wx.Dialog):
         self.savepdf_button.Bind(wx.EVT_BUTTON, self.savepdf)
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
         self.openpage_button.Bind(wx.EVT_BUTTON, self.openpage)
+        # The links come with the part record, so there is nothing to open
+        # until the fetch below has returned it.
+        self.openpdf_button.Disable()
+        self.openpage_button.Disable()
 
         self.savepdf_button.SetBitmap(
             loadBitmapScaled(
@@ -239,13 +266,31 @@ class PartDetailsDialog(wx.Dialog):
 
     def openpdf(self, *_):
         """Open the linked datasheet PDF on button click."""
-        self.logger.info("opening %s", str(self.pdfurl))
-        webbrowser.open(str(self.pdfurl))
+        self._open_link(self.pdfurl, "datasheet")
 
     def openpage(self, *_):
         """Open the linked LCSC page for the part on button click."""
-        self.logger.info("opening LCSC page for %s", str(self.part))
-        webbrowser.open(str(self.pageurl))
+        self._open_link(self.pageurl, "LCSC page")
+
+    def _open_link(self, url: Optional[str], name: str) -> None:  # noqa: UP045
+        """Open a link in the default browser, and say so when it cannot.
+
+        wx hands the link to the system from this process (Launch Services on
+        macOS, not a helper program) and reports whether it was opened. Its
+        own error log is silenced so a failure is reported once, here.
+        """
+        self.logger.info("opening %s for %s: %s", name, self.part, url)
+        if not url:
+            return
+        with wx.LogNull():
+            opened = wx.LaunchDefaultBrowser(quote(url, safe=_URL_SAFE))
+        if not opened:
+            wx.MessageBox(
+                f"Could not open the {name} for {self.part}:\n{url}",
+                "Error",
+                style=wx.ICON_ERROR,
+                parent=self,
+            )
 
     def _fetch_part_data(self):
         """Fetch part data and image bytes on a background thread.
@@ -303,6 +348,14 @@ class PartDetailsDialog(wx.Dialog):
             self.report_part_data_fetch_error(result.get("msg", "unknown error"))
             return
 
+        data = result["data"].get("data", {})
+        # The links are taken before the rows and the picture, so a value
+        # that fails to display cannot leave the buttons without them.
+        self.pdfurl = _web_link(data.get("dataManualUrl"))
+        self.pageurl = _web_link(data.get("lcscGoodsUrl"))
+        self.openpdf_button.Enable(bool(self.pdfurl))
+        self.openpage_button.Enable(bool(self.pageurl))
+
         parameters = {
             "componentCode": "Component Code",
             "firstTypeNameEn": "Primary Category",
@@ -319,7 +372,6 @@ class PartDetailsDialog(wx.Dialog):
             "leastNumber": "Minimal Quantity",
             "leastNumberPrice": "Minimum price",
         }
-        data = result["data"].get("data", {})
         parttype = data.get("componentLibraryType")
         if parttype == "base":
             self.data_list.AppendItem(["Type", "Basic"])
@@ -360,9 +412,6 @@ class PartDetailsDialog(wx.Dialog):
             size = int(200 * self.scale_factor)
             image = image.Scale(size, size, wx.IMAGE_QUALITY_HIGH)
             self.image.SetBitmap(wx.Bitmap(image))
-
-        self.pdfurl = data.get("dataManualUrl")
-        self.pageurl = data.get("lcscGoodsUrl")
 
     def report_part_data_fetch_error(self, reason):
         """Spawn a message box with an error message if the fetch fails."""
