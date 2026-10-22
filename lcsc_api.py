@@ -6,6 +6,10 @@ from typing import Union
 
 import requests  # pylint: disable=import-error
 
+# JLCPCB serves the files a part record names by their access ids: the part
+# pictures, and in dataManualFileAccessId the datasheet PDF itself.
+JLC_FILE_URL = "https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{}"
+
 
 class LCSC_API:
     """Unofficial LCSC API."""
@@ -38,12 +42,27 @@ class LCSC_API:
         return io.BytesIO(content)
 
     def download_datasheet(self, url: str, path: Path):
-        """Download and save a datasheet from the API."""
-        r = requests.get(url, stream=True, headers=self.headers, timeout=10)
+        """Download a datasheet and save it only if it is a PDF.
+
+        LCSC's datasheet links answer with a web page that displays the PDF,
+        with a successful status, so the status alone does not show that the
+        file is a datasheet.
+        """
+        try:
+            r = requests.get(url, headers=self.headers, timeout=10)
+        except requests.RequestException as error:
+            return {"success": False, "msg": f"Failed to download datasheet: {error}"}
         if r.status_code != requests.codes.ok:  # pylint: disable=no-member
             return {"success": False, "msg": "non-OK HTTP response status"}
-        if not r:
-            return {"success": False, "msg": "Failed to download datasheet!"}
-        with open(path, "wb") as f:
-            f.write(r.content)
-        return {"success": True, "msg": "Successfully downloaded datasheet!"}
+        if not r.content.startswith(b"%PDF-"):
+            return {"success": False, "msg": "The datasheet link did not return a PDF."}
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(r.content)
+        except OSError as error:
+            return {
+                "success": False,
+                "msg": f"Could not save the datasheet to {path}: {error}",
+            }
+        return {"success": True, "msg": f"Saved the datasheet to {path}"}

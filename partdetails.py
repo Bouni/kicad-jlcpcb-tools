@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import suppress
 import logging
 from pathlib import Path
+import re
 import threading
 from typing import Any
 import webbrowser
@@ -14,7 +15,12 @@ import wx.dataview  # pylint: disable=import-error
 
 from .events import MessageEvent
 from .helpers import HighResWxSize, loadBitmapScaled
-from .lcsc_api import LCSC_API
+from .lcsc_api import JLC_FILE_URL, LCSC_API
+
+# A datasheet keeps the file name from LCSC's link only when it is a plain PDF
+# file name. Others end in "/", carry a query string or hold characters some
+# systems refuse in file names.
+_PDF_NAME = re.compile(r"[\w.\-]+\.pdf", re.IGNORECASE)
 
 
 class PartDetailsDialog(wx.Dialog):
@@ -37,6 +43,7 @@ class PartDetailsDialog(wx.Dialog):
 
         self.lcsc_api = LCSC_API()
         self.pdfurl = ""
+        self.datasheet_file_id = ""
         self.pageurl = ""
         self.picture = None
 
@@ -123,6 +130,9 @@ class PartDetailsDialog(wx.Dialog):
         self.savepdf_button.Bind(wx.EVT_BUTTON, self.savepdf)
         self.openpdf_button.Bind(wx.EVT_BUTTON, self.openpdf)
         self.openpage_button.Bind(wx.EVT_BUTTON, self.openpage)
+        # The datasheet is named in the part record, so there is nothing to
+        # download until the fetch below has returned it.
+        self.savepdf_button.Disable()
 
         self.savepdf_button.SetBitmap(
             loadBitmapScaled(
@@ -204,21 +214,37 @@ class PartDetailsDialog(wx.Dialog):
         self.Destroy()
 
     def savepdf(self, *_):
-        """Download a datasheet from The LCSC API."""
+        """Save the part's datasheet PDF in the project's datasheets folder.
+
+        The PDF comes from JLCPCB's file service, by the datasheet's file id.
+        LCSC's datasheet link is tried after it, and is saved only if it gives
+        a PDF rather than its viewer page. When neither does, the first
+        failure is the one reported: LCSC's link is expected to fail.
+        """
+        urls = []
+        if self.datasheet_file_id:
+            urls.append(JLC_FILE_URL.format(self.datasheet_file_id))
         if self.pdfurl:
-            filename = self.pdfurl.rsplit("/", maxsplit=1)[-1]
+            urls.append(self.pdfurl)
+        result = {"success": False, "msg": "Undefined URL for datasheet download"}
+        if urls:
+            name = self.pdfurl.rsplit("/", maxsplit=1)[-1] if self.pdfurl else ""
+            filename = name if _PDF_NAME.fullmatch(name) else f"{self.part}.pdf"
             self.logger.info("Save datasheet %s to %s", filename, self.datasheet_path)
-            self.datasheet_path.mkdir(parents=True, exist_ok=True)
-            result = self.lcsc_api.download_datasheet(
-                self.pdfurl, self.datasheet_path / filename
-            )
-            title = "Success" if result["success"] else "Error"
-            style = "info" if result["success"] else "error"
-            resultMsg = result["msg"]
-        else:
-            title = "Error"
-            style = "error"
-            resultMsg = "Undefined URL for datasheet download"
+            failures = []
+            for url in urls:
+                result = self.lcsc_api.download_datasheet(
+                    url, self.datasheet_path / filename
+                )
+                if result["success"]:
+                    break
+                self.logger.warning("Datasheet from %s: %s", url, result["msg"])
+                failures.append(result)
+            else:
+                result = failures[0]
+        title = "Success" if result["success"] else "Error"
+        style = "info" if result["success"] else "error"
+        resultMsg = result["msg"]
         target = self.parent
         candidate = self.parent
         depth = 0
@@ -279,9 +305,7 @@ class PartDetailsDialog(wx.Dialog):
             return picture.replace("96x96", "900x900")
         image_id = data.get("productBigImageAccessId")
         if image_id:
-            return (
-                f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{image_id}"
-            )
+            return JLC_FILE_URL.format(image_id)
         return None
 
     def _apply_part_data(self, result, image_bytes):
@@ -303,6 +327,13 @@ class PartDetailsDialog(wx.Dialog):
             self.report_part_data_fetch_error(result.get("msg", "unknown error"))
             return
 
+        data = result["data"].get("data", {})
+        # The datasheet is taken before the rows and the picture, so a value
+        # that fails to display cannot leave Download without it.
+        self.pdfurl = data.get("dataManualUrl")
+        self.datasheet_file_id = data.get("dataManualFileAccessId")
+        self.savepdf_button.Enable(bool(self.datasheet_file_id or self.pdfurl))
+
         parameters = {
             "componentCode": "Component Code",
             "firstTypeNameEn": "Primary Category",
@@ -319,7 +350,6 @@ class PartDetailsDialog(wx.Dialog):
             "leastNumber": "Minimal Quantity",
             "leastNumberPrice": "Minimum price",
         }
-        data = result["data"].get("data", {})
         parttype = data.get("componentLibraryType")
         if parttype == "base":
             self.data_list.AppendItem(["Type", "Basic"])
@@ -361,7 +391,6 @@ class PartDetailsDialog(wx.Dialog):
             image = image.Scale(size, size, wx.IMAGE_QUALITY_HIGH)
             self.image.SetBitmap(wx.Bitmap(image))
 
-        self.pdfurl = data.get("dataManualUrl")
         self.pageurl = data.get("lcscGoodsUrl")
 
     def report_part_data_fetch_error(self, reason):
