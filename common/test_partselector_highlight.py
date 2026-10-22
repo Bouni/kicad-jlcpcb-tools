@@ -192,6 +192,7 @@ def test_thermistor_keeps_its_bare_code():
     """A thermistor's params show its part number, where its code is the match."""
     assert "103" in expand_value("TH1", "103")
     assert _params_spans("TH1", "103", "NCP18XH103F03RB 0603") == ["103"]
+    assert _params_spans("TH1", "103", "NTCS0603E3103FMT 0603") == ["103"]
 
 
 @pytest.mark.native_wx
