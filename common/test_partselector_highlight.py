@@ -1,5 +1,8 @@
 """Tests for reusable dataview highlighting helpers."""
 
+import pytest
+
+import dataview_highlight
 from dataview_highlight import (
     HighlightQueryCache,
     decode_highlighted_value,
@@ -11,6 +14,7 @@ from dataview_highlight import (
     normalize_highlight_terms,
     simplify_footprint_name,
 )
+from tests.native_wx_support import run_native
 
 
 def test_normalize_highlight_terms_deduplicates_casefolded_terms():
@@ -132,6 +136,126 @@ def test_expand_value_for_capacitor_without_suffix_adds_f_variants():
     """Capacitor values without `F` also get `F`-suffixed variants."""
     assert expand_value("C12", "1u") == ["1u", "1µ", "1uF", "1µF"]
     assert expand_value("C13", "1µ") == ["1µ", "1u", "1µF", "1uF"]
+
+
+def test_expand_value_adds_the_catalog_spelling():
+    """A board value also highlights the spelling the catalog writes for it."""
+    assert "2.2nF" in expand_value("C1", "2n2")
+    assert "100nF" in expand_value("C2", "0.1uF")
+    assert "4.7kΩ" in expand_value("R1", "4k7")
+    assert "2.2uH" in expand_value("L1", "2u2")
+
+
+def test_expand_value_catalog_spelling_highlights_the_params_text():
+    """The catalog spelling reaches the rendered params through the cell codec."""
+    packed = encode_highlighted_value("2.2nF 50V", expand_value("C1", "2n2"))
+    text, terms = decode_highlighted_value(packed)
+    assert find_highlight_spans(text, terms, whole_values=True) == [(0, 5)]
+
+
+def test_expand_value_gives_a_bare_resistance_its_ohm_sign():
+    """A bare number lights its own value, not the start of a larger one."""
+    assert expand_value("R1", "100") == ["100Ω"]
+    assert expand_value("R2", ".47") == ["0.47Ω", "470mΩ"]
+    terms = normalize_highlight_terms(" ".join(expand_value("R1", "100")))
+    assert find_highlight_spans("100kΩ ±1%", terms, whole_values=True) == []
+    assert find_highlight_spans("100Ω ±1%", terms, whole_values=True) == [(0, 4)]
+    assert _params_spans("R3", "0.1", "0.1Ω ±1% 0805") == ["0.1Ω"]
+    assert _params_spans("R3", "0.1", "100mΩ (0.1Ω) ±1%") == ["100mΩ", "0.1Ω"]
+
+
+def test_whole_values_refuse_a_digit_or_point_before_a_value():
+    """A board value does not light the end of a different value."""
+    terms = normalize_highlight_terms(" ".join(expand_value("R1", "4k7")))
+    assert find_highlight_spans("14.7kΩ ±1%", terms) == [(1, 6)]
+    assert find_highlight_spans("14.7kΩ ±1%", terms, whole_values=True) == []
+    assert find_highlight_spans("4.7kΩ ±1%", terms, whole_values=True) == [(0, 5)]
+    terms = normalize_highlight_terms(" ".join(expand_value("R2", "0R2")))
+    assert find_highlight_spans("200mΩ (0.2Ω)", terms, whole_values=True) == [(0, 5)]
+
+
+def test_whole_values_bound_a_value_written_with_a_leading_point():
+    """A board .1uF does not light the end of 10.1uF."""
+    assert find_highlight_spans("10.1uF 50V", [".1uf"], whole_values=True) == []
+    assert _params_spans("C1", ".1uF", "10.1uF 50V") == []
+    assert _params_spans("C1", ".1uF", "100nF 50V") == ["100nF"]
+
+
+def _params_spans(reference, value, params):
+    """Return the highlighted text of params the way the footprint list finds it."""
+    packed = encode_highlighted_value(params, expand_value(reference, value))
+    text, terms = decode_highlighted_value(packed)
+    return [text[a:b] for a, b in find_highlight_spans(text, terms, whole_values=True)]
+
+
+def test_thermistor_keeps_its_bare_code():
+    """A thermistor's params show its part number, where its code is the match."""
+    assert "103" in expand_value("TH1", "103")
+    assert _params_spans("TH1", "103", "NCP18XH103F03RB 0603") == ["103"]
+
+
+@pytest.mark.native_wx
+def test_params_renderer_lights_the_board_value_and_not_its_neighbours():
+    """The footprint list's params cell holds its board value to a whole value."""
+    pytest.importorskip("wx")
+    drawn = []
+
+    class RecordingDC:
+        """Record each painted run and its colour, with fixed text metrics."""
+
+        colour = None
+
+        def SetTextForeground(self, colour):
+            self.colour = colour
+
+        def SetBackgroundMode(self, _mode):
+            pass
+
+        def GetTextExtent(self, text):
+            return 7 * len(text), 12
+
+        def SetClippingRegion(self, _rect):
+            pass
+
+        def DestroyClippingRegion(self):
+            pass
+
+        def DrawText(self, text, _x, _y):
+            drawn.append((text, self.colour))
+
+    def exercise(_frame, wx):
+        plain = wx.SystemSettings.GetColour(wx.SYS_COLOUR_LISTBOXTEXT)
+        renderer = dataview_highlight.HighlightedTextRenderer(
+            value_decoder=decode_highlighted_value
+        )
+        for value, params, lit in (
+            ("4k7", "4.7kΩ ±1% 0603", ["4.7kΩ"]),
+            ("4k7", "14.7kΩ ±1% 0603", []),
+            ("100", "100kΩ ±1% 0603", []),
+        ):
+            drawn.clear()
+            renderer.SetValue(
+                encode_highlighted_value(params, expand_value("R1", value))
+            )
+            renderer.Render(wx.Rect(0, 0, 400, 20), RecordingDC(), 0)
+            assert "".join(text for text, _ in drawn) == params
+            assert [text for text, colour in drawn if colour != plain] == lit
+
+    run_native(exercise)
+
+
+def test_whole_values_keep_package_terms_and_later_matches():
+    """Only number-led terms are bounded, and a refused match does not end the scan."""
+    assert find_highlight_spans("10kΩ 0603", ["0603"], whole_values=True) == [(5, 9)]
+    assert find_highlight_spans("SOT-23-5", ["sot-23"], whole_values=True) == [(0, 6)]
+    assert find_highlight_spans("21k1k1", ["1k1"], whole_values=True) == [(3, 6)]
+
+
+def test_expand_value_leaves_values_without_a_quantity_alone():
+    """No catalog spelling is guessed for a reference that names no quantity."""
+    assert expand_value("D1", "1N4148") == ["1N4148"]
+    assert expand_value("U1", "2n2") == ["2n2"]
+    assert expand_value("U2", "555") == ["555"]
 
 
 def test_expand_footprint_adds_known_aliases():
