@@ -12,11 +12,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install pytest
-        run: pip install pytest
+        run: |
+          python -m venv .venv-tests
+          .venv-tests/bin/python -m pip install pytest
       - name: Install python packages
-        run: pip install .
+        run: .venv-tests/bin/python -m pip install .
       - name: Run tests
-        run: pytest -m 'not native_wx and not native_kicad'
+        run: .venv-tests/bin/python -m pytest -m 'not native_wx and not native_kicad'
   native-wx:
     name: Native wx (${{ matrix.lane }})
     runs-on: ubuntu-24.04
@@ -28,16 +30,18 @@ jobs:
       matrix:
         include:
           - lane: controls
+            artifact_index: 0
             selection: not native_kicad and not os_input
             test_timeout_seconds: 900
             job_timeout_minutes: 20
           - lane: isolated input
+            artifact_index: 1
             selection: os_input
             test_timeout_seconds: 360
             job_timeout_minutes: 10
     steps:
       - name: Initialize native wx timing evidence
-        run: echo "NATIVE_WX_ARTIFACTS=$RUNNER_TEMP/native-wx-${{ strategy.job-index }}" >> "$GITHUB_ENV"
+        run: echo "NATIVE_WX_ARTIFACTS=$RUNNER_TEMP/native-wx-${{ matrix.artifact_index }}" >> "$GITHUB_ENV"
       - name: Checkout code
         uses: actions/checkout@v7
       - name: Install wx and virtual display
@@ -66,7 +70,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-wx-${{ strategy.job-index }}
+          name: native-wx-${{ matrix.artifact_index }}
           path: ${{ env.NATIVE_WX_ARTIFACTS }}
           if-no-files-found: warn
           retention-days: 14

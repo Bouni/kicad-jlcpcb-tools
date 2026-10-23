@@ -1,0 +1,10 @@
+--workflows=.github/workflows/tests.yml
+--container-architecture=linux/amd64
+--platform=ubuntu-latest=ghcr.io/catthehacker/ubuntu:runner-latest
+--platform=ubuntu-24.04=ghcr.io/catthehacker/ubuntu:runner-24.04
+--artifact-server-path=$HOME/.cache/kicad-jlcpcb-tools/act-artifacts
+--artifact-server-addr=0.0.0.0
+--reuse=false
+--bind=false
+--use-gitignore=true
+--rm

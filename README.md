@@ -419,12 +419,27 @@ in `tests/golden/kicad_builds.json`. Run them with Python libraries matching
 the installed KiCad or wx packages. Mouse/keyboard tests require an isolated desktop with a window
 manager; Linux native tests can use Xvfb.
 
-To reproduce CI locally, use an Ubuntu 24.04 Docker container with the same CPU
-architecture, KiCad packages, dependencies, and commands as
-[the test workflow](.github/workflows/tests.yml). Copy the tracked source tree so
-untracked test files cannot change collection. Include the tested revision,
-Python/wx/KiCad versions, command, and pass/skip/deselection counts when reporting
-results. A required lane that was not run remains unvalidated.
+To run the test workflow locally, install Docker and
+[`act`](https://nektosact.com/installation/), then start Docker.
+
+From the repository root, run:
+
+```sh
+act
+```
+
+With Docker Desktop, set the address for this invocation so containers can reach
+the local artifact server:
+
+```sh
+ACTIONS_RUNTIME_URL=http://host.docker.internal:34567/ act
+```
+
+The committed [`.actrc`](.actrc) configures local execution of
+[the test workflow](.github/workflows/tests.yml), including its native tests
+and KiCad 10 smoke test.
+
+Results are saved under `$HOME/.cache/kicad-jlcpcb-tools/act-artifacts`.
 
 ### Settings
 
