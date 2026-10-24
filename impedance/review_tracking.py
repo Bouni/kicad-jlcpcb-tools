@@ -6,7 +6,7 @@ current; an old timestamp alone must never authorize a changed board.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import datetime, timezone
 from decimal import localcontext
 import hashlib
@@ -230,11 +230,27 @@ def review_tracking_from_dict(value: object) -> ReviewTracking:
     return result
 
 
+def _capture_record(value: object) -> dict[str, Any]:
+    """Serialize geometry while excluding metadata used only for spacing."""
+    from .model import CopperFeature
+
+    if not is_dataclass(value) or isinstance(value, type):
+        raise TypeError("Review fingerprints require serializable dataclass values.")
+    omitted = (
+        {"footprint_id", "pad_number"} if isinstance(value, CopperFeature) else set()
+    )
+    return {
+        field.name: getattr(value, field.name)
+        for field in fields(value)
+        if field.name not in omitted
+    }
+
+
 def _sha256(value: object) -> str:
     """Hash canonical JSON, never process-dependent hashes or representations."""
     payload = json.dumps(
         value,
-        default=asdict,
+        default=_capture_record,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
@@ -245,10 +261,16 @@ def _sha256(value: object) -> str:
 
 def _trace_record(trace: "Trace") -> dict[str, Any]:
     """Preserve all trace content while canonicalizing centerline direction."""
-    return {
+    record = {
         **{field.name: getattr(trace, field.name) for field in fields(trace)},
         "points": min(trace.points, tuple(reversed(trace.points))),
     }
+    # Analytic arc metadata belongs to spacing approval, not captured pixels.
+    # Preserve all other extension fields and historical image fingerprints.
+    record.pop("native_arc_midpoint", None)
+    record.pop("native_arc_center", None)
+    record.pop("native_arc_radius_nm", None)
+    return record
 
 
 def source_fingerprint(snapshot: "BoardSnapshot") -> str:

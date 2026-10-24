@@ -78,6 +78,9 @@ class Trace:
     points: tuple[Point, ...]
     is_native_arc: bool = False
     copper_polygons: tuple[CopperPolygon, ...] = ()
+    native_arc_midpoint: Optional[Point] = None
+    native_arc_center: Optional[Point] = None
+    native_arc_radius_nm: Optional[float] = None
 
 
 # Machine-stable exclusion codes. Empty means the section is exportable.
@@ -87,7 +90,7 @@ COPPER_FEATURE_SHAPES = ("circle", "oval", "rect", "roundrect", "polygon")
 
 @dataclass(frozen=True)
 class CopperFeature:
-    """Pad or via copper flash used to detect covered stubs (nanometres)."""
+    """Native copper flash with optional diagnostic landing ownership."""
 
     feature_id: str
     net: str
@@ -100,6 +103,8 @@ class CopperFeature:
     rotation_deg: float = 0.0
     corner_radius_nm: int = 0
     polygons: tuple[CopperPolygon, ...] = ()
+    footprint_id: str = ""
+    pad_number: str = ""
 
 
 @dataclass(frozen=True)

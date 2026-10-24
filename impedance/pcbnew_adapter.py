@@ -104,6 +104,16 @@ def _feature_id(item: Any, data: tuple[Any, ...]) -> str:
     return hashlib.sha256(serialized.encode("ascii")).hexdigest()
 
 
+def _footprint_id(footprint: Any) -> str:
+    """Copy authoritative native ownership without guessing from pad geometry."""
+    uuid = getattr(footprint, "m_Uuid", None)
+    getter = getattr(uuid, "AsString", None)
+    if not callable(getter):
+        return ""
+    value = str(getter())
+    return value if value.strip() else ""
+
+
 def _pad_shape_name(shape: Any, pcbnew_module: Any) -> str:
     """Recognize primitives explicitly; all other shapes need a native perimeter."""
     for name in ("circle", "oval", "rect", "roundrect"):
@@ -251,9 +261,12 @@ def _copper_features(
             )
     footprints = board.GetFootprints() if hasattr(board, "GetFootprints") else ()
     for footprint in footprints:
+        footprint_id = _footprint_id(footprint)
         pads = footprint.Pads() if hasattr(footprint, "Pads") else ()
         for pad in pads:
             net = str(pad.GetNetname()) if hasattr(pad, "GetNetname") else ""
+            number_getter = getattr(pad, "GetNumber", None)
+            pad_number = str(number_getter()) if callable(number_getter) else ""
             for layer_name, layer_id in layers.items():
                 if not _item_on_layer(pad, layer_id):
                     continue
@@ -312,6 +325,8 @@ def _copper_features(
                         rotation_deg=rotation,
                         corner_radius_nm=radius,
                         polygons=polygons,
+                        footprint_id=footprint_id,
+                        pad_number=pad_number,
                     )
                 )
     return tuple(sorted(features, key=lambda feature: feature.feature_id))
@@ -375,6 +390,14 @@ def _trace_id(item: Any, data: tuple[Any, ...]) -> str:
 
 def _without_fill_cache(serialized: str) -> str:
     """Exclude generated fills and plot preferences, retaining PCB definitions."""
+    if (
+        _FILL_CACHE_TOKEN.search(serialized) is None
+        and _FILL_STATE_TOKEN.search(serialized) is None
+    ):
+        # Most native item records contain no generated cache syntax. The same
+        # token canonicalizer is sufficient; possible tokens even inside quotes
+        # deliberately retain the conservative character/escape-aware filter.
+        return _normalize_record_tokens(serialized)
     result = []
     position = 0
     quoted = False
@@ -412,9 +435,14 @@ def _without_fill_cache(serialized: str) -> str:
         escaped = character == "\\" and not escaped
         result.append(character)
         position += 1
+    return _normalize_record_tokens("".join(result))
+
+
+def _normalize_record_tokens(serialized: str) -> str:
+    """Canonicalize native token whitespace without changing quoted contents."""
     # Whitespace outside quoted strings separates tokens only; removed cache
     # records must not leave a changing number of blank lines in the digest.
-    tokens = re.findall(r'"(?:\\.|[^"\\])*"|[()]|[^\s()"]+', "".join(result))
+    tokens = re.findall(r'"(?:\\.|[^"\\])*"|[()]|[^\s()"]+', serialized)
     normalized = []
     previous = ""
     for token in tokens:
@@ -715,9 +743,26 @@ def snapshot_board(
         midpoint_getter = getattr(item, "GetMid", None)
         if is_native_arc and not callable(midpoint_getter):
             raise BoardSnapshotError("KiCad cannot read the native arc midpoint.")
+        native_midpoint = _point(midpoint_getter()) if is_native_arc else None
+        center_getter = getattr(item, "GetPosition", None)
+        radius_getter = getattr(item, "GetRadius", None)
+        native_center, native_radius = None, None
+        if is_native_arc:
+            try:
+                if callable(center_getter):
+                    native_center = _point(center_getter())
+                if callable(radius_getter):
+                    value = float(radius_getter())
+                    native_radius = (
+                        value if math.isfinite(value) and value > 0 else None
+                    )
+            except (AttributeError, TypeError, RuntimeError, OverflowError, ValueError):
+                # Rendering remains available when optional effective geometry
+                # cannot establish an authoritative spacing measurement.
+                native_center, native_radius = None, None
         points = (
-            sample_arc(start, _point(midpoint_getter()), end, width)
-            if is_native_arc
+            sample_arc(start, native_midpoint, end, width)
+            if native_midpoint is not None
             else (start, end)
         )
         net = str(item.GetNetname())
@@ -729,6 +774,9 @@ def snapshot_board(
                 width,
                 points,
                 is_native_arc=is_native_arc,
+                native_arc_midpoint=native_midpoint,
+                native_arc_center=native_center,
+                native_arc_radius_nm=native_radius,
                 copper_polygons=(
                     _arc_copper_polygons(
                         item,

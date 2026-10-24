@@ -145,6 +145,27 @@ def _validate_snapshot(snapshot: BoardSnapshot) -> None:
             raise ValidationError("Trace widths must be positive integer nanometres.")
         if type(trace.is_native_arc) is not bool:
             raise ValidationError("Native arc provenance must be boolean.")
+        for label in ("native_arc_midpoint", "native_arc_center"):
+            point = getattr(trace, label, None)
+            if point is not None and (
+                not trace.is_native_arc
+                or not isinstance(point, tuple)
+                or len(point) != 2
+                or any(type(value) is not int for value in point)
+            ):
+                raise ValidationError(
+                    "Native arc coordinates must be integer nanometre pairs on an arc."
+                )
+        radius = getattr(trace, "native_arc_radius_nm", None)
+        if radius is not None and (
+            not trace.is_native_arc
+            or type(radius) not in (int, float)
+            or not math.isfinite(radius)
+            or radius <= 0
+        ):
+            raise ValidationError(
+                "Native arc radius must be positive and finite on an arc."
+            )
         if not _valid_polygons(trace.copper_polygons):
             raise ValidationError("Native arc copper perimeter is invalid.")
         if not isinstance(trace.points, tuple) or len(trace.points) < 2:
@@ -173,6 +194,12 @@ def _validate_snapshot(snapshot: BoardSnapshot) -> None:
             raise ValidationError("Copper feature layer or net name is invalid.")
         if feature.kind not in ("pad", "via"):
             raise ValidationError("Copper feature kind must be pad or via.")
+        if not isinstance(feature.footprint_id, str) or not isinstance(
+            feature.pad_number, str
+        ):
+            raise ValidationError(
+                "Copper landing ownership must use string identifiers."
+            )
         if feature.shape not in COPPER_FEATURE_SHAPES:
             raise ValidationError("Copper feature shape is unsupported.")
         if (
