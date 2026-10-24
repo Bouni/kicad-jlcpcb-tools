@@ -213,7 +213,16 @@ def test_arc_provenance_invalidates_digest_without_losing_historical_row_id() ->
     arc = _native_trace(True)
     config, current_snapshot = _scenario(arc, (_circle((0, 0), 3_000_000),))
     historical_snapshot = replace(
-        current_snapshot, traces=(replace(arc, is_native_arc=False),)
+        current_snapshot,
+        traces=(
+            replace(
+                arc,
+                is_native_arc=False,
+                native_arc_midpoint=None,
+                native_arc_center=None,
+                native_arc_radius_nm=None,
+            ),
+        ),
     )
     historical = analyze(config, historical_snapshot)
     current = analyze(config, current_snapshot)

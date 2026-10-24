@@ -2870,3 +2870,95 @@ def test_missing_wx_svg_reports_capability_instead_of_import_error(
     monkeypatch.setattr("impedance.render.importlib.import_module", missing)
     with pytest.raises(RenderError, match="wx.svg"):
         _wx_rasterize(tmp_path / "source.svg", tmp_path / "target.png", 800, 420)
+
+
+def test_cache_free_context_record_skips_python_character_scanning() -> None:
+    """Ordinary native context still canonicalizes without a Python walk per byte."""
+
+    class UnscannedRecord(str):
+        """Make unnecessary native-record character traversal observable."""
+
+        def __getitem__(self, position: Any) -> str:
+            raise AssertionError(
+                "A cache-free record was scanned character by character"
+            )
+
+    quoted = json.dumps('Review "A" on (F.Cu)')
+    record = UnscannedRecord(
+        f"\n (gr_text\t{quoted}\n (at 1.0 -2.0)\t(effects (font (size 1 1))))\n"
+    )
+    assert _without_fill_cache(record) == (
+        f"(gr_text {quoted} (at 1.0 -2.0) (effects (font (size 1 1))))"
+    )
+
+
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [
+        ("\n\t ", ""),
+        (' (gr_text "Layer µ"\t(at 1 2))\n', '(gr_text "Layer µ" (at 1 2))'),
+        ("\n(zone\t(fill no) (thermal_gap 0.3))", "(zone (fill no) (thermal_gap 0.3))"),
+        (
+            "(filled_polygon_extra\t(pts (xy 1 2)))",
+            "(filled_polygon_extra (pts (xy 1 2)))",
+        ),
+        ("(fill yesterday) (fill yes_extra)", "(fill yesterday) (fill yes_extra)"),
+        (
+            ' (gr_text "escaped \\"quote\\" and \\\\ slash" (at 1 2)) ',
+            '(gr_text "escaped \\"quote\\" and \\\\ slash" (at 1 2))',
+        ),
+        (
+            '(gr_text "literal (filled_polygon) (fill yes) (pcbplotparams)"\n(at 1 2))',
+            '(gr_text "literal (filled_polygon) (fill yes) (pcbplotparams)" (at 1 2))',
+        ),
+        (
+            '(zone\n (filled_polygon (layer "F.Cu") (pts (xy 1 2)))\n(fill_segments (pts (xy 3 4))) (fill yes (thermal_gap 0.3))\t(polygon (pts (xy 5 6))))',
+            "(zone (fill (thermal_gap 0.3)) (polygon (pts (xy 5 6))))",
+        ),
+        ('(pcbplotparams (outputdirectory "a \\"(filled_polygon)\\""))', ""),
+        (' (gr_text "label" (at 1 2)', '(gr_text "label" (at 1 2)'),
+        (' (gr_text "unterminated', "(gr_text unterminated"),
+    ],
+)
+def test_context_normalization_preserves_exact_existing_token_semantics(
+    record: str, expected: str
+) -> None:
+    """Cached forms and ordinary records retain the same quoted-token contract."""
+    assert _without_fill_cache(record) == expected
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        '(gr_text "literal (filled_polygon)" (at 1 2))',
+        '(gr_text "literal (fill yes)" (at 1 2))',
+        '(gr_text "escaped \\"(fill yes)\\" and (pcbplotparams)" (at 1 2))',
+    ],
+)
+def test_quoted_cache_lookalikes_keep_the_quote_aware_path(record: str) -> None:
+    """Potential cache tokens anywhere must keep conservative quote-aware filtering."""
+    positions = []
+
+    class ObservedRecord(str):
+        """Observe the deliberate slow path for possible quoted cache syntax."""
+
+        def __getitem__(self, position: Any) -> str:
+            positions.append(position)
+            return super().__getitem__(position)
+
+    assert _without_fill_cache(ObservedRecord(record)) == record
+    assert positions
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "(zone (filled_polygon (pts (xy 1 2))",
+        "(zone (fill_segments (pts (xy 1 2))",
+        '(setup (pcbplotparams (outputdirectory "quoted path")',
+    ],
+)
+def test_incomplete_cache_records_still_fail_closed(record: str) -> None:
+    """An unterminated generated-cache expression cannot become approval evidence."""
+    with pytest.raises(BoardSnapshotError, match="incomplete zone record"):
+        _without_fill_cache(record)
