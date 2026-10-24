@@ -10,6 +10,7 @@ from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
 from datetime import datetime as dt
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Optional, Union
 import logging
 import os
@@ -70,6 +71,7 @@ from .core.settings_persistence import (
 )
 from .correction_data import Correction, match_correction
 from .corrections import CorrectionManagerDialog
+from .copper_zone_dialog import EmptyCopperZonesDialog
 from .datamodel import PartListDataModel
 from .dataview_highlight import (
     HighlightedTextRenderer,
@@ -98,6 +100,7 @@ from .events import (
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
+from .fabrication_archive import ArchiveEntry
 from .footprint_helpers import iter_board_items
 from .generate_hooks import format_hook_error, run_configured_hook
 from .generation_review import (
@@ -118,6 +121,9 @@ from .helpers import (
     getVersion,
     loadBitmapScaled,
 )
+from .impedance.integration import ImpedanceControls, ImpedanceStorageError
+from .impedance.model import ValidationError as ImpedanceValidationError
+from .impedance.service import export_reports as export_impedance_reports
 from .kicad_backend import BoardChanged, BoardSnapshot
 from .kicad_backend.swig import SwigBackend
 from .kicad_backend.swig.legacy import live_footprints
@@ -150,6 +156,7 @@ FOOTPRINT_COLUMN_KEYS = {
 }
 
 SCHEMATIC_PRE_WRITE_BACKUP_ZIP = "schematics-before-plugin-attributes.zip"
+_OMIT_IMPEDANCE_REPORTS = object()
 
 if TYPE_CHECKING:
     from .library import CorrectionSnapshot
@@ -182,6 +189,47 @@ ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
 ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
+
+
+@contextmanager
+def _interactive_cursor() -> Iterator[None]:
+    """Restore only the busy cursor scope that was active before the modal UI."""
+    busy = wx.IsBusy()
+    if busy:
+        wx.EndBusyCursor()
+    try:
+        yield
+    finally:
+        if busy:
+            wx.BeginBusyCursor()
+
+
+def _read_impedance_for_generation(
+    controls: Any, read: Callable[[], Any], logger: Any
+) -> tuple[bool, Any]:
+    """Recover unreadable storage or record explicit omission for this invocation."""
+    while True:
+        try:
+            return True, read()
+        except ImpedanceStorageError as error:
+            with _interactive_cursor():
+                action = controls.storage_error_action(error, allow_omit=True)
+            if action == "omit":
+                controls.verify_omission()
+                logger.warning(
+                    "User explicitly chose generation without impedance workbook and "
+                    "HTML report this time; saved settings were preserved."
+                )
+                return True, _OMIT_IMPEDANCE_REPORTS
+            if action != "retry":
+                logger.warning(
+                    "Generation cancelled: impedance settings unavailable (%s)", error
+                )
+                return False, None
+            try:
+                controls.retry_storage()
+            except ImpedanceStorageError:
+                continue
 
 
 def _board_has_variants(board: Any) -> bool:
@@ -377,6 +425,7 @@ class JLCPCBTools(wx.Frame):
         self.layer_selection.SetSelection(0)
 
         self.upper_toolbar.AddControl(self.layer_selection)
+        self._impedance = ImpedanceControls(self, self.upper_toolbar)
 
         self.upper_toolbar.AddStretchableSpace()
 
@@ -1342,6 +1391,7 @@ class JLCPCBTools(wx.Frame):
                     )
                 self.store = controller.cache
                 self._set_project_storage_error(None)
+                self._impedance.attach_store(self.store)
                 controller._update_enabled()
                 self._maybe_show_schematic_storage_notice(project_db_preexisted)
             except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
@@ -1376,6 +1426,7 @@ class JLCPCBTools(wx.Frame):
             self._migrate_legacy_assignments()
             if getattr(self, "_board_unreliable", False):
                 return
+            self._impedance.attach_store(self.store)
             self._maybe_show_schematic_storage_notice(project_db_preexisted)
             if self._variant_mode:
                 from .variant.controller import VariantMainController
@@ -1824,6 +1875,10 @@ class JLCPCBTools(wx.Frame):
                 tooltip.dismiss()
             self.partlist_data_model.RemoveAll()
             self.assembly_lookup.invalidate()
+            impedance = getattr(self, "_impedance", None)
+            if impedance is not None:
+                impedance.checkbox.Enable(False)
+                impedance.configure_button.Enable(False)
         self.project_storage_status.SetLabel(
             "Part assignments are unavailable; assignment actions and generation are disabled.\n"
             "Check the log, close other windows using this project, then reopen. Settings remains available."
@@ -3165,6 +3220,115 @@ class JLCPCBTools(wx.Frame):
         )
         return False
 
+    def prepare_copper_zones(self) -> bool:
+        """Prepare copper and locate empty pours before reviewing board images."""
+        try:
+            refill = self.settings.get("gerber", {}).get("fill_zones", True)
+            board = self.pcbnew.GetBoard()
+            empty_pours = self.run_generation_step(
+                "Filling copper zones" if refill else "Checking copper zone fills",
+                self.fabrication.fill_zone_regions,
+                board,
+            )
+            if not empty_pours:
+                return True
+            operation = "review"
+            listed = "\n".join(
+                f"  {pour.diagnostic_label} (ID {pour.zone_id}): "
+                f"{pour.location_text}; {pour.dimensions_text}; {pour.fill_status_text}"
+                for pour in empty_pours
+            )
+            dialog = EmptyCopperZonesDialog(
+                self,
+                board,
+                self.pcbnew,
+                empty_pours,
+                for_review=True,
+            )
+            try:
+                result = dialog.ShowModal()
+            finally:
+                dialog.Destroy()
+            self.logger.warning(
+                "Copper zones with no filled copper, user chose to %s %s:\n%s",
+                "continue" if result == wx.ID_YES else "stop",
+                operation,
+                listed,
+            )
+            if result != wx.ID_YES:
+                self.report_generation_step(
+                    f"{operation.title()} stopped by empty copper zones"
+                )
+                return False
+            return True
+        finally:
+            # Configure opens outside Generate; Pulse() would otherwise keep bouncing.
+            self.reset_gauge()
+
+    def _impedance_plan_for_generation(
+        self, impedance_controls: Any, layer_count: Optional[int]
+    ) -> tuple[bool, Any]:
+        """Check review after copper preparation; open Configure when approval is needed.
+
+        Returns ``(True, plan)`` when generation may continue (``plan`` is ``None`` when
+        controlled impedance is disabled). Returns ``(False, None)`` when the user
+        cancelled or left review incomplete; that path must not log an ERROR traceback.
+        """
+        try:
+            return _read_impedance_for_generation(
+                impedance_controls,
+                lambda: self.run_generation_step(
+                    "Checking controlled-impedance configuration",
+                    impedance_controls.preflight,
+                    layer_count,
+                ),
+                self.logger,
+            )
+        except ImpedanceValidationError as error:
+            self.logger.info(
+                "Controlled-impedance review is required before generation: %s",
+                error,
+            )
+            self.report_generation_step(
+                "Controlled-impedance review required; opening configuration"
+            )
+            prepared_source = impedance_controls.prepared_source_revision(
+                self.fabrication.board
+            )
+            with _interactive_cursor():
+                configured = impedance_controls.on_configure(
+                    None, prepared_source=prepared_source
+                )
+            if configured is False:
+                self.logger.warning(
+                    "Fabrication generation stopped: controlled-impedance "
+                    "configuration was cancelled or could not finish. Generate again."
+                )
+                self.report_generation_step(
+                    "Stopped: controlled-impedance configuration incomplete"
+                )
+                return False, None
+            try:
+                return _read_impedance_for_generation(
+                    impedance_controls,
+                    lambda: self.run_generation_step(
+                        "Checking controlled-impedance configuration",
+                        impedance_controls.preflight,
+                        layer_count,
+                    ),
+                    self.logger,
+                )
+            except ImpedanceValidationError as still_incomplete:
+                self.logger.warning(
+                    "Fabrication generation stopped: controlled-impedance review "
+                    "incomplete (%s)",
+                    still_incomplete,
+                )
+                self.report_generation_step(
+                    "Stopped: controlled-impedance review incomplete"
+                )
+                return False, None
+
     def generate_fabrication_data(self, *_: object) -> None:
         """Generate fabrication data."""
         if self._project_storage_unavailable:
@@ -3201,8 +3365,37 @@ class JLCPCBTools(wx.Frame):
             layer_selection = self.layer_selection.GetSelection()
             number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
             layer_count = int(number.group(0)) if number else None
-            # Every check runs before anything is asked, so one decision
-            # covers all of their findings.
+            impedance_controls = getattr(self, "_impedance", None)
+            impedance_plan = None
+            reports = None
+            report_board = None
+
+            def verify_impedance(enabled_step: str, disabled_step: str) -> bool:
+                """Keep normal concurrency guards unless omission was explicitly chosen."""
+                nonlocal impedance_plan
+                if impedance_controls is None:
+                    return True
+                if impedance_plan is _OMIT_IMPEDANCE_REPORTS:
+                    impedance_controls.verify_omission()
+                    return True
+                enabled = impedance_plan is not None
+                ready, result = _read_impedance_for_generation(
+                    impedance_controls,
+                    lambda: self.run_generation_step(
+                        enabled_step if enabled else disabled_step,
+                        impedance_controls.verify_current
+                        if enabled
+                        else impedance_controls.verify_disabled,
+                        *((impedance_plan, layer_count) if enabled else ()),
+                    ),
+                    self.logger,
+                )
+                if result is _OMIT_IMPEDANCE_REPORTS:
+                    impedance_plan = result
+                return ready
+
+            # Collect every fabrication finding before the export review, so
+            # one decision covers them all.
             findings = value_mismatch_findings(
                 self.run_generation_step(
                     "Checking part consistency",
@@ -3223,6 +3416,14 @@ class JLCPCBTools(wx.Frame):
                     self.fabrication.fill_zones,
                 )
             )
+            # Match Configure: prepare copper before the review digest is checked.
+            if impedance_controls is not None:
+                ready, impedance_plan = self._impedance_plan_for_generation(
+                    impedance_controls, layer_count
+                )
+                if not ready:
+                    return
+
             findings += self.run_generation_step(
                 "Running pre-export DRC check",
                 self.drc_review_findings,
@@ -3252,6 +3453,11 @@ class JLCPCBTools(wx.Frame):
                 return
 
             self.fabrication.validate_generation()
+            if not verify_impedance(
+                "Validating controlled-impedance review after board preparation",
+                "Checking controlled impedance remains disabled after board preparation",
+            ):
+                return
 
             self.run_generation_step(
                 "Plotting Gerbers",
@@ -3264,10 +3470,68 @@ class JLCPCBTools(wx.Frame):
                 self.fabrication.generate_excellon,
             )
 
-            self.run_generation_step(
-                "Creating Gerber archive (.zip)",
-                self.fabrication.zip_gerber_excellon,
-            )
+            if (
+                impedance_plan is not None
+                and impedance_plan is not _OMIT_IMPEDANCE_REPORTS
+            ):
+                report_board = self.pcbnew.GetBoard()
+                if getattr(self, "_variant_controller", None):
+                    report_board = self.run_generation_step(
+                        "Preparing controlled-impedance output board",
+                        self.fabrication.get_report_board,
+                    )
+                    self.run_generation_step(
+                        "Validating controlled-impedance output variant",
+                        impedance_controls.verify_output_board,
+                        impedance_plan,
+                        report_board,
+                        layer_count,
+                    )
+                with TemporaryDirectory(prefix="jlcpcb-impedance-export-") as scratch:
+                    reports = self.run_generation_step(
+                        "Generating controlled-impedance workbook and HTML report",
+                        export_impedance_reports,
+                        impedance_plan,
+                        report_board,
+                        self.pcbnew,
+                        Path(scratch),
+                    )
+                    if not verify_impedance(
+                        "Validating controlled-impedance review after report rendering",
+                        "Checking controlled impedance remains disabled after report rendering",
+                    ):
+                        return
+                    if impedance_plan is not _OMIT_IMPEDANCE_REPORTS:
+                        self.run_generation_step(
+                            "Validating controlled-impedance captures before archive",
+                            impedance_controls.verify_report_captures,
+                            impedance_plan,
+                            reports,
+                            report_board,
+                        )
+                    entries = (
+                        ()
+                        if impedance_plan is _OMIT_IMPEDANCE_REPORTS
+                        else (
+                            ArchiveEntry(reports.workbook, reports.workbook.name),
+                            ArchiveEntry(reports.html_report, reports.html_report.name),
+                        )
+                    )
+                    self.run_generation_step(
+                        "Creating Gerber archive (.zip)",
+                        self.fabrication.zip_gerber_excellon,
+                        entries,
+                    )
+            else:
+                if not verify_impedance(
+                    "Validating controlled-impedance review before Gerber archive",
+                    "Checking controlled impedance remains disabled before Gerber archive",
+                ):
+                    return
+                self.run_generation_step(
+                    "Creating Gerber archive (.zip)",
+                    self.fabrication.zip_gerber_excellon,
+                )
 
             self.run_generation_step(
                 "Generating placement file (CPL)",
@@ -3281,6 +3545,23 @@ class JLCPCBTools(wx.Frame):
             )
 
             if getattr(self, "_variant_controller", None):
+                if (
+                    reports is not None
+                    and impedance_plan is not _OMIT_IMPEDANCE_REPORTS
+                ):
+                    if not verify_impedance(
+                        "Validating controlled-impedance review before publication",
+                        "Checking controlled impedance remains disabled before publication",
+                    ):
+                        return
+                    if impedance_plan is not _OMIT_IMPEDANCE_REPORTS:
+                        self.run_generation_step(
+                            "Validating controlled-impedance captures before publication",
+                            impedance_controls.verify_report_captures,
+                            impedance_plan,
+                            reports,
+                            report_board,
+                        )
                 self._current_generation_step = "Publishing fabrication files"
                 self.report_generation_step(self._current_generation_step)
                 with (
