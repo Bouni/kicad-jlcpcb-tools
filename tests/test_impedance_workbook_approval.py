@@ -57,7 +57,7 @@ def test_bulk_approval_of_current_rows_survives_historical_image_hashes(
     old = open_dialog(config)
     _show_main(api, old)
     for section in old.preview_pane.sections:
-        old.preview_pane.select(old.preview_pane.sections.index(section))
+        old.preview_pane.select(old.preview_pane.entries.index(section))
         api.drain()
         api.paint(old.preview_pane)
     old.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)
@@ -271,7 +271,7 @@ def test_later_pixels_revoke_fresh_workbook_approval_in_same_dialog(
         )
         # The stateful ListCtrl setter delivers the production bound native
         # selection handler; painting separately records the actual new pixels.
-        dialog.preview_pane.select(dialog.preview_pane.sections.index(target))
+        dialog.preview_pane.checklist.Select(dialog.preview_pane.entries.index(target))
         api.drain()
         api.paint(dialog.preview_pane)
         assert dialog.preview_pane.selected_section == target

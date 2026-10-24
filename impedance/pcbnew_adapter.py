@@ -1,11 +1,13 @@
 """Copy live KiCad geometry into immutable impedance records."""
 
+from collections import OrderedDict
 from collections.abc import Iterable
 import hashlib
 import json
 import math
 from pathlib import Path
 import re
+from threading import Lock
 from typing import Any, Optional
 
 from .board_copy import BoardCopyError, _record_tokens, empty_board
@@ -31,6 +33,91 @@ _FLASH_READ_ERRORS = (
     RuntimeError,
     OverflowError,
 )
+_ContextRecordKey = tuple[int, str, Optional[tuple[str, ...]], str]
+
+
+class _ContextRecordCache:
+    """Bound successful pure normalization; never retain native state or freshness.
+
+    Keys contain exact freshly serialized text, the native collection, enabled
+    copper names and the context policy. Both keys and immutable results count
+    against the encoded payload limit. Oversized or unfamiliar inputs stay cold.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_entries: int = 4096,
+        max_bytes: int = 16 * 1024 * 1024,
+        max_entry_bytes: int = 1024 * 1024,
+    ) -> None:
+        self.max_entries = max_entries
+        self.max_bytes = max_bytes
+        self.max_entry_bytes = max_entry_bytes
+        self.entries: OrderedDict[_ContextRecordKey, tuple[Optional[str], int]] = (
+            OrderedDict()
+        )
+        self.payload_bytes = 0
+        self.lock = Lock()
+
+    def key(
+        self,
+        serialized: str,
+        collection: str,
+        copper_names: Optional[tuple[str, ...]],
+    ) -> Optional[_ContextRecordKey]:
+        """Admit only bounded plain immutable values with audited semantics."""
+        if (
+            type(serialized) is not str
+            or len(serialized) > self.max_entry_bytes
+            or collection
+            not in {"", "GetFootprints", "GetDrawings", "Groups", "Generators"}
+            or (
+                copper_names is not None
+                and any(type(name) is not str for name in copper_names)
+            )
+        ):
+            return None
+        return CONTEXT_POLICY_VERSION, collection, copper_names, serialized
+
+    def get(self, key: _ContextRecordKey) -> tuple[bool, Optional[str]]:
+        """Distinguish cached omitted drawings from a missing record."""
+        with self.lock:
+            entry = self.entries.get(key)
+            if entry is None:
+                return False, None
+            self.entries.move_to_end(key)
+            return True, entry[0]
+
+    def put(self, key: _ContextRecordKey, result: Optional[str]) -> None:
+        """Keep successful immutable results under strict entry/payload bounds."""
+        strings = (key[1], key[3]) + (key[2] or ())
+        if result is not None:
+            if type(result) is not str or len(result) > self.max_entry_bytes:
+                return
+            strings += (result,)
+        payload_bytes = sum(
+            len(value.encode("utf-8", errors="surrogatepass")) for value in strings
+        )
+        if self.max_entries <= 0 or payload_bytes > min(
+            self.max_entry_bytes, self.max_bytes
+        ):
+            return
+        with self.lock:
+            previous = self.entries.pop(key, None)
+            if previous is not None:
+                self.payload_bytes -= previous[1]
+            while self.entries and (
+                len(self.entries) >= self.max_entries
+                or self.payload_bytes + payload_bytes > self.max_bytes
+            ):
+                _, (_, removed_bytes) = self.entries.popitem(last=False)
+                self.payload_bytes -= removed_bytes
+            self.entries[key] = result, payload_bytes
+            self.payload_bytes += payload_bytes
+
+
+_CONTEXT_RECORD_CACHE = _ContextRecordCache()
 
 
 class BoardSnapshotError(RuntimeError):
@@ -95,11 +182,23 @@ def _is_arc(item: Any, pcbnew_module: Any) -> bool:
 
 def _feature_id(item: Any, data: tuple[Any, ...]) -> str:
     """Stable identity for one pad/via copper flash on one layer."""
+    return _feature_id_from_uuid(_feature_uuid(item), data)
+
+
+def _feature_uuid(item: Any) -> Optional[str]:
+    """Read one item-wide native UUID, preserving missing-UUID geometry fallback."""
     uuid = getattr(item, "m_Uuid", None)
     if uuid is not None and hasattr(uuid, "AsString"):
+        return f"{uuid.AsString()}"
+    return None
+
+
+def _feature_id_from_uuid(uuid: Optional[str], data: tuple[Any, ...]) -> str:
+    """Bind a freshly read native UUID or exact fallback geometry to one layer."""
+    if uuid is not None:
         # One physical item can flash multiple copper layers; bind the layer in.
         layer = data[1] if len(data) > 1 else ""
-        return f"{uuid.AsString()}:{layer}"
+        return f"{uuid}:{layer}"
     serialized = json.dumps(data, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(serialized.encode("ascii")).hexdigest()
 
@@ -158,16 +257,13 @@ def _copper_polygons(
     return tuple(polygons)
 
 
-def _arc_copper_polygons(
-    item: Any,
-    pcbnew_module: Any,
-    layer_id: int,
+def _arc_needs_copper_polygons(
     layer: str,
     net: str,
     endpoints: tuple[Point, Point],
     features: tuple[CopperFeature, ...],
-) -> tuple[CopperPolygon, ...]:
-    """Request native stroke proof only when a same-net flash could contain it."""
+) -> bool:
+    """Require stroke proof only when a same-net flash could contain both ends."""
     for feature in features:
         if feature.layer != layer or feature.net != net:
             continue
@@ -191,10 +287,25 @@ def _arc_copper_polygons(
             bounds[0] - 1 <= x <= bounds[2] + 1 and bounds[1] - 1 <= y <= bounds[3] + 1
             for x, y in endpoints
         ):
-            try:
-                return _copper_polygons(item, layer_id, pcbnew_module, outside=True)
-            except _FLASH_READ_ERRORS:
-                return ()
+            return True
+    return False
+
+
+def _arc_copper_polygons(
+    item: Any,
+    pcbnew_module: Any,
+    layer_id: int,
+    layer: str,
+    net: str,
+    endpoints: tuple[Point, Point],
+    features: tuple[CopperFeature, ...],
+) -> tuple[CopperPolygon, ...]:
+    """Request native stroke proof only when a same-net flash could contain it."""
+    if _arc_needs_copper_polygons(layer, net, endpoints, features):
+        try:
+            return _copper_polygons(item, layer_id, pcbnew_module, outside=True)
+        except _FLASH_READ_ERRORS:
+            return ()
     return ()
 
 
@@ -226,14 +337,21 @@ def _item_on_layer(item: Any, layer_id: int) -> bool:
 
 
 def _copper_features(
-    board: Any, pcbnew_module: Any, layers: dict[str, int]
+    board: Any,
+    pcbnew_module: Any,
+    layers: dict[str, int],
+    *,
+    tracks: Optional[Iterable[Any]] = None,
 ) -> tuple[CopperFeature, ...]:
-    """Collect pad and via copper flashes for covered-stub detection."""
+    """Collect fresh flashes, sharing item-wide values only inside this call."""
     features: list[CopperFeature] = []
-    for item in board.GetTracks():
+    for item in board.GetTracks() if tracks is None else tracks:
         if not _is_via(item, pcbnew_module):
             continue
         net = str(item.GetNetname()) if hasattr(item, "GetNetname") else ""
+        center: Optional[Point] = None
+        uuid: Optional[str] = None
+        uuid_read = False
         for layer_name, layer_id in layers.items():
             if not _item_on_layer(item, layer_id):
                 continue
@@ -241,12 +359,18 @@ def _copper_features(
                 # KiCad 10 padstacks may have different diameters on each layer.
                 # The inherited no-argument width is not physical-layer evidence.
                 width = int(item.GetWidth(layer_id))
-                center = _point(item.GetPosition())
+                if center is None:
+                    center = _point(item.GetPosition())
             except _FLASH_READ_ERRORS:
                 continue
             if width <= 0:
                 continue
-            feature_id = _feature_id(item, ("via", layer_name, net, width, center))
+            if not uuid_read:
+                uuid = _feature_uuid(item)
+                uuid_read = True
+            feature_id = _feature_id_from_uuid(
+                uuid, ("via", layer_name, net, width, center)
+            )
             features.append(
                 CopperFeature(
                     feature_id=feature_id,
@@ -267,6 +391,9 @@ def _copper_features(
             net = str(pad.GetNetname()) if hasattr(pad, "GetNetname") else ""
             number_getter = getattr(pad, "GetNumber", None)
             pad_number = str(number_getter()) if callable(number_getter) else ""
+            pad_rotation: Optional[float] = None
+            uuid = None
+            uuid_read = False
             for layer_name, layer_id in layers.items():
                 if not _item_on_layer(pad, layer_id):
                     continue
@@ -277,7 +404,11 @@ def _copper_features(
                     size_x, size_y = int(size.x), int(size.y)
                     center = _point(pad.ShapePos(layer_id))
                     shape = _pad_shape_name(pad.GetShape(layer_id), pcbnew_module)
-                    rotation = _pad_rotation_deg(pad)
+                    rotation = (
+                        _pad_rotation_deg(pad) if pad_rotation is None else pad_rotation
+                    )
+                    if math.isfinite(rotation):
+                        pad_rotation = rotation
                     radius = (
                         int(pad.GetRoundRectCornerRadius(layer_id))
                         if shape == "roundrect"
@@ -297,8 +428,11 @@ def _copper_features(
                     continue
                 if radius < 0 or radius * 2 > min(size_x, size_y):
                     continue
-                feature_id = _feature_id(
-                    pad,
+                if not uuid_read:
+                    uuid = _feature_uuid(pad)
+                    uuid_read = True
+                feature_id = _feature_id_from_uuid(
+                    uuid,
                     (
                         "pad",
                         layer_name,
@@ -620,6 +754,33 @@ def _footprint_context_record(
     )
 
 
+def _normalized_context_record(
+    serialized: str,
+    collection: str,
+    copper_names: Optional[Iterable[str]],
+) -> Optional[str]:
+    """Reuse pure parsing only after the caller freshly serializes a native item.
+
+    Settings, shown text, project files, copper geometry and zone readiness are
+    deliberately outside this memo. No result certifies that a board is fresh.
+    """
+    names = None if copper_names is None else tuple(copper_names)
+    key = _CONTEXT_RECORD_CACHE.key(serialized, collection, names)
+    if key is not None:
+        found, result = _CONTEXT_RECORD_CACHE.get(key)
+        if found:
+            return result
+    if collection == "GetFootprints":
+        result = _footprint_context_record(serialized, names)
+    elif collection == "GetDrawings":
+        result = _drawing_context_record(serialized, names)
+    else:
+        result = _without_fill_cache(serialized)
+    if key is not None:
+        _CONTEXT_RECORD_CACHE.put(key, result)
+    return result
+
+
 def _context_digest(
     board: Any,
     pcbnew_module: Any,
@@ -666,16 +827,12 @@ def _context_digest(
         serialized = str(formatter.GetStringOutput(True))
         # Cached plots contain the actual filled polygons. Omitting them from
         # the source revision could reuse old pixels after a live zone refill.
-        if collection == "GetFootprints":
-            records.append(_footprint_context_record(serialized, copper_names))
-        elif collection == "GetDrawings":
-            record = _drawing_context_record(serialized, copper_names)
-            if record is not None:
-                records.append(record)
-        elif collection == "Zones":
+        if collection == "Zones":
             records.append(serialized)
         else:
-            records.append(_without_fill_cache(serialized))
+            record = _normalized_context_record(serialized, collection, copper_names)
+            if record is not None:
+                records.append(record)
         zones = (
             (item,)
             if collection == "Zones"
@@ -727,10 +884,11 @@ def snapshot_board(
     """
     layers = copper_layers(board, pcbnew_module)
     names_by_id = {value: name for name, value in layers.items()}
-    features = _copper_features(board, pcbnew_module, layers)
+    track_items = tuple(board.GetTracks())
+    features = _copper_features(board, pcbnew_module, layers, tracks=track_items)
     traces = []
     vias = []
-    for item in board.GetTracks():
+    for item in track_items:
         if _is_via(item, pcbnew_module):
             vias.append(item)
             continue

@@ -56,7 +56,7 @@ def _content_width(api: SimpleNamespace, table: Any, column: int) -> int:
         for row in range(table.GetNumberRows()):
             dc.SetFont(table.GetCellFont(row, column))
             width = max(width, dc.GetTextExtent(table.GetCellValue(row, column))[0])
-        if column == 8:
+        if column in (8, 12):
             dc.SetFont(table.GetDefaultCellFont())
             width = max(width, dc.GetTextExtent("!=")[0])
         return width
@@ -66,7 +66,7 @@ def _content_width(api: SimpleNamespace, table: Any, column: int) -> int:
 
 def _assert_compact(api: SimpleNamespace, table: Any) -> None:
     """Fit complete current content with a single six-DIP clearance allowance."""
-    assert table.GetNumberCols() == 11
+    assert table.GetNumberCols() == 15
     for column in range(table.GetNumberCols()):
         content = _content_width(api, table, column)
         allocated = table.GetColSize(column)
@@ -166,6 +166,34 @@ def test_constructor_measures_populated_rows_once(
     assert dialog.sections.GetNumberRows() == 2
     assert measured_rows == [2]
     _assert_compact(api, dialog.sections)
+
+
+@pytest.mark.parametrize("empty", [False, True], ids=["single-ended", "empty"])
+def test_blank_comparison_columns_reserve_the_same_compact_marker_width(
+    draft_api: SimpleNamespace, empty: bool
+) -> None:
+    """Both comparison columns fit != even when all displayed markers are blank."""
+    api = draft_api
+    dialog = _open(api, _intent(api), _board(api))
+    table = dialog.sections
+    if empty:
+        table.SetItems(())
+    else:
+        assert table.GetNumberRows()
+        assert all(
+            table.GetCellValue(row, column) == ""
+            for row in range(table.GetNumberRows())
+            for column in (8, 11, 12, 13)
+        )
+    table.fit_columns()
+    _assert_compact(api, table)
+    dc = api.wx.ClientDC(table)
+    try:
+        dc.SetFont(table.GetDefaultCellFont())
+        expected = dc.GetTextExtent("!=")[0] + table.FromDIP(6)
+    finally:
+        del dc
+    assert table.GetColSize(8) == table.GetColSize(12) == expected
 
 
 def test_window_font_does_not_replace_distinct_header_and_body_font_metrics(
@@ -385,7 +413,9 @@ def test_autosize_failure_restores_labels_and_batch_before_retry(
     api = draft_api
     dialog = _open(api, _intent(api), _board(api))
     table = dialog.sections
-    labels = tuple(table.GetColLabelValue(column) for column in range(11))
+    labels = tuple(
+        table.GetColLabelValue(column) for column in range(table.GetNumberCols())
+    )
     state = _state(dialog)
 
     def fail(*_args: Any, **_options: Any) -> None:
@@ -398,7 +428,10 @@ def test_autosize_failure_restores_labels_and_batch_before_retry(
             table.fit_columns()
     assert not table.GetTable().measuring_cells
     assert table.GetBatchCount() == 0
-    assert tuple(table.GetColLabelValue(column) for column in range(11)) == labels
+    assert (
+        tuple(table.GetColLabelValue(column) for column in range(table.GetNumberCols()))
+        == labels
+    )
     assert _state(dialog) == state
     table.fit_columns()
     _assert_compact(api, table)

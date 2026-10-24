@@ -1,7 +1,7 @@
 """Immutable models and strict persistence for controlled-impedance intent."""
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 import re
 from typing import Any, Optional
 
@@ -236,7 +236,9 @@ class Config:
             included_section_ids=_strings(
                 data["included_section_ids"], "included section IDs"
             ),
-            review_tracking=review_tracking_from_dict(data["review_tracking"]),
+            review_tracking=review_tracking_from_dict(
+                data["review_tracking"], version=version
+            ),
             stackup=(
                 stackup_from_dict(data["stackup"])
                 if data["stackup"] is not None
@@ -359,6 +361,16 @@ def format_length(value_nm: int, unit: str = "mm") -> str:
         context.prec = 40
         result = format(Decimal(value_nm) / UNIT_NM[unit], "f")
     return result.rstrip("0").rstrip(".") if "." in result else result
+
+
+def format_workbook_length(value_nm: int) -> str:
+    """Round signed workbook dimensions to five mm decimals without a unit suffix."""
+    with localcontext() as context:
+        context.prec = max(40, len(str(abs(value_nm))) + 12)
+        millimetres = Decimal(value_nm) / Decimal(1_000_000)
+        rounded = millimetres.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+        text = format(rounded, "f") if rounded else "0"
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def _specification_dict(spec: Specification) -> dict[str, Any]:

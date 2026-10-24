@@ -17,7 +17,12 @@ from impedance.model import (
     validate_storage_config,
 )
 from impedance.repository import ImpedanceRepository
-from impedance.review_tracking import ImageView, LayerApproval, ReviewTracking
+from impedance.review_tracking import (
+    ImageView,
+    LayerApproval,
+    ReviewTracking,
+    SpacingImageReview,
+)
 
 
 def _approved_config() -> Config:
@@ -55,7 +60,7 @@ def _legacy_payload(version: int) -> dict[str, Any]:
     payload["schema_version"] = version
     payload.pop("reviewed_captures")
     if version < 7:
-        payload["review_tracking"].pop("spacing_images", None)
+        payload["review_tracking"].pop("spacing_images")
     if version < 6:
         for spec in payload["specifications"]:
             spec.pop("linked_layer_groups")
@@ -94,7 +99,7 @@ def test_workbook_capture_consent_survives_actual_database_reopening(
     assert restored.review_tracking == config.review_tracking
 
 
-@pytest.mark.parametrize("version", [4, 5, 6])
+@pytest.mark.parametrize("version", [4, 5, 6, 7])
 def test_old_schemas_do_not_invent_workbook_pixel_evidence(version: int) -> None:
     """Legacy approval and image history cannot imply a new independent baseline."""
     payload = _legacy_payload(version)
@@ -113,6 +118,37 @@ def test_current_schema_requires_explicit_workbook_capture_field() -> None:
     payload.pop("reviewed_captures")
     with pytest.raises(ValidationError, match="missing or unknown fields"):
         Config.from_dict(payload)
+
+
+def test_schema_seven_spacing_approval_remains_unchanged() -> None:
+    """Adding workbook evidence must not alter existing diagnostic consent."""
+    timestamp = "2026-10-29T12:34:56.000000Z"
+    config = _approved_config()
+    config = replace(
+        config,
+        review_tracking=replace(
+            config.review_tracking,
+            spacing_images=(
+                SpacingImageReview(
+                    "rf",
+                    "F.Cu",
+                    "issue-a",
+                    "view-a",
+                    "f" * 64,
+                    "a" * 64,
+                    timestamp,
+                    "a" * 64,
+                    timestamp,
+                ),
+            ),
+        ),
+    )
+    payload = config.to_dict()
+    payload["schema_version"] = 7
+    payload.pop("reviewed_captures")
+    restored = Config.from_dict(payload)
+    assert restored.reviewed_captures == ()
+    assert restored.review_tracking == config.review_tracking
 
 
 def test_empty_workbook_evidence_is_valid_for_drafts_and_legacy_approval() -> None:

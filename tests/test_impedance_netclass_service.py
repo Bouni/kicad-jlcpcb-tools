@@ -15,8 +15,13 @@ from fabrication_archive import ArchiveEntry, build_archive
 from impedance import html_report, service, workbook
 from impedance.matching import analyze, preview_sections
 from impedance.model import BoardSnapshot, Config, LayerSettings, Section, Specification
+from impedance.review_tracking import SpacingImageReview, spacing_capture_fingerprint
+from impedance.spacing_checks import SpacingContext
+from impedance.spacing_review import SpacingReviewEntry, spacing_review_entries
 from tests.rf_impedance_fixtures import COPPER_LAYERS, RF_CASES, RFCase
 from tests.test_impedance_workbook import _NS, _png
+
+SPACING_PNG = _png(1200, 800)
 
 
 def _class_plan(case: RFCase) -> service.ExportPlan:
@@ -56,9 +61,39 @@ def _class_plan(case: RFCase) -> service.ExportPlan:
         reviewed_digest=analysis.digest,
         included_section_ids=tuple(section.section_id for section in analysis.sections),
     )
+    # This export-orchestration fixture supplies explicit prior diagnostic
+    # consent. Native UI tests separately exercise viewing and approval events.
+    spacing_images = []
+    capture = service.CapturedImage.from_bytes(SPACING_PNG)
+    spacing_context = SpacingContext(snapshot)
+    for entry in spacing_review_entries(
+        config, snapshot, analysis.sections, context=spacing_context
+    ):
+        digest = spacing_capture_fingerprint(entry.input_digest, capture.sha256)
+        spacing_images.append(
+            SpacingImageReview(
+                entry.spec_id,
+                entry.layer,
+                entry.issue_id,
+                entry.view_id,
+                entry.input_digest,
+                digest,
+                "2026-10-24T12:00:00.000001Z",
+                digest,
+                "2026-10-24T12:01:00.000001Z",
+            )
+        )
+    config = replace(
+        config,
+        review_tracking=replace(
+            config.review_tracking, spacing_images=tuple(spacing_images)
+        ),
+    )
     # Reopening the persisted payload must preserve the same approved rows.
     reopened = Config.from_dict(config.to_dict())
-    plan = service.prepare(reopened, snapshot, layer_count=6)
+    plan = service.prepare(
+        reopened, snapshot, layer_count=6, spacing_context=spacing_context
+    )
     assert plan is not None
     return plan
 
@@ -106,6 +141,19 @@ def test_netclass_export_resolves_each_layers_fields_in_real_workbook_and_archiv
             """End native resource scope before XLSX generation."""
             assert not self.closed
             self.closed = True
+
+        def render_spacing(
+            self,
+            entry: SpacingReviewEntry,
+            destination: Path,
+            width_px: int,
+            height_px: int,
+        ) -> Path:
+            """Reproduce the exact independent image explicitly approved above."""
+            assert not self.closed
+            assert (width_px, height_px) == (entry.width_px, entry.height_px)
+            destination.write_bytes(SPACING_PNG)
+            return destination
 
     renderer = Renderer()
 

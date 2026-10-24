@@ -197,9 +197,10 @@ def test_native_two_class_workbook_button_updates_status_idle_save_and_reopen(
             _wait_for_images(wx, draft)
             assert len(draft.session.analysis.sections) == 4
             assert len(draft.session.included) == 3
+            assert not draft.session.pending_spacing_reviews
             _assert_class_statuses(wx, draft, approved=False)
             for section in draft.preview_pane.sections:
-                draft.preview_pane.select(draft.preview_pane.sections.index(section))
+                draft.preview_pane.select(draft.preview_pane.entries.index(section))
                 wait_until(wx, lambda: draft.preview_pane.displayed)
             _click(wx, draft.FindWindow(wx.ID_OK))
 

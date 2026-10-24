@@ -951,6 +951,28 @@ def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
         if uses_pairs
         else {}
     )
+    spacing_context: dict[str, Any] = {}
+    if uses_pairs:
+        from .review_tracking import spacing_review_context
+        from .spacing_checks import spacing_input_digest
+
+        spacing_context["spacing_checks"] = [
+            (
+                spec.spec_id,
+                layer,
+                spacing_review_context(spec, layer, ordered),
+                spacing_input_digest(snapshot, spec, layer),
+            )
+            for spec in sorted(config.specifications, key=lambda item: item.spec_id)
+            if spec.kind.startswith("differential")
+            for layer in sorted(
+                {
+                    section.layer
+                    for section in ordered
+                    if section.spec_id == spec.spec_id
+                }
+            )
+        ]
     # Preserve section IDs so historical row approvals remain identifiable.
     # A separate exclusion-policy revision invalidates current approval when
     # corrected containment changes exportable rows without changing geometry.
@@ -979,6 +1001,7 @@ def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
             "width_results": width_results_fingerprint(config.width_results),
             **class_context,
             **pair_context,
+            **spacing_context,
         }
     )
     return Analysis(ordered, digest, tuple(sorted(warnings)))

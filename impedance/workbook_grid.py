@@ -18,17 +18,21 @@ else:
 
 from .width_checks import COVERED_STUB_COLOUR, WIDTH_MISMATCH_COLOUR
 
-_COLUMN_COUNT = 11
+_COLUMN_COUNT = 15
 _WIDTH_COLUMN = 7
 _COMPARISON_COLUMN = 8
 _TARGET_WIDTH_COLUMN = 9
+_PAIR_SPACING_COLUMN = 11
+_SPACING_COMPARISON_COLUMN = 12
+_TARGET_SPACING_COLUMN = 13
+_SPACING_CHECK_COLUMN = 14
 _PADDING_DIP = 6
 
 
 def workbook_cell_colour(
     values: Sequence[object], column: int
 ) -> Optional[tuple[int, int, int]]:
-    """Mute covered stubs; otherwise highlight only mismatching width cells."""
+    """Mute covered stubs and highlight dimensional warnings in their own cells."""
     if values[_WIDTH_COLUMN] == "Covered stub":
         return COVERED_STUB_COLOUR
     if (
@@ -36,11 +40,27 @@ def workbook_cell_colour(
         and values[_COMPARISON_COLUMN] == "!="
     ):
         return WIDTH_MISMATCH_COLOUR
+    if (
+        column
+        in (
+            _PAIR_SPACING_COLUMN,
+            _SPACING_COMPARISON_COLUMN,
+            _TARGET_SPACING_COLUMN,
+        )
+        and values[_SPACING_COMPARISON_COLUMN] == "!="
+    ):
+        return WIDTH_MISMATCH_COLOUR
+    if column == _SPACING_CHECK_COLUMN and values[column] not in (
+        "",
+        "Match",
+        "Terminal transitions",
+    ):
+        return WIDTH_MISMATCH_COLOUR
     return None
 
 
 class _WorkbookTable(gridlib.GridTableBase):
-    """Keep the eleven logical columns independent of available viewport width."""
+    """Keep the logical columns independent of available viewport width."""
 
     def __init__(self, labels: tuple[str, ...]) -> None:
         super().__init__()
@@ -105,7 +125,7 @@ class _WorkbookCellRenderer(gridlib.GridCellRenderer):
         col: int,
         isSelected: bool,
     ) -> None:
-        """Paint native selection text or unselected width/stub cues over row fills."""
+        """Paint native selection text or unselected dimension/stub cues over fills."""
         background = (
             grid.GetSelectionBackground()
             if isSelected
@@ -170,7 +190,9 @@ class WorkbookGrid(gridlib.Grid):
         on_select: Optional[Callable[[int], None]] = None,
     ) -> None:
         if len(labels) != _COLUMN_COUNT:
-            raise ValueError("The workbook grid requires exactly eleven columns.")
+            raise ValueError(
+                f"The workbook grid requires exactly {_COLUMN_COUNT} columns."
+            )
         super().__init__(parent, style=wx.WANTS_CHARS)
         self.SetCanFocus(False)
         self._on_include = on_include
@@ -178,6 +200,7 @@ class WorkbookGrid(gridlib.Grid):
         self._selected_row = wx.NOT_FOUND
         self._selecting = False
         self._row_epoch = 0
+        self._pending_selection: Optional[tuple[int, int]] = None
         self._table = _WorkbookTable(labels)
         self.SetTable(self._table, takeOwnership=True, selmode=gridlib.Grid.SelectRows)
         self.SetRowLabelSize(0)
@@ -210,6 +233,20 @@ class WorkbookGrid(gridlib.Grid):
         """Return selection independently of wx's retained cursor on an empty grid."""
         return self._selected_row
 
+    def GetPendingSelectedRow(self) -> int:
+        """Expose a real user choice that has not reached the parent's preview yet."""
+        if (
+            self
+            and self._pending_selection == (self._selected_row, self._row_epoch)
+            and 0 <= self._selected_row < self.GetItemCount()
+        ):
+            return self._selected_row
+        return wx.NOT_FOUND
+
+    def CancelPendingSelection(self) -> None:
+        """Revoke queued navigation when its owner clears or closes the review."""
+        self._pending_selection = None
+
     def SelectRow(
         self,
         row: int,
@@ -223,6 +260,7 @@ class WorkbookGrid(gridlib.Grid):
             if not 0 <= row < self.GetItemCount():
                 super().ClearSelection()
                 self._selected_row = wx.NOT_FOUND
+                self.CancelPendingSelection()
                 return
             self._selected_row = row
             super().SelectRow(row, addToSelected=False)
@@ -235,26 +273,21 @@ class WorkbookGrid(gridlib.Grid):
     def DeleteAllItems(self) -> None:
         """Invalidate queued callbacks before replacing the parent-owned row projection."""
         self._row_epoch += 1
+        self.CancelPendingSelection()
         self._selected_row = wx.NOT_FOUND
         count = len(self._table.rows)
         self._table.rows.clear()
         if count:
-            self.ProcessTableMessage(
-                gridlib.GridTableMessage(
-                    self._table, gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, 0, count
-                )
-            )
+            self._notify_rows(gridlib.GRIDTABLE_NOTIFY_ROWS_DELETED, 0, count)
 
     def AppendItem(self, values: list[object]) -> None:
         """Append exactly one workbook row and install its persistent colour cues."""
         if len(values) != self.GetColumnCount():
-            raise ValueError("Each workbook row requires exactly eleven values.")
-        self._table.rows.append(list(values))
-        self.ProcessTableMessage(
-            gridlib.GridTableMessage(
-                self._table, gridlib.GRIDTABLE_NOTIFY_ROWS_APPENDED, 1
+            raise ValueError(
+                f"Each workbook row requires exactly {_COLUMN_COUNT} values."
             )
-        )
+        self._table.rows.append(list(values))
+        self._notify_rows(gridlib.GRIDTABLE_NOTIFY_ROWS_APPENDED, 1)
         row = self.GetItemCount() - 1
         self._apply_row_text_colours(row)
 
@@ -262,17 +295,26 @@ class WorkbookGrid(gridlib.Grid):
         """Replace complete rows with one deletion and one append notification."""
         values = [list(row) for row in rows]
         if any(len(row) != self.GetColumnCount() for row in values):
-            raise ValueError("Each workbook row requires exactly eleven values.")
+            raise ValueError(
+                f"Each workbook row requires exactly {_COLUMN_COUNT} values."
+            )
         self.DeleteAllItems()
         self._table.rows.extend(values)
         if values:
-            self.ProcessTableMessage(
-                gridlib.GridTableMessage(
-                    self._table, gridlib.GRIDTABLE_NOTIFY_ROWS_APPENDED, len(values)
-                )
-            )
+            self._notify_rows(gridlib.GRIDTABLE_NOTIFY_ROWS_APPENDED, len(values))
             for row in range(len(values)):
                 self._apply_row_text_colours(row)
+
+    def _notify_rows(self, message: int, *arguments: int) -> None:
+        """Keep wx's programmatic cursor changes from queuing user navigation."""
+        selecting = self._selecting
+        self._selecting = True
+        try:
+            self.ProcessTableMessage(
+                gridlib.GridTableMessage(self._table, message, *arguments)
+            )
+        finally:
+            self._selecting = selecting
 
     def _apply_row_text_colours(self, row: int) -> None:
         """Keep diagnostic attributes native; ordinary text inherits the palette."""
@@ -318,7 +360,7 @@ class WorkbookGrid(gridlib.Grid):
                 content_width = max(0, widths[col] - native_padding)
                 if col == 0:
                     content_width = max(content_width, checkbox.width)
-                elif col == _COMPARISON_COLUMN:
+                elif col in (_COMPARISON_COLUMN, _SPACING_COMPARISON_COLUMN):
                     content_width = max(content_width, marker_width)
                 width = max(header_width, content_width) + padding
                 self.SetColMinimalWidth(col, width)
@@ -359,10 +401,12 @@ class WorkbookGrid(gridlib.Grid):
         """Publish only the latest valid user selection after wx finishes its event."""
         if (
             self
+            and self._pending_selection == (row, epoch)
             and epoch == self._row_epoch
             and row == self._selected_row
             and 0 <= row < self.GetItemCount()
         ):
+            self.CancelPendingSelection()
             # wx's default Left/Right/Tab navigation clears the native row
             # selection before moving its cursor. Restore single-row selection
             # after that event, preserving the resulting column and viewport.
@@ -379,7 +423,13 @@ class WorkbookGrid(gridlib.Grid):
                     self.SelectRow(row, column=self.GetGridCursorCol())
                 else:
                     self._selected_row = row
+                    self._pending_selection = row, epoch
                     self._notify_selection(row, epoch)
+
+    def _queue_selection(self, row: int) -> None:
+        """Retain explicit intent until deferred navigation or a parent row refresh."""
+        self._pending_selection = row, self._row_epoch
+        wx.CallAfter(self._notify_selection, row, self._row_epoch)
 
     def _select_user_row(self, row: int, col: Optional[int] = None) -> None:
         """Select one row and defer preview navigation beyond the native event stack."""
@@ -391,7 +441,7 @@ class WorkbookGrid(gridlib.Grid):
             finally:
                 self._selecting = False
         self.MakeCellVisible(row, max(0, self.GetGridCursorCol()))
-        wx.CallAfter(self._notify_selection, row, self._row_epoch)
+        self._queue_selection(row)
 
     def _toggle_user_row(self, row: int) -> None:
         """Commit inclusion before another action can replace the row projection.
@@ -412,7 +462,7 @@ class WorkbookGrid(gridlib.Grid):
             and 0 <= event.GetRow() < self.GetItemCount()
         ):
             self._selected_row = event.GetRow()
-            wx.CallAfter(self._notify_selection, self._selected_row, self._row_epoch)
+            self._queue_selection(self._selected_row)
         event.Skip()
 
     def _on_cell_click(self, event: gridlib.GridEvent) -> None:

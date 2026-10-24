@@ -248,6 +248,7 @@ def harness(
             skip_stub_review: Optional[Callable[[], bool]] = None,
             verify_captures: Optional[Callable[..., Any]] = None,
             prepare_capture: Optional[Callable[..., Any]] = None,
+            verify_spacing_captures: Optional[Callable[..., Any]] = None,
         ) -> None:
             if state.dialog_error is not None:
                 raise state.dialog_error
@@ -265,6 +266,7 @@ def harness(
             self.verify_snapshot = verify_snapshot
             self.verify_captures = verify_captures
             self.prepare_capture = prepare_capture
+            self.verify_spacing_captures = verify_spacing_captures
             self.save_config = save_config
             self.appearance_context = appearance_context
             self.load_stackup_catalog = load_stackup_catalog

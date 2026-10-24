@@ -13,7 +13,7 @@ import hashlib
 from pathlib import Path
 import re
 import struct
-from typing import Any
+from typing import Any, Optional
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 import zlib
@@ -35,6 +35,12 @@ from impedance.model import (
     Specification,
     Trace,
     ValidationError,
+)
+from impedance.stackup_model import (
+    Stackup,
+    StackupLayer,
+    WidthResult,
+    calculation_fingerprint,
 )
 
 _DRAWING = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
@@ -100,6 +106,105 @@ def _html_images(path: Path) -> list[bytes]:
             path.read_text(encoding="utf-8"),
         )
     ]
+
+
+def _spacing_plan(actual_gap_nm: int) -> service.ExportPlan:
+    """Build reviewed equal-width differential copper with an explicit gap target."""
+    width_nm = 150_000
+    separation_nm = width_nm + actual_gap_nm
+    snapshot = BoardSnapshot(
+        ("F.Cu", "B.Cu"),
+        (
+            Trace("plus", "F.Cu", "USB_D+", width_nm, ((0, 0), (10_000_000, 0))),
+            Trace(
+                "minus",
+                "F.Cu",
+                "USB_D-",
+                width_nm,
+                ((0, separation_nm), (10_000_000, separation_nm)),
+            ),
+        ),
+        net_classes=("USB",),
+        net_class_context_digest="usb-class-constraints",
+        net_class_memberships=(("USB_D+", ("USB",)), ("USB_D-", ("USB",))),
+        differential_pairs=(("USB_D+", "USB_D-"),),
+    )
+    spec = Specification(
+        "usb",
+        "USB pair",
+        "90",
+        "differential",
+        "USB",
+        (LayerSettings("F.Cu", ("B.Cu",), 150_000),),
+    )
+    stackup = Stackup(
+        "sample",
+        "Sample two-layer construction",
+        2,
+        "0.324",
+        "1",
+        "",
+        calculator_id="sample-calculator",
+        layers=(
+            StackupLayer("L1", "copper", "0.035"),
+            StackupLayer("Core", "core", "0.254", "FR4", "4.2"),
+            StackupLayer("L2", "copper", "0.035"),
+        ),
+    )
+    config = Config(
+        enabled=True,
+        specifications=(spec,),
+        stackup=stackup,
+        width_results=(
+            WidthResult(
+                spec_id=spec.spec_id,
+                layer="F.Cu",
+                input_digest=calculation_fingerprint(stackup, spec, "F.Cu"),
+                status="success",
+                target_width_nm=width_nm,
+                calculated_at_utc="2026-09-23T00:00:00.000000Z",
+                model="DiffEdgeCoupledCoatedMicrostrip1B",
+                calculation_digest="a" * 64,
+            ),
+        ),
+    )
+    analysis = analyze(config, snapshot)
+    assert len(analysis.sections) == 1
+    config = replace(
+        config,
+        reviewed_digest=analysis.digest,
+        included_section_ids=(analysis.sections[0].section_id,),
+    )
+    # These are writer/measurement fixtures, deliberately before diagnostic
+    # approval. Boundary tests exercise prepare() with actual review evidence.
+    return service.ExportPlan(config, snapshot, analysis, analysis.sections)
+
+
+@pytest.mark.parametrize("actual_gap_nm", [100_000, 250_000])
+def test_reports_warn_when_pair_gap_differs_despite_matching_widths(
+    tmp_path: Path, actual_gap_nm: int
+) -> None:
+    """Matching nominal widths cannot conceal a too-tight or too-wide pair gap."""
+    plan = _spacing_plan(actual_gap_nm)
+    rows = service.report_rows(plan, (service.CapturedImage.from_bytes(_png()),))
+    assert rows[0].width_check is not None
+    assert rows[0].width_check.status == "matches_nominal"
+    output = html_report.write_html_report(rows, tmp_path / "spacing.html")
+    markup = output.read_text(encoding="utf-8")
+    assert "Pair spacing" in markup
+    assert "Deviation" in markup
+    assert rows[0].spacing_check is not None
+    assert rows[0].spacing_check.verdict == "deviation"
+    assert rows[0].spacing_check.coverage == "complete"
+    assert rows[0].spacing_check.declared_spacing_nm == 150_000
+    minimum = rows[0].spacing_check.minimum_gap_nm
+    maximum = rows[0].spacing_check.maximum_gap_nm
+    assert minimum is not None and maximum is not None
+    assert minimum.lower_nm <= actual_gap_nm <= minimum.upper_nm
+    assert maximum.lower_nm <= actual_gap_nm <= maximum.upper_nm
+    assert "Declared pair spacing" in markup
+    expected_deviation = "-0.05" if actual_gap_nm == 100_000 else "+0.1"
+    assert f"Minimum deviation: {expected_deviation} mm" in markup
 
 
 def test_captured_image_is_immutable_and_fingerprints_exact_bytes() -> None:
@@ -566,6 +671,13 @@ def test_export_pipeline_loads_each_capture_once_and_shares_canonical_rows(
 
         closed = False
 
+        def viewport(
+            self, section: Section, *, width_px: int, height_px: int
+        ) -> tuple[float, float, float, float]:
+            """Expose the same physical viewport contract as the native renderer."""
+            left, top, right, bottom = section.bounds
+            return float(left), float(top), float(right - left), float(bottom - top)
+
         def render(
             self, section: Section, destination: Path, width_px: int, height_px: int
         ) -> Path:
@@ -585,10 +697,15 @@ def test_export_pipeline_loads_each_capture_once_and_shares_canonical_rows(
 
     renderer = Renderer()
 
-    def load_once(_cls: type, path: Path) -> service.CapturedImage:
+    def load_once(
+        _cls: type,
+        path: Path,
+        *,
+        viewport_nm: Optional[tuple[float, float, float, float]] = None,
+    ) -> service.CapturedImage:
         """Count actual file capture loads without replacing their implementation."""
         loads.append(path)
-        return original_load(path)
+        return original_load(path, viewport_nm=viewport_nm)
 
     def write_xlsx(rows: Sequence[service.ReportRow], destination: Path) -> Path:
         """Remove temporary sources after embedding the canonical captures."""
@@ -619,6 +736,10 @@ def test_export_pipeline_loads_each_capture_once_and_shares_canonical_rows(
     assert loads == paths
     assert len(seen) == 2 and seen[0] is seen[1]
     assert all(isinstance(row, service.ReportRow) for row in seen[0])
+    assert [row.image.viewport_nm for row in seen[0]] == [
+        renderer.viewport(section, width_px=800, height_px=420)
+        for section in plan.sections
+    ]
     expected = [row.image.data for row in seen[0]]
     assert _media(artifacts.workbook) == _html_images(artifacts.html_report) == expected
 

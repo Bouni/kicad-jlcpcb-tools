@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,45 @@ if TYPE_CHECKING:
     from impedance.model import Config
 
 draft_api = _draft_api
+
+_LABELS = (
+    "Incl.",
+    "Row",
+    "Layer",
+    "Net class",
+    "Target Ω",
+    "Length",
+    "Net",
+    "Width",
+    "",
+    "Target width",
+    "Segments",
+    "Pair spacing",
+    "",
+    "Target spacing",
+    "Spacing check",
+)
+
+
+def _comparison_row(*, width_mismatch: bool, spacing_mismatch: bool) -> list[object]:
+    """Describe independent routed and target dimensions in the workbook schema."""
+    return [
+        True,
+        "1",
+        "F.Cu",
+        "USB",
+        "90",
+        "2 mm",
+        "USB_P / USB_N",
+        "0.15 mm",
+        "!=" if width_mismatch else "",
+        "0.18 mm" if width_mismatch else "0.15 mm",
+        "2",
+        "0.25 mm" if spacing_mismatch else "0.2 mm",
+        "!=" if spacing_mismatch else "",
+        "0.2 mm",
+        "Deviation" if spacing_mismatch else "Match",
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +100,74 @@ def _paint(
     return dc.brush, getattr(dc, "foreground", None)
 
 
+@pytest.mark.parametrize("width_mismatch", [False, True])
+@pytest.mark.parametrize("spacing_mismatch", [False, True])
+def test_width_and_spacing_warning_triplets_are_independent(
+    draft_api: SimpleNamespace, width_mismatch: bool, spacing_mismatch: bool
+) -> None:
+    """Each comparison colors its values and marker without tinting its neighbor."""
+    api = draft_api
+    grid_api = importlib.import_module(api.dialog.__package__ + ".workbook_grid")
+    values = _comparison_row(
+        width_mismatch=width_mismatch, spacing_mismatch=spacing_mismatch
+    )
+    for column in range(len(_LABELS)):
+        warning = (width_mismatch and column in (7, 8, 9)) or (
+            spacing_mismatch and column in (11, 12, 13, 14)
+        )
+        assert grid_api.workbook_cell_colour(values, column) == (
+            (180, 140, 0) if warning else None
+        ), (column, width_mismatch, spacing_mismatch)
+
+
+def test_spacing_mismatch_refresh_clears_and_restores_native_attributes_and_paint(
+    draft_api: SimpleNamespace,
+) -> None:
+    """Replacing rows removes old spacing warnings while selection stays native."""
+    api = draft_api
+    grid_api = importlib.import_module(api.dialog.__package__ + ".workbook_grid")
+    grid = grid_api.WorkbookGrid(None, _LABELS)
+    view = SimpleNamespace(sections=grid)
+    for mismatch in (True, False, True):
+        grid.SetItems(
+            [_comparison_row(width_mismatch=False, spacing_mismatch=mismatch)]
+        )
+        grid.fit_columns()
+        for column in range(grid.GetNumberCols()):
+            expected = (
+                (180, 140, 0)
+                if mismatch and column in (11, 12, 13, 14)
+                else grid.GetDefaultCellTextColour()
+            )
+            assert grid.GetCellTextColour(0, column) == expected
+            if column:
+                assert _paint(api, view, 0, column)[1] == expected
+                assert _paint(api, view, 0, column, selected=True)[1] == (
+                    grid.GetSelectionForeground()
+                )
+
+
+def test_covered_stub_colour_has_priority_over_both_dimension_warnings(
+    draft_api: SimpleNamespace,
+) -> None:
+    """A stub remains muted across all fifteen cells even with warning markers."""
+    api = draft_api
+    grid_api = importlib.import_module(api.dialog.__package__ + ".workbook_grid")
+    values = _comparison_row(width_mismatch=True, spacing_mismatch=True)
+    values[7] = "Covered stub"
+    grid = grid_api.WorkbookGrid(None, _LABELS)
+    grid.AppendItem(values)
+    grid.fit_columns()
+    view = SimpleNamespace(sections=grid)
+    for column in range(grid.GetNumberCols()):
+        assert grid.GetCellTextColour(0, column) == (120, 120, 120)
+        if column:
+            assert _paint(api, view, 0, column)[1] == (120, 120, 120)
+            assert _paint(api, view, 0, column, selected=True)[1] == (
+                grid.GetSelectionForeground()
+            )
+
+
 @pytest.mark.parametrize(
     "background,foreground,stripe",
     [
@@ -87,7 +195,7 @@ def test_all_columns_share_variant_style_stripes_and_native_selection(
                 if selected
                 else (stripe if row else background)
             )
-            for column in range(11):
+            for column in range(grid.GetNumberCols()):
                 fill, text = _paint(api, dialog, row, column, selected=selected)
                 assert fill == expected, (row, column, selected)
                 if not selected and row == 0:
@@ -96,6 +204,33 @@ def test_all_columns_share_variant_style_stripes_and_native_selection(
                     assert text == (
                         grid.GetSelectionForeground() if selected else foreground
                     )
+
+
+@pytest.mark.parametrize(
+    "status,warning",
+    [
+        ("Terminal transitions", False),
+        ("Match", False),
+        ("Deviation", True),
+        ("Unverified", True),
+    ],
+)
+def test_transition_spacing_status_uses_ordinary_text_instead_of_warning(
+    draft_api: SimpleNamespace, status: str, warning: bool
+) -> None:
+    """An informational transition result stays quiet through real grid drawing."""
+    api = draft_api
+    dialog = _open(api, _intent(api), _board(api))
+    grid = dialog.sections
+    rows = [list(row) for row in grid.GetTable().rows]
+    rows[0][14] = status
+    grid.SetItems(rows)
+    assert _paint(api, dialog, 0, 14)[1] == (
+        (180, 140, 0) if warning else grid.GetDefaultCellTextColour()
+    )
+    assert _paint(api, dialog, 0, 14, selected=True)[1] == grid.GetSelectionForeground()
+    for column in (11, 12, 13):
+        assert _paint(api, dialog, 0, column)[1] == grid.GetDefaultCellTextColour()
 
 
 @pytest.mark.parametrize(
@@ -140,7 +275,7 @@ def test_native_selection_text_overrides_warning_and_stub_colours(
                 if selected
                 else ((230, 230, 230) if row % 2 else (255, 255, 255))
             )
-            for column in range(11):
+            for column in range(dialog.sections.GetNumberCols()):
                 fill, text = _paint(api, dialog, row, column, selected=selected)
                 assert fill == expected_fill
                 if column:

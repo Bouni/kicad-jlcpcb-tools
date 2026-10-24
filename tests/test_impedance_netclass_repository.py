@@ -61,6 +61,7 @@ def _current_payload() -> dict[str, Any]:
     """Add current editing metadata while keeping historical fixtures exact."""
     payload = _netclass_payload(8)
     payload["reviewed_captures"] = []
+    payload["review_tracking"]["spacing_images"] = []
     for spec in payload["specifications"]:
         spec.update(linked_layer_groups=[], independent_layers=[])
     return payload

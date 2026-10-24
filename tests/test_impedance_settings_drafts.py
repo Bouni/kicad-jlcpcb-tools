@@ -19,6 +19,7 @@ from tests.test_impedance_netclass_dialog import (
     choose_class,
     choose_layer,
     class_snapshot,
+    constructor_api as _constructor_api,
     view_all_rows,
 )
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from impedance.dialog import SpecificationDialog
     from impedance.model import BoardSnapshot, Specification
 
-constructor_api = dialog_tests.constructor_api
+constructor_api = _constructor_api
 
 
 def _apply(api: SimpleNamespace, dialog: SpecificationDialog) -> None:

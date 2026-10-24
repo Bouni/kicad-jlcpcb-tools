@@ -22,8 +22,14 @@ from tests.wx_harness import FakeWxModule, temporary_modules
 class Control:
     """Retain choice, bitmap, layout and event state through real constructors."""
 
+    standard_button_ids: tuple[int, ...] = ()
+
     def __init__(self, parent: object = None, **kwargs: Any) -> None:
         self.parent = parent
+        self.children: list[Control] = []
+        if isinstance(parent, Control):
+            parent.children.append(self)
+        self.position = (0, 0)
         self.label = kwargs.get("label", "")
         self.title = kwargs.get("title", self.label)
         self.bitmap = kwargs.get("bitmap")
@@ -41,6 +47,7 @@ class Control:
         self.shown = self.alive = self.on_screen = True
         self.refreshes = 0
         self.drawn: list[tuple[Image, int, int]] = []
+        self.annotations: list[tuple[str, object]] = []
         self.columns: list[tuple[str, int]] = []
         self.cells: dict[tuple[int, int], str] = {}
         self.colours: dict[int, object] = {}
@@ -54,6 +61,10 @@ class Control:
     def Show(self, shown: bool = True) -> None:
         """Retain the visibility changed by the owner."""
         self.shown = shown
+
+    def Hide(self) -> None:
+        """Retain native hidden state when no issue navigation is needed."""
+        self.Show(False)
 
     def IsShownOnScreen(self) -> bool:
         """Require the canvas and all owning panels to be visible."""
@@ -227,9 +238,42 @@ class Control:
         """Keep layout observable without generating synthetic resize events."""
         self.laid_out = True
 
+    def GetSize(self) -> SimpleNamespace:
+        """Measure the fixture's explicitly modeled image and native chrome."""
+        width, height = (
+            self.canvas.minimum_size if hasattr(self, "canvas") else self.client_size
+        )
+        return SimpleNamespace(
+            GetWidth=lambda: width + 20, GetHeight=lambda: height + 180
+        )
+
+    def SetPosition(self, position: tuple[int, int]) -> None:
+        """Retain the fitted top-level position within the modeled display."""
+        self.position = position
+
+    def GetParent(self) -> object:
+        """Expose actual ownership for native-style clipping checks."""
+        return self.parent
+
+    def FindWindow(self, control_id: int) -> object:
+        """Return a real standard-button descendant rather than manufacturing one."""
+        return next(
+            (
+                child
+                for child in self.children
+                if getattr(child, "window_id", None) == control_id
+            ),
+            None,
+        )
+
     def CreateButtonSizer(self, _flags: int) -> Sizer:
-        """Accept standard dialog buttons without claiming native layout."""
-        return Sizer(0)
+        """Create stateful standard buttons for the actual modal control checks."""
+        layout = Sizer(0)
+        for control_id in self.standard_button_ids:
+            child = Control(self)
+            child.window_id = control_id
+            layout.Add(child)
+        return layout
 
     def SetSizerAndFit(self, sizer: object) -> None:
         """Retain the enlarge-dialog layout tree."""
@@ -239,6 +283,11 @@ class Control:
         """Record that the enlarge dialog became modal."""
         self.modal_shown = True
         return getattr(self, "modal_result", 5100)
+
+    def EndModal(self, result: int) -> None:
+        """Retain actual modal acceptance and remove its visible screen state."""
+        self.modal_result = result
+        self.on_screen = False
 
     def Destroy(self) -> None:
         """Mark the enlarge dialog destroyed after ShowModal returns."""
@@ -284,6 +333,10 @@ class Image:
         """Return a distinct resized image as wx.Image.Scale does."""
         return Image((width, height), self.valid)
 
+    def GetSubImage(self, rectangle: tuple[int, int, int, int]) -> Image:
+        """Return a cropped copy while retaining the source pixels' dimensions."""
+        return Image(rectangle[2:], self.valid)
+
 
 class PaintDC:
     """Retain actual draw calls; a Refresh request alone is not a display."""
@@ -298,14 +351,42 @@ class PaintDC:
     def Clear(self) -> None:
         """Remove draws from the previous paint."""
         self.canvas.drawn.clear()
+        self.canvas.annotations.clear()
 
     def DrawBitmap(self, bitmap: Image, x: int, y: int, transparent: bool) -> None:
         """Record a valid bitmap drawn by the real paint handler."""
         assert bitmap.IsOk()
         self.canvas.drawn.append((bitmap, x, y))
 
+    def SetBrush(self, brush: object) -> None:
+        """Retain the actual brush used to fill label and outline shapes."""
+        self.brush = brush
 
-def _png() -> bytes:
+    def SetPen(self, pen: object) -> None:
+        """Retain widths and colours to check selected issue emphasis."""
+        self.pen = pen
+
+    def DrawRectangle(self, *rectangle: int) -> None:
+        """Retain rectangles positioned by the real bitmap transform."""
+        self.canvas.annotations.append(("rectangle", (rectangle, self.pen)))
+
+    def GetTextExtent(self, text: str) -> SimpleNamespace:
+        """Expose deterministic text metrics separately from overlay geometry."""
+        return SimpleNamespace(GetWidth=lambda: 8 * len(text), GetHeight=lambda: 16)
+
+    def SetTextForeground(self, colour: object) -> None:
+        """Retain label foreground for high contrast drawing."""
+        self.foreground = colour
+
+    def DrawText(self, text: str, x: int, y: int) -> None:
+        """Retain the numbered marker drawn at its issue rectangle."""
+        self.canvas.annotations.append(("text", (text, x, y)))
+
+
+def _png(
+    colour: tuple[int, int, int] = (0, 0, 0),
+    size: tuple[int, int] = (800, 420),
+) -> bytes:
     """Provide real PNG bytes while the native decoder is explicitly doubled."""
 
     def chunk(kind: bytes, payload: bytes) -> bytes:
@@ -318,8 +399,8 @@ def _png() -> bytes:
 
     return (
         b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack(">IIBBBBB", 800, 420, 8, 2, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress((b"\0" + b"\0" * 2400) * 420))
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", *size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress((b"\0" + bytes(colour) * size[0]) * size[1]))
         + chunk(b"IEND", b"")
     )
 
@@ -374,6 +455,8 @@ def pane_api() -> Iterator[SimpleNamespace]:
         CallAfter=call_after,
         AutoBufferedPaintDC=PaintDC,
         Brush=lambda colour: colour,
+        Pen=lambda colour, width: (colour, width),
+        Rect=lambda *rectangle: rectangle,
         Colour=lambda *channels: tuple(channels),
         SystemSettings=SimpleNamespace(GetColour=lambda _kind: (120, 120, 120)),
         Image=load_image,
@@ -387,11 +470,17 @@ def pane_api() -> Iterator[SimpleNamespace]:
                 "GetFromWindow": staticmethod(lambda _window: 0),
                 "__init__": lambda self, _index: None,
                 "GetClientArea": lambda self: SimpleNamespace(
-                    GetWidth=lambda: 1600, GetHeight=lambda: 1000
+                    x=0,
+                    y=0,
+                    width=1600,
+                    height=1000,
+                    GetWidth=lambda: 1600,
+                    GetHeight=lambda: 1000,
                 ),
             },
         ),
     )
+    Control.standard_button_ids = (wx.ID_OK, wx.ID_CANCEL)
     with temporary_modules(
         {package_name: package, "wx": wx}, namespaces=(package_name,)
     ):
@@ -479,7 +568,7 @@ def test_constructor_queues_exact_capture_but_requires_visible_paint(
     )
     assert "needs review" in pane.checklist.GetItemText(0, 1)
     assert views == [] and not pane.ready
-    with pytest.raises(ValueError, match="Images still needing review: 1"):
+    with pytest.raises(ValueError, match="Images still needing review: Image 1"):
         pane.ensure_reviewed()
     paint(api, pane, drain=False)
     assert views == [] and not pane.ready
@@ -576,7 +665,7 @@ def test_skip_stub_review_off_requires_viewing_stubs(
     show(api, pane)
     assert pane.advance_to_unreviewed() is True
     assert pane.checklist.GetFirstSelected() == 1
-    with pytest.raises(ValueError, match="Images still needing review: 2"):
+    with pytest.raises(ValueError, match="Images still needing review: Image 2"):
         pane.ensure_reviewed()
     show(api, pane)
     assert pane.advance_to_unreviewed() is False
@@ -594,7 +683,7 @@ def test_every_row_requires_display_and_approve_advances_to_next(
     show(api, pane)
     assert pane.checklist.cells[1, 0] == "—"
     assert pane.checklist.colours[1] == (120, 120, 120)
-    with pytest.raises(ValueError, match="Images still needing review: 2"):
+    with pytest.raises(ValueError, match="Images still needing review: Image 2"):
         pane.ensure_reviewed()
     assert pane.advance_to_unreviewed() is True
     assert pane.checklist.GetFirstSelected() == 1 and not pane.ready
@@ -829,7 +918,7 @@ def test_reordering_rows_does_not_transfer_review_to_unseen_section(
     pane.set_sections((second, unseen, api.section), "board-a")
     show(api, pane)
     assert "needs review" in pane.checklist.GetItemText(1, 1)
-    with pytest.raises(ValueError, match="Images still needing review: 2"):
+    with pytest.raises(ValueError, match="Images still needing review: Image 2"):
         pane.ensure_reviewed()
 
 
@@ -917,7 +1006,7 @@ def test_failed_later_row_remains_unreviewed_after_returning_to_good_row(
     show(api, pane)
     choose(api, pane, 0)
     show(api, pane)
-    with pytest.raises(ValueError, match="Images still needing review: 2"):
+    with pytest.raises(ValueError, match="Images still needing review: Image 2"):
         pane.ensure_reviewed()
 
 
@@ -943,7 +1032,7 @@ def test_layer_navigation_uses_capture_provider_and_review_keys_not_row_indices(
     api.drain()
     # Returning uses the provider (whose revision cache belongs outside this pane).
     assert captures == [api.section, second, second, api.section]
-    with pytest.raises(ValueError, match="Images still needing review: 1"):
+    with pytest.raises(ValueError, match="Images still needing review: Image 1"):
         pane.ensure_reviewed()
     paint(api, pane)
     pane.ensure_reviewed()
@@ -1080,6 +1169,133 @@ def test_repaints_and_repeated_resize_do_not_recapture_rescan_or_restamp(
     assert checks == [] and len(views) == 1
 
 
+def _spacing_entry(api: SimpleNamespace, view_id: str = "spacing-a") -> Any:
+    """Build a real diagnostic record without manufacturing section coercion."""
+    spacing = importlib.import_module(api.module.__package__ + ".spacing_review")
+    composition = importlib.import_module(
+        api.module.__package__ + ".spacing_composition"
+    )
+    detail_width, detail_height = composition.DETAIL_RECT[2:]
+    return spacing.SpacingReviewEntry(
+        api.section.spec_id,
+        api.section.layer,
+        "issue-a",
+        view_id,
+        (api.section.section_id,),
+        ("USB_P", "USB_N"),
+        "too_wide",
+        "Spacing concern 1: routed gap 0.25 mm; declared gap 0.15 mm.",
+        (100, 80, 200, 120),
+        (0.0, 0.0, 800.0, 800.0 * detail_height / detail_width),
+        "a" * 64,
+        (),
+        (),
+    )
+
+
+def test_spacing_images_are_separate_entries_with_external_captions(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A diagnostic is reviewed independently and never obscures workbook copper."""
+    api = pane_api
+    captures: list[object] = []
+    workbook_views: list[object] = []
+    spacing_views: list[object] = []
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda entry, **_options: captures.append(entry) or api.capture,
+        image_viewed=lambda *args: workbook_views.append(args),
+        spacing_image_viewed=lambda *args: spacing_views.append(args),
+        image_list=Control(),
+        approved_images=lambda: set(),
+    )
+    entry = _spacing_entry(api)
+    pane.set_sections((api.section,), "board-a")
+    pane.set_spacing_entries((entry,))
+    spacing_index = pane.entries.index(entry)
+    assert pane.sections == (api.section,)
+    assert pane.entries == (entry, api.section)
+    assert pane.spacing_entries == (entry,)
+    assert "Spacing image 1" in pane.checklist.GetItemText(spacing_index, 1)
+    show(api, pane)
+    assert len(workbook_views) == 1 and spacing_views == []
+    assert pane.canvas.annotations == []
+    choose(api, pane, spacing_index)
+    assert pane.selected_entry is entry
+    assert pane.selected_section is api.section
+    assert pane.caption.label == entry.caption and pane.caption.shown
+    assert pane.title.label == "Spacing review image"
+    assert not pane.ready and not pane.displayed
+    show(api, pane)
+    assert spacing_views == []
+    assert len(workbook_views) == 1
+    assert pane.canvas.annotations == []
+    assert "needs review" in pane.checklist.GetItemText(spacing_index, 1)
+    assert "approved" not in pane.checklist.GetItemText(spacing_index, 1)
+    assert captures == [api.section, entry]
+    evidence = dict(pane._viewed)
+    resize(api, pane, (800, 600))
+    paint(api, pane)
+    assert pane._viewed == evidence and spacing_views == []
+    with pytest.raises(ValueError, match="Images still needing review"):
+        pane.reviewed_capture_hashes()
+
+
+def test_enlarged_capture_refits_complete_png_without_modifying_pixels(
+    pane_api: SimpleNamespace,
+) -> None:
+    """The actual inspection window refits the complete immutable capture."""
+    api = pane_api
+    capture = replace(api.capture)
+    dialog = api.module.EnlargedCaptureDialog(Control(), capture, "Workbook image")
+    assert {control.label for control in dialog.children}.isdisjoint(
+        {"Fit image", "Original image", "Fit issue", "Fit route"}
+    )
+    for size, dimensions in (((1200, 700), (1200, 630)), ((400, 300), (400, 210))):
+        resize(api, dialog, size)
+        paint(api, dialog)
+        assert dialog.canvas._image.size == (capture.width, capture.height)
+        assert dialog.canvas.drawn[0][0].size == dimensions
+        assert dialog.canvas._visible_source_rect == (
+            0,
+            0,
+            capture.width,
+            capture.height,
+        )
+        assert dialog.canvas._painted_size == size
+        assert dialog.canvas.annotations == []
+        assert capture.data == api.capture.data and capture.sha256 == api.capture.sha256
+
+
+def test_replaced_spacing_entry_rejects_queued_old_image_display(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A deferred paint cannot stamp a concern replaced by a changed target."""
+    api = pane_api
+    views: list[object] = []
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda *_args, **_kwargs: api.capture,
+        spacing_image_viewed=lambda *args: views.append(args),
+    )
+    first = _spacing_entry(api)
+    second = replace(first, view_id="spacing-b", input_digest="b" * 64)
+    pane.set_sections((api.section,), "board-a")
+    pane.set_spacing_entries((first,))
+    pane.select(pane.entries.index(first))
+    api.drain()
+    paint(api, pane, drain=False)
+    pane.set_spacing_entries((second,))
+    assert pane._capture is None and not pane.ready
+    api.drain()
+    assert views == []
+    pane.select(pane.entries.index(second))
+    show(api, pane)
+    assert views == []
+    assert pane.selected_entry == second and pane.ready
+    assert pane.canvas.annotations == []
+
+
 def test_selection_error_is_literal_complete_readonly_multiline_status(
     pane_api: SimpleNamespace,
 ) -> None:
@@ -1144,3 +1360,432 @@ def test_click_without_image_does_not_open_enlarge_dialog(
     assert pane.canvas._image is None
     pane.canvas.bindings[api.wx.EVT_LEFT_UP](SimpleNamespace(Skip=lambda: None))
     assert shown == []
+
+
+def test_workbook_capture_never_receives_spacing_annotations(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Manufacturing captures retain an unobscured, diagnostic-free presentation."""
+    api = pane_api
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda *_args, **_kwargs: replace(api.capture, viewport_nm=(0, 0, 800, 420)),
+    )
+    pane.set_sections((api.section,), "board-a")
+    show(api, pane)
+    assert pane.canvas._visible_source_rect == (
+        0,
+        0,
+        api.capture.width,
+        api.capture.height,
+    )
+    assert pane.canvas.annotations == []
+
+
+class _CountedContext:
+    """Expose structural-context hash work independently of wall-clock timings."""
+
+    def __init__(self, value: str, hashes: list[str]) -> None:
+        self.value, self.hashes = value, hashes
+
+    def __hash__(self) -> int:
+        """Count full-context hashing, like hashing a large immutable board."""
+        self.hashes.append(self.value)
+        return hash(self.value)
+
+    def __eq__(self, other: object) -> bool:
+        """Retain semantic equality across independently reconstructed contexts."""
+        return isinstance(other, _CountedContext) and self.value == other.value
+
+
+def test_large_review_context_hashing_is_bounded_per_changed_binding(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A checklist repaint must not rehash the complete board once per row."""
+    api = pane_api
+    pane = open_pane(api)
+    sections = tuple(
+        replace(api.section, section_id=f"row-{index}") for index in range(900)
+    )
+    hashes: list[str] = []
+    context = _CountedContext("board-a", hashes)
+    pane.set_sections(sections, context)
+    show(api, pane)
+    initial = len(hashes)
+    assert initial <= 1
+    for _ in range(4):
+        pane.refresh_review_labels()
+        assert pane.ready
+        assert pane.image_digest(sections[0]) == api.capture.sha256
+    assert len(hashes) == initial
+    pane.set_sections(sections, _CountedContext("board-a", hashes))
+    assert len(hashes) == initial
+    pane.set_sections(sections, _CountedContext("board-b", hashes))
+    assert len(hashes) <= initial + 1
+    assert not pane.ready
+    assert pane.image_digest(sections[0]) is None
+
+
+def test_review_list_only_rewrites_changed_row_state(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native row updates stay local when one displayed image gains approval."""
+    api = pane_api
+    approved: set[str] = set()
+    pane = open_pane(api, approved_images=lambda: approved)
+    sections = tuple(
+        replace(api.section, section_id=f"row-{index}") for index in range(900)
+    )
+    pane.set_sections(sections, "board-a")
+    show(api, pane)
+    writes: list[tuple[int, str]] = []
+    set_item, set_colour = pane.checklist.SetItem, pane.checklist.SetItemTextColour
+
+    def write_item(index: int, column: int, value: str) -> None:
+        """Observe real cell writes without weakening the stateful native double."""
+        writes.append((index, "text"))
+        set_item(index, column, value)
+
+    def write_colour(index: int, colour: object) -> None:
+        """Observe native row recoloring while retaining actual control state."""
+        writes.append((index, "colour"))
+        set_colour(index, colour)
+
+    monkeypatch.setattr(pane.checklist, "SetItem", write_item)
+    monkeypatch.setattr(pane.checklist, "SetItemTextColour", write_colour)
+    pane.refresh_review_labels()
+    assert writes == []
+    approved.add(sections[0].section_id)
+    pane.refresh_review_labels()
+    assert writes and {index for index, _kind in writes} == {0}
+    assert "approved" in pane.checklist.GetItemText(0, 1)
+    assert "needs review" in pane.checklist.GetItemText(1, 1)
+    writes.clear()
+    pane.refresh_review_labels()
+    assert writes == []
+
+
+def test_compact_review_keys_preserve_context_restore_and_appearance_invalidation(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Equal reconstructed contexts restore proof, while a different context cannot."""
+    api = pane_api
+    hashes: list[str] = []
+    palette = ["before"]
+    views: list[object] = []
+    pane = open_pane(
+        api,
+        appearance_context=lambda: palette[0],
+        image_viewed=lambda *args: views.append(args),
+    )
+    first = _CountedContext("board-a", hashes)
+    pane.set_sections((api.section,), first)
+    show(api, pane)
+    assert len(views) == 1
+    original_evidence = dict(pane._viewed)
+    pane.set_sections((api.section,), _CountedContext("board-b", hashes))
+    assert pane.image_digest(api.section) is None
+    assert not pane.ready and len(views) == 1
+    pane.restore_viewed(
+        lambda _section, _digest: False, {api.section: api.capture.sha256}
+    )
+    assert pane._viewed == original_evidence
+    pane.set_sections((api.section,), _CountedContext("board-a", hashes))
+    assert pane.image_digest(api.section) == api.capture.sha256
+    assert not pane.ready  # Historical proof has not supplied a current visible paint.
+    assert pane._viewed == original_evidence and len(views) == 1
+    before = len(hashes)
+    changed = replace(api.section, width_nm=180_000)
+    pane.set_sections((changed,), _CountedContext("board-a", hashes))
+    assert len(hashes) == before
+    assert pane.image_digest(changed) is None
+    pane.set_sections((api.section,), first)
+    assert pane.image_digest(api.section) == api.capture.sha256
+    palette[0] = "after"
+    with pytest.raises(ValueError, match="appearance changed"):
+        pane.ensure_appearance_current()
+    assert pane.image_digest(api.section) is None
+    assert pane._viewed == {} and len(views) == 1
+    assert len(hashes) == before
+
+
+def test_compact_review_keys_do_not_retain_unseen_contexts_or_invent_reopened_views(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Intermediate revisions stay bounded and reopening needs verified saved hashes."""
+    api = pane_api
+    hashes: list[str] = []
+    pane = open_pane(api)
+    for index in range(40):
+        pane.set_sections((api.section,), _CountedContext(str(index), hashes))
+    assert len(pane._context_tokens) == 1
+    assert not pane._viewed
+    reopened = open_pane(api)
+    reopened.set_sections((api.section,), _CountedContext("39", hashes))
+    assert reopened.image_digest(api.section) is None
+    reopened.restore_viewed(
+        lambda _section, _digest: True, {api.section: api.capture.sha256}
+    )
+    assert reopened.image_digest(api.section) == api.capture.sha256
+    assert not reopened.ready and not reopened.displayed
+    assert reopened.reviewed_capture_hashes() == ((api.section, api.capture.sha256),)
+    reopened.clear("Reset review")
+    assert not reopened._viewed and not reopened._context_tokens
+
+
+def test_compact_context_hash_collision_cannot_reuse_another_board_review(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A compact token still requires full semantic equality at context binding."""
+    api = pane_api
+
+    class CollidingContext(_CountedContext):
+        """Model distinct structural boards with an identical ordinary hash."""
+
+        def __hash__(self) -> int:
+            """Force a collision without changing semantic equality."""
+            self.hashes.append(self.value)
+            return 7
+
+    hashes: list[str] = []
+    pane = open_pane(api)
+    pane.set_sections((api.section,), CollidingContext("board-a", hashes))
+    show(api, pane)
+    pane.set_sections((api.section,), CollidingContext("board-b", hashes))
+    assert pane.image_digest(api.section) is None
+    assert not pane.ready
+    pane.set_sections((api.section,), CollidingContext("board-a", hashes))
+    assert pane.image_digest(api.section) == api.capture.sha256
+    assert not pane.ready and not pane.displayed
+
+
+def test_spacing_thumbnail_paint_is_navigation_without_diagnostic_view_evidence(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A small full-image thumbnail cannot satisfy the readable review requirement."""
+    api = pane_api
+    views: list[object] = []
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda *_args, **_kwargs: api.capture,
+        spacing_image_viewed=lambda *args: views.append(args),
+    )
+    entry = _spacing_entry(api)
+    pane.set_sections((api.section,), "board-a")
+    pane.set_spacing_entries((entry,))
+    spacing_index = pane.entries.index(entry)
+    pane.select(spacing_index)
+    show(api, pane)
+    assert pane.ready and pane.displayed
+    assert (
+        min(
+            pane.canvas._dimensions[0] / api.capture.width,
+            pane.canvas._dimensions[1] / api.capture.height,
+        )
+        < 2 / 3
+    )
+    assert views == []
+    assert pane._key(spacing_index) not in pane._viewed
+
+
+def _readable_large_viewer(
+    api: SimpleNamespace,
+    *,
+    composition: object = None,
+) -> tuple[Any, list[str], dict[str, Any]]:
+    """Construct a real 1200×800 viewer with native-like visible screen bounds."""
+    api.state.image = Image((1200, 800))
+    service = importlib.import_module(api.module.__package__ + ".service")
+    capture = service.CapturedImage.from_bytes(_png(size=(1200, 800)))
+    events: list[str] = []
+    state = {"active": True, "source": True, "frame_width": 1020}
+
+    def verify() -> None:
+        """Fail when the live source changes after the actual large image paint."""
+        events.append("verify")
+        if not state["source"]:
+            raise ValueError("The board changed during spacing review")
+
+    viewer = api.module.EnlargedCaptureDialog(
+        Control(),
+        capture,
+        "Spacing review — F.Cu — USB_P, USB_N",
+        caption="Too wide · declared gap 0.2 mm",
+        verify_current=verify,
+        displayed=lambda: events.append("viewed"),
+        approve=lambda: events.append("approved"),
+        active=lambda: state["active"],
+        **({"composition": composition} if composition is not None else {}),
+    )
+    viewer.client_size = (1020, 780)
+    viewer.canvas.client_size = (1000, 667)
+    viewer.GetScreenRect = lambda: SimpleNamespace(
+        x=0, y=0, width=state["frame_width"], height=800
+    )
+    viewer.ClientToScreen = lambda _x, _y: (0, 20)
+    viewer.canvas.GetParent = lambda: viewer
+    viewer.canvas.GetScreenRect = lambda: SimpleNamespace(
+        x=10,
+        y=40,
+        width=viewer.canvas.client_size[0],
+        height=viewer.canvas.client_size[1],
+    )
+    for control, top, width in (
+        (viewer.caption, 20, 600),
+        (viewer.status, 715, 700),
+        (viewer.approve_button, 740, 220),
+        (viewer.FindWindow(api.wx.ID_CANCEL), 770, 100),
+    ):
+        control.GetScreenRect = lambda top=top, width=width: SimpleNamespace(
+            x=10, y=top, width=width, height=20
+        )
+    return viewer, events, state
+
+
+def test_readable_large_spacing_view_requires_fresh_full_paint_and_explicit_button(
+    pane_api: SimpleNamespace,
+) -> None:
+    """The 24-pixel native floor reaches eight visible pixels before consent."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(api)
+    assert not viewer.readable and not viewer.approve_button.enabled
+    viewer.approve_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    assert not viewer.approved and "approved" not in events
+    # A failed early click cannot grant consent; a fresh real paint recovers.
+    paint(api, viewer)
+    assert viewer.readable and viewer.approve_button.enabled
+    assert (
+        24
+        * min(viewer.canvas._dimensions[0] / 1200, viewer.canvas._dimensions[1] / 800)
+        >= 8
+    )
+    assert events.count("viewed") == 1 and "approved" not in events
+    viewer.approve_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    assert viewer.approved and events[-1] == "approved"
+    assert viewer.modal_result == api.wx.ID_OK
+    assert not viewer.readable  # A closed viewer cannot authorize another image.
+    assert viewer.caption.label == "Too wide · declared gap 0.2 mm"
+    assert viewer.canvas.annotations == []
+
+
+@pytest.mark.parametrize(
+    "state_name", ["small", "hidden", "stale", "failed", "clipped"]
+)
+def test_spacing_large_view_rejects_unreadable_or_invalid_paints(
+    pane_api: SimpleNamespace,
+    state_name: str,
+) -> None:
+    """Scale, source, visibility and real ancestor clipping all precede viewing."""
+    api = pane_api
+    viewer, events, state = _readable_large_viewer(api)
+    if state_name == "small":
+        viewer.canvas.client_size = (300, 200)
+    elif state_name == "hidden":
+        viewer.on_screen = False
+    elif state_name == "stale":
+        state["active"] = False
+    elif state_name == "failed":
+        api.state.image.valid = False
+    else:
+        state["frame_width"] = 900  # A logical 1000px canvas extends outside its frame.
+    paint(api, viewer)
+    assert not viewer.readable and not viewer.approve_button.enabled
+    assert "viewed" not in events
+    viewer.approve_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    assert not viewer.approved and "approved" not in events
+
+
+@pytest.mark.parametrize("change", ["resize", "source", "selection", "clip"])
+def test_readable_spacing_view_revalidates_at_explicit_approval(
+    pane_api: SimpleNamespace,
+    change: str,
+) -> None:
+    """An earlier readable paint cannot approve newly stale or clipped pixels."""
+    api = pane_api
+    viewer, events, state = _readable_large_viewer(api)
+    paint(api, viewer)
+    assert viewer.readable and events.count("viewed") == 1
+    if change == "resize":
+        resize(api, viewer, (300, 200))
+        assert not viewer.approve_button.enabled
+    elif change == "source":
+        state["source"] = False
+    elif change == "selection":
+        state["active"] = False
+    else:
+        state["frame_width"] = 900
+    viewer.approve_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    assert not viewer.approved and "approved" not in events
+    assert not viewer.readable
+
+
+def test_spacing_large_view_cancel_does_not_approve_a_viewed_image(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Readable viewing remains a separate event when the user cancels."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(api)
+    paint(api, viewer)
+    assert viewer.readable and "viewed" in events
+    viewer.EndModal(api.wx.ID_CANCEL)
+    assert not viewer.approved and not viewer.readable and "approved" not in events
+
+
+def test_spacing_large_view_resize_requires_another_readable_native_paint(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A too-small initial display cannot become approved from resize alone."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(api)
+    viewer.canvas.client_size = (300, 200)
+    paint(api, viewer)
+    assert not viewer.readable and "viewed" not in events
+    resize(api, viewer, (1000, 667))
+    assert not viewer.readable and not viewer.approve_button.enabled
+    paint(api, viewer)
+    assert viewer.readable and events.count("viewed") == 1
+
+
+def test_moving_spacing_review_back_on_screen_requires_another_full_paint(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A clipped window recovers through a real visible paint after being moved."""
+    api = pane_api
+    viewer, events, state = _readable_large_viewer(api)
+    state["frame_width"] = 900
+    paint(api, viewer)
+    assert not viewer.readable and "viewed" not in events
+    state["frame_width"] = 1020
+    viewer.bindings[api.wx.EVT_MOVE](SimpleNamespace(Skip=lambda: None))
+    assert not viewer.readable and not viewer.approve_button.enabled
+    paint(api, viewer)
+    assert viewer.readable and events.count("viewed") == 1
+    resize(api, viewer, (950, 634))
+    paint(api, viewer)
+    assert viewer.readable and events.count("viewed") == 1
+
+
+def test_spacing_viewer_reserves_measured_chrome_within_small_work_area(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All controls fit an 800px-high work area while the full image stays readable."""
+    api = pane_api
+    area = SimpleNamespace(
+        x=100,
+        y=50,
+        width=1280,
+        height=800,
+        GetWidth=lambda: 1280,
+        GetHeight=lambda: 800,
+    )
+    monkeypatch.setattr(api.wx.Display, "GetClientArea", lambda _self: area)
+    viewer, _events, _state = _readable_large_viewer(api)
+    width, height = viewer.canvas.minimum_size
+    fitted = viewer.GetSize()
+    assert fitted.GetWidth() <= area.width and fitted.GetHeight() <= area.height
+    assert viewer.position[0] >= area.x and viewer.position[1] >= area.y
+    assert viewer.position[0] + fitted.GetWidth() <= area.x + area.width
+    assert viewer.position[1] + fitted.GetHeight() <= area.y + area.height
+    assert 24 * min(width / 1200, height / 800) >= 8

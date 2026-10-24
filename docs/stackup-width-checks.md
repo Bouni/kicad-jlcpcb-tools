@@ -292,14 +292,113 @@ width/net filters require explicit reset and recreation; there is no
 inline legacy-specification conversion. See
 [Project storage and board identity](controlled-impedance.md#project-storage-and-board-identity).
 
-Comparisons are **nominal width checks**, not impedance verification. They do not
-measure pair/ground gaps, prove uninterrupted reference planes, model transitions
-and connectors, or establish manufacturing tolerance. No percent-width tolerance
-is presented as a percent-impedance tolerance. Actual routed width remains in
-the XLSX; the HTML adds the frozen stackup, nominal comparison and provenance.
+Comparisons are **nominal width checks**, not impedance verification. The width
+solver holds declared pair spacing and coplanar ground gap fixed. A separate
+offline, advisory **Pair spacing** compares routed trace-to-trace gaps with
+the declared per-layer spacing for both differential types. It works without a
+selected stackup or a successful width calculation, including a measured preview
+with a missing spacing target.
+
+The spacing comparison band is **±0.001 mm, inclusive**; measurement uncertainty
+is separate and never widens the band. Complete coverage with bounded gaps wholly
+inside that band is required for a match. A definite violation remains a
+deviation with partial coverage; matching assessed portions alone remain
+unverified. The editor shows a concise status, partial coverage when applicable,
+and separate spacing-review image entries. HTML also identifies assessed,
+transition, and unverified length, bounded minimum/maximum gaps, signed
+departures, and reasons for incomplete coverage. The routed measurement uses
+finite shared facing sidewalls rather than gaps to a mate's rounded endpoint.
+Matching turns with the same signed normal offset can prove a constant gap
+through a mitered corner; route ends, divergent turns, and branches are not
+extrapolated to invent matching sidewalls.
+
+Recognized local transitions at pins, pads, and vias are excluded before
+measurement; transition-only rows are informational. Recognition requires actual
+same-net, same-layer copper contact, including contacts inside unsplit tracks.
+An unambiguous opposite-net landing supplies the actual pad pitch; known
+common-footprint ownership takes priority over unrelated nearby contacts. Its
+combined landing-copper outline is extended in the outgoing direction by one pitch,
+including both sides of inline testpoints, and exclusions stop at the first
+region exit or branch. Duplicated pins require authoritative common-footprint
+identity and physical contact; adjacent opposite-net pitches bound separate
+local banks. Each bank's copper hull receives a one-pitch radial allowance for
+its internal links. Multiple ambiguous routed exits remain unverified. These
+are bounded software allowances, not manufacturing tolerances. Pad proximity
+alone, an isolated pad with no paired landing, and later reentry cannot exempt
+continuing routing. Routing outside each local region is checked even when its
+gap is wrong.
+An ambiguous transition boundary affects local coverage. Unsupported native arcs,
+ambiguous geometry, and work-budget limits cannot produce an unqualified match.
+Arc checks use KiCad's native center and radius. Curves whose rounded native
+geometry cannot establish a consistent circle remain explicitly unverified.
+A covered-stub row has no spacing verdict of its own. Recognized transition spans
+are excluded from assessed source routing. Distance queries retain actual native
+mate copper and finite correspondence limits; clipping an entry does not invent
+a mate endpoint. Unrelated routing remains assessable.
+
+Confirmed concerns have separate combined images in the dialogs and HTML: native
+physical detail, a location overview, mm measurements, and a large **Gap deviation
+from target** percentage. This is `100 × (actual gap − target gap) / target gap`,
+using the unrounded local measurement. The label says below, above, or at the
+target, and preserves the direction of nonzero differences smaller than 0.1%.
+Overlapping copper can show more than 100% below target.
+Missing local measurements or invalid targets display **Unavailable**. Actual gap,
+target gap, and the shortfall or excess remain in mm. The shown cross-section is
+distinguished from a varying region's gap range.
+Gold marks affected spans, dashed cyan guides show the target facing edge from
+the opposite trace's actual edge, and white ticks mark the measured gap.
+Continuous guides require proven parallel or concentric sidewalls; other
+witnesses receive local target rulers. Identifiers, the legend, and gap/target
+descriptions stay outside copper. Each continuous physical concern has one
+approval entry: the overview highlights its complete affected run and locates
+readable detail at the worst measured gap, with the complete measured gap range
+reported separately. A longer uniform run does not create extra approvals.
+Tight and wide departures retain separate entries, as do disconnected concerns.
+The complete route is still measured, with normal pad transitions excluded.
+Spacing entries precede workbook images so routed departures receive attention
+first; direct workbook-image selection remains
+available. The small preview shows the detail and actual/target
+summary. Choose **Open spacing review**, click the detail, or choose
+**Approve spacing exception** to open the combined image in its resizable,
+maximizable window.
+The complete image automatically fits on opening and resizing, including
+maximizing or restoring the window. Approval requires a current complete paint
+at a readable scale with visible controls; enlarge an undersized window before
+approval. The spacing review window offers **Approve spacing exception** and
+**Cancel**; choose **Cancel** to leave it pending. The smaller preview does not
+record diagnostic viewing or approval.
+Workbook-image approval and bulk row approval do not grant
+diagnostic consent. Save/reopen retains only matching current approvals; changed
+inputs or pixels require review. Guides are burned into those exact approved
+diagnostic PNGs and remain identical in HTML. Rendering policy 6 replaced crop
+approval with continuous-concern approval. Rendering policy 7 replaces comparison
+bars with percentage deviation and requires fresh diagnostic consent, including
+for previously approved policy 6 images. Historical events and matching workbook
+approvals remain intact. Regenerating images does not transfer historical consent.
+HTML retains its optional original-image
+comparison and presents diagnostic cards before workbook cards with independent
+spacing-image numbering; workbook Row N and XLSX sheet
+row N + 1 references remain unchanged. The vendor XLSX retains its original
+rows and PNGs and never includes diagnostic images. Generation verifies the exact approved
+diagnostic captures before either report is written and never stamps review events.
+
+Neither dimensional check proves uninterrupted reference planes, verifies
+coplanar ground clearance, models transition/connector impedance, establishes
+manufacturing tolerance, or verifies achieved impedance. No percent-width or
+spacing tolerance is presented as a percent-impedance tolerance. Actual routed
+width and declared fabrication spacing remain in the unchanged vendor XLSX;
+HTML adds the spacing diagnostics, frozen stackup, nominal comparison and
+provenance. Existing saved model assumptions remain historical evidence rather
+than being rewritten by an upgrade.
 Generation does not fetch the network or invent new review/calculation timestamps.
 These calculations remain part of review currentness; “nominal” does not mean
 that changing their meaningful inputs or results bypasses approval.
+Differential approvals additionally identify the spacing policy and exact
+relevant trace, pad, and via geometry. Earlier differential approvals require
+fresh explicit review, retaining historical timestamps and image/section
+identities; unchanged
+single-ended approvals remain current. Spacing diagnostics are advisory and do
+not introduce an additional export blocker after explicit review.
 
 `websockets` 15.0.1 is bundled as a pure-Python wheel in `lib/`, with its BSD
 license, so the KiCad plugin does not depend on a user's separate Python packages.

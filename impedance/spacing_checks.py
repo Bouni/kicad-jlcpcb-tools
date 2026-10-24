@@ -26,6 +26,7 @@ from .model import (
     Section,
     Specification,
     Trace,
+    format_workbook_length,
 )
 from .spacing_transitions import contact_seed, first_exit, landing_region
 
@@ -3027,6 +3028,35 @@ def _format_bounds(bounds: NmBounds, *, signed: bool = False) -> str:
     if bounds.lower_nm == bounds.upper_nm:
         return _format_nm(bounds.lower_nm, signed=signed) + " mm"
     return f"{_format_nm(bounds.lower_nm, signed=signed)}–{_format_nm(bounds.upper_nm, signed=signed)} mm"
+
+
+def spacing_workbook_cells(
+    check: Optional[SpacingCheck],
+) -> tuple[str, str, str, str]:
+    """Return actual gap, mismatch marker, target and coverage-aware status."""
+    if check is None:
+        return "", "", "", ""
+    actual = "Unverified"
+    if check.verdict == "not_applicable":
+        actual = "Terminal transitions"
+    elif check.minimum_gap_nm is not None and check.maximum_gap_nm is not None:
+        lower_nm = check.minimum_gap_nm.lower_nm
+        upper_nm = check.maximum_gap_nm.upper_nm
+        actual = format_workbook_length(lower_nm)
+        if lower_nm != upper_nm:
+            actual += "–" + format_workbook_length(upper_nm)
+        actual += " mm"
+    target = (
+        format_workbook_length(check.declared_spacing_nm) + " mm"
+        if check.declared_spacing_nm is not None
+        else "Needs target"
+    )
+    return (
+        actual,
+        "!=" if check.verdict == "deviation" else "",
+        target,
+        spacing_check_label(check),
+    )
 
 
 def spacing_check_details(check: SpacingCheck) -> str:
