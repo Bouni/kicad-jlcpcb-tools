@@ -9,8 +9,16 @@ from pathlib import Path
 import tempfile
 from typing import Optional
 
-from .review_tracking import format_timestamp
-from .service import ReportRow, validate_report_rows
+from .review_tracking import (
+    ReviewTracking,
+    find_spacing_image,
+    format_timestamp,
+    spacing_capture_fingerprint,
+    spacing_image_current,
+)
+from .service import ReportRow, validate_report_rows, validate_spacing_review_images
+from .spacing_checks import SpacingCheck, spacing_check_details, spacing_check_label
+from .spacing_review import SpacingReviewImage
 from .stackup_model import Stackup, validate_stackup
 from .width_checks import WidthCheck, format_width_delta_nm, format_width_nm
 
@@ -66,6 +74,11 @@ dd, h1, h2 { overflow-wrap: anywhere; }
 .target { font-size: 1.5rem; font-weight: 700; }
 figure { margin: 0; padding: 1rem; align-self: center; min-width: 0; }
 img { display: block; width: 100%; height: auto; border-radius: 5px; }
+.pcb-image { position: relative; }
+.spacing-review .row-content { grid-template-columns: minmax(180px, 1fr) minmax(0, 4fr); }
+.spacing-capture { overflow: auto; max-height: 85vh; margin-top: .5rem; }
+.spacing-full-size:checked ~ .spacing-capture img { width: auto; max-width: none; }
+.spacing-original { margin-top: 1rem; }
 figcaption { color: #546c7d; font-size: .8rem; margin-top: .5rem; }
 footer { color: #546c7d; padding: .5rem 1rem 2rem; text-align: center; }
 @media (max-width: 760px) {
@@ -165,6 +178,30 @@ def _width_fields(check: Optional[WidthCheck]) -> list[str]:
             else "Not recorded in the saved calculation"
         )
         fields.append(f"<dt>Saved model assumptions</dt><dd>{assumptions}</dd>")
+    return fields
+
+
+def _spacing_fields(check: Optional[SpacingCheck]) -> list[str]:
+    """Render shared advisory spacing evidence without remeasuring geometry."""
+    if check is None:
+        return [_field("Pair spacing", "Unverified · No spacing assessment")]
+    fields = [_field("Pair spacing", spacing_check_label(check))]
+    details = spacing_check_details(check)
+    fields.append(
+        "<dt>Spacing assessment</dt><dd>"
+        + "<br>".join(
+            _text(line, "spacing assessment") for line in details.splitlines()
+        )
+        + "</dd>"
+    )
+    fields.append(
+        _field(
+            "Spacing check scope",
+            "Advisory routed trace-to-trace dimensional check; recognized local "
+            "transitions are excluded. Coplanar ground gaps, "
+            "reference-plane continuity and achieved impedance are not verified.",
+        )
+    )
     return fields
 
 
@@ -270,8 +307,9 @@ def _card(row: ReportRow, index: int) -> str:
     ]
     if values.kind.startswith("differential") and values.spacing_nm is not None:
         fields.append(
-            _field("Pair spacing (edge to edge)", format_width_nm(values.spacing_nm))
+            _field("Declared pair spacing", format_width_nm(values.spacing_nm))
         )
+        fields.extend(_spacing_fields(row.spacing_check))
     if values.kind.endswith("_coplanar") and values.ground_gap_nm is not None:
         fields.append(
             _field("Coplanar ground gap", format_width_nm(values.ground_gap_nm))
@@ -305,11 +343,75 @@ def _card(row: ReportRow, index: int) -> str:
         f"<h2>{_text(row.specification, 'specification')}</h2>"
         f'<span class="sheet-row">XLSX sheet row {index + 1}</span></div>'
         f'<div class="row-content"><dl>{"".join(fields)}</dl><figure>'
-        f'<img src="data:image/png;base64,{encoded}" width="{width}" '
-        f'height="{height}" alt="{alt}">'
+        f'<div class="pcb-image"><img src="data:image/png;base64,{encoded}" width="{width}" '
+        f'height="{height}" alt="{alt}"></div>'
         "<figcaption>The yellow outline identifies this row's route or differential pair. "
         "This is the same capture embedded in the workbook.</figcaption>"
         "</figure></div></article>\n"
+    )
+
+
+def _spacing_card(
+    image: SpacingReviewImage,
+    index: int,
+    tracking: Optional[ReviewTracking],
+) -> str:
+    """Show a native close-up with external labels and exact approval evidence."""
+    entry, capture = image.entry, image.capture
+    record = (
+        find_spacing_image(tracking, entry.spec_id, entry.layer, entry.view_id)
+        if tracking is not None
+        else None
+    )
+    current = (
+        record is not None
+        and record.issue_id == entry.issue_id
+        and spacing_image_current(
+            record,
+            entry.input_digest,
+            spacing_capture_fingerprint(entry.input_digest, capture.sha256),
+            approved=True,
+        )
+    )
+    status = (
+        f"Approved · {format_timestamp(record.approved_at_utc, local=False)}"
+        if current and record is not None and record.approved_at_utc
+        else "Not approved for this capture"
+    )
+    fields = (
+        _field("Nets", ", ".join(entry.pair)),
+        _field("Signal copper layer", entry.layer),
+        _field("Spacing concern", entry.caption),
+        _field("Image approval", status),
+    )
+    encoded = b64encode(capture.data).decode("ascii")
+    alt = _text(
+        f"Spacing review {index}: {entry.caption} on {entry.layer}",
+        "spacing image description",
+    )
+    original = ""
+    if capture.original is not None:
+        comparison = capture.original
+        original_encoded = b64encode(comparison.data).decode("ascii")
+        original = (
+            '<details class="spacing-original"><summary>Original image — comparison only</summary>'
+            f'<img src="data:image/png;base64,{original_encoded}" width="{comparison.width}" '
+            f'height="{comparison.height}" alt="Original native detail without spacing annotations">'
+            "<p>Viewing this comparison does not approve the combined spacing image.</p></details>"
+        )
+    return (
+        f'<article class="spacing-review" id="spacing-review-{index}">'
+        '<div class="row-heading">'
+        f'<a class="row-id" href="#spacing-review-{index}">Spacing image {index}</a>'
+        f"<h2>{_text(entry.caption, 'spacing caption')}</h2></div>"
+        f'<div class="row-content"><dl>{"".join(fields)}</dl><figure>'
+        f'<input class="spacing-full-size" type="checkbox" id="spacing-size-{index}"> '
+        f'<label for="spacing-size-{index}">Full-size image</label><div class="spacing-capture">'
+        f'<img src="data:image/png;base64,{encoded}" width="{capture.width}" '
+        f'height="{capture.height}" alt="{alt}"></div>'
+        "<figcaption>Independent combined spacing image, separate from the workbook. "
+        "Approval acknowledges this image; it does not change the measured verdict "
+        f"or declared manufacturing spacing.</figcaption>{original}</figure></div></article>\n"
     )
 
 
@@ -319,6 +421,8 @@ def write_html_report(
     *,
     board_name: str = "PCB",
     stackup: Optional[Stackup] = None,
+    spacing_reviews: Sequence[SpacingReviewImage] = (),
+    review_tracking: Optional[ReviewTracking] = None,
 ) -> Path:
     """Atomically publish a self-contained HTML report; preserve old output on failure.
 
@@ -329,6 +433,9 @@ def write_html_report(
     Display names retain the model's existing length policy and are HTML-escaped.
     """
     validate_report_rows(rows)
+    validate_spacing_review_images(
+        spacing_reviews, manufacturing_bytes=sum(len(row.image.data) for row in rows)
+    )
     title = _text(board_name, "board name")
     stackup_summary = _stackup_summary(stackup)
     icon_attribution = (
@@ -369,9 +476,21 @@ def write_html_report(
                 "with your manufacturer. Nominal widths use the selected stackup and declared "
                 "reference layers and pair/ground gaps; an exact width match is not impedance "
                 "verification. No solver or manufacturing tolerance is used for the width comparison. "
+                "The separate routed pair-spacing check is advisory and uses an inclusive "
+                "±0.001 mm dimensional band with measurement uncertainty reported separately. "
+                "Incomplete coverage cannot establish a match. "
                 "Review times are recorded in UTC; exporting a report "
                 "does not mark captures as viewed or layers as approved.</p>\n"
             )
+            if spacing_reviews:
+                output.write(
+                    '<section aria-label="Separate spacing review images">'
+                    "<h2>Spacing review images</h2>"
+                    "<p>Each close-up is reviewed individually and excluded from Excel.</p>\n"
+                )
+                for index, image in enumerate(spacing_reviews, start=1):
+                    output.write(_spacing_card(image, index, review_tracking))
+                output.write("</section>\n")
             for index, row in enumerate(rows, start=1):
                 output.write(_card(row, index))
             output.write(

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .stackup_model import Stackup, WidthResult
 
 MAX_IMAGE_RECORDS = 10_000
+MAX_SPACING_IMAGE_RECORDS = 10_000
 MAX_LAYER_RECORDS = 1_000
 MAX_APPROVAL_CAPTURES = 1_000
 _UTC_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\Z")
@@ -48,11 +49,31 @@ class LayerApproval:
 
 
 @dataclass(frozen=True)
+class SpacingImageReview:
+    """Latest explicit viewing and approval of one diagnostic concern image.
+
+    ``view_id`` identifies its deterministic composition, apart from workbook rows.
+    Old approval evidence is retained when a newer viewing makes it stale.
+    """
+
+    spec_id: str
+    layer: str
+    issue_id: str
+    view_id: str
+    input_digest: str
+    viewed_digest: str
+    viewed_at_utc: str
+    approved_digest: str = ""
+    approved_at_utc: str = ""
+
+
+@dataclass(frozen=True)
 class ReviewTracking:
     """Board-scoped latest events, independent of manufacturing intent."""
 
     images: tuple[ImageView, ...] = ()
     layers: tuple[LayerApproval, ...] = ()
+    spacing_images: tuple[SpacingImageReview, ...] = ()
 
 
 def _invalid(message: str) -> NoReturn:
@@ -122,6 +143,14 @@ def validate_tracking(tracking: ReviewTracking) -> None:
         _invalid(
             f"Review layers must be a tuple with at most {MAX_LAYER_RECORDS} records."
         )
+    if (
+        not isinstance(tracking.spacing_images, tuple)
+        or len(tracking.spacing_images) > MAX_SPACING_IMAGE_RECORDS
+    ):
+        _invalid(
+            "Review spacing images must be a tuple with at most "
+            f"{MAX_SPACING_IMAGE_RECORDS} records."
+        )
     image_keys: set[tuple[str, str, str]] = set()
     for record in tracking.images:
         if not isinstance(record, ImageView):
@@ -167,6 +196,28 @@ def validate_tracking(tracking: ReviewTracking) -> None:
             if section_id in section_ids:
                 _invalid("Approved captures must not repeat a section ID.")
             section_ids.add(section_id)
+    spacing_keys: set[tuple[str, str, str]] = set()
+    for record in tracking.spacing_images:
+        if not isinstance(record, SpacingImageReview):
+            _invalid("Every spacing image must be a SpacingImageReview record.")
+        _name(record.spec_id, "specification ID")
+        _name(record.layer, "signal layer")
+        _name(record.issue_id, "spacing issue ID")
+        _name(record.view_id, "spacing view ID")
+        _digest_value(record.input_digest, "spacing input fingerprint")
+        _digest_value(record.viewed_digest, "spacing viewed fingerprint")
+        _parse_timestamp(record.viewed_at_utc)
+        if record.approved_digest == "" and record.approved_at_utc == "":
+            pass
+        elif record.approved_digest == "" or record.approved_at_utc == "":
+            _invalid("A spacing approval requires both its fingerprint and timestamp.")
+        else:
+            _digest_value(record.approved_digest, "spacing approved fingerprint")
+            _parse_timestamp(record.approved_at_utc)
+        key = (record.spec_id, record.layer, record.view_id)
+        if key in spacing_keys:
+            _invalid("Spacing images must not repeat a specification/layer/view key.")
+        spacing_keys.add(key)
 
 
 def review_tracking_to_dict(tracking: ReviewTracking) -> dict[str, Any]:
@@ -178,6 +229,7 @@ def review_tracking_to_dict(tracking: ReviewTracking) -> dict[str, Any]:
             {**asdict(record), "captures": [list(pair) for pair in record.captures]}
             for record in tracking.layers
         ],
+        "spacing_images": [asdict(record) for record in tracking.spacing_images],
     }
 
 
@@ -195,9 +247,12 @@ def _array(value: object, limit: int, label: str) -> list[Any]:
     return value
 
 
-def review_tracking_from_dict(value: object) -> ReviewTracking:
+def review_tracking_from_dict(value: object, *, version: int = 7) -> ReviewTracking:
     """Decode all records strictly; absent legacy tracking is handled by Config."""
-    data = _object(value, {"images", "layers"}, "tracking")
+    tracking_fields = {"images", "layers"}
+    if version >= 7:
+        tracking_fields.add("spacing_images")
+    data = _object(value, tracking_fields, "tracking")
     images = tuple(
         ImageView(
             **_object(
@@ -225,7 +280,29 @@ def review_tracking_from_dict(value: object) -> ReviewTracking:
                 )
             captures.append((pair[0], pair[1]))
         layers.append(LayerApproval(**{**record, "captures": tuple(captures)}))
-    result = ReviewTracking(images, tuple(layers))
+    spacing_images = tuple(
+        SpacingImageReview(
+            **_object(
+                item,
+                {
+                    "spec_id",
+                    "layer",
+                    "issue_id",
+                    "view_id",
+                    "input_digest",
+                    "viewed_digest",
+                    "viewed_at_utc",
+                    "approved_digest",
+                    "approved_at_utc",
+                },
+                "spacing image",
+            )
+        )
+        for item in _array(
+            data.get("spacing_images", []), MAX_SPACING_IMAGE_RECORDS, "spacing images"
+        )
+    )
+    result = ReviewTracking(images, tuple(layers), spacing_images)
     validate_tracking(result)
     return result
 
@@ -334,6 +411,104 @@ def capture_fingerprint(
     )
 
 
+def spacing_capture_fingerprint(input_digest: str, image_sha256: str) -> str:
+    """Bind a diagnostic viewing to its current inputs and exact image bytes."""
+    _digest_value(input_digest, "spacing input fingerprint")
+    _digest_value(image_sha256, "spacing image fingerprint")
+    return _sha256({"spacing_input": input_digest, "image_sha256": image_sha256})
+
+
+def spacing_image_current(
+    record: Optional[SpacingImageReview],
+    input_digest: str,
+    capture_digest: Optional[str] = None,
+    *,
+    approved: bool = False,
+) -> bool:
+    """Check exact diagnostic evidence without consulting manufacturing approval.
+
+    An absent capture digest asks only whether the recorded viewing belongs to
+    current diagnostic inputs. Callers with current pixels also pass their
+    ``spacing_capture_fingerprint`` result to require those exact pixels.
+    """
+    if record is None or record.input_digest != input_digest:
+        return False
+    if capture_digest is not None and record.viewed_digest != capture_digest:
+        return False
+    return not approved or bool(
+        record.approved_digest and record.approved_digest == record.viewed_digest
+    )
+
+
+def find_spacing_image(
+    tracking: ReviewTracking, spec_id: str, layer: str, view_id: str
+) -> Optional[SpacingImageReview]:
+    """Find diagnostic history without claiming that its approval remains current."""
+    return next(
+        (
+            record
+            for record in tracking.spacing_images
+            if (record.spec_id, record.layer, record.view_id)
+            == (spec_id, layer, view_id)
+        ),
+        None,
+    )
+
+
+def put_spacing_image(
+    tracking: ReviewTracking, record: SpacingImageReview
+) -> ReviewTracking:
+    """Replace one close-up's explicit events while retaining other review history."""
+    other_records = tuple(
+        item
+        for item in tracking.spacing_images
+        if (item.spec_id, item.layer, item.view_id)
+        != (record.spec_id, record.layer, record.view_id)
+    )
+    result = ReviewTracking(
+        tracking.images,
+        tracking.layers,
+        tuple(
+            sorted(
+                other_records + (record,),
+                key=lambda item: (item.spec_id, item.layer, item.view_id),
+            )
+        ),
+    )
+    validate_tracking(result)
+    return result
+
+
+def spacing_review_context(
+    spec: "Specification", layer: str, sections: Sequence["Section"]
+) -> dict[str, Any]:
+    """Bind spacing policy and analytic metadata from the complete layer rows.
+
+    Callers pass all current rows, including unchecked and covered-stub rows.
+    Existing source hashes cover pairing, class membership and sampled geometry;
+    only the new analytic metadata is excluded from those historical hashes.
+    """
+    if not spec.kind.startswith("differential"):
+        return {}
+    from .spacing_checks import SPACING_CHECK_POLICY_REVISION
+
+    arcs = {
+        trace.trace_id: (
+            trace.native_arc_midpoint,
+            trace.native_arc_center,
+            trace.native_arc_radius_nm,
+        )
+        for section in sections
+        if section.spec_id == spec.spec_id and section.layer == layer
+        for trace in section.traces
+        if trace.is_native_arc
+    }
+    return {
+        "spacing_check_policy_revision": SPACING_CHECK_POLICY_REVISION,
+        "spacing_arc_definitions": sorted(arcs.items()),
+    }
+
+
 def layer_fingerprint(
     source_digest: str,
     spec: "Specification",
@@ -387,6 +562,7 @@ def layer_fingerprint(
             "capture_policy_revision": CAPTURE_POLICY_REVISION,
             "covered_stub_policy_revision": COVERED_STUB_POLICY_REVISION,
             "calculation_revision": CALCULATION_REVISION,
+            **spacing_review_context(spec, layer, sections),
         }
     )
 
@@ -580,6 +756,7 @@ def put_image(tracking: ReviewTracking, record: ImageView) -> ReviewTracking:
             )
         ),
         tracking.layers,
+        tracking.spacing_images,
     )
     validate_tracking(result)
     return result
@@ -599,6 +776,7 @@ def put_layer(tracking: ReviewTracking, record: LayerApproval) -> ReviewTracking
                 other_layers + (record,), key=lambda item: (item.spec_id, item.layer)
             )
         ),
+        tracking.spacing_images,
     )
     validate_tracking(result)
     return result
@@ -609,6 +787,9 @@ def for_spec(tracking: ReviewTracking, spec_id: str) -> ReviewTracking:
     return ReviewTracking(
         tuple(record for record in tracking.images if record.spec_id == spec_id),
         tuple(record for record in tracking.layers if record.spec_id == spec_id),
+        tuple(
+            record for record in tracking.spacing_images if record.spec_id == spec_id
+        ),
     )
 
 
@@ -619,7 +800,11 @@ def merge_spec(
     validate_tracking(replacement)
     if any(
         record.spec_id != spec_id
-        for record in (*replacement.images, *replacement.layers)
+        for record in (
+            *replacement.images,
+            *replacement.layers,
+            *replacement.spacing_images,
+        )
     ):
         _invalid("A specification review buffer must not contain other specifications.")
     result = ReviewTracking(
@@ -627,6 +812,8 @@ def merge_spec(
         + replacement.images,
         tuple(record for record in tracking.layers if record.spec_id != spec_id)
         + replacement.layers,
+        tuple(record for record in tracking.spacing_images if record.spec_id != spec_id)
+        + replacement.spacing_images,
     )
     validate_tracking(result)
     return result
@@ -638,4 +825,7 @@ def retain_specs(tracking: ReviewTracking, spec_ids: Iterable[str]) -> ReviewTra
     return ReviewTracking(
         tuple(record for record in tracking.images if record.spec_id in retained),
         tuple(record for record in tracking.layers if record.spec_id in retained),
+        tuple(
+            record for record in tracking.spacing_images if record.spec_id in retained
+        ),
     )

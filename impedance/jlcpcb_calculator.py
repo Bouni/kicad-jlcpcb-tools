@@ -857,7 +857,8 @@ class JlcpcbCalculator:
                 calculation_digest=solver_fingerprint(
                     parameters, normalized_result, construction
                 ),
-                message="Nominal width only; reference-plane continuity and actual gaps are not verified.",
+                message="Nominal width only; routed pair spacing is assessed separately. "
+                "Reference-plane continuity, coplanar ground gaps and achieved impedance are not verified.",
             )
         except CalculatorCancelled:
             _LOG.info(

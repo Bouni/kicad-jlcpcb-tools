@@ -2,8 +2,10 @@
 
 JLCPCB Tools can include an illustrated impedance form in a board's Gerber ZIP.
 The form records the designer's intended impedance and identifies selected copper
-routes. Matching a net class identifies the intended signals; it does not verify
-impedance, reference-plane continuity, differential spacing, or the chosen stackup.
+routes. Matching a net class identifies the intended signals. A separate offline
+check compares routed differential-pair spacing with the declared spacing. Neither
+matching nor dimensional checks verify impedance, reference-plane continuity, or
+the chosen stackup.
 
 ## Configure and review a board
 
@@ -27,6 +29,13 @@ impedance, reference-plane continuity, differential spacing, or the chosen stack
    Each click approves only the displayed image and selects the next image
    needing approval. Viewing or preparing an image does not approve it. Once
    every required image is approved, review advances to the next pending layer.
+   Differential spacing concerns appear before workbook images so their routed
+   departures can be reviewed first. The small preview
+   shows the physical detail and an actual/target gap summary in mm. Choose
+   **Open spacing review** or click the detail to open its enlarged review window.
+   Review the combined image, then choose
+   **Approve spacing exception** in that window, or **Cancel** to leave it pending.
+   These diagnostic images are included in HTML, never the vendor spreadsheet.
    You can also choose images directly; matching image approvals, including
    partial progress, survive applying settings and reopening the editor.
    The layer and image controls identify what still needs configuration or review.
@@ -47,18 +56,16 @@ impedance, reference-plane continuity, differential spacing, or the chosen stack
    accepting specification changes. The rows list uses most of the main pane
    (about three-quarters of the width) as a multi-column table: include
    checkbox, row number, signal layer, net class, target Ω, centerline length,
-   net names, width (or **Covered stub**), target width, and segment count.
+   net names, width (or **Covered stub**), target width, segment count,
+   measured **Pair spacing**, **Target spacing**, and **Spacing check**.
    When a current calculated target differs from the routed width by more than
    0.01 mm, `!=` appears between the two widths; both values and the symbol turn
    amber. The workbook uses the same grid content measurement as the variants
    table. Columns fit their headers, text, and checkbox artwork with a compact
    margin, resizing as rows refresh. **Incl.**, **Row**, and **Target Ω** keep
    those content widths when the window gets wider.
-   The workbook **Target width** display rounds to at most five decimal places in
-   mm and trims trailing zeros. Stored dimensions and comparisons retain their
-   original nanometre precision.
    Alternating row backgrounds use the same theme-aware shading as the variants
-   part list; selection, muted covered stubs, and amber width warnings remain visible.
+   part list; selection, muted covered stubs, and amber dimensional warnings remain visible.
    Click an inclusion checkbox or press Space on the selected row to toggle it.
    Checked rows appear first; unchecked rows, including the covered stubs, stay
    available at the bottom. Rows keep their existing order within each group.
@@ -320,6 +327,142 @@ layers to physical stack numbers, **L1** through **Ln**. Its spacing cell contai
 both labeled dimensions when both apply. The supplied template's impedance
 heading retains its ±10% wording.
 
+### Routed differential-pair spacing checks
+
+Both differential types receive an offline, advisory **Pair spacing** in
+the specification editor and workbook review table. The checker compares the
+declared per-layer edge-to-edge spacing with routed trace geometry on that
+physical layer. It does not require a stackup, network access, or a successful
+nominal-width calculation. A missing target can still show measured geometry as
+**Needs target**; export retains its existing complete-settings requirements.
+
+The workbook table shows the measured **Pair spacing**, a `!=` comparison,
+the declared **Target spacing**, and the diagnostic **Spacing check**. A varying
+gap is shown as a conservative measured range. A definite deviation colors both
+spacing values and the comparison amber; incomplete coverage remains identified
+in the diagnostic status. These cells stay blank for single-ended rows.
+The workbook **Target width** display rounds to at most five decimal places in
+mm and trims trailing zeros. Stored dimensions and comparisons retain their
+original nanometre precision.
+
+The dimensional comparison band is **±0.001 mm, inclusive**. This is a spacing
+threshold, not an impedance or manufacturing tolerance. Measurement uncertainty
+is reported separately and does not widen the comparison band. The editor shows
+a concise status and separate concern images. The HTML report also gives bounded
+minimum/maximum gaps, signed deviations, and separately accounted routed,
+transition, and unverified lengths. Recognized local transitions at pins,
+pads, and vias are excluded before measuring routed spacing. A transition-only
+row has an informational status rather than a spacing warning.
+
+**Match** requires complete eligible coverage wholly within the comparison band.
+**Deviation** means at least one definite tight or wide portion exists, even if
+other portions remain unverified. **Unverified** means the available evidence
+cannot establish a complete match or a definite violation. Coverage is shown
+separately as complete, partial, or none; measurements with partial coverage
+describe only assessed portions. Measurement uncertainty crossing a threshold
+cannot produce a match.
+
+Measurements use KiCad's native pair identity and all relevant mate widths on the
+same layer, assessing both directions along the routed traces. Routed spacing
+uses the finite, shared span of facing sidewalls. A rounded track endpoint does
+not create a false tight or wide gap beyond that span. Matching mitered corners
+can retain a constant-gap result when both traces make the same turn with the
+same normal offset. Route ends, divergent turns, and branches are not extended
+to invent a correspondence; unresolved geometry remains explicitly unverified.
+
+Transition recognition uses actual same-net, same-layer pad/via contacts,
+including a contact inside an unsplit track. An unambiguous associated landing
+on the opposite pair net establishes the actual center-to-center pitch; known
+common-footprint ownership takes priority over unrelated nearby landings. The
+combined landing copper outline is extended by one pitch in the outgoing direction. This bounded
+allowance applies on both sides of an inline testpoint and stops at the first
+region exit or branch. Routing outside it is checked even when its gap is wrong.
+An isolated pad without a paired landing, nearby unconnected pads, and later
+reentry do not justify an exemption. Widening and narrowing use the same rule.
+
+Duplicated connector pins also require authoritative membership in the same
+footprint and physical contact with the routing. Adjacent opposite-net pad
+pitches separate local pin banks, so distant banks cannot create one large
+exempt area. The bank's actual copper outline receives a one-pitch radial
+allowance for its internal links and exits. Ambiguous banks with multiple routed
+exits remain unverified. These allowances are software policies, not impedance
+or manufacturing tolerances. Existing proven covered-stub exclusions remain in
+effect; unsupported geometry and exhausted measurement budgets remain explicitly
+unverified. Dimensional correspondence does not establish electrical coupling
+or achieved impedance.
+
+Confirmed non-transition concerns appear as separate **Spacing review** image
+entries. Each combined image contains a large native physical detail, a location
+overview, external measurements in mm, and a large **Gap deviation from target**
+percentage. The percentage uses the unrounded gap shown in the physical detail:
+`100 × (actual gap − target gap) / target gap`. It identifies whether the gap is
+below, above, or at the target; nonzero differences smaller than 0.1% retain
+their direction. Overlapping copper can show more than 100% below target.
+A missing local measurement or invalid target displays
+**Unavailable**. Actual gap, target gap, and the shortfall or excess remain in mm.
+Region gap ranges and the shown cross-section are identified separately when
+spacing varies. Gold marks the affected routed spans. Dashed cyan
+guides show the facing edge expected at the declared gap from the opposite
+trace's actual facing edge; white ticks show the measured gap. Continuous guides
+require proven parallel or concentric sidewalls. Other witnessed measurements
+use local target rulers rather than guessed continuous edges. The legend,
+numbers, measurements, targets, and approval status stay outside the copper image.
+
+Each continuous physical spacing concern has one approval entry. Its overview
+highlights the complete affected run and locates a readable detail at the worst
+measured gap, with the complete measured gap range reported separately. A longer
+run with the same spacing behavior does not create more approvals. Tight and
+wide departures retain separate entries, as do disconnected concerns.
+Reciprocal findings share one concern. The measurement still covers the complete
+route and excludes normal pad transitions. Unlocalized uncertainty is not
+presented as a pinpoint violation.
+
+Every spacing image must display successfully in its enlarged review window and
+receive explicit approval there. The smaller preview selects the image to review;
+it does not record diagnostic viewing or approval. Choose **Open spacing review**,
+click the detail, or choose **Approve spacing exception** to open the combined image.
+The complete image automatically fits the window when it opens or resizes,
+including maximizing or restoring the window. Approval becomes available after
+a current complete image has actually painted at a readable scale, with its
+controls visible on screen. A window too small for readable review must be
+enlarged before approval. The spacing review window offers
+**Approve spacing exception** and **Cancel**; **Cancel** leaves the image pending.
+
+Viewing alone, background preparation, ordinary workbook-image approval, and
+bulk row approval cannot approve spacing images. Matching approvals survive
+save/reopen; changed geometry, targets, policies, appearance, or image bytes
+require fresh review. Approval acknowledges the finding without changing its
+verdict or the declared fabrication spacing.
+
+The guides are part of the exact diagnostic PNG that receives approval and
+appears in HTML. They are not temporary preview overlays. Earlier diagnostic
+approvals require fresh review when the rendering policy changes; their
+historical timestamps remain available. Rendering policy 6 changed the approval
+unit from overlapping crops to continuous spacing concerns. Rendering policy 7
+replaces the comparison bars with percentage deviation and requires fresh
+diagnostic consent for the changed PNGs, including previously approved policy 6
+images. Historical events and matching workbook-image approvals remain intact.
+Opening or regenerating concern images does not transfer historical consent.
+
+HTML places separate spacing-review cards before the workbook row cards, with
+their current approval status, full-size image access, and an optional
+original-image comparison. Spacing images have their own numbering; workbook
+**Row N** and **XLSX sheet row N + 1** references keep their original meaning.
+Diagnostic images never enter the vendor XLSX: its rows, declared values, and
+original route PNGs remain unchanged. Generation verifies current diagnostic
+approval and exact image bytes before writing either report. It does not create
+viewing or approval events. Image-count and memory limits report incomplete
+review rather than silently omitting concerns.
+
+Spacing results remain advisory under the existing explicit review workflow.
+Reviewers can approve and export a route with departures or incomplete checks.
+The check covers routed trace-to-trace spacing, excluding recognized local
+transitions, pad/via clearance, coplanar ground clearance, reference-plane
+continuity, and achieved impedance. The width solver still holds declared pair
+spacing and ground gap fixed.
+
+### Routed section grouping
+
 Single-ended straight tracks and arcs are grouped by specification, physical
 layer, actual width, and net. Nearby pieces can share a region even when their
 endpoints are separated by a pad. A whole nearby group is preferred when its
@@ -367,7 +510,8 @@ be proven. Updates to this containment policy require a new review while retaini
 historical row identities and recorded review times. After upgrading to this
 policy, saved image views and layer approvals require fresh verification,
 including unchanged straight routes. Native pair
-identity does not establish electrical coupling or validate the entered spacing.
+identity does not establish electrical coupling; the separate spacing diagnostic
+reports dimensional evidence against the entered spacing.
 
 Native tracks and arcs remain whole; a long route made of multiple tracks can
 receive several readable regions. An indivisible track that falls below the
@@ -448,13 +592,27 @@ still match; otherwise it starts a fresh review. Older configurations show
 Each view is tied to its exact capture, including the source board, selection,
 rendering policy, and actual PNG bytes. Layer approvals additionally identify the
 target, type, reference planes, gaps, and complete set of reviewed captures on that
-layer. The HTML companion shows both timestamps in UTC and labels whether they
+layer. Differential approvals also identify the spacing-check policy and complete
+relevant measurement geometry, including native arc definitions. Upgrading from
+approvals made before spacing checks requires fresh differential approval while
+preserving historical times and existing image/section identities. Unchanged
+single-ended approvals remain current. Geometry or declared-spacing edits require
+fresh affected approval; a physically unchanged unit conversion does not.
+Measuring, opening, and exporting never create approval timestamps. The HTML
+companion shows both timestamps in UTC and labels whether they
 describe the current capture/settings or previous ones. A changed image can make
 an old timestamp historical without erasing it. Historical records do not grant
 current image review or layer approval. The vendor XLSX template is unchanged.
 All of a layer's approved captures must be present and match the export before
 any row describes that layer approval as current. If rows are omitted from the
 report, the layer's earlier approval is conservatively shown as historical.
+
+**Approve workbook rows** verifies and saves the current image fingerprints for
+all checked rows. This workbook approval survives reopening even when an older,
+unvisited image has a historical display record. Capturing an image in the
+background does not create a viewing timestamp or a layer approval. Later changes
+to the approved images still require fresh workbook approval; a failed image
+verification leaves the workbook as a draft and shows an error that can be retried.
 
 Revisiting an image or successfully refreshing it records a new display time;
 resizing, repainting, populating rows, or exporting does not. Automatic selection
@@ -501,9 +659,12 @@ recovery workflow remains separate from impedance configuration; the ordinary
 parts adapter reads current PCB fields rather than restoring assignments from
 those tables.
 
-Impedance payload version 6 stores net-class-only intent, frozen stackups,
+Impedance payload version 7 stores net-class-only intent, frozen stackups,
 compact nominal-width results, review tracking, unfinished settings, and
-layer-linkage metadata. Storage validation accepts missing required settings;
+layer-linkage metadata, including separate spacing-image viewing and approval
+records. Versions 4–6 load without inventing diagnostic approval; historical
+manufacturing events remain intact, and version-6 incomplete drafts still load.
+Storage validation accepts missing required settings;
 calculation, approval, and export validation still require complete valid inputs.
 A missing target is stored as an empty string, no chosen reference planes as an
 empty list, and missing differential spacing or coplanar ground gap as `null`.
@@ -564,8 +725,13 @@ An enabled export adds two root-level files to the existing Gerber ZIP in
 row and one HTML section, in the same order and using the same captured 800×420
 PNG. The HTML report shows net and specification names, the signal and reference
 layers in both KiCad and physical L1…Ln notation, impedance targets, and trace
-widths and applicable gaps in mm and mil. Its images and styles are embedded;
-it opens offline after extraction without any supporting files or scripts.
+widths and applicable gaps in mm and mil. Differential rows also show declared
+spacing, advisory measured diagnostics, coverage, and limitations. XLSX spacing
+remains the declared manufacturing value,
+including the existing labeled Pair/Ground dimensions for coplanar pairs. Derived
+spacing measurements are recomputed from the current board, not stored as design
+intent or substituted into the vendor form. Images and styles are embedded, so
+the HTML opens offline after extraction without supporting files or scripts.
 Both reports remain usable after their temporary source images are deleted.
 A disabled export contains neither report, including after an enabled export.
 In the XLSX, Trace Width and Trace Spacing mil values are rounded to at most
@@ -602,13 +768,6 @@ to reopen **Configure…**; historical timestamps alone cannot authorize it.
 Older configurations without image evidence remain compatible. Current source,
 output variant, actual report board, and appearance are checked again before
 archiving and, for staged variant output, before publication.
-
-**Approve workbook rows** verifies and saves the current image fingerprints for
-all checked rows. This workbook approval survives reopening even when an older,
-unvisited image has a historical display record. Capturing an image in the
-background does not create a viewing timestamp or a layer approval. Later changes
-to the approved images still require fresh workbook approval; a failed image
-verification leaves the workbook as a draft and shows an error that can be retried.
 
 Previews, SVG plots, and source PNGs use temporary directories that are cleaned up
 after success, cancellation, or failure. These standalone assets and the source

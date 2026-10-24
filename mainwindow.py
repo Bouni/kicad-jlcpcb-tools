@@ -1321,6 +1321,10 @@ class JLCPCBTools(wx.Frame):
         layout_ready = getattr(self, "_layout_ready", False)
         selector = getattr(self, "_part_selector", None)
         try:
+            impedance = getattr(self, "_impedance", None)
+            close_impedance = getattr(impedance, "close", None)
+            if callable(close_impedance):
+                close_impedance()
             if controller is not None:
                 controller.close()
             if layout_ready:
@@ -3508,13 +3512,27 @@ class JLCPCBTools(wx.Frame):
                         layer_count,
                     )
                 with TemporaryDirectory(prefix="jlcpcb-impedance-export-") as scratch:
+                    capture_options = getattr(
+                        impedance_controls, "export_capture_options", None
+                    )
+
+                    def render_impedance_reports() -> Any:
+                        """Pass reuse options inside the existing timed callable contract."""
+                        return export_impedance_reports(
+                            impedance_plan,
+                            report_board,
+                            self.pcbnew,
+                            Path(scratch),
+                            **(
+                                capture_options(impedance_plan, report_board)
+                                if callable(capture_options)
+                                else {}
+                            ),
+                        )
+
                     reports = self.run_generation_step(
                         "Generating controlled-impedance workbook and HTML report",
-                        export_impedance_reports,
-                        impedance_plan,
-                        report_board,
-                        self.pcbnew,
-                        Path(scratch),
+                        render_impedance_reports,
                     )
                     if not verify_impedance(
                         "Validating controlled-impedance review after report rendering",

@@ -146,7 +146,10 @@ def test_v4_load_preserves_intent_and_history_without_writing(tmp_path: Path) ->
         {**spec, "linked_layer_groups": [], "independent_layers": []}
         for spec in payload["specifications"]
     ]
-    assert upgraded["review_tracking"] == payload["review_tracking"]
+    assert upgraded["review_tracking"] == {
+        **payload["review_tracking"],
+        "spacing_images": [],
+    }
     assert upgraded["reviewed_digest"] == ""
     assert upgraded["included_section_ids"] == []
     assert "section_groups" not in upgraded and "legacy_specifications" not in upgraded

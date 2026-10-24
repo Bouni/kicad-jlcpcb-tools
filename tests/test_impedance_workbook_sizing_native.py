@@ -246,12 +246,12 @@ def assert_columns_fit(
             rows,
             expected_rows,
         )
-    assert control.GetNumberCols() == 11
+    assert control.GetNumberCols() == 15
     contents: list[tuple[str, ...]] = []
     bounds: list[tuple[int, int]] = []
     dc = wx.ClientDC(control)
     try:
-        for index in range(11):
+        for index in range(control.GetNumberCols()):
             strings = [control.GetColLabelValue(index)]
             if index:
                 strings.extend(control.GetTextValue(row, index) for row in range(rows))
@@ -264,7 +264,7 @@ def assert_columns_fit(
                     widths.append(
                         dc.GetTextExtent(control.GetTextValue(row, index)).width
                     )
-            if index == 8:
+            if index in (8, 12):
                 dc.SetFont(control.GetDefaultCellFont())
                 widths.append(dc.GetTextExtent("!=").width)
             if index == 0:
@@ -277,7 +277,7 @@ def assert_columns_fit(
             dc.SetFont(control.GetDefaultCellFont())
             maximum = ink + (
                 control.FromDIP(6)
-                if index in (0, 1, 4)
+                if index in (0, 1, 4, 8, 12)
                 else 4 * dc.GetTextExtent("M").width
             )
             bounds.append((ink, maximum))
@@ -304,7 +304,7 @@ def assert_columns_fit(
                 bounds[index],
                 control.GetColSize(index),
             )
-            for index in range(11)
+            for index in range(control.GetNumberCols())
         ]
         raise AssertionError(
             f"{phase}: after {time.monotonic() - started:.3f}s, "
@@ -314,7 +314,7 @@ def assert_columns_fit(
     assert contents == [
         (control.GetColLabelValue(index),)
         + tuple(control.GetTextValue(row, index) for row in range(rows) if index)
-        for index in range(11)
+        for index in range(control.GetNumberCols())
     ], (phase, "Workbook contents changed while awaiting native geometry")
     _diagnostic(
         f"Workbook sizing: {phase}, allocation fitted in {time.monotonic() - started:.3f}s"
@@ -645,7 +645,10 @@ def test_native_workbook_sizes_offscreen_rows_refresh_retry_and_empty_state(
         def resize_without_stretching(label: str) -> None:
             """Await real resizing while retaining widths, selection and inclusion."""
             original_size = dialog.GetSize()
-            intrinsic = tuple(dialog.sections.GetColSize(index) for index in range(11))
+            intrinsic = tuple(
+                dialog.sections.GetColSize(index)
+                for index in range(dialog.sections.GetNumberCols())
+            )
             selected = dialog.sections.GetSelectedRow()
             included = set(dialog.session.included)
             with patch.object(
@@ -668,7 +671,10 @@ def test_native_workbook_sizes_offscreen_rows_refresh_retry_and_empty_state(
                         dialog.sections, phase=f"{label}: resize to {width}"
                     )
                     assert (
-                        tuple(dialog.sections.GetColSize(index) for index in range(11))
+                        tuple(
+                            dialog.sections.GetColSize(index)
+                            for index in range(dialog.sections.GetNumberCols())
+                        )
                         == intrinsic
                     )
                     dialog.Layout()
@@ -676,7 +682,10 @@ def test_native_workbook_sizes_offscreen_rows_refresh_retry_and_empty_state(
                         dialog.sections, phase=f"{label}: explicit Layout"
                     )
                     assert (
-                        tuple(dialog.sections.GetColSize(index) for index in range(11))
+                        tuple(
+                            dialog.sections.GetColSize(index)
+                            for index in range(dialog.sections.GetNumberCols())
+                        )
                         == intrinsic
                     )
                     assert dialog.sections.GetSelectedRow() == selected

@@ -162,7 +162,8 @@ def cross_section(stackup: Stackup, spec: Specification, layer: str) -> CrossSec
     values: dict[str, Any] = {"Zo": float(target)}
     assumptions = [
         "Reference layers are assumed to be continuous ground planes.",
-        "Declared spacing and coplanar gap are held fixed; their actual copper geometry is not verified.",
+        "The width solver holds declared pair spacing and coplanar gap fixed. "
+        "Routed pair spacing is assessed separately; actual coplanar ground gap is not verified.",
         "Er uses JLCPCB calculator model defaults (matching their Si9000 confirmation), "
         "not the catalog stackup Dk shown in the construction pane.",
     ]
