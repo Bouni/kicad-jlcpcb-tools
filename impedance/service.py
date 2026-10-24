@@ -5,8 +5,10 @@ from dataclasses import dataclass, field
 import hashlib
 from pathlib import Path
 import struct
+import tempfile
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
+from .capture_cache import OwnedCaptureCache, capture_key
 from .matching import analyze, validate_review
 from .model import (
     Analysis,
@@ -19,6 +21,8 @@ from .model import (
 )
 
 if TYPE_CHECKING:
+    from .spacing_checks import SpacingCheck, SpacingContext
+    from .spacing_review import SpacingReviewEntry, SpacingReviewImage
     from .width_checks import WidthCheck
 
 MAX_ROWS = 1000
@@ -44,6 +48,10 @@ class CapturedImage:
     """
 
     data: bytes
+    viewport_nm: Optional[tuple[float, float, float, float]] = field(
+        default=None, compare=False
+    )
+    original: Optional["CapturedImage"] = field(default=None, compare=False)
     width: int = field(init=False)
     height: int = field(init=False)
     sha256: str = field(init=False)
@@ -52,6 +60,18 @@ class CapturedImage:
         """Validate the PNG container and record its dimensions and digest."""
         if not isinstance(self.data, bytes):
             raise TypeError("A capture requires immutable PNG bytes.")
+        if self.original is not None:
+            if not isinstance(self.original, CapturedImage):
+                raise TypeError("An original comparison requires a captured image.")
+            if self.original.original is not None:
+                raise ValidationError(
+                    "An original comparison cannot contain another comparison."
+                )
+        if self.viewport_nm is not None:
+            from .spacing_overlays import valid_viewport
+
+            if not valid_viewport(self.viewport_nm):
+                raise ValidationError("The impedance capture viewport is invalid.")
         if len(self.data) > MAX_IMAGE_BYTES:
             raise ValidationError(
                 "The impedance capture exceeds the 10 MiB size limit."
@@ -70,19 +90,124 @@ class CapturedImage:
         object.__setattr__(self, "height", height)
         object.__setattr__(self, "sha256", hashlib.sha256(self.data).hexdigest())
 
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "CapturedImage":
-        """Capture the exact bytes that the preview and both reports will share."""
-        return cls(data)
+    @property
+    def byte_size(self) -> int:
+        """Include the optional comparison in capture and export memory limits."""
+        return len(self.data) + (
+            len(self.original.data) if self.original is not None else 0
+        )
 
     @classmethod
-    def load(cls, path: Path) -> "CapturedImage":
+    def from_bytes(
+        cls,
+        data: bytes,
+        *,
+        viewport_nm: Optional[tuple[float, float, float, float]] = None,
+        original: Optional["CapturedImage"] = None,
+    ) -> "CapturedImage":
+        """Capture the exact bytes that the preview and both reports will share."""
+        return cls(data, viewport_nm=viewport_nm, original=original)
+
+    @classmethod
+    def load(
+        cls,
+        path: Path,
+        *,
+        viewport_nm: Optional[tuple[float, float, float, float]] = None,
+        original: Optional["CapturedImage"] = None,
+    ) -> "CapturedImage":
         """Read one locally generated PNG with a bounded allocation."""
         try:
             with Path(path).open("rb") as source:
-                return cls(source.read(MAX_IMAGE_BYTES + 1))
+                return cls(
+                    source.read(MAX_IMAGE_BYTES + 1),
+                    viewport_nm=viewport_nm,
+                    original=original,
+                )
         except OSError as error:
             raise ValidationError(f"Cannot read impedance capture: {path}.") from error
+
+
+def load_rendered_capture(
+    path: Path,
+    renderer: Any,
+    section: Section,
+    *,
+    width_px: int = IMAGE_WIDTH,
+    height_px: int = IMAGE_HEIGHT,
+) -> CapturedImage:
+    """Attach the exact renderer transform without modifying captured pixels."""
+    viewport_getter = getattr(renderer, "viewport", None)
+    viewport = (
+        viewport_getter(section, width_px=width_px, height_px=height_px)
+        if callable(viewport_getter)
+        else None
+    )
+    return CapturedImage.load(path, viewport_nm=viewport)
+
+
+def load_spacing_capture(
+    path: Path,
+    renderer: Any,
+    entry: "SpacingReviewEntry",
+    *,
+    include_original: bool = True,
+) -> CapturedImage:
+    """Own a combined image and optional native original without a false transform.
+
+    Several panels cannot share one board-to-image viewport. Only the unannotated
+    original has the entry's physical detail transform. Its pixels are a read-only
+    comparison, independent of the exact combined PNG that requires approval.
+    """
+    capture = CapturedImage.load(path)
+    if (capture.width, capture.height) != (entry.width_px, entry.height_px):
+        raise ValidationError("The spacing capture has unexpected dimensions.")
+    if not include_original:
+        return capture
+    destination = Path(path).with_name(f"{Path(path).stem}-original.png")
+    return attach_spacing_original(capture, renderer, entry, destination)
+
+
+def attach_spacing_original(
+    capture: CapturedImage,
+    renderer: Any,
+    entry: "SpacingReviewEntry",
+    destination: Path,
+) -> CapturedImage:
+    """Create HTML's independent comparison only when that consumer needs it."""
+    if capture.original is not None:
+        validate_spacing_original(capture.original, entry)
+        return capture
+    render_original = getattr(renderer, "render_spacing_original", None)
+    if not callable(render_original):
+        return capture
+    result = Path(render_original(entry, destination))
+    if result.resolve() != destination.resolve():
+        raise ValidationError(
+            "The spacing renderer did not create its expected original PNG."
+        )
+    original = CapturedImage.load(destination, viewport_nm=entry.viewport_nm)
+    validate_spacing_original(original, entry)
+    return CapturedImage.from_bytes(capture.data, original=original)
+
+
+def validate_spacing_original(
+    original: CapturedImage, entry: "SpacingReviewEntry"
+) -> None:
+    """Check detail dimensions and transform even when the comparison is cached."""
+    composition = getattr(entry, "composition", None)
+    expected = (
+        tuple(composition.detail_rect[2:])
+        if composition is not None
+        else (entry.width_px, entry.height_px)
+    )
+    if (
+        original.width,
+        original.height,
+    ) != expected or original.viewport_nm != entry.viewport_nm:
+        raise ValidationError(
+            "The original spacing comparison has unexpected dimensions."
+        )
 
 
 @dataclass(frozen=True)
@@ -91,6 +216,14 @@ class CaptureEvidence:
 
     current: bool
     hashes: dict[Section, Optional[str]]
+
+
+@dataclass(frozen=True)
+class SpacingCaptureEvidence:
+    """Verified diagnostic hashes kept separate from manufacturing image evidence."""
+
+    current: bool
+    hashes: dict["SpacingReviewEntry", Optional[str]]
 
 
 @dataclass(frozen=True)
@@ -114,6 +247,7 @@ class ReportRow:
     layer_approved_at_utc: str = ""
     layer_approval_current: bool = False
     width_check: Optional["WidthCheck"] = None
+    spacing_check: Optional["SpacingCheck"] = None
 
     def __post_init__(self) -> None:
         """Validate the immutable image, board layers, and impedance dimensions."""
@@ -191,6 +325,35 @@ def validate_report_rows(rows: Sequence[ReportRow]) -> None:
         raise ValidationError("Position images exceed the 128 MiB total size limit.")
 
 
+def validate_spacing_review_images(
+    images: Sequence["SpacingReviewImage"], *, manufacturing_bytes: int = 0
+) -> None:
+    """Bound diagnostic payloads separately and together with workbook captures."""
+    from .spacing_review import (
+        MAX_SPACING_REVIEW_BYTES,
+        MAX_SPACING_REVIEW_IMAGES,
+        SpacingReviewEntry,
+        SpacingReviewImage,
+    )
+
+    if len(images) > MAX_SPACING_REVIEW_IMAGES or any(
+        not isinstance(image, SpacingReviewImage)
+        or not isinstance(image.entry, SpacingReviewEntry)
+        or not isinstance(image.capture, CapturedImage)
+        for image in images
+    ):
+        raise ValidationError(
+            f"Spacing review requires at most {MAX_SPACING_REVIEW_IMAGES} diagnostic images."
+        )
+    diagnostic_bytes = sum(image.capture.byte_size for image in images)
+    if diagnostic_bytes > MAX_SPACING_REVIEW_BYTES:
+        raise ValidationError("Spacing review images exceed the 128 MiB size limit.")
+    if diagnostic_bytes + manufacturing_bytes > MAX_TOTAL_IMAGE_BYTES:
+        raise ValidationError(
+            "Manufacturing and spacing review images exceed the 128 MiB combined size limit."
+        )
+
+
 class Renderer(Protocol):
     """Render a section using the existing native renderer contract."""
 
@@ -213,6 +376,9 @@ class ExportPlan:
     snapshot: BoardSnapshot
     analysis: Analysis
     sections: tuple[Section, ...]
+    spacing_context: Optional["SpacingContext"] = field(
+        default=None, compare=False, repr=False
+    )
 
 
 @dataclass(frozen=True)
@@ -235,10 +401,14 @@ def report_rows(
         layer_approval_current,
         source_fingerprint,
     )
+    from .spacing_checks import spacing_checks_for_sections
     from .width_checks import width_check
 
     if len(images) != len(plan.sections):
         raise ValidationError("Every reviewed impedance section requires one image.")
+    spacing_by_section = spacing_checks_for_sections(
+        plan.config, plan.snapshot, plan.sections, context=plan.spacing_context
+    )
     specifications = {spec.spec_id: spec for spec in plan.config.specifications}
     tracking = plan.config.review_tracking
     source_digest = source_fingerprint(plan.snapshot)
@@ -297,13 +467,18 @@ def report_rows(
                 width_check=width_check(
                     plan.config, spec, section.layer, section.width_nm
                 ),
+                spacing_check=spacing_by_section.get(section.section_id),
             )
         )
     return tuple(rows)
 
 
 def prepare(
-    config: Config, snapshot: BoardSnapshot, layer_count: Optional[int] = None
+    config: Config,
+    snapshot: BoardSnapshot,
+    layer_count: Optional[int] = None,
+    *,
+    spacing_context: Optional["SpacingContext"] = None,
 ) -> Optional[ExportPlan]:
     """Require reviewed current geometry and a usable template before fabrication."""
     if not isinstance(config, Config) or type(config.enabled) is not bool:
@@ -338,8 +513,30 @@ def prepare(
             settings.ground_gap_nm,
             spec.target_ohms,
         )
+    from .review_tracking import find_spacing_image, spacing_image_current
+    from .spacing_checks import SpacingContext
+    from .spacing_review import spacing_review_entries
+
+    if spacing_context is None or spacing_context.snapshot is not snapshot:
+        spacing_context = SpacingContext(snapshot)
+    entries = spacing_review_entries(
+        config, snapshot, analysis.sections, context=spacing_context
+    )
+    for entry in entries:
+        record = find_spacing_image(
+            config.review_tracking, entry.spec_id, entry.layer, entry.view_id
+        )
+        if (
+            record is None
+            or record.issue_id != entry.issue_id
+            or not spacing_image_current(record, entry.input_digest, approved=True)
+        ):
+            raise ValidationError(
+                "Spacing review images require individual approval. Open Configure "
+                "to review and approve every spacing image before generation."
+            )
     validate_template()
-    return ExportPlan(config, snapshot, analysis, sections)
+    return ExportPlan(config, snapshot, analysis, sections, spacing_context)
 
 
 def validate_current(
@@ -349,7 +546,9 @@ def validate_current(
     layer_count: Optional[int] = None,
 ) -> None:
     """Reject changed intent or geometry immediately before publishing artifacts."""
-    current = prepare(config, snapshot, layer_count)
+    current = prepare(
+        config, snapshot, layer_count, spacing_context=plan.spacing_context
+    )
     if current is None or (
         current.config != plan.config
         or current.analysis.digest != plan.analysis.digest
@@ -369,6 +568,9 @@ def export_reports(
     renderer_factory: Optional[RendererFactory] = None,
     writer: Optional[WorkbookWriter] = None,
     appearance_context: Optional[Callable[[], object]] = None,
+    capture_cache: Optional[OwnedCaptureCache] = None,
+    capture_identity: Optional[tuple[str, Optional[str]]] = None,
+    source_context: Optional[Callable[[], BoardSnapshot]] = None,
 ) -> ExportArtifacts:
     """Render once and create both reports before the caller publishes the ZIP."""
     from .html_report import OUTPUT_FILENAME as HTML_FILENAME, write_html_report
@@ -377,47 +579,202 @@ def export_reports(
     from .review_tracking import (
         capture_fingerprint,
         expected_capture_digest,
+        find_spacing_image,
         source_fingerprint,
+        spacing_capture_fingerprint,
+        spacing_image_current,
+    )
+    from .spacing_checks import SpacingContext
+    from .spacing_review import (
+        MAX_SPACING_REVIEW_IMAGES,
+        SpacingReviewImage,
+        spacing_review_entries,
     )
     from .workbook import OUTPUT_FILENAME, write_workbook
 
+    context = plan.spacing_context or SpacingContext(plan.snapshot)
+    plan = ExportPlan(plan.config, plan.snapshot, plan.analysis, plan.sections, context)
     validate_current(plan, plan.config, plan.snapshot)
+    spacing_entries = spacing_review_entries(
+        plan.config, plan.snapshot, plan.analysis.sections, context=context
+    )
+    if len(spacing_entries) > MAX_SPACING_REVIEW_IMAGES:
+        raise ValidationError(
+            f"Spacing review requires at most {MAX_SPACING_REVIEW_IMAGES} diagnostic images."
+        )
     scratch_dir = Path(scratch_dir)
     if not scratch_dir.is_dir():
         raise ValidationError("The impedance export scratch directory does not exist.")
     if appearance_context is None and renderer_factory is None:
         appearance_context = lambda: read_theme_context(pcbnew_module)
     appearance = appearance_context() if appearance_context is not None else None
-    renderer = (renderer_factory or SectionRenderer)(board, pcbnew_module)
+    if capture_cache is not None and (
+        capture_identity is None
+        or not isinstance(capture_identity[0], str)
+        or not capture_identity[0].strip()
+        or source_context is None
+        or appearance_context is None
+    ):
+        raise ValidationError(
+            "Owned captures require live source and appearance checks."
+        )
+    if source_context is not None and source_context() != plan.snapshot:
+        raise ValidationError(
+            "The report output changed before its captures were rendered."
+        )
+    renderer: Optional[Renderer] = None
+
+    def current_renderer() -> Renderer:
+        """Do not create native plots when all required PNGs are already owned."""
+        nonlocal renderer
+        if renderer is None:
+            renderer = (renderer_factory or SectionRenderer)(board, pcbnew_module)
+        return renderer
+
+    def owned_key(item: object, dimensions: tuple[int, int]) -> Any:
+        """Sharing requires an independently verified board and output identity."""
+        if capture_cache is None or capture_identity is None:
+            return None
+        return capture_key(
+            capture_cache,
+            capture_identity[0],
+            plan.snapshot,
+            appearance,
+            capture_identity[1],
+            item,
+            dimensions=dimensions,
+        )
+
     images = []
+    spacing_images = []
+    staged_captures = []
     total_bytes = 0
     try:
         for index, section in enumerate(plan.sections, 1):
             destination = scratch_dir / f"impedance-section-{index:04d}.png"
-            result = Path(
-                renderer.render(
-                    section, destination, width_px=IMAGE_WIDTH, height_px=IMAGE_HEIGHT
+            key = owned_key(section, (IMAGE_WIDTH, IMAGE_HEIGHT))
+            capture = capture_cache.get(key) if key is not None else None
+            if capture is None:
+                active_renderer = current_renderer()
+                result = Path(
+                    active_renderer.render(
+                        section,
+                        destination,
+                        width_px=IMAGE_WIDTH,
+                        height_px=IMAGE_HEIGHT,
+                    )
                 )
-            )
-            if result.resolve() != destination.resolve():
-                raise ValidationError(
-                    "The impedance renderer did not create its expected PNG."
+                if result.resolve() != destination.resolve():
+                    raise ValidationError(
+                        "The impedance renderer did not create its expected PNG."
+                    )
+                capture = load_rendered_capture(
+                    result,
+                    active_renderer,
+                    section,
+                    width_px=IMAGE_WIDTH,
+                    height_px=IMAGE_HEIGHT,
                 )
-            capture = CapturedImage.load(destination)
+            if key is not None:
+                staged_captures.append((key, capture))
             total_bytes += len(capture.data)
             if total_bytes > MAX_TOTAL_IMAGE_BYTES:
                 raise ValidationError(
                     "Position images exceed the 128 MiB total size limit."
                 )
             images.append(capture)
+        if spacing_entries:
+            # Diagnostic PNG paths have no manufacturing identity or report-row
+            # slot. Their bytes are owned before the temporary directory closes.
+            with tempfile.TemporaryDirectory(
+                prefix=".impedance-spacing-", dir=scratch_dir
+            ) as directory:
+                for index, entry in enumerate(spacing_entries, 1):
+                    destination = Path(directory) / f"spacing-{index:04d}.png"
+                    key = owned_key(entry, (entry.width_px, entry.height_px))
+                    capture = capture_cache.get(key) if key is not None else None
+                    if capture is None:
+                        active_renderer = current_renderer()
+                        render_spacing = getattr(
+                            active_renderer, "render_spacing", None
+                        )
+                        if not callable(render_spacing):
+                            raise ValidationError(
+                                "The renderer cannot capture spacing review images. Open Configure "
+                                "to review the spacing images and generate again."
+                            )
+                        result = Path(
+                            render_spacing(
+                                entry,
+                                destination,
+                                width_px=entry.width_px,
+                                height_px=entry.height_px,
+                            )
+                        )
+                        if result.resolve() != destination.resolve():
+                            raise ValidationError(
+                                "The spacing renderer did not create its expected PNG."
+                            )
+                        capture = load_spacing_capture(
+                            destination, active_renderer, entry, include_original=False
+                        )
+                    if capture.original is None:
+                        capture = attach_spacing_original(
+                            capture,
+                            current_renderer(),
+                            entry,
+                            destination.with_name(f"{destination.stem}-original.png"),
+                        )
+                    else:
+                        validate_spacing_original(capture.original, entry)
+                    if key is not None:
+                        staged_captures.append((key, capture))
+                    if (capture.width, capture.height) != (
+                        entry.width_px,
+                        entry.height_px,
+                    ):
+                        raise ValidationError(
+                            "The spacing review capture has changed dimensions. Open "
+                            "Configure to review the spacing images and generate again."
+                        )
+                    record = find_spacing_image(
+                        plan.config.review_tracking,
+                        entry.spec_id,
+                        entry.layer,
+                        entry.view_id,
+                    )
+                    if (
+                        record is None
+                        or record.issue_id != entry.issue_id
+                        or not spacing_image_current(
+                            record,
+                            entry.input_digest,
+                            spacing_capture_fingerprint(
+                                entry.input_digest, capture.sha256
+                            ),
+                            approved=True,
+                        )
+                    ):
+                        raise ValidationError(
+                            "A spacing review image changed since approval. Open Configure "
+                            "to review and approve the spacing images and generate again."
+                        )
+                    spacing_images.append(SpacingReviewImage(entry, capture))
+                    validate_spacing_review_images(
+                        spacing_images, manufacturing_bytes=total_bytes
+                    )
     finally:
-        close = getattr(renderer, "close", None)
+        close = getattr(renderer, "close", None) if renderer is not None else None
         if callable(close):
             close()
     if appearance_context is not None and appearance_context() != appearance:
         raise ValidationError(
             "The PCB appearance changed during impedance capture. Open Configure "
             "to review the images and generate again."
+        )
+    if source_context is not None and source_context() != plan.snapshot:
+        raise ValidationError(
+            "The report output changed while its captures were rendered."
         )
     specifications = {spec.spec_id: spec for spec in plan.config.specifications}
     source_digest = source_fingerprint(plan.snapshot)
@@ -440,6 +797,9 @@ def export_reports(
                 "An impedance image changed since review. Open Configure to "
                 "review the images and generate again."
             )
+    if capture_cache is not None:
+        for key, image in staged_captures:
+            capture_cache.put(key, image)
     rows = report_rows(plan, images)
     workbook = scratch_dir / OUTPUT_FILENAME
     html_report = scratch_dir / HTML_FILENAME
@@ -453,6 +813,8 @@ def export_reports(
                 html_report,
                 board_name=board_name or "Untitled board",
                 stackup=plan.config.stackup,
+                spacing_reviews=tuple(spacing_images),
+                review_tracking=plan.config.review_tracking,
             ),
             html_report,
         ),

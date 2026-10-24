@@ -17,10 +17,79 @@ from impedance import (
 )
 from impedance.model import Section, ValidationError
 from impedance.review_tracking import ImageView, LayerApproval, ReviewTracking
-from tests.test_impedance_report_pipeline import _png
+from tests.test_impedance_report_pipeline import _png, _spacing_plan
 from tests.test_impedance_service import _board, _configuration, _review
 
 _TIME = "2026-10-20T12:13:14.000000Z"
+
+
+def _approved_spacing_plan() -> service.ExportPlan:
+    """Record explicit per-image approval for every independently derived close-up."""
+    from impedance.spacing_review import spacing_review_entries
+
+    plan = _spacing_plan(100_000)
+    tracking = plan.config.review_tracking
+    for entry in spacing_review_entries(
+        plan.config, plan.snapshot, plan.analysis.sections
+    ):
+        digest = review_tracking.spacing_capture_fingerprint(
+            entry.input_digest,
+            service.CapturedImage.from_bytes(
+                _png(entry.width_px, entry.height_px, b"\x20\x90\x40")
+            ).sha256,
+        )
+        tracking = review_tracking.put_spacing_image(
+            tracking,
+            review_tracking.SpacingImageReview(
+                entry.spec_id,
+                entry.layer,
+                entry.issue_id,
+                entry.view_id,
+                entry.input_digest,
+                digest,
+                _TIME,
+                digest,
+                _TIME,
+            ),
+        )
+    return replace(plan, config=replace(plan.config, review_tracking=tracking))
+
+
+@pytest.mark.parametrize(
+    "evidence", ["absent", "viewed", "stale", "wrong_issue", "one_pending"]
+)
+def test_prepare_requires_explicit_current_approval_of_every_spacing_image(
+    evidence: str,
+) -> None:
+    """Global workbook consent and exact viewing do not approve any diagnostic."""
+    plan = _approved_spacing_plan()
+    history = plan.config.review_tracking
+    assert len(history.spacing_images) > 1
+    if evidence == "absent":
+        records = ()
+    elif evidence == "viewed":
+        records = tuple(
+            replace(record, approved_digest="", approved_at_utc="")
+            for record in history.spacing_images
+        )
+    elif evidence == "stale":
+        records = tuple(
+            replace(record, input_digest="0" * 64) for record in history.spacing_images
+        )
+    elif evidence == "wrong_issue":
+        records = tuple(
+            replace(record, issue_id="unrelated") for record in history.spacing_images
+        )
+    else:
+        records = history.spacing_images[:-1]
+    config = replace(
+        plan.config, review_tracking=replace(history, spacing_images=records)
+    )
+    before = config.to_dict()
+    with pytest.raises(ValidationError, match="Spacing.*individual approval"):
+        service.prepare(config, plan.snapshot)
+    assert config.to_dict() == before
+    assert service.prepare(plan.config, plan.snapshot) is not None
 
 
 def _plan(
@@ -90,6 +159,115 @@ class _Renderer:
     def close(self) -> None:
         """Expose release on success and every validation failure."""
         self.closed = True
+
+
+class _SpacingRenderer(_Renderer):
+    """Keep diagnostic entry rendering separate from manufacturing section calls."""
+
+    def __init__(self, failure: str = "") -> None:
+        super().__init__(_png())
+        self.failure = failure
+        self.spacing: list[Any] = []
+
+    def render_spacing(
+        self, entry: Any, destination: Path, width_px: int, height_px: int
+    ) -> Path:
+        """Return actual image bytes so validation checks the captured pixels."""
+        self.spacing.append(entry)
+        if self.failure == "render":
+            raise RuntimeError("spacing render failed")
+        if self.failure == "path":
+            return destination.with_name("unexpected.png")
+        if self.failure == "dimensions":
+            width_px //= 2
+        color = b"\xff\x00\x00" if self.failure == "pixels" else b"\x20\x90\x40"
+        destination.write_bytes(_png(width_px, height_px, color))
+        return destination
+
+
+@pytest.mark.parametrize("failure", ["pixels", "dimensions", "path", "render", "api"])
+def test_spacing_capture_failures_stop_both_writers_and_keep_previous_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """Saved approval cannot authorize changed diagnostics or a missing renderer."""
+    plan = _approved_spacing_plan()
+    before = plan.config.to_dict()
+    renderer = _Renderer(_png()) if failure == "api" else _SpacingRenderer(failure)
+    seen, writer = _writers(monkeypatch)
+    outputs = (
+        tmp_path / workbook.OUTPUT_FILENAME,
+        tmp_path / html_report.OUTPUT_FILENAME,
+    )
+    for output in outputs:
+        output.write_bytes(b"previous report")
+    error = RuntimeError if failure == "render" else ValidationError
+    with pytest.raises(error):
+        service.export_reports(
+            plan,
+            object(),
+            object(),
+            tmp_path,
+            renderer_factory=lambda _board, _pcbnew: renderer,
+            writer=writer,
+        )
+    assert renderer.closed
+    assert seen == []
+    assert all(output.read_bytes() == b"previous report" for output in outputs)
+    assert not tuple(tmp_path.glob(".impedance-spacing-*"))
+    assert plan.config.to_dict() == before
+
+
+def test_export_keeps_spacing_images_out_of_canonical_workbook_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both writers share manufacturing rows; only HTML receives extra close-ups."""
+    from impedance.spacing_review import SpacingReviewImage, spacing_review_entries
+
+    plan = _approved_spacing_plan()
+    expected_entries = spacing_review_entries(
+        plan.config, plan.snapshot, plan.analysis.sections
+    )
+    renderer = _SpacingRenderer()
+    workbook_rows: list[Any] = []
+    html_options: dict[str, Any] = {}
+    before = plan.config.to_dict()
+
+    def write_xlsx(rows: Any, destination: Path) -> Path:
+        """Check that the workbook receives its unchanged immutable row contract."""
+        workbook_rows.append(rows)
+        destination.write_bytes(b"workbook")
+        return destination
+
+    def write_html(rows: Any, destination: Path, **options: Any) -> Path:
+        """Keep diagnostics in their dedicated companion-only argument."""
+        assert rows is workbook_rows[0]
+        html_options.update(options)
+        destination.write_bytes(b"html")
+        return destination
+
+    monkeypatch.setattr(html_report, "write_html_report", write_html)
+    service.export_reports(
+        plan,
+        object(),
+        object(),
+        tmp_path,
+        renderer_factory=lambda _board, _pcbnew: renderer,
+        writer=write_xlsx,
+    )
+    assert renderer.closed and renderer.sections == list(plan.sections)
+    assert renderer.spacing == list(expected_entries)
+    assert len(workbook_rows[0]) == len(plan.sections)
+    assert all(isinstance(row, service.ReportRow) for row in workbook_rows[0])
+    assert all(row.image.data == _png() for row in workbook_rows[0])
+    diagnostics = html_options["spacing_reviews"]
+    assert all(isinstance(image, SpacingReviewImage) for image in diagnostics)
+    assert tuple(image.entry for image in diagnostics) == expected_entries
+    assert all(
+        image.capture.viewport_nm == image.entry.viewport_nm for image in diagnostics
+    )
+    assert html_options["review_tracking"] == plan.config.review_tracking
+    assert plan.config.to_dict() == before
+    assert not tuple(tmp_path.glob(".impedance-spacing-*"))
 
 
 def _writers(

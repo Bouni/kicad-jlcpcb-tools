@@ -340,6 +340,10 @@ def test_opening_populates_rows_and_offers_counted_approval_without_scan_button(
         "",
         "Target width",
         "Segments",
+        "Pair spacing",
+        "",
+        "Target spacing",
+        "Spacing check",
     ]
     assert [title for title, _width in dialog.specifications.columns] == [
         "Review",
@@ -351,7 +355,7 @@ def test_opening_populates_rows_and_offers_counted_approval_without_scan_button(
         "Width (mm)",
         "References",
     ]
-    assert dialog.sections.GetNumberCols() == 11
+    assert dialog.sections.GetNumberCols() == 15
     assert dialog.sections.minimum_size[0] >= 720
     assert len(dialog.sections.items) == 2
     assert [row[1] for row in dialog.sections.table_rows] == ["1", "2"]

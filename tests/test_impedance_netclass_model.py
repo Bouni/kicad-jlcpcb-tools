@@ -67,6 +67,7 @@ def current_payload() -> dict[str, Any]:
     payload = class_payload()
     payload["schema_version"] = 8
     payload["reviewed_captures"] = []
+    payload["review_tracking"]["spacing_images"] = []
     for spec in payload["specifications"]:
         spec.update(linked_layer_groups=[], independent_layers=[])
     return payload

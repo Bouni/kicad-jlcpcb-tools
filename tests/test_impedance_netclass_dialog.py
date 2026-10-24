@@ -6,10 +6,11 @@ these regressions do not claim native platform rendering coverage.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import replace
 import json
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -20,7 +21,126 @@ if TYPE_CHECKING:
     from impedance.dialog import SpecificationDialog
     from impedance.model import BoardSnapshot
 
-constructor_api = dialog_tests.constructor_api
+
+def _drive_spacing_viewer(
+    api: SimpleNamespace,
+    viewer: Any,
+    *,
+    approve: bool = True,
+    size: tuple[int, int] = (1000, 700),
+) -> int:
+    """Paint the automatically fitted image before explicit approval or Cancel."""
+    viewer.on_screen = True
+    viewer.canvas.GetClientSize = lambda: SimpleNamespace(
+        GetWidth=lambda: size[0], GetHeight=lambda: size[1]
+    )
+    viewer.GetClientSize = lambda: SimpleNamespace(
+        GetWidth=lambda: size[0] + 20, GetHeight=lambda: size[1] + 100
+    )
+    viewer.canvas.GetParent = lambda: viewer
+    viewer.canvas.GetScreenRect = lambda: SimpleNamespace(
+        x=10, y=30, width=size[0], height=size[1]
+    )
+    viewer.GetScreenRect = lambda: SimpleNamespace(
+        x=0, y=0, width=size[0] + 20, height=size[1] + 100
+    )
+    viewer.ClientToScreen = lambda _x, _y: (0, 20)
+    for control, top, width in (
+        (viewer.caption, 20, 600),
+        (viewer.status, size[1] + 30, 700),
+        (viewer.approve_button, size[1] + 50, 220),
+        (viewer.FindWindow(api.wx.ID_CANCEL), size[1] + 80, 100),
+    ):
+        control.GetParent = lambda: viewer
+        control.GetScreenRect = lambda top=top, width=width: SimpleNamespace(
+            x=10, y=top, width=width, height=20
+        )
+    assert not viewer.approve_button.enabled
+    api.paint(viewer)
+    if approve:
+        assert viewer.canvas._visible_source_rect == (
+            0.0,
+            0.0,
+            float(viewer.canvas._image.GetWidth()),
+            float(viewer.canvas._image.GetHeight()),
+        )
+        assert viewer.readable and viewer.approve_button.enabled
+        viewer.approve_button.emit(api.wx.EVT_BUTTON)
+    else:
+        viewer.EndModal(api.wx.ID_CANCEL)
+    return viewer.modal_result
+
+
+def _install_spacing_viewer_harness(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Provide native modal lifecycle and geometry in the shared control double."""
+    monkeypatch.setattr(
+        api.wx, "Rect", lambda *rectangle: tuple(rectangle), raising=False
+    )
+    monkeypatch.setattr(
+        api.wx.Dialog,
+        "SetSizerAndFit",
+        lambda window, sizer: window.SetSizer(sizer),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        api.wx.Dialog,
+        "GetSize",
+        lambda window: SimpleNamespace(
+            GetWidth=lambda: window.canvas.minimum_size[0] + 20,
+            GetHeight=lambda: window.canvas.minimum_size[1] + 180,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        api.wx.Dialog,
+        "SetPosition",
+        lambda window, position: setattr(window, "position", position),
+        raising=False,
+    )
+
+    def show_modal(viewer: object) -> int:
+        """Require a real readable paint whenever a test explicitly opens review."""
+        if getattr(viewer, "approve_button", None) is not None:
+            return _drive_spacing_viewer(api, viewer)
+        return viewer.modal_result or api.wx.ID_CANCEL
+
+    monkeypatch.setattr(api.wx.Dialog, "ShowModal", show_modal, raising=False)
+    monkeypatch.setattr(
+        api.wx,
+        "Display",
+        type(
+            "Display",
+            (),
+            {
+                "GetFromWindow": staticmethod(lambda _window: 0),
+                "__init__": lambda self, _index: None,
+                "GetClientArea": lambda self: SimpleNamespace(
+                    x=0,
+                    y=0,
+                    width=1600,
+                    height=1000,
+                    GetWidth=lambda: 1600,
+                    GetHeight=lambda: 1000,
+                ),
+            },
+        ),
+        raising=False,
+    )
+
+
+@pytest.fixture
+def constructor_api(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    """Extend the existing constructor fixture with real modal paint events."""
+    original = dialog_tests.constructor_api.__wrapped__(monkeypatch)
+    try:
+        api = next(original)
+        _install_spacing_viewer_harness(api, monkeypatch)
+        yield api
+    finally:
+        original.close()
 
 
 def class_snapshot(api: SimpleNamespace) -> BoardSnapshot:
@@ -72,20 +192,29 @@ def choose_layer(api: SimpleNamespace, dialog: SpecificationDialog, name: str) -
 
 
 def apply_layer(api: SimpleNamespace, dialog: SpecificationDialog) -> None:
-    """Explicitly approve each displayed image on the current layer."""
-    pane = dialog.preview_pane
-    layer = dialog._active_layer
-    for _ in range(len(pane.sections) + 1):
-        api.drain()
-        api.paint(pane)
-        previous = (pane.selected_section, dialog.review_tracking.layers)
-        dialog.approve_layer.emit(api.wx.EVT_BUTTON)
-        api.drain()
-        api.paint(pane)
-        if dialog._active_layer != layer or dialog._layer_drafts[layer].confirmed:
-            return
-        if previous == (pane.selected_section, dialog.review_tracking.layers):
-            return
+    """Explicitly approve each displayed workbook or spacing image on this layer."""
+    with pytest.MonkeyPatch.context() as modal_patch:
+        _install_spacing_viewer_harness(api, modal_patch)
+        pane = dialog.preview_pane
+        layer = dialog._active_layer
+        for _ in range(len(pane.entries) + 1):
+            api.drain()
+            api.paint(pane)
+            if (
+                dialog._layer_drafts[layer].included
+                and pane.capture_loaded
+                and not pane.failure
+            ):
+                assert pane.displayed
+                assert dialog.approve_layer.enabled
+            previous = (pane.selected_entry, dialog.review_tracking)
+            dialog.approve_layer.emit(api.wx.EVT_BUTTON)
+            api.drain()
+            api.paint(pane)
+            if dialog._active_layer != layer or dialog._layer_drafts[layer].confirmed:
+                return
+            if previous == (pane.selected_entry, dialog.review_tracking):
+                return
 
 
 def save(api: SimpleNamespace, dialog: SpecificationDialog) -> None:
@@ -96,16 +225,9 @@ def save(api: SimpleNamespace, dialog: SpecificationDialog) -> None:
 
 
 def view_all_rows(api: SimpleNamespace, dialog: SpecificationDialog) -> None:
-    """Visit every exact capture using the row selector's real bound native event."""
+    """View every workbook and spacing capture through its real selection event."""
     api.drain()
-    for index in range(
-        len(
-            [
-                dialog.preview_pane.checklist.GetItemText(index, 1)
-                for index in range(dialog.preview_pane.checklist.GetItemCount())
-            ]
-        )
-    ):
+    for index in range(len(dialog.preview_pane.entries)):
         dialog.preview_pane.checklist.Select(index)
         dialog.preview_pane.checklist.emit(api.wx.EVT_LIST_ITEM_SELECTED)
         api.drain()
@@ -350,6 +472,14 @@ def test_editing_a_confirmed_layer_immediately_marks_it_as_needing_review(
     apply_layer(api, dialog)
     choose_layer(api, dialog, "F.Cu")
     assert "F.Cu: 0.1, 0.15 mm (approved)" in dialog.layer_hint.GetValue()
+    front_reviews = tuple(
+        record
+        for record in dialog.review_tracking.spacing_images
+        if record.layer == "F.Cu"
+    )
+    assert front_reviews and all(
+        record.approved_digest == record.viewed_digest for record in front_reviews
+    )
     if field == "references":
         dialog.references.Check(3, True)
         dialog.references.emit(api.wx.EVT_CHECKLISTBOX)
@@ -759,6 +889,8 @@ def test_exact_pair_captures_precede_missing_fields_and_survive_review_then_appl
         dialog.spacing.SetValue(spacing)
         apply_layer(api, dialog)
         assert api.errors == []
+        assert dialog._layer_drafts[layer].confirmed
+        assert not dialog._pending_spacing_entries(layer)
     assert dialog.modal_result is None
     save(api, dialog)
     assert dialog.modal_result == api.wx.ID_OK

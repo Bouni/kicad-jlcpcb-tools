@@ -27,6 +27,9 @@ from impedance.model import (
     resolved_layer_settings,
 )
 from impedance.render import section_viewport
+from impedance.review_tracking import SpacingImageReview, spacing_capture_fingerprint
+from impedance.spacing_checks import SpacingContext
+from impedance.spacing_review import spacing_review_entries
 from scripts import generate_rf_impedance_fixtures as fixture_generator
 from tests.rf_impedance_combined import COMBINED_BOARDS
 from tests.rf_impedance_fixtures import (
@@ -69,7 +72,35 @@ def _prepare(case: RFCase) -> tuple[Analysis, service.ExportPlan]:
         reviewed_digest=grouped.digest,
         included_section_ids=tuple(section.section_id for section in grouped.sections),
     )
-    plan = service.prepare(config, snapshot, layer_count=6)
+    # These geometry/workbook fixtures provide explicit prior consent for each
+    # deterministic diagnostic. Native UI tests exercise the approval actions.
+    spacing_context = SpacingContext(snapshot)
+    capture = service.CapturedImage.from_bytes(_png(1200, 800))
+    reviews = []
+    for entry in spacing_review_entries(
+        config, snapshot, grouped.sections, context=spacing_context
+    ):
+        digest = spacing_capture_fingerprint(entry.input_digest, capture.sha256)
+        reviews.append(
+            SpacingImageReview(
+                entry.spec_id,
+                entry.layer,
+                entry.issue_id,
+                entry.view_id,
+                entry.input_digest,
+                digest,
+                "2026-10-24T12:00:00.000001Z",
+                digest,
+                "2026-10-24T12:01:00.000001Z",
+            )
+        )
+    config = replace(
+        config,
+        review_tracking=replace(config.review_tracking, spacing_images=tuple(reviews)),
+    )
+    plan = service.prepare(
+        config, snapshot, layer_count=6, spacing_context=spacing_context
+    )
     assert plan is not None
     return grouped, plan
 

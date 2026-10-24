@@ -7,10 +7,16 @@ its displayed precision. All functions are read-only and work offline.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import Decimal, localcontext
 from typing import Optional
 
-from .model import Config, Specification, ValidationError, format_length
+from .model import (
+    Config,
+    Specification,
+    ValidationError,
+    format_length,
+    format_workbook_length,
+)
 from .stackup_model import (
     WidthResult,
     calculation_fingerprint,
@@ -49,13 +55,7 @@ def target_width_cell_text(check: "WidthCheck") -> str:
         and check.target_width_nm is not None
         and check.status in {"matches_nominal", "different"}
     ):
-        with localcontext() as context:
-            context.prec = max(40, len(str(check.target_width_nm)) + 12)
-            millimetres = Decimal(check.target_width_nm) / Decimal(1_000_000)
-            text = format(
-                millimetres.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP), "f"
-            )
-        return f"{text.rstrip('0').rstrip('.')} mm"
+        return f"{format_workbook_length(check.target_width_nm)} mm"
     if check.result_status == "pending" or (
         not check.result_current and "pending" in check.message.casefold()
     ):

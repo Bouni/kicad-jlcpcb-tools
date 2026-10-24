@@ -42,6 +42,10 @@ _LABELS = (
     "",
     "Target width",
     "Segments",
+    "Pair spacing",
+    "",
+    "Target spacing",
+    "Spacing check",
 )
 
 
@@ -157,7 +161,7 @@ def _paint_cell(grid: Any, row: int, col: int, selected: bool) -> tuple[Any, ...
 
 
 def _assert_rows_painted(grid: Any) -> None:
-    """Check all eleven columns in every unselected and selected displayed row."""
+    """Check every column in every unselected and selected displayed row."""
     import wx
 
     for selected in (False, True):
@@ -179,7 +183,15 @@ def _assert_rows_painted(grid: Any) -> None:
                     (120, 120, 120)
                     if grid.GetTextValue(row, 7) == "Covered stub"
                     else (180, 140, 0)
-                    if col in (7, 8, 9) and grid.GetTextValue(row, 8) == "!="
+                    if (
+                        (col in (7, 8, 9) and grid.GetTextValue(row, 8) == "!=")
+                        or (col in (11, 12, 13) and grid.GetTextValue(row, 12) == "!=")
+                        or (
+                            col == 14
+                            and grid.GetTextValue(row, 14)
+                            not in ("", "Match", "Terminal transitions")
+                        )
+                    )
                     else None
                 )
                 assert _rgb(grid.GetCellTextColour(row, col)) == (
@@ -230,8 +242,15 @@ def test_native_alternating_fill_all_columns_preserves_selection_and_cues(
         grid = api.workbook_grid.WorkbookGrid(frame, _LABELS)
         grid.SetDefaultCellBackgroundColour(wx.Colour(*base))
         grid.SetDefaultCellTextColour(wx.Colour(*text))
-        for row, (width, marker) in enumerate(
-            (("0.15 mm", ""), ("Covered stub", ""), ("0.15 mm", "!="), ("0.2 mm", "!="))
+        for row, (width, marker, spacing, spacing_marker, spacing_status) in enumerate(
+            (
+                ("0.15 mm", "", "0.2 mm", "", "Match"),
+                ("Covered stub", "", "0.25 mm", "!=", "Deviation"),
+                ("0.15 mm", "!=", "0.2 mm", "", "Match"),
+                ("0.2 mm", "", "0.25 mm", "!=", "Deviation"),
+                ("0.15 mm", "!=", "0.1–0.25 mm", "!=", "Deviation"),
+                ("0.15 mm", "", "", "", "Unverified"),
+            )
         ):
             grid.AppendItem(
                 [
@@ -246,6 +265,10 @@ def test_native_alternating_fill_all_columns_preserves_selection_and_cues(
                     marker,
                     "0.18 mm",
                     "1",
+                    spacing,
+                    spacing_marker,
+                    "0.2 mm",
+                    spacing_status,
                 ]
             )
         grid.SelectRow(1)
@@ -276,6 +299,17 @@ def test_native_alternating_fill_all_columns_preserves_selection_and_cues(
         assert _rgb(grid.GetDefaultCellTextColour()) == next_text
         assert grid.GetSelectedRow() == 1
         _assert_rows_painted(grid)
+        for marker in ("!=", "", "!="):
+            rows = [list(row) for row in grid.GetTable().rows]
+            rows[0][11:15] = [
+                "0.25 mm" if marker else "0.2 mm",
+                marker,
+                "0.2 mm",
+                "Deviation" if marker else "Match",
+            ]
+            grid.SetItems(rows)
+            grid.fit_columns()
+            _assert_rows_painted(grid)
 
     run_native(exercise)
 

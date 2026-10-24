@@ -2,23 +2,27 @@
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import importlib
 import math
 from pathlib import Path
 import re
 import struct
 from tempfile import TemporaryDirectory
-from typing import Any, Optional
+from time import perf_counter
+from typing import TYPE_CHECKING, Any, Optional, Union
 from xml.etree import ElementTree as ET
 
 from . import capture_geometry
 from .board_copy import BoardCopyError, copy_for_render
 from .capture_geometry import capture_viewport
-from .model import Bounds, Section
+from .model import Bounds, Section, Trace
 from .palette import PaletteError, ThemeContext, read_theme_context
 from .pcbnew_adapter import copper_layers
 from .render_context import NONCOPPER_CONTEXT_LAYERS
+
+if TYPE_CHECKING:
+    from .spacing_review import SpacingReviewEntry
 
 NM_PER_MM = 1_000_000
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -26,6 +30,9 @@ BACKGROUND_COLOR = "#10151d"
 # Bump matching.CAPTURE_POLICY_REVISION for material framing/highlight changes
 # so saved approvals cannot silently authorize a visually different capture.
 HIGHLIGHT_COLOR = "#FFFF00"
+SPACING_GUIDE_COLOR = "#69E4FF"
+SPACING_TICK_COLOR = "#FFFFFF"
+SPACING_SPAN_COLOR = "#FFE066"
 # Retain the renderer's public constants as explicit compatibility re-exports.
 HIGHLIGHT_PADDING_PX = capture_geometry.HIGHLIGHT_PADDING_PX
 HIGHLIGHT_STROKE_PX = capture_geometry.HIGHLIGHT_STROKE_PX
@@ -53,6 +60,16 @@ _PAINT_KEYS = {
     "stroke-dashoffset",
 }
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")
+_POINT = rf"{_NUMBER.pattern}\s*(?:,\s*|\s+){_NUMBER.pattern}"
+_LINEAR_PATH = re.compile(
+    rf"(?:\s*M\s*{_POINT}(?:\s+{_POINT}|\s*L\s*{_POINT})*(?:\s*Z)?)+\s*"
+)
+_LINEAR_POINTS = re.compile(rf"\s*{_POINT}(?:\s+{_POINT})*\s*")
+_RASTER_PANEL = re.compile(
+    r'<svg\b[^>]*\bdata-spacing-raster-panel="[^"]+"[^>]*>.*?</svg>', re.DOTALL
+)
+_NATIVE_SCENE_LIMIT = 4
+_NATIVE_SCENE_BYTES = 64 * 1024 * 1024
 _NATIVE_DOCTYPE = re.compile(
     r"<!DOCTYPE\s+svg\s+PUBLIC\s+[\"\']-//W3C//DTD SVG 1\.1//EN[\"\']"
     r"\s+[\"\']http://www\.w3\.org/Graphics/SVG/1\.1/DTD/svg11\.dtd[\"\']\s*>"
@@ -83,6 +100,499 @@ class Viewport:
     top: float
     width: float
     height: float
+
+
+@dataclass(frozen=True)
+class _RasterFragment:
+    """Own immutable XML and a proved paint bound independently of viewports."""
+
+    head: str
+    tail: str
+    children: Optional[tuple["_RasterFragment", ...]]
+    bounds: Optional[tuple[float, float, float, float]]
+    weight: int
+
+    def visible(self, viewport: tuple[float, float, float, float], guard: float) -> str:
+        """Select only already-certified bounds; uncertain content stays complete."""
+        bounds = self.bounds
+        if bounds is not None and (
+            bounds[2] + guard < viewport[0]
+            or bounds[0] - guard > viewport[2]
+            or bounds[3] + guard < viewport[1]
+            or bounds[1] - guard > viewport[3]
+        ):
+            return ""
+        if self.children is None:
+            return self.head
+        return (
+            self.head
+            + "".join(child.visible(viewport, guard) for child in self.children)
+            + self.tail
+        )
+
+
+@dataclass(frozen=True)
+class _NativeScene:
+    """Own validated geometry and invariant serialized paint for one native layer."""
+
+    source: str
+    root_attributes: tuple[tuple[str, str], ...]
+    units_per_nm: float
+    background: str
+    original_body: str
+    dimmed_body: str
+    opacity: str
+    original_fragments: tuple[_RasterFragment, ...]
+    dimmed_fragments: tuple[_RasterFragment, ...]
+    weight: int
+
+
+@dataclass(frozen=True)
+class _TraceSelection:
+    """Select copper paint without coupling an immutable scene to a review item."""
+
+    layer: str
+    traces: tuple[Trace, ...] = ()
+
+
+def _spacing_path(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    viewport: tuple[float, float, float, float],
+    width_px: int,
+    height_px: int,
+    center: Optional[tuple[float, float]] = None,
+    sweep: float = 0.0,
+) -> str:
+    """Project a certified native line/arc without sampled chord approximations."""
+    left, top, width, height = viewport
+    first = (
+        (start[0] - left) / width * width_px,
+        (start[1] - top) / height * height_px,
+    )
+    last = ((end[0] - left) / width * width_px, (end[1] - top) / height * height_px)
+    prefix = f"M {first[0]:.6f},{first[1]:.6f} "
+    if center is None:
+        return prefix + f"L {last[0]:.6f},{last[1]:.6f}"
+    radius = math.dist(start, center) / width * width_px
+    return (
+        prefix
+        + f"A {radius:.6f},{radius:.6f} 0 {int(abs(sweep) > math.pi)} {int(sweep > 0)} {last[0]:.6f},{last[1]:.6f}"
+    )
+
+
+def _spacing_annotations(entry: "SpacingReviewEntry") -> str:
+    """Burn exact affected spans and target edges into diagnostic PNG evidence."""
+    from .spacing_overlays import spacing_guide_paths
+    from .spacing_review import spacing_review_spans
+
+    viewport, width_px, height_px = entry.viewport_nm, entry.width_px, entry.height_px
+    root = ET.Element("g", {"data-impedance-spacing-annotations": "measured"})
+
+    def physical(point: tuple[float, float]) -> str:
+        """Keep physical endpoints inspectable independently of SVG projection."""
+        return ",".join(f"{value:.6f}".rstrip("0").rstrip(".") for value in point)
+
+    guides = spacing_guide_paths(entry)
+    selected = entry.composition.measurement
+    guides = tuple(
+        guide
+        for guide in guides
+        if guide.kind not in ("measured-gap", "target-gap") or guide.section == selected
+    )
+    for guide in guides:
+        edge = guide.facing_edge
+        if edge is None:
+            continue
+        outward = _spacing_path(
+            guide.start,
+            guide.end,
+            viewport,
+            width_px,
+            height_px,
+            guide.center,
+            guide.sweep,
+        )
+        inward = _spacing_path(
+            edge.end,
+            edge.start,
+            viewport,
+            width_px,
+            height_px,
+            edge.center,
+            -edge.sweep,
+        )
+        # The target and source-facing edge share certified native line/arc
+        # geometry. Joining their finite endpoints gives a truthful clearance
+        # envelope without extrapolating across a bend or unmeasured mate.
+        path = (
+            outward
+            + " L "
+            + inward.split("M ", 1)[1].split(" ", 1)[0]
+            + " "
+            + inward.split(" ", 2)[2]
+            + " Z"
+        )
+        ET.SubElement(
+            root,
+            "path",
+            {
+                "data-impedance-spacing-clearance": "certified",
+                "d": path,
+                "fill": SPACING_GUIDE_COLOR,
+                "fill-opacity": "0.18",
+                "stroke": "none",
+            },
+        )
+
+    for span in spacing_review_spans(entry):
+        ET.SubElement(
+            root,
+            "path",
+            {
+                "data-impedance-spacing-span": span.trace.trace_id,
+                "data-board-start-nm": physical(span.start),
+                "data-board-end-nm": physical(span.end),
+                "d": _spacing_path(
+                    span.start,
+                    span.end,
+                    viewport,
+                    width_px,
+                    height_px,
+                    span.center,
+                    span.sweep,
+                ),
+                "fill": "none",
+                "stroke": SPACING_SPAN_COLOR,
+                "stroke-width": f"{span.trace.width_nm / viewport[2] * width_px:.6f}",
+                "stroke-linecap": "round",
+                "stroke-linejoin": "round",
+            },
+        )
+    colored_guides = []
+    for guide in guides:
+        path = _spacing_path(
+            guide.start,
+            guide.end,
+            viewport,
+            width_px,
+            height_px,
+            guide.center,
+            guide.sweep,
+        )
+        target = guide.kind.startswith("target")
+        if guide.kind in ("measured-gap", "target-gap"):
+            dx, dy = guide.end[0] - guide.start[0], guide.end[1] - guide.start[1]
+            length = math.hypot(dx, dy)
+            if length:
+                # Visible caps survive the complete image's minimum fitted scale.
+                offset = (-dy / length * 8, dx / length * 8)
+                for point in (guide.start, guide.end):
+                    x = (point[0] - viewport[0]) / viewport[2] * width_px
+                    y = (point[1] - viewport[1]) / viewport[3] * height_px
+                    path += f" M {x - offset[0]:.6f},{y - offset[1]:.6f} L {x + offset[0]:.6f},{y + offset[1]:.6f}"
+        paint = {"d": path, "fill": "none", "stroke-linecap": "round"}
+        if target:
+            paint["stroke-dasharray"] = "18 10"
+        ET.SubElement(
+            root, "path", dict(paint, stroke="#10151d", **{"stroke-width": "10"})
+        )
+        attributes = dict(
+            paint,
+            stroke=SPACING_GUIDE_COLOR if target else SPACING_TICK_COLOR,
+            **{
+                "stroke-width": "4",
+                "data-impedance-spacing-guide": guide.kind,
+                "data-board-start-nm": physical(guide.start),
+                "data-board-end-nm": physical(guide.end),
+            },
+        )
+        if guide.start[1] == guide.end[1] and guide.center is None:
+            attributes["data-board-y-nm"] = str(guide.start[1])
+        colored_guides.append(ET.Element("path", attributes))
+    # Local actual and target rulers share a physical origin. Paint all contrast
+    # keylines underneath the colored paths, so a later dashed target's dark
+    # stroke cannot erase the measured ruler between its cyan dashes.
+    root.extend(colored_guides)
+    return ET.tostring(root, encoding="unicode")
+
+
+def _spacing_valid_viewport(
+    entry: "SpacingReviewEntry", dimensions: tuple[int, int]
+) -> None:
+    """Require true proportions for the physical detail rather than its canvas."""
+    _left, _top, width, height = entry.viewport_nm
+    if (
+        not all(math.isfinite(value) for value in entry.viewport_nm)
+        or width <= 0
+        or height <= 0
+        or not math.isclose(width / height, dimensions[0] / dimensions[1], rel_tol=1e-9)
+        or not entry.traces
+    ):
+        raise RenderError("The spacing image has no valid native review viewport.")
+
+
+def _spacing_panel(
+    scene: _NativeScene,
+    viewport: tuple[float, float, float, float],
+    rect: tuple[int, int, int, int],
+    background: str,
+    *,
+    kind: str,
+    annotations: str = "",
+    dimmed: bool = False,
+    prepared: bool = False,
+) -> str:
+    """Render one independently clipped native viewport in composite pixels."""
+    x, y, width_px, height_px = rect
+    left, top, width, _height = viewport
+    factor = width_px / (width * scene.units_per_nm)
+    transform = (
+        f"translate({-left * scene.units_per_nm * factor:.6f},"
+        f"{-top * scene.units_per_nm * factor:.6f}) scale({factor:.9f})"
+    )
+    paint = scene.opacity
+    body = scene.dimmed_body if dimmed else scene.original_body
+    if prepared:
+        # Match the serialized transform actually consumed by NanoSVG, including
+        # its existing decimal rounding, before applying the antialiasing guard.
+        scale = float(f"{factor:.9f}")
+        tx, ty = (
+            float(f"{-left * scene.units_per_nm * factor:.6f}"),
+            float(f"{-top * scene.units_per_nm * factor:.6f}"),
+        )
+        visible = (
+            -tx / scale,
+            -ty / scale,
+            (width_px - tx) / scale,
+            (height_px - ty) / scale,
+        )
+        fragments = scene.dimmed_fragments if dimmed else scene.original_fragments
+        body = "".join(fragment.visible(visible, 2 / scale) for fragment in fragments)
+    return (
+        f'<svg x="{x}" y="{y}" width="{width_px}" height="{height_px}" '
+        f'viewBox="0 0 {width_px} {height_px}" overflow="hidden" '
+        f'data-spacing-raster-panel="{kind}" data-spacing-{kind}-panel="true">'
+        f'<rect width="{width_px}" height="{height_px}" fill="{background}"/>'
+        f'<g data-impedance-spacing-view="{kind}"{paint} transform="{transform}">{body}</g>'
+        f"{annotations}</svg>"
+    )
+
+
+def _spacing_locator(entry: "SpacingReviewEntry") -> str:
+    """Highlight the complete concern and locate its selected physical detail."""
+    from .spacing_review import spacing_review_spans
+
+    left, top, width, height = entry.composition.overview_viewport_nm
+    detail_left, detail_top, detail_width, detail_height = entry.viewport_nm
+    pixels_w, pixels_h = entry.composition.overview_rect[2:]
+    root = ET.Element("g", {"data-spacing-overview-concern": entry.issue_id})
+    highlights = []
+    for span in spacing_review_spans(entry):
+        # This overview locates the complete affected native interval. A minimum
+        # visible line weight makes a long run recognisable at Fit Image; the
+        # separate physical detail retains true copper widths and proportions.
+        attributes = {
+            "d": _spacing_path(
+                span.start,
+                span.end,
+                (left, top, width, height),
+                pixels_w,
+                pixels_h,
+                span.center,
+                span.sweep,
+            ),
+            "fill": "none",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+        }
+        line_width = max(8, span.trace.width_nm / width * pixels_w)
+        ET.SubElement(
+            root,
+            "path",
+            dict(
+                attributes,
+                stroke="#10151d",
+                **{"stroke-width": f"{line_width + 6:.6f}"},
+            ),
+        )
+        highlights.append(
+            ET.Element(
+                "path",
+                dict(
+                    attributes,
+                    stroke=SPACING_SPAN_COLOR,
+                    **{
+                        "stroke-width": f"{line_width:.6f}",
+                        "data-spacing-overview-span": span.trace.trace_id,
+                        "data-board-start-nm": ",".join(
+                            f"{value:.6f}".rstrip("0").rstrip(".")
+                            for value in span.start
+                        ),
+                        "data-board-end-nm": ",".join(
+                            f"{value:.6f}".rstrip("0").rstrip(".") for value in span.end
+                        ),
+                    },
+                ),
+            )
+        )
+    locator = {
+        "x": f"{(detail_left - left) / width * pixels_w:.6f}",
+        "y": f"{(detail_top - top) / height * pixels_h:.6f}",
+        "width": f"{detail_width / width * pixels_w:.6f}",
+        "height": f"{detail_height / height * pixels_h:.6f}",
+        "fill": "none",
+    }
+    ET.SubElement(
+        root,
+        "rect",
+        dict(
+            locator,
+            stroke="#10151d",
+            **{"data-spacing-overview-locator": "true", "stroke-width": "10"},
+        ),
+    )
+    root.extend(highlights)
+    ET.SubElement(
+        root,
+        "rect",
+        dict(
+            locator,
+            stroke=SPACING_TICK_COLOR,
+            **{"data-spacing-overview-locator": "outline", "stroke-width": "4"},
+        ),
+    )
+    return ET.tostring(root, encoding="unicode")
+
+
+def _spacing_gap_deviation(actual: Optional[float], target: Optional[float]) -> str:
+    """Compare the unrounded signed copper gap with a valid positive target."""
+    if (
+        actual is None
+        or not math.isfinite(actual)
+        or target is None
+        or not math.isfinite(target)
+        or target <= 0
+    ):
+        return "Unavailable"
+    deviation = (actual - target) / target * 100
+    if not math.isfinite(deviation):
+        return "Unavailable"
+    if deviation == 0:
+        return "0.0% at target"
+    direction = "below" if deviation < 0 else "above"
+    magnitude = abs(deviation)
+    percentage = "<0.1" if magnitude < 0.1 else f"{magnitude:.1f}"
+    return f"{percentage}% {direction} target"
+
+
+def _spacing_summary_svg(entry: "SpacingReviewEntry") -> str:
+    """Keep fit-readable mm values and the target-relative gap outside copper."""
+    from .spacing_composition import spacing_label
+
+    def mm(value: float) -> str:
+        """Use mm consistently, retaining meaningful nanometre-sized differences."""
+        if not math.isfinite(value):
+            return "Unavailable"
+        return f"{value / NM_PER_MM:.6f}".rstrip("0").rstrip(".") + " mm"
+
+    composition = entry.composition
+    actual, target = composition.actual_gap_nm, entry.target_spacing_nm
+    metric_x, metric_y, metric_width, _metric_height = composition.metrics_rect
+    actual_x, actual_y, actual_value_y = metric_x, metric_y, metric_y + 48
+    target_x, target_y, target_value_y = metric_x, metric_y + 100, metric_y + 148
+    delta_x, delta_y, delta_value_y = metric_x, metric_y + 200, metric_y + 248
+    if composition.metric_columns:
+        actual_value_y = target_value_y = delta_value_y = metric_y + 60
+        target_y = delta_y = metric_y
+        target_x = metric_x + metric_width / (3 if actual is not None else 2)
+        delta_x = metric_x + 2 * metric_width / 3
+    region_x, region_y, _region_width, _region_height = composition.region_rect
+    footer_x, footer_y, _footer_width, _footer_height = composition.schematic_rect
+    parts = [
+        spacing_label(
+            "Worst gap - true proportions"
+            if entry.representative is not None
+            else "Physical detail - true proportions",
+            16,
+            8,
+        ),
+        spacing_label(
+            "Affected run",
+            composition.overview_rect[0],
+            composition.overview_label_top,
+        ),
+    ]
+    for x, y, width, height in (composition.detail_rect, composition.overview_rect):
+        parts.append(
+            f'<rect x="{x - 1}" y="{y - 1}" width="{width + 2}" '
+            f'height="{height + 2}" fill="none" stroke="#617185" stroke-width="2"/>'
+        )
+    if actual is not None and target is not None:
+        difference = actual - target
+        parts.extend(
+            (
+                spacing_label("Actual gap", actual_x, actual_y),
+                spacing_label(mm(actual), actual_x, actual_value_y, size=48),
+                spacing_label(
+                    "Too close by" if difference < 0 else "Wider by",
+                    delta_x,
+                    delta_y,
+                    color=SPACING_SPAN_COLOR,
+                ),
+                spacing_label(
+                    mm(abs(difference)),
+                    delta_x,
+                    delta_value_y,
+                    size=48,
+                    color=SPACING_SPAN_COLOR,
+                ),
+            )
+        )
+    else:
+        parts.append(spacing_label("See region gap range", metric_x, metric_y))
+    if target is not None:
+        parts.extend(
+            (
+                spacing_label(
+                    "Target gap", target_x, target_y, color=SPACING_GUIDE_COLOR
+                ),
+                spacing_label(
+                    mm(target),
+                    target_x,
+                    target_value_y,
+                    size=48,
+                    color=SPACING_GUIDE_COLOR,
+                ),
+            )
+        )
+    gap = composition.region_gap_nm
+    label = "Unavailable"
+    if gap is not None:
+        label = (
+            mm(gap.lower_nm)
+            if gap.lower_nm == gap.upper_nm
+            else (mm(gap.lower_nm).removesuffix(" mm") + "-" + mm(gap.upper_nm))
+        )
+    parts.extend(
+        (
+            spacing_label("Region gap range", region_x, region_y),
+            spacing_label(label, region_x + 420, region_y, size=48),
+        )
+    )
+    parts.extend(
+        (
+            spacing_label("Gap deviation from target", footer_x, footer_y),
+            spacing_label(
+                _spacing_gap_deviation(actual, target),
+                footer_x,
+                footer_y + 64,
+                size=72,
+                color=SPACING_SPAN_COLOR,
+            ),
+        )
+    )
+    return "".join(parts)
 
 
 def _fit_viewport(
@@ -746,7 +1256,10 @@ def _emphasized_color(color: str, background_luminance: float) -> str:
 
 
 def _emphasize_native_traces(
-    root: ET.Element, section: Section, units_per_nm: float, background_color: str
+    root: ET.Element,
+    section: Union[Section, "SpacingReviewEntry", _TraceSelection],
+    units_per_nm: float,
+    background_color: str,
 ) -> None:
     """Boost represented strokes and dim surrounding copper without changing alpha.
 
@@ -885,8 +1398,284 @@ def board_outline_bounds(board: Any) -> Optional[Bounds]:
     return bounds if _valid_bounds(bounds) else None
 
 
+def _native_shape_bounds(
+    node: ET.Element,
+) -> Optional[tuple[float, float, float, float]]:
+    """Bound only certified native primitives; retain every unfamiliar command."""
+    try:
+        if node.tag in {"circle", "ellipse"}:
+            x, y = float(node.get("cx", "0")), float(node.get("cy", "0"))
+            rx = float(node.attrib["r" if node.tag == "circle" else "rx"])
+            ry = rx if node.tag == "circle" else float(node.attrib["ry"])
+            if rx < 0 or ry < 0:
+                return None
+            bounds = x - rx, y - ry, x + rx, y + ry
+        elif node.tag == "rect":
+            x, y = float(node.get("x", "0")), float(node.get("y", "0"))
+            width, height = float(node.attrib["width"]), float(node.attrib["height"])
+            if width < 0 or height < 0:
+                return None
+            bounds = x, y, x + width, y + height
+        elif node.tag == "line":
+            x1, y1, x2, y2 = (
+                float(node.get(key, "0")) for key in ("x1", "y1", "x2", "y2")
+            )
+            bounds = min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
+        elif node.tag in {"path", "polyline", "polygon"}:
+            data = node.get("d" if node.tag == "path" else "points", "")
+            if node.tag == "path":
+                # Implicit line-to coordinate pairs after M are native plotter
+                # output. Curves, arcs, relative commands and malformed syntax
+                # remain untouched rather than guessing extrema.
+                if (
+                    re.sub(r"[MLZ\s,]", "", _NUMBER.sub("", data))
+                    or _LINEAR_PATH.fullmatch(data) is None
+                ):
+                    return None
+            elif _LINEAR_POINTS.fullmatch(data) is None:
+                return None
+            values = tuple(float(value) for value in _NUMBER.findall(data))
+            if len(values) < 4 or len(values) % 2:
+                return None
+            xs, ys = values[::2], values[1::2]
+            bounds = min(xs), min(ys), max(xs), max(ys)
+        else:
+            return None
+    except (KeyError, ValueError, OverflowError):
+        return None
+    return bounds if all(math.isfinite(value) for value in bounds) else None
+
+
+def _pruning_paint(node: ET.Element, inherited: Mapping[str, str]) -> dict[str, str]:
+    """Retain every property needed to prove safe bounds, including inline style."""
+    paint = dict(inherited)
+    local = _style(node)
+    for name in (
+        "stroke-miterlimit",
+        "filter",
+        "mask",
+        "clip-path",
+        "vector-effect",
+        "marker",
+        "marker-start",
+        "marker-mid",
+        "marker-end",
+    ):
+        if name in node.attrib and name not in local:
+            local[name] = node.attrib[name]
+    paint.update(local)
+    return paint
+
+
+def _prepare_raster_fragment(
+    node: ET.Element, inherited: Mapping[str, str]
+) -> _RasterFragment:
+    """Resolve inherited geometry/paint once, retaining opaque uncertain subtrees."""
+    paint = _pruning_paint(node, inherited)
+    uncertain = (
+        "id" in node.attrib
+        or node.tag in {"defs", "svg"}
+        or not _identity_native_transform(node.get("transform", ""))
+        or not _identity_native_transform(paint.get("transform", ""))
+        or any(
+            paint.get(name, "none") != "none"
+            for name in (
+                "filter",
+                "mask",
+                "clip-path",
+                "vector-effect",
+                "marker",
+                "marker-start",
+                "marker-mid",
+                "marker-end",
+            )
+        )
+    )
+    if node.tag == "g" and not uncertain:
+        children = tuple(_prepare_raster_fragment(child, paint) for child in node)
+        head, tail = _raster_group_markup(node)
+        return _RasterFragment(
+            head,
+            tail,
+            children,
+            None,
+            256 + len((head + tail).encode()) + sum(child.weight for child in children),
+        )
+    bounds = None if uncertain else _native_shape_bounds(node)
+    if bounds is not None:
+        try:
+            stroke = (
+                float(paint.get("stroke-width", "1"))
+                if paint.get("stroke", "none") != "none"
+                else 0.0
+            )
+            miter = max(4.0, float(paint.get("stroke-miterlimit", "4")))
+            padding = stroke * miter
+            if math.isfinite(padding) and stroke >= 0:
+                bounds = (
+                    bounds[0] - padding,
+                    bounds[1] - padding,
+                    bounds[2] + padding,
+                    bounds[3] + padding,
+                )
+            else:
+                bounds = None
+        except (ValueError, OverflowError):
+            bounds = None
+    content = ET.tostring(node, encoding="unicode")
+    return _RasterFragment(content, "", None, bounds, 256 + len(content.encode()))
+
+
+def _repaint_raster_fragment(
+    fragment: _RasterFragment, node: ET.Element
+) -> _RasterFragment:
+    """Share certified geometry with the paint-only dimmed version of the tree."""
+    if fragment.children is None:
+        content = ET.tostring(node, encoding="unicode")
+        return _RasterFragment(
+            content, "", None, fragment.bounds, 256 + len(content.encode())
+        )
+    children = tuple(
+        _repaint_raster_fragment(child, native)
+        for child, native in zip(fragment.children, node)
+    )
+    head, tail = _raster_group_markup(node)
+    return _RasterFragment(
+        head,
+        tail,
+        children,
+        fragment.bounds,
+        256 + len((head + tail).encode()) + sum(child.weight for child in children),
+    )
+
+
+def _raster_group_markup(node: ET.Element) -> tuple[str, str]:
+    """Keep group text and tails escaped by the same serializer as native leaves."""
+    shallow = ET.Element(node.tag, node.attrib)
+    shallow.text, shallow.tail = node.text, node.tail
+    ending = f"</{node.tag}>"
+    head, _closing, tail = ET.tostring(
+        shallow, encoding="unicode", short_empty_elements=False
+    ).partition(ending)
+    return head, ending + tail
+
+
+def _prune_panel_geometry(panel: ET.Element) -> None:
+    """Skip provably invisible native geometry before NanoSVG transforms paths.
+
+    The emitted SVG remains complete. This private raster copy alone loses
+    primitive leaves whose conservative painted bounds cannot touch the canvas.
+    Unknown transforms, effects, curves, definitions and stroke units stay intact.
+    """
+    try:
+        width, height = float(panel.attrib["width"]), float(panel.attrib["height"])
+    except (KeyError, ValueError):
+        return
+    if not all(math.isfinite(value) and value > 0 for value in (width, height)):
+        return
+    for content in panel:
+        if not (
+            content.get("data-impedance-spacing-view")
+            or content.get("data-impedance-view")
+        ):
+            continue
+        match = re.fullmatch(
+            r"translate\(([-+\d.eE]+),([-+\d.eE]+)\) scale\(([-+\d.eE]+)\)",
+            content.get("transform", ""),
+        )
+        if match is None:
+            continue
+        if not _identity_native_transform(_style(content).get("transform", "")):
+            continue
+        tx, ty, scale = (float(value) for value in match.groups())
+        if not all(math.isfinite(value) for value in (tx, ty, scale)) or scale <= 0:
+            continue
+        viewport = -tx / scale, -ty / scale, (width - tx) / scale, (height - ty) / scale
+
+        def prune(
+            parent: ET.Element,
+            inherited: dict[str, str],
+            viewport: tuple[float, float, float, float] = viewport,
+            scale: float = scale,
+        ) -> None:
+            """Respect native inherited paint and leave unknown subtrees alone."""
+            for node in list(parent):
+                if (
+                    "id" in node.attrib
+                    or node.tag == "defs"
+                    or not _identity_native_transform(node.get("transform", ""))
+                ):
+                    continue
+                paint = _pruning_paint(node, inherited)
+                if not _identity_native_transform(paint.get("transform", "")):
+                    continue
+                if any(
+                    paint.get(name, "none") != "none"
+                    for name in (
+                        "filter",
+                        "mask",
+                        "clip-path",
+                        "vector-effect",
+                        "marker",
+                        "marker-start",
+                        "marker-mid",
+                        "marker-end",
+                    )
+                ):
+                    continue
+                if node.tag in {"g", "svg"}:
+                    # A nested SVG introduces its own viewport. Native composed
+                    # scenes prohibit it, but conservatively retain future input.
+                    if node.tag == "g":
+                        prune(node, paint)
+                    continue
+                bounds = _native_shape_bounds(node)
+                if bounds is None:
+                    continue
+                try:
+                    stroke = (
+                        float(paint.get("stroke-width", "1"))
+                        if paint.get("stroke", "none") != "none"
+                        else 0.0
+                    )
+                    miter = max(4.0, float(paint.get("stroke-miterlimit", "4")))
+                except (ValueError, OverflowError):
+                    continue
+                if not math.isfinite(stroke * miter) or stroke < 0:
+                    continue
+                # Twice the default miter extension, round/square caps and two
+                # output pixels of antialiasing guard remain inside this bound.
+                padding = stroke * miter + 2 / scale
+                if (
+                    bounds[2] + padding < viewport[0]
+                    or bounds[0] - padding > viewport[2]
+                    or bounds[3] + padding < viewport[1]
+                    or bounds[1] - padding > viewport[3]
+                ):
+                    parent.remove(node)
+
+        prune(content, _style(content))
+
+
+def _raster_svg_namespaces(root: ET.Element) -> None:
+    """Keep literal NanoSVG namespace spellings without changing global XML state."""
+    for node in root.iter():
+        node.tag = node.tag.rsplit("}", 1)[-1]
+        for key in tuple(node.attrib):
+            if key.startswith("{http://www.w3.org/1999/xlink}"):
+                node.set("xlink:" + key.rsplit("}", 1)[-1], node.attrib.pop(key))
+    root.set("xmlns", "http://www.w3.org/2000/svg")
+    root.set("xmlns:xlink", "http://www.w3.org/1999/xlink")
+
+
 def _wx_rasterize(
-    source: Path, destination: Path, width_px: int, height_px: int
+    source: Path,
+    destination: Path,
+    width_px: int,
+    height_px: int,
+    *,
+    prepared_panels: Optional[tuple[str, ...]] = None,
+    prepared_native: bool = False,
 ) -> None:
     """Rasterize native stroked SVG without touching the live editor canvas."""
     try:
@@ -895,8 +1684,120 @@ def _wx_rasterize(
     except ImportError as error:
         raise RenderError("Impedance images require KiCad's wx.svg support.") from error
     try:
-        image = svg.SVGimage.CreateFromFile(str(source))
-        bitmap = image.ConvertToBitmap(width=width_px, height=height_px)
+        from .spacing_review import SPACING_RENDER_POLICY_REVISION
+
+        content = source.read_text(encoding="utf-8")
+        if "xlink:" in content and "xmlns:xlink=" not in content.partition(">")[0]:
+            # Historical Original SVGs relied on NanoSVG's literal-prefix
+            # parser. Bind that same spelling in the private XML copy before
+            # ElementTree reads it, without changing emitted source or pixels.
+            content = re.sub(
+                r"<svg\b",
+                '<svg xmlns:xlink="http://www.w3.org/1999/xlink"',
+                content,
+                count=1,
+            )
+        if prepared_panels is not None:
+            replacements = iter(prepared_panels)
+            if len(_RASTER_PANEL.findall(content)) != len(prepared_panels):
+                raise RenderError(
+                    "Prepared spacing panels differ from the capture composition."
+                )
+            content = _RASTER_PANEL.sub(lambda match: next(replacements), content)
+        root = (
+            ET.fromstring(content)  # noqa: S314 -- Local renderer SVG.
+            if f'data-spacing-composition="{SPACING_RENDER_POLICY_REVISION}"' in content
+            else None
+        )
+        if root is not None:
+            _raster_svg_namespaces(root)
+            panels = [child for child in root if child.get("data-spacing-raster-panel")]
+        else:
+            panels = []
+        if root is not None and panels:
+            # NanoSVG has no reliable nested viewport clipping. Rasterize each
+            # physical viewport independently, then paste its bounded bitmap.
+            # NanoSVG does not draw fonts. Preserve SVG label descriptors and
+            # paint them into the same final bitmap with native antialiasing.
+            labels = []
+            for parent in root.iter():
+                for node in list(parent):
+                    if node.tag == "text" and node.get("data-spacing-label"):
+                        labels.append(node)
+                        parent.remove(node)
+            for panel in panels:
+                root.remove(panel)
+            image = svg.SVGimage.CreateFromBytes(ET.tostring(root))
+            bitmap = image.ConvertToBitmap(width=width_px, height=height_px)
+            dc = wx.MemoryDC(bitmap)
+            try:
+                for panel in panels:
+                    x, y = int(panel.attrib.pop("x")), int(panel.attrib.pop("y"))
+                    panel_width, panel_height = (
+                        int(panel.get("width")),
+                        int(panel.get("height")),
+                    )
+                    _raster_svg_namespaces(panel)
+                    if prepared_panels is None and not prepared_native:
+                        _prune_panel_geometry(panel)
+                    panel_image = svg.SVGimage.CreateFromBytes(ET.tostring(panel))
+                    panel_bitmap = panel_image.ConvertToBitmap(
+                        width=panel_width, height=panel_height
+                    )
+                    if not panel_bitmap.IsOk():
+                        raise RenderError(
+                            "KiCad could not draw a spacing review panel."
+                        )
+                    dc.DrawBitmap(panel_bitmap, x, y, True)
+                dc.SetBackgroundMode(wx.TRANSPARENT)
+                for label in labels:
+                    size = round(float(label.get("font-size", "18")))
+                    font = wx.Font(
+                        wx.Size(0, size),
+                        wx.FONTFAMILY_SWISS,
+                        wx.FONTSTYLE_NORMAL,
+                        wx.FONTWEIGHT_BOLD
+                        if label.get("font-weight") == "bold"
+                        else wx.FONTWEIGHT_NORMAL,
+                    )
+                    dc.SetFont(font)
+                    dc.SetTextForeground(wx.Colour(label.get("fill", "#FFFFFF")))
+                    text = label.text or ""
+                    x = round(float(label.get("x", "0")))
+                    y = round(float(label.get("data-spacing-text-top", "0")))
+                    text_width, text_height = dc.GetTextExtent(text)
+                    if (
+                        x < 0
+                        or y < 0
+                        or x + text_width > width_px
+                        or y + text_height > height_px
+                    ):
+                        raise RenderError(
+                            "The spacing image labels do not fit the required composition."
+                        )
+                    dc.DrawText(text, x, y)
+            finally:
+                dc.SelectObject(wx.NullBitmap)
+        else:
+            if prepared_native:
+                image = svg.SVGimage.CreateFromBytes(content.encode())
+            elif (
+                "data-impedance-spacing-view" in content
+                or "data-impedance-view" in content
+            ):
+                root = ET.fromstring(content)  # noqa: S314 -- Local renderer SVG.
+                _raster_svg_namespaces(root)
+                for panel in root.iter("svg"):
+                    if prepared_panels is None and panel.get(
+                        "data-spacing-raster-panel"
+                    ):
+                        _prune_panel_geometry(panel)
+                if prepared_panels is None:
+                    _prune_panel_geometry(root)
+                image = svg.SVGimage.CreateFromBytes(ET.tostring(root))
+            else:
+                image = svg.SVGimage.CreateFromFile(str(source))
+            bitmap = image.ConvertToBitmap(width=width_px, height=height_px)
         if not bitmap.IsOk() or not bitmap.SaveFile(
             str(destination), wx.BITMAP_TYPE_PNG
         ):
@@ -905,6 +1806,9 @@ def _wx_rasterize(
         raise RenderError(
             f"KiCad could not rasterize the impedance image: {error}"
         ) from error
+
+
+_NATIVE_RASTERIZER = _wx_rasterize
 
 
 def _validate_png(path: Path, width_px: int, height_px: int) -> None:
@@ -989,6 +1893,9 @@ class SectionRenderer:
         self.board = board
         self.pcbnew = pcbnew_module
         self._rasterizer = rasterizer or _wx_rasterize
+        self._use_native_panels = (
+            rasterizer is None and self._rasterizer is _NATIVE_RASTERIZER
+        )
         self._allow_unfilled_zones = allow_unfilled_zones
         self._copper_ids = copper_layers(board, pcbnew_module)
         self._layer_ids = dict(self._copper_ids)
@@ -997,6 +1904,8 @@ class SectionRenderer:
             if layer_id is not None:
                 self._layer_ids[name] = int(layer_id)
         self._layer_svg: dict[str, str] = {}
+        self._native_scenes: dict[str, _NativeScene] = {}
+        self.render_timings: dict[str, dict[str, Union[int, float]]] = {}
         self._plot_owner: Any = None
         self._plot_board: Any = None
         self._board_bounds: Optional[Bounds] = None
@@ -1029,6 +1938,7 @@ class SectionRenderer:
         self._plot_owner = None
         self._board_bounds = None
         self._layer_svg.clear()
+        self._native_scenes.clear()
         self._theme = None
         if owner is not None:
             owner.close()
@@ -1209,9 +2119,18 @@ class SectionRenderer:
         self._layer_svg[layer] = context
         return context
 
+    def viewport(
+        self, section: Section, width_px: int = 800, height_px: int = 420
+    ) -> tuple[float, float, float, float]:
+        """Expose the physical frame used by the native capture, without guessing."""
+        self._board_for_plot()
+        value = section_viewport(section, width_px, height_px, self._board_bounds)
+        return value.left, value.top, value.width, value.height
+
     def svg(self, section: Section, width_px: int = 800, height_px: int = 420) -> str:
         """Return the same full-frame native capture used by preview and workbook."""
-        return annotated_svg(
+        started = perf_counter()
+        result = annotated_svg(
             self.context_svg(section.layer),
             section,
             width_px,
@@ -1219,6 +2138,8 @@ class SectionRenderer:
             board_bounds=self._board_bounds,
             background_color=self._theme_context().background,
         )
+        self._record_render_timing("trace_compose", started)
+        return result
 
     def render(
         self,
@@ -1228,7 +2149,12 @@ class SectionRenderer:
         height_px: int = 420,
     ) -> Path:
         """Create one native-color PNG without changing the board, fills or canvas."""
-        content = self.svg(section, width_px, height_px)
+        native = self._native_document_available("svg")
+        content = (
+            self._native_trace_svg(section, width_px, height_px)
+            if native
+            else self.svg(section, width_px, height_px)
+        )
         destination = Path(destination)
         with TemporaryDirectory(prefix="jlcpcb-impedance-image-") as directory:
             source, output = (
@@ -1236,10 +2162,350 @@ class SectionRenderer:
                 Path(directory) / "section.png",
             )
             source.write_text(content, encoding="utf-8")
-            self._rasterizer(source, output, width_px, height_px)
+            started = perf_counter()
+            if native:
+                self._rasterizer(
+                    source, output, width_px, height_px, prepared_native=True
+                )
+            else:
+                self._rasterizer(source, output, width_px, height_px)
+            self._record_render_timing("rasterize", started)
+            started = perf_counter()
             _validate_png(output, width_px, height_px)
             destination.write_bytes(output.read_bytes())
+            self._record_render_timing("png_validate_copy", started)
         return destination
+
+    def _spacing_scene(self, entry: "SpacingReviewEntry") -> _NativeScene:
+        """Read unchanged native geometry once for diagnostic panels."""
+        return self._layer_scene(entry.layer)
+
+    def _native_document_available(self, method: str) -> bool:
+        """Keep public overrides and every custom callback on the four-argument path."""
+        return (
+            getattr(self, "_use_native_panels", False)
+            and self._rasterizer is _NATIVE_RASTERIZER
+            and getattr(getattr(self, method), "__func__", None)
+            is _NATIVE_PUBLIC_SVGS[method]
+        )
+
+    def _layer_scene(self, layer: str) -> _NativeScene:
+        """Prepare one immutable physical layer independently of any review item."""
+        started = perf_counter()
+        source = self.context_svg(layer)
+        background = self._theme_context().background
+        scenes = getattr(self, "_native_scenes", None)
+        if scenes is None:
+            self._native_scenes = scenes = {}
+        cached = scenes.get(layer)
+        if (
+            cached is not None
+            and cached.source == source
+            and cached.background == background
+        ):
+            scenes.pop(layer)
+            scenes[layer] = cached
+            return cached
+        root, units_per_mm, _page_width, _page_height = _native_svg(source)
+        if not any(node.tag in _SHAPES for node in root.iter()):
+            raise RenderError("KiCad SVG contains no PCB geometry.")
+        original_body = "".join(
+            ET.tostring(child, encoding="unicode") for child in root
+        )
+        dimmed = deepcopy(root)
+        _emphasize_native_traces(
+            dimmed,
+            _TraceSelection(layer),
+            units_per_mm / NM_PER_MM,
+            background,
+        )
+        opacity = _style(root).get("opacity")
+        original_fragments = tuple(
+            _prepare_raster_fragment(child, _style(root)) for child in root
+        )
+        dimmed_fragments = tuple(
+            _repaint_raster_fragment(fragment, child)
+            for fragment, child in zip(original_fragments, dimmed)
+        )
+        dimmed_body = "".join(
+            ET.tostring(child, encoding="unicode") for child in dimmed
+        )
+        weight = (
+            len(source.encode())
+            + len(original_body.encode())
+            + len(dimmed_body.encode())
+            + sum(fragment.weight for fragment in original_fragments + dimmed_fragments)
+        )
+        scene = _NativeScene(
+            source,
+            tuple(root.attrib.items()),
+            units_per_mm / NM_PER_MM,
+            background,
+            original_body,
+            dimmed_body,
+            f' opacity="{_opacity(opacity):.6f}"' if opacity is not None else "",
+            original_fragments,
+            dimmed_fragments,
+            weight,
+        )
+        scenes.pop(layer, None)
+        if weight <= _NATIVE_SCENE_BYTES:
+            while scenes and (
+                len(scenes) >= _NATIVE_SCENE_LIMIT
+                or sum(item.weight for item in scenes.values()) + weight
+                > _NATIVE_SCENE_BYTES
+            ):
+                scenes.pop(next(iter(scenes)))
+            scenes[layer] = scene
+        self._record_render_timing("scene_prepare", started)
+        return scene
+
+    def _native_trace_svg(self, section: Section, width_px: int, height_px: int) -> str:
+        """Paint a private native PNG document after proving off-canvas geometry."""
+        started = perf_counter()
+        scene = self._layer_scene(section.layer)
+        background = scene.background
+        if not isinstance(background, str) or not re.fullmatch(
+            r"#[0-9a-fA-F]{6}", background
+        ):
+            raise RenderError("The selected PCB background color is invalid.")
+        viewport = section_viewport(section, width_px, height_px, self._board_bounds)
+        factor = width_px / (viewport.width * scene.units_per_nm)
+        tx = -viewport.left * scene.units_per_nm * factor
+        ty = -viewport.top * scene.units_per_nm * factor
+        transform = f"translate({tx:.6f},{ty:.6f}) scale({factor:.9f})"
+        scale = float(f"{factor:.9f}")
+        left, top = -float(f"{tx:.6f}") / scale, -float(f"{ty:.6f}") / scale
+        visible = left, top, left + width_px / scale, top + height_px / scale
+        selected = "".join(
+            fragment.visible(visible, 2 / scale)
+            for fragment in scene.original_fragments
+        )
+        root = ET.fromstring(  # noqa: S314 -- Validated native fragments.
+            '<svg xmlns:xlink="http://www.w3.org/1999/xlink">' + selected + "</svg>"
+        )
+        _raster_svg_namespaces(root)
+        root.attrib.update(dict(scene.root_attributes))
+        _emphasize_native_traces(root, section, scene.units_per_nm, background)
+        body = "".join(ET.tostring(child, encoding="unicode") for child in root)
+        result = (
+            '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+            f'width="{width_px}" height="{height_px}" viewBox="0 0 {width_px} {height_px}">'
+            f'<rect width="{width_px}" height="{height_px}" fill="{background}"/>'
+            f'<g data-impedance-view="segment"{scene.opacity} transform="{transform}">{body}</g>'
+            + _highlight_box(section, viewport, width_px, height_px)
+            + "</svg>"
+        )
+        self._record_render_timing("trace_compose", started)
+        return result
+
+    def _record_render_timing(self, phase: str, started: float) -> None:
+        """Aggregate bounded phase measurements without retaining image inputs."""
+        timings = getattr(self, "render_timings", None)
+        if timings is None:
+            self.render_timings = timings = {}
+        value = timings.setdefault(phase, {"calls": 0, "seconds": 0.0})
+        value["calls"] += 1
+        value["seconds"] += perf_counter() - started
+
+    def spacing_svg(
+        self,
+        entry: "SpacingReviewEntry",
+        width_px: int = 1600,
+        height_px: int = 1000,
+    ) -> str:
+        """Compose true native detail, locator, mm values, and a labeled schematic."""
+        return self._spacing_document(entry, width_px, height_px)
+
+    def _spacing_document(
+        self,
+        entry: "SpacingReviewEntry",
+        width_px: int,
+        height_px: int,
+        *,
+        prepared: bool = False,
+    ) -> str:
+        """Keep public complete SVG and private native PNG framing identical."""
+        from .spacing_review import SPACING_RENDER_POLICY_REVISION
+
+        if (width_px, height_px) != (entry.width_px, entry.height_px):
+            raise RenderError(
+                "Spacing image dimensions differ from the required review viewport."
+            )
+        if not 1 <= width_px <= 4096 or not 1 <= height_px <= 4096:
+            raise RenderError("Image dimensions must be between 1 and 4096 pixels.")
+        composition = entry.composition
+        started = perf_counter()
+        _spacing_valid_viewport(entry, composition.detail_rect[2:])
+        if width_px != 1600 or height_px != 1000:
+            raise RenderError(
+                "The combined spacing composition requires 1600 by 1000 pixels."
+            )
+        scene = self._spacing_scene(entry)
+        detail, overview = self._spacing_panels(entry, scene, prepared=prepared)
+        result = (
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink" '
+            f'width="{width_px}" height="{height_px}" viewBox="0 0 {width_px} {height_px}" '
+            f'data-spacing-composition="{SPACING_RENDER_POLICY_REVISION}">'
+            f'<rect width="{width_px}" height="{height_px}" fill="#10151d"/>'
+            f"{detail}{overview}{_spacing_summary_svg(entry)}"
+            "</svg>"
+        )
+        self._record_render_timing("spacing_compose", started)
+        return result
+
+    def _spacing_panels(
+        self,
+        entry: "SpacingReviewEntry",
+        scene: _NativeScene,
+        *,
+        prepared: bool = False,
+    ) -> tuple[str, str]:
+        """Keep public and internally pruned panels on identical physical geometry."""
+        composition = entry.composition
+        detail = _spacing_panel(
+            scene,
+            entry.viewport_nm,
+            composition.detail_rect,
+            scene.background,
+            kind="detail",
+            annotations=_spacing_annotations(
+                replace(
+                    entry,
+                    width_px=composition.detail_rect[2],
+                    height_px=composition.detail_rect[3],
+                )
+            ),
+            dimmed=True,
+            prepared=prepared,
+        )
+        overview = _spacing_panel(
+            scene,
+            composition.overview_viewport_nm,
+            composition.overview_rect,
+            scene.background,
+            kind="overview",
+            annotations=_spacing_locator(entry),
+            dimmed=True,
+            prepared=prepared,
+        )
+        return detail, overview
+
+    def render_spacing(
+        self,
+        entry: "SpacingReviewEntry",
+        destination: Path,
+        width_px: int = 1600,
+        height_px: int = 1000,
+    ) -> Path:
+        """Rasterize all panels into the one immutable image explicitly approved."""
+        native = self._native_document_available("spacing_svg")
+        content = (
+            self._spacing_document(entry, width_px, height_px, prepared=True)
+            if native
+            else self.spacing_svg(entry, width_px, height_px)
+        )
+        return self._render_spacing_svg(
+            content,
+            destination,
+            width_px,
+            height_px,
+            prepared_native=native,
+        )
+
+    def spacing_original_svg(self, entry: "SpacingReviewEntry") -> str:
+        """Return unchanged native copper at the detailed image's exact viewport."""
+        return self._spacing_original_document(entry)
+
+    def _spacing_original_document(
+        self, entry: "SpacingReviewEntry", *, prepared: bool = False
+    ) -> str:
+        """Select a small native scratch SVG while retaining the public Original."""
+        width, height = entry.composition.detail_rect[2:]
+        _spacing_valid_viewport(entry, (width, height))
+        scene = self._spacing_scene(entry)
+        panel = _spacing_panel(
+            scene,
+            entry.viewport_nm,
+            (0, 0, width, height),
+            scene.background,
+            kind="original",
+            prepared=prepared,
+        )
+        return (
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+            f"{panel}</svg>"
+        )
+
+    def render_spacing_original(
+        self,
+        entry: "SpacingReviewEntry",
+        destination: Path,
+        width_px: Optional[int] = None,
+        height_px: Optional[int] = None,
+    ) -> Path:
+        """Keep a separate unannotated comparison without granting it approval."""
+        width, height = entry.composition.detail_rect[2:]
+        if (width_px is not None and width_px != width) or (
+            height_px is not None and height_px != height
+        ):
+            raise RenderError(
+                "Original spacing image dimensions differ from its detail panel."
+            )
+        native = self._native_document_available("spacing_original_svg")
+        return self._render_spacing_svg(
+            self._spacing_original_document(entry, prepared=True)
+            if native
+            else self.spacing_original_svg(entry),
+            destination,
+            width,
+            height,
+            prepared_native=native,
+        )
+
+    def _render_spacing_svg(
+        self,
+        content: str,
+        destination: Path,
+        width_px: int,
+        height_px: int,
+        *,
+        prepared_panels: Optional[tuple[str, ...]] = None,
+        prepared_native: bool = False,
+    ) -> Path:
+        """Render a fresh bounded SVG and validate its immutable native PNG."""
+        destination = Path(destination)
+        with TemporaryDirectory(prefix="jlcpcb-spacing-image-") as directory:
+            source = Path(directory) / "spacing.svg"
+            output = Path(directory) / "spacing.png"
+            source.write_text(content, encoding="utf-8")
+            started = perf_counter()
+            if prepared_panels is None and not prepared_native:
+                self._rasterizer(source, output, width_px, height_px)
+            else:
+                self._rasterizer(
+                    source,
+                    output,
+                    width_px,
+                    height_px,
+                    prepared_panels=prepared_panels,
+                    prepared_native=prepared_native,
+                )
+            self._record_render_timing("rasterize", started)
+            started = perf_counter()
+            _validate_png(output, width_px, height_px)
+            destination.write_bytes(output.read_bytes())
+            self._record_render_timing("png_validate_copy", started)
+        return destination
+
+
+_NATIVE_PUBLIC_SVGS: dict[str, Callable[..., str]] = {
+    "svg": SectionRenderer.svg,
+    "spacing_svg": SectionRenderer.spacing_svg,
+    "spacing_original_svg": SectionRenderer.spacing_original_svg,
+}
 
 
 def render_section(
