@@ -322,8 +322,19 @@ def test_selected_variant_generate_publishes_current_reports_or_preserves_prior_
         def close(self) -> None:
             self.closed = True
 
-    def export(plan: Any, board: Any, pcbnew: Any, scratch: Path) -> Any:
-        return service.export_reports(plan, board, pcbnew, scratch, Renderer)
+    def export(
+        plan: Any, board: Any, pcbnew: Any, scratch: Path, **options: Any
+    ) -> Any:
+        """Exercise the real live-provenance/cache seam with the native output fake."""
+        assert options["capture_identity"] == (
+            str(Path(harness.board_path).resolve()),
+            "A",
+        )
+        assert options["source_context"]() == plan.snapshot
+        # These scenarios inject changes at the cold renderer boundary. Warm
+        # review/export reuse has separate coverage and must not bypass this one.
+        options["capture_cache"] = type(options["capture_cache"])()
+        return service.export_reports(plan, board, pcbnew, scratch, Renderer, **options)
 
     def zip_files(entries: Any = ()) -> None:
         archive.build_archive(

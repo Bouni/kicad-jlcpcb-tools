@@ -19,6 +19,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from tests.native_rf_artifacts import RFSourceFiles, prepare_native_rf_board
 from tests.rf_impedance_fixtures import RF_CASES, RFCase
 from tests.test_impedance_capture_examples import (
     rf_examples,  # noqa: F401 -- pytest discovers the imported fixture
@@ -245,40 +246,23 @@ def native_rf_board(
         pytest.skip("Set KICAD_CLI to enable native RF fixture validation")
     case = request.param
     original_path = rf_examples / f"{case.name}.kicad_pcb"
-    original_bytes = original_path.read_bytes()
-    directory = tmp_path_factory.mktemp(f"native-rf-{case.name}")
-    board_path = directory / original_path.name
-    shutil.copy2(original_path, board_path)
-    for suffix in (".kicad_pro", ".kicad_dru"):
-        settings = original_path.with_suffix(suffix)
-        if suffix == ".kicad_dru" and not case.coplanar:
-            assert settings.is_file(), "Noncoplanar fill requires its custom rules"
-        if settings.exists():
-            shutil.copy2(settings, board_path.with_suffix(suffix))
-    report_path = directory / "drc.json"
-    _run_native(
-        [
-            executable,
-            "pcb",
-            "drc",
-            "--refill-zones",
-            "--save-board",
-            "--format",
-            "json",
-            "--output",
-            str(report_path),
-            str(board_path),
-        ]
+    source = RFSourceFiles.read(original_path)
+    if not case.coplanar:
+        assert source.rules is not None, "Noncoplanar fill requires its custom rules"
+    artifacts = prepare_native_rf_board(
+        source, executable, request, tmp_path_factory, _run_native
     )
+    directory = tmp_path_factory.mktemp(f"native-rf-{case.name}")
+    board_path = artifacts.filled.write_to(directory)
     yield NativeBoard(
         case,
         executable,
         board_path,
-        _parse_board(original_bytes.decode("utf-8")),
+        _parse_board(source.board.decode("utf-8")),
         _parse_board(board_path.read_text(encoding="utf-8")),
-        json.loads(report_path.read_text(encoding="utf-8")),
+        json.loads(artifacts.report),
     )
-    assert original_path.read_bytes() == original_bytes
+    assert RFSourceFiles.read(original_path) == source
 
 
 @pytest.mark.native_kicad

@@ -1,5 +1,6 @@
 """Exercise architecture selection, failure propagation and owned cleanup."""
 
+import json
 from pathlib import Path
 import signal
 import subprocess
@@ -53,7 +54,7 @@ def test_cleanup_is_limited_to_owned_containers(
 ) -> None:
     """Cleanup selects this run's containers and verifies their removal."""
     calls = []
-    results = iter(["owned-one\nowned-two", "", ""])
+    results = iter(["owned-one\nowned-two", "", "", ""])
 
     def docker(*args: str) -> str:
         calls.append(args)
@@ -63,9 +64,181 @@ def test_cleanup_is_limited_to_owned_containers(
     runner.cleanup("this-run")
     assert calls == [
         ("ps", "--all", "--quiet", "--filter", f"label={runner.LABEL}=this-run"),
+        ("stop", "--time", "15", "owned-one", "owned-two"),
         ("rm", "--force", "owned-one", "owned-two"),
         ("ps", "--all", "--quiet", "--filter", f"label={runner.LABEL}=this-run"),
     ]
+
+
+@pytest.mark.parametrize("stop_failure", ["", "error", "timeout"])
+def test_cleanup_handles_automatic_removal_and_failed_graceful_stop(
+    monkeypatch: pytest.MonkeyPatch, stop_failure: str
+) -> None:
+    """Allow diagnostics to finish, then remove survivors and verify ownership."""
+    remaining = {"owned"}
+    stopped = False
+
+    def docker(*args: str) -> str:
+        nonlocal stopped
+        if args[0] == "ps":
+            assert args[-1] == f"label={runner.LABEL}=this-run"
+            return "\n".join(remaining)
+        assert args[-1] == "owned"
+        if args[0] == "stop":
+            stopped = True
+            if stop_failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 30)
+            if stop_failure:
+                raise subprocess.CalledProcessError(1, args)
+            remaining.clear()  # --rm containers disappear after graceful exit.
+            return ""
+        assert args[:2] == ("rm", "--force")
+        assert stopped, "Do not destroy native evidence before graceful shutdown"
+        if not remaining:
+            raise subprocess.CalledProcessError(1, args)
+        remaining.clear()
+        return ""
+
+    monkeypatch.setattr(runner, "docker", docker)
+    runner.cleanup("this-run")
+    assert stopped and not remaining
+
+
+@pytest.mark.parametrize("copy_fails", [False, True])
+@pytest.mark.parametrize("ownership", ["created", "preexisting", "unknown"])
+def test_cancelled_native_evidence_is_copied_before_owned_containers_are_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, copy_fails: bool, ownership: str
+) -> None:
+    """Partial reports reach the requested output; copy failure cannot skip removal."""
+    calls = []
+    remaining = True
+    stopped = False
+    destination = tmp_path / "partial-native/native-kicad-10"
+
+    def docker(*args: str) -> str:
+        nonlocal remaining, stopped
+        calls.append(args)
+        if args[0] == "ps":
+            assert f"label={runner.LABEL}=this-run" in args
+            return "native-container" if remaining else ""
+        if args[0] == "inspect":
+            config = {
+                "Labels": {runner.LANE_LABEL: "native-kicad-10"},
+                "WorkingDir": "/workspace",
+            }
+            return json.dumps(
+                config
+                if args[2] == "{{json .Config}}"
+                else {
+                    "Config": config,
+                    "Mounts": [
+                        {
+                            "Type": "volume",
+                            "Destination": "/workspace",
+                            "Name": "act-owned-workspace",
+                        },
+                        {
+                            "Type": "volume",
+                            "Destination": "/opt/hostedtoolcache",
+                            "Name": "act-shared-cache",
+                        },
+                        {
+                            "Type": "bind",
+                            "Destination": "/workspace",
+                            "Source": "/unrelated-bind",
+                        },
+                    ],
+                }
+            )
+        if args[0] == "stop":
+            stopped = True
+        if args[0] == "cp":
+            assert stopped and remaining
+            assert args == (
+                "cp",
+                "native-container:/workspace/.cache/native-tests/native-kicad-10/.",
+                str(destination),
+            )
+            assert destination.is_dir()
+            if copy_fails:
+                raise subprocess.CalledProcessError(1, args)
+        if args[0] == "rm":
+            assert any(call[0] == "cp" for call in calls)
+            remaining = False
+        if args[0] == "volume":
+            assert ownership == "created", (
+                "Never delete a preexisting or unproven volume"
+            )
+            assert not remaining
+            assert args == ("volume", "rm", "act-owned-workspace")
+        return ""
+
+    monkeypatch.setattr(runner, "docker", docker)
+    arguments = ["this-run", destination.parent]
+    if ownership != "unknown":
+        arguments.append(
+            {"act-owned-workspace"} if ownership == "preexisting" else set()
+        )
+    if copy_fails:
+        with pytest.raises(subprocess.CalledProcessError):
+            runner.cleanup(*arguments)
+    else:
+        runner.cleanup(*arguments)
+    assert not remaining
+    assert calls[-1] == (
+        ("volume", "rm", "act-owned-workspace")
+        if ownership == "created"
+        else ("ps", "--all", "--quiet", "--filter", f"label={runner.LABEL}=this-run")
+    )
+
+
+@pytest.mark.parametrize("failure", ["inspect", "remove"])
+def test_cleanup_continues_for_known_workspaces_after_a_docker_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """A failed inspection/removal must not strand other discovered workspaces."""
+    remaining = True
+    removed = set()
+
+    def docker(*args: str) -> str:
+        nonlocal remaining
+        if args[0] == "ps":
+            return "one\ntwo" if remaining else ""
+        if args[0] == "inspect":
+            identifier = args[-1]
+            if failure == "inspect" and identifier == "two":
+                raise subprocess.CalledProcessError(1, args)
+            return json.dumps(
+                {
+                    "Config": {
+                        "Labels": {runner.LANE_LABEL: "native-kicad-10"},
+                        "WorkingDir": "/workspace",
+                    },
+                    "Mounts": [
+                        {
+                            "Type": "volume",
+                            "Destination": "/workspace",
+                            "Name": f"act-{identifier}",
+                        }
+                    ],
+                }
+            )
+        if args[0] == "rm":
+            remaining = False
+        if args[0] == "volume":
+            assert not remaining
+            removed.update(
+                name for name in args[2:] if failure != "remove" or name != "act-one"
+            )
+            if failure == "remove":
+                raise subprocess.CalledProcessError(1, args)
+        return ""
+
+    monkeypatch.setattr(runner, "docker", docker)
+    with pytest.raises(subprocess.CalledProcessError):
+        runner.cleanup("this-run", tmp_path / "partial-native", set())
+    assert not remaining
+    assert removed == ({"act-one"} if failure == "inspect" else {"act-two"})
 
 
 @pytest.mark.parametrize("failure", ["setup", "tests", "interrupt"])
@@ -75,10 +248,11 @@ def test_failed_or_interrupted_workflow_preserves_status_and_cleans_up(
     """Failure and interruption cannot skip cleanup or become a success."""
     calls, cleaned = [], []
     monkeypatch.setattr(runner, "daemon_architecture", lambda _choice: "arm64")
+    monkeypatch.setattr(runner, "docker", lambda *_args: "preexisting-cache")
     monkeypatch.setattr(
         runner, "private_endpoints", lambda: ("127.0.0.1", "host.docker.internal")
     )
-    monkeypatch.setattr(runner, "cleanup", cleaned.append)
+    monkeypatch.setattr(runner, "cleanup", lambda *args: cleaned.append(args))
     monkeypatch.setattr(runner, "copy_tracked", lambda _directory: None)
 
     def execute(command: list[str], _log: Path, _environment: dict[str, str]) -> int:
@@ -94,6 +268,8 @@ def test_failed_or_interrupted_workflow_preserves_status_and_cleans_up(
     else:
         assert runner.run(tmp_path / "out", tmp_path / "cache", "auto") == 7
     assert len(cleaned) == 1
+    assert cleaned[0][1] == tmp_path / "out/partial-native"
+    assert cleaned[0][2] == {"preexisting-cache"}
     assert len(calls) == (2 if failure == "tests" else 1)
     assert "--matrix=lane:ordinary-tests" in calls[0]
     if len(calls) == 2:

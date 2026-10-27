@@ -8,7 +8,7 @@ from pathlib import Path
 from struct import pack
 import sys
 from types import ModuleType
-from typing import Any
+from typing import Any, Optional
 from zlib import compress, crc32
 
 import pytest
@@ -107,7 +107,7 @@ def _select(wx: Any, dialog: Any, row: int) -> None:
     wait_until(
         wx,
         lambda: dialog.preview_pane.ready
-        and dialog.preview_pane._sections[dialog.preview_pane._index].section_id
+        and getattr(dialog.preview_pane.selected_entry, "section_id", None)
         == section_id,
     )
 
@@ -165,12 +165,12 @@ def _assert_rows(dialog: Any, count: int) -> None:
         ("left", 1, 3),
         ("right", 1, 5),
         ("home", 1, 0),
-        ("end", 1, 10),
+        ("end", 1, None),
         ("page_up", 0, 4),
         ("page_down", 1, 4),
         ("tab", 1, 5),
         ("left_boundary", 1, 0),
-        ("right_boundary", 1, 10),
+        ("right_boundary", 1, None),
         ("shift_page_down", 0, 4),
         ("ctrl_shift_end", 0, 4),
     ],
@@ -180,7 +180,7 @@ def test_native_default_keys_preserve_whole_row_selection(
     request: pytest.FixtureRequest,
     direction: str,
     expected_row: int,
-    expected_col: int,
+    expected_col: Optional[int],
 ) -> None:
     """Default wx grid cursor movement keeps the selected workbook row highlighted."""
     if isolated_native(request, "KICAD_IMPEDANCE_GRID_NATIVE_KEYS_CHILD"):
@@ -216,7 +216,8 @@ def test_native_default_keys_preserve_whole_row_selection(
                 initial_row = (
                     0 if direction in ("shift_page_down", "ctrl_shift_end") else 1
                 )
-                initial_col = {"left_boundary": 0, "right_boundary": 10}.get(
+                last_column = dialog.sections.GetNumberCols() - 1
+                initial_col = {"left_boundary": 0, "right_boundary": last_column}.get(
                     direction, 4
                 )
                 grid_cell_click(wx, dialog.sections, initial_row, initial_col)
@@ -249,17 +250,19 @@ def test_native_default_keys_preserve_whole_row_selection(
                 key.SetMetaDown(direction == "ctrl_shift_end")
                 assert window.GetEventHandler().ProcessEvent(key)
                 pump(wx)
-                assert dialog.sections.GetGridCursorCol() == expected_col
+                assert dialog.sections.GetGridCursorCol() == (
+                    last_column if expected_col is None else expected_col
+                )
                 assert dialog.sections.GetGridCursorRow() == expected_row
                 assert dialog.sections.GetSelectedRow() == expected_row
                 assert list(dialog.sections.GetSelectedRows()) == [expected_row]
                 assert all(
                     dialog.sections.IsInSelection(expected_row, column)
-                    for column in range(11)
+                    for column in range(dialog.sections.GetNumberCols())
                 )
                 assert not any(
                     dialog.sections.IsInSelection(1 - expected_row, column)
-                    for column in range(11)
+                    for column in range(dialog.sections.GetNumberCols())
                 )
                 assert dialog.session.included == before_included
                 _button(wx, dialog, wx.ID_CANCEL)
@@ -322,7 +325,9 @@ def test_native_tab_boundary_requests_dialog_navigation(
         def interact() -> None:
             try:
                 table = dialog.sections
-                initial_row, initial_col = (0, 0) if backward else (1, 10)
+                initial_row, initial_col = (
+                    (0, 0) if backward else (1, table.GetNumberCols() - 1)
+                )
                 _select(wx, dialog, initial_row)
                 table.SelectRow(initial_row, column=initial_col)
                 window = table.GetGridWindow()
@@ -614,6 +619,10 @@ def test_native_row_numbers_retain_identity_through_selection_save_and_reopen(
                     "",
                     "Target width",
                     "Segments",
+                    "Pair spacing",
+                    "",
+                    "Target spacing",
+                    "Spacing check",
                 ]
                 _assert_rows(dialog, 12)
                 assert dialog.session.analysis is not None
@@ -651,12 +660,7 @@ def test_native_row_numbers_retain_identity_through_selection_save_and_reopen(
                 for row in range(12):
                     section_id = dialog._row_ids[row]
                     _select(wx, dialog, row)
-                    assert (
-                        dialog.preview_pane._sections[
-                            dialog.preview_pane._index
-                        ].section_id
-                        == section_id
-                    )
+                    assert dialog.preview_pane.selected_entry.section_id == section_id
                     _assert_displayed(wx, dialog, section_id, dialog_api.tracking)
 
                 # The double-digit canonical row moves between groups on Space.
@@ -672,10 +676,7 @@ def test_native_row_numbers_retain_identity_through_selection_save_and_reopen(
                 assert dialog.sections.GetTextValue(11, 1) == "12"
                 assert not dialog.sections.GetToggleValue(11, 0)
                 _assert_displayed(wx, dialog, target_id, dialog_api.tracking)
-                assert (
-                    dialog.preview_pane._sections[dialog.preview_pane._index].section_id
-                    == target_id
-                )
+                assert dialog.preview_pane.selected_entry.section_id == target_id
                 assert not dialog.sections.IsCellEditControlEnabled()
                 _assert_rows(dialog, 12)
                 _key(wx, dialog.sections, wx.WXK_SPACE)
@@ -698,9 +699,9 @@ def test_native_row_numbers_retain_identity_through_selection_save_and_reopen(
                         lambda selected=selected: dialog.sections.GetSelectedRow()
                         == selected
                         and dialog.preview_pane.ready
-                        and dialog.preview_pane._sections[
-                            dialog.preview_pane._index
-                        ].section_id
+                        and getattr(
+                            dialog.preview_pane.selected_entry, "section_id", None
+                        )
                         == dialog._row_ids[selected],
                     )
                     _assert_displayed(
@@ -733,10 +734,7 @@ def test_native_row_numbers_retain_identity_through_selection_save_and_reopen(
                 _assert_rows(dialog, 12)
                 assert dialog._row_ids == ids_before_refresh
                 assert dialog._row_ids[dialog.sections.GetSelectedRow()] == unchecked_id
-                assert (
-                    dialog.preview_pane._sections[dialog.preview_pane._index].section_id
-                    == unchecked_id
-                )
+                assert dialog.preview_pane.selected_entry.section_id == unchecked_id
                 _assert_displayed(wx, dialog, unchecked_id, dialog_api.tracking)
                 _select(wx, dialog, dialog._row_ids.index(target_id))
                 event(wx, dialog.approve_button, wx.EVT_BUTTON)
@@ -788,6 +786,126 @@ def test_native_row_numbers_retain_identity_through_selection_save_and_reopen(
             assert len(saved) == 1
         finally:
             reopened.Destroy()
+            pump(wx)
+
+    try:
+        run_native(exercise)
+    finally:
+        for name in tuple(sys.modules):
+            if name.startswith(package_name + "."):
+                del sys.modules[name]
+
+
+def test_native_spacing_first_keeps_grid_mouse_keyboard_trace_identity(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    """A diagnostic prefix cannot offset canonical grid selection or review evidence."""
+    if isolated_native(request, "KICAD_IMPEDANCE_SPACING_ROW_CHILD"):
+        return
+    package_name = "_impedance_spacing_row_native"
+    package = ModuleType(package_name)
+    package.__path__ = [str(Path(__file__).resolve().parents[1] / "impedance")]
+    monkeypatch.setitem(sys.modules, package_name, package)
+    model = importlib.import_module(f"{package_name}.model")
+    dialog_api = importlib.import_module(f"{package_name}.dialog")
+    service = importlib.import_module(f"{package_name}.service")
+    snapshot = model.BoardSnapshot(
+        layers=("F.Cu", "B.Cu"),
+        traces=tuple(
+            model.Trace(
+                f"pair-{pair}-{side}",
+                "F.Cu",
+                f"PAIR{pair}_{side}",
+                150_000,
+                (
+                    (0, pair * 5_000_000 + offset),
+                    (2_000_000, pair * 5_000_000 + offset),
+                ),
+            )
+            for pair in range(2)
+            for side, offset in (("P", 0), ("N", 250_000))
+        ),
+        net_classes=("RF",),
+        net_class_memberships=tuple(
+            (f"PAIR{pair}_{side}", ("RF",)) for pair in range(2) for side in ("P", "N")
+        ),
+        net_class_context_digest="spacing-first-native-grid",
+        differential_pairs=tuple(
+            (f"PAIR{pair}_P", f"PAIR{pair}_N") for pair in range(2)
+        ),
+    )
+    config = model.Config(
+        specifications=(
+            model.Specification(
+                "rf",
+                "RF",
+                "90",
+                "differential",
+                "RF",
+                (model.LayerSettings("F.Cu", ("B.Cu",), 200_000),),
+            ),
+        )
+    )
+
+    def preview(entry: Any, *, refresh: bool = False) -> Any:
+        """Give every entry its own immutable decodable pixels at the capture seam."""
+        identifier = (
+            entry.section_id if isinstance(entry, model.Section) else entry.view_id
+        )
+        return service.CapturedImage(_section_png(identifier))
+
+    def exercise(frame: Any, wx: Any) -> None:
+        """Drive native grid events against the real mixed-list owner integration."""
+        dialog = dialog_api.ImpedanceDialog(
+            frame,
+            config,
+            snapshot,
+            preview,
+            lambda: snapshot,
+            fetch_stackup_catalog=lambda _count, **_kwargs: (),
+        )
+        failures: list[BaseException] = []
+
+        def interact() -> None:
+            """Open at a concern, choose both traces, and retain explicit concern choice."""
+            try:
+                pane = dialog.preview_pane
+                wait_until(wx, lambda: pane.ready)
+                assert pane.spacing_entries
+                assert pane.entries == pane.spacing_entries + pane.sections
+                assert pane.selected_entry == pane.spacing_entries[0]
+                assert len(pane.sections) == 2
+                _assert_rows(dialog, 2)
+                assert dialog.session.config.review_tracking.spacing_images == ()
+                _select(wx, dialog, 0)
+                _assert_displayed(wx, dialog, dialog._row_ids[0], dialog_api.tracking)
+                _key(wx, dialog.sections, wx.WXK_DOWN)
+                wait_until(wx, lambda: dialog.sections.GetSelectedRow() == 1)
+                _assert_displayed(wx, dialog, dialog._row_ids[1], dialog_api.tracking)
+                pane.select(0)
+                wait_until(
+                    wx,
+                    lambda: pane.ready
+                    and pane.selected_entry == pane.spacing_entries[0],
+                )
+                dialog._populate_sections()
+                assert pane.selected_entry == pane.spacing_entries[0]
+                _assert_rows(dialog, 2)
+                assert dialog.session.config.review_tracking.spacing_images == ()
+                assert not dialog.session.approved
+                _button(wx, dialog, wx.ID_CANCEL)
+            except BaseException as error:
+                failures.append(error)
+                dialog.EndModal(wx.ID_ABORT)
+
+        wx.CallAfter(interact)
+        try:
+            result = dialog.ShowModal()
+            if failures:
+                raise failures[0]
+            assert result == wx.ID_CANCEL
+        finally:
+            dialog.Destroy()
             pump(wx)
 
     try:

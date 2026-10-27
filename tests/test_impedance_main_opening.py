@@ -102,14 +102,17 @@ def test_unchanged_row_refresh_does_not_requeue_verified_capture_evidence(
     env.api.paint(dialog.preview_pane)
     env.api.finish_preparation(dialog)
     assert dialog.session.approved
+    selected = dialog.preview_pane.selected_entry
     env.reset_counts()
     assert dialog._refresh_rows()
     env.api.drain()
     env.api.finish_preparation(dialog)
     assert dialog._capture_prepare_sections == ()
     assert not dialog._capture_prepare_timer.IsRunning()
-    # One fresh row check and one queued visible-preview check, independent of N.
-    assert len(env.state.source_reads) == 2
+    # The row refresh checks the source once and preserves the current display.
+    assert env.state.source_reads == [env.state.snapshot]
+    assert dialog.session.snapshot == env.state.snapshot
+    assert dialog.preview_pane.selected_entry == selected
     assert env.state.provider_calls == []
     assert env.state.renders == []
     assert env.state.analyses == []
@@ -176,7 +179,7 @@ def test_viewing_changed_omitted_stub_does_not_revoke_included_row_approval(
     env.api.finish_preparation(dialog)
     assert dialog.session.approved
     env.api.capture = _changed_capture(env.api)
-    dialog.preview_pane.select(dialog.preview_pane.sections.index(stub))
+    dialog.preview_pane.select(dialog.preview_pane.entries.index(stub))
     env.api.drain()
     env.api.paint(dialog.preview_pane)
     assert dialog.session.approved
@@ -247,7 +250,7 @@ def test_failed_selected_preview_only_revokes_its_included_consent(
 
     with monkeypatch.context() as patch:
         patch.setattr(pane.canvas, "set_capture", reject_capture)
-        pane.select(pane.sections.index(section), refresh=True)
+        pane.select(pane.entries.index(section), refresh=True)
         env.api.drain()
         assert "Temporary image decoder failure" in pane.failure
         assert pane._retry_timer.IsRunning()
@@ -288,7 +291,7 @@ def test_omitted_preview_still_rejects_changed_source_or_appearance(
         env.state.palette = "changed native appearance"
     else:
         env.state.variant = "same geometry, different output"
-    dialog.preview_pane.select(dialog.preview_pane.sections.index(stub), refresh=True)
+    dialog.preview_pane.select(dialog.preview_pane.entries.index(stub), refresh=True)
     env.api.drain()
     assert not dialog.session.approved
     dialog.emit(env.api.wx.EVT_BUTTON, env.api.wx.ID_OK)

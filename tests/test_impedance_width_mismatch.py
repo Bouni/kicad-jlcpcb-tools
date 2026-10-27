@@ -89,7 +89,7 @@ def _assert_regular_rows(
     for index, row in enumerate(rows):
         assert row[7] == "0.15 mm"
         assert len(row) == dialog.sections.GetColumnCount()
-        for column in range(11):
+        for column in range(dialog.sections.GetColumnCount()):
             colour = (180, 140, 0) if mismatch and column in (7, 8, 9) else None
             _assert_cell_colour(api, dialog, index, column, colour)
 
@@ -249,5 +249,5 @@ def test_covered_stub_keeps_muted_cells_and_blank_comparison_when_included(
         assert dialog.sections.GetToggleValue(index, 0) is include
         row = dialog.sections.table_rows[index]
         assert row[8:10] == ["", ""]
-        for column in range(11):
+        for column in range(dialog.sections.GetColumnCount()):
             _assert_cell_colour(api, dialog, index, column, (120, 120, 120))

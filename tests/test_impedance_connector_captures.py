@@ -179,6 +179,38 @@ def test_new_routed_layer_without_reference_metadata_fails_closed() -> None:
         gallery.reviewed_showcase_sections(showcase, changed)
 
 
+def test_connector_gallery_html_preview_does_not_approve_spacing_images(
+    tmp_path: Path,
+) -> None:
+    """Real connector geometry can be previewed without fabrication consent."""
+    from impedance import service
+    from impedance.model import ValidationError
+    from impedance.spacing_review import spacing_review_entries
+    from tests.test_impedance_report_pipeline import _html_images, _png
+
+    showcase = next(
+        item for item in CONNECTOR_SHOWCASES if item.kind.startswith("differential")
+    )
+    snapshot = gallery.fixture_snapshot(
+        showcase, gallery.native_snapshot(DIRECTORY / f"{showcase.name}.kicad_pcb")
+    )
+    config, sections = gallery.reviewed_showcase_sections(showcase, snapshot)
+    assert spacing_review_entries(config, snapshot, sections)
+    before = config.to_dict()
+    for index, section in enumerate(sections, 1):
+        (tmp_path / f"row-{index}-{section.layer.replace('.', '_')}.png").write_bytes(
+            _png()
+        )
+    output = gallery.write_case_report(tmp_path, showcase, config, snapshot, sections)
+    assert "Sample preview (unapproved)" in output.read_text(encoding="utf-8")
+    assert _html_images(output) == [_png()] * len(sections)
+    assert config.to_dict() == before
+    assert not config.review_tracking.spacing_images
+    assert not tuple(tmp_path.glob("*.xlsx"))
+    with pytest.raises(ValidationError, match="Spacing.*individual approval"):
+        service.prepare(config, snapshot)
+
+
 @pytest.mark.parametrize("theme", [None, "explicit-theme"])
 def test_showcase_generation_wires_actual_geometry_crop_palette_and_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, theme: Optional[str]
@@ -335,25 +367,31 @@ def test_native_connector_gallery_preserves_sources_and_generates_real_color_png
         if path.suffix in (".kicad_pcb", ".kicad_pro", ".kicad_dru")
     }
     # Isolate native wx from UI doubles while retaining this platform's test env.
-    subprocess.run(
-        [
-            sys.executable,
-            str(Path(gallery.__file__).resolve()),
-            "--output",
-            str(tmp_path),
-            "--kicad-cli",
-            executable,
-            "--showcase",
-            showcase.name,
-            "--examples",
-            str(DIRECTORY.parent),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        cwd=gallery.REPOSITORY_ROOT,
-    )
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                str(Path(gallery.__file__).resolve()),
+                "--output",
+                str(tmp_path),
+                "--kicad-cli",
+                executable,
+                "--showcase",
+                showcase.name,
+                "--examples",
+                str(DIRECTORY.parent),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=gallery.REPOSITORY_ROOT,
+        )
+    except subprocess.CalledProcessError as error:
+        pytest.fail(
+            f"Native connector gallery failed:\n{error.stdout}\n{error.stderr}",
+            pytrace=False,
+        )
     records = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     assert records
     for record in records:

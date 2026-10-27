@@ -200,6 +200,244 @@ def test_new_viewing_retains_prior_approval_as_stale_history() -> None:
     )
 
 
+@pytest.mark.parametrize("legacy_revision", (5, 6))
+def test_concern_render_policy_retains_old_approval_as_history_after_reopen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_revision: int
+) -> None:
+    """Render 5/6→7 requires fresh consent while exact spacing and trace events stay saved."""
+    from impedance import spacing_review
+    from impedance.spacing_checks import SPACING_CHECK_POLICY_REVISION
+    from tests.test_impedance_report_pipeline import _spacing_plan
+
+    plan = _spacing_plan(100_000)
+    with monkeypatch.context() as old_policy:
+        old_policy.setattr(
+            spacing_review, "SPACING_RENDER_POLICY_REVISION", legacy_revision
+        )
+        previous = spacing_review.spacing_review_entries(
+            plan.config, plan.snapshot, plan.analysis.sections
+        )
+    assert previous
+    records = tuple(
+        tracking.SpacingImageReview(
+            entry.spec_id,
+            entry.layer,
+            entry.issue_id,
+            entry.view_id,
+            entry.input_digest,
+            tracking.spacing_capture_fingerprint(entry.input_digest, PNG),
+            VIEWED,
+            tracking.spacing_capture_fingerprint(entry.input_digest, PNG),
+            APPROVED,
+        )
+        for entry in previous
+    )
+    source = tracking.source_fingerprint(plan.snapshot)
+    specification = plan.config.specifications[0]
+    trace_images = tuple(
+        tracking.ImageView(
+            section.spec_id,
+            section.layer,
+            section.section_id,
+            tracking.capture_fingerprint(source, specification, section, PNG),
+            VIEWED,
+        )
+        for section in plan.analysis.sections
+    )
+    trace_layers = tuple(
+        tracking.LayerApproval(
+            specification.spec_id,
+            layer,
+            tracking.layer_fingerprint(
+                source,
+                specification,
+                layer,
+                plan.analysis.sections,
+                stackup=plan.config.stackup,
+                width_results=plan.config.width_results,
+            ),
+            APPROVED,
+            tuple(
+                (image.section_id, image.capture_digest)
+                for image in trace_images
+                if image.layer == layer
+            ),
+        )
+        for layer in sorted({section.layer for section in plan.analysis.sections})
+    )
+    config = replace(
+        plan.config,
+        review_tracking=tracking.ReviewTracking(trace_images, trace_layers, records),
+    )
+    repository = _repository(tmp_path)
+    repository.save(config, 0)
+
+    def unexpected_clock() -> str:
+        raise AssertionError("Opening a revised image cannot manufacture consent")
+
+    monkeypatch.setattr(tracking, "utc_now", unexpected_clock)
+    assert SPACING_CHECK_POLICY_REVISION == 4
+    reopened, revision = _repository(tmp_path).load()
+    current = spacing_review.spacing_review_entries(
+        reopened, plan.snapshot, plan.analysis.sections
+    )
+    pending = spacing_review.pending_spacing_reviews(
+        reopened, plan.snapshot, plan.analysis.sections
+    )
+    assert revision == 1 and current
+    assert pending == current
+    assert spacing_review.SPACING_RENDER_POLICY_REVISION == 7
+    assert set(current).isdisjoint(previous)
+    assert reopened.review_tracking.spacing_images == records
+    assert reopened.review_tracking.images == trace_images
+    assert reopened.review_tracking.layers == trace_layers
+    assert tracking.specification_layer_review_current(
+        reopened.review_tracking,
+        source,
+        specification,
+        plan.analysis.sections,
+        stackup=plan.config.stackup,
+        width_results=plan.config.width_results,
+        capture_digests={
+            image.section_id: image.capture_digest for image in trace_images
+        },
+    )
+    assert {entry.issue_id for entry in current} == {
+        entry.issue_id for entry in previous
+    }
+    assert all(
+        entry.view_id not in {old.view_id for old in previous} for entry in current
+    )
+    assert repository.load() == (reopened, revision)
+
+
+def test_seven_historical_crops_reopen_as_two_unapproved_continuous_concerns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old five-plus-two crop approvals cannot approve replacement concern images."""
+    from impedance import spacing_review
+    from impedance.matching import analyze
+    from impedance.model import Trace
+    from tests.test_impedance_report_pipeline import _spacing_plan
+
+    plan = _spacing_plan(331_300)
+    pairs = (("PONG_D+", "PONG_D-"), ("PONG_IN_D+", "PONG_IN_D-"))
+    traces = tuple(
+        Trace(
+            f"pair-{index}-{side}",
+            "F.Cu",
+            net,
+            150_000,
+            (
+                (0, index * 5_000_000 + side * (gap + 150_000)),
+                (length, index * 5_000_000 + side * (gap + 150_000)),
+            ),
+        )
+        for index, (pair, gap, length) in enumerate(
+            ((pairs[0], 331_300, 24_000_000), (pairs[1], 206_300, 10_000_000))
+        )
+        for side, net in enumerate(pair)
+    )
+    snapshot = replace(
+        plan.snapshot,
+        traces=traces,
+        differential_pairs=pairs,
+        net_class_memberships=tuple((net, ("USB",)) for pair in pairs for net in pair),
+    )
+    spec = replace(
+        plan.config.specifications[0],
+        layer_settings=(LayerSettings("F.Cu", ("B.Cu",), 202_300),),
+    )
+    # Historical capture identities are deliberately independent of the new
+    # selector: changing the selector must not rewrite saved consent to fit it.
+    records = tuple(
+        replace(
+            _record(view_id=f"policy-5-concern-{concern}-crop-{crop}", approved=True),
+            issue_id=f"policy-5-concern-{concern}",
+        )
+        for concern, count in enumerate((5, 2))
+        for crop in range(count)
+    )
+    config = replace(
+        plan.config,
+        specifications=(spec,),
+        review_tracking=tracking.ReviewTracking(spacing_images=records),
+    )
+    sections = analyze(config, snapshot).sections
+    repository = _repository(tmp_path)
+    repository.save(config, 0)
+
+    def unexpected_clock() -> str:
+        raise AssertionError("Regenerating or reopening concerns cannot grant consent")
+
+    monkeypatch.setattr(tracking, "utc_now", unexpected_clock)
+    reopened, revision = repository.load()
+    entries = spacing_review.spacing_review_entries(reopened, snapshot, sections)
+    assert len(entries) == 2
+    assert {entry.pair for entry in entries} == {tuple(sorted(pair)) for pair in pairs}
+    assert (
+        spacing_review.pending_spacing_reviews(reopened, snapshot, sections) == entries
+    )
+    assert reopened.review_tracking.spacing_images == records
+    assert all(
+        not tracking.spacing_image_current(
+            tracking.find_spacing_image(
+                reopened.review_tracking, entry.spec_id, entry.layer, entry.view_id
+            ),
+            entry.input_digest,
+            approved=True,
+        )
+        for entry in entries
+    )
+    repository.save(reopened, revision)
+    again, again_revision = _repository(tmp_path).load()
+    assert again_revision == revision + 1
+    assert again.review_tracking.spacing_images == records
+    assert spacing_review.pending_spacing_reviews(again, snapshot, sections) == entries
+
+    first = entries[0]
+    current_capture = tracking.spacing_capture_fingerprint(first.input_digest, PNG)
+    current_view = tracking.SpacingImageReview(
+        first.spec_id,
+        first.layer,
+        first.issue_id,
+        first.view_id,
+        first.input_digest,
+        current_capture,
+        "2026-10-26T12:34:56.000001Z",
+    )
+    viewed = replace(
+        again,
+        review_tracking=tracking.put_spacing_image(again.review_tracking, current_view),
+    )
+    assert spacing_review.pending_spacing_reviews(viewed, snapshot, sections) == entries
+    current_approval = replace(
+        current_view,
+        approved_digest=current_capture,
+        approved_at_utc="2026-10-26T12:35:56.000002Z",
+    )
+    partly_approved = replace(
+        viewed,
+        review_tracking=tracking.put_spacing_image(
+            viewed.review_tracking, current_approval
+        ),
+    )
+    assert (
+        spacing_review.pending_spacing_reviews(partly_approved, snapshot, sections)
+        == entries[1:]
+    )
+    repository.save(partly_approved, again_revision)
+    final, final_revision = _repository(tmp_path).load()
+    assert final_revision == again_revision + 1
+    assert len(final.review_tracking.spacing_images) == 8
+    assert all(record in final.review_tracking.spacing_images for record in records)
+    assert current_approval in final.review_tracking.spacing_images
+    assert final.review_tracking == partly_approved.review_tracking
+    assert (
+        spacing_review.pending_spacing_reviews(final, snapshot, sections) == entries[1:]
+    )
+
+
 @pytest.mark.parametrize("version", [4, 5, 6])
 def test_legacy_load_preserves_history_without_spacing_consent_or_writes(
     tmp_path: Path, version: int

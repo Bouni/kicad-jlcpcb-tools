@@ -566,7 +566,11 @@ def test_impedance_reports_use_reviewed_output_variant_before_publication(
 ) -> None:
     """Only a reviewed output clone can accompany the variant's real ZIP and CSVs."""
     plan = _reviewed_plan(generation.module)
-    report_board = SimpleNamespace(GetCurrentVariant=lambda: "A")
+    report_board = SimpleNamespace(
+        filename=generation.exporter.board.GetFileName(), variant="A"
+    )
+    report_board.GetFileName = lambda: report_board.filename
+    report_board.GetCurrentVariant = lambda: report_board.variant
     snapshot = plan.snapshot
     # Approval describes output A; the native reader below independently supplies
     # the actual plot board snapshot when the real output verifier reads it.
@@ -583,12 +587,19 @@ def test_impedance_reports_use_reviewed_output_variant_before_publication(
     )
     plan = service.prepare(approved_config, approved_snapshot)
     assert plan is not None
-    controls = generation.module.ImpedanceControls.__new__(
-        generation.module.ImpedanceControls
+    from .test_impedance_controls import Widget
+
+    integration = importlib.import_module(
+        generation.module.ImpedanceControls.__module__
     )
-    controls.parent = generation.window
-    controls.board_path = generation.window.pcbnew.GetBoard().GetFileName()
-    controls.repository = None
+    for widget in ("CheckBox", "Button", "StaticText"):
+        monkeypatch.setattr(integration.wx, widget, Widget, raising=False)
+    monkeypatch.setattr(
+        integration, "read_theme_context", lambda _pcbnew: "current-theme"
+    )
+    controls = generation.module.ImpedanceControls(
+        generation.window, SimpleNamespace(AddControl=lambda _control: None)
+    )
     controls.preflight = MagicMock(return_value=plan)
     controls.verify_current = MagicMock()
     controls.verify_disabled = MagicMock()
@@ -603,14 +614,21 @@ def test_impedance_reports_use_reviewed_output_variant_before_publication(
         raising=False,
     )
     reads: list[tuple[Any, Any, Any]] = []
+    read_stages: list[str] = []
+    boundaries = {
+        "render": "Validating controlled-impedance output variant",
+        "archive": "Validating controlled-impedance captures before archive",
+        "publication": "Validating controlled-impedance captures before publication",
+    }
 
     def read_snapshot(board: Any, pcbnew: Any, *, netclass_source: Any = None) -> Any:
         """Read output state separately from the saved approval and production verifier."""
         reads.append((board, pcbnew, netclass_source))
+        stage = generation.window._current_generation_step
+        read_stages.append(stage)
         assert board is report_board
         assert netclass_source is generation.window.pcbnew.GetBoard()
-        boundaries = {"render": 1, "archive": 2, "publication": 3}
-        if change_at is not None and len(reads) >= boundaries[change_at]:
+        if change_at is not None and stage == boundaries[change_at]:
             return replace(snapshot, context_digest="different output variant text")
         return snapshot
 
@@ -625,11 +643,24 @@ def test_impedance_reports_use_reviewed_output_variant_before_publication(
     rendered_boards = []
     scratch_paths = []
 
-    def export(_plan: Any, board: Any, _pcbnew: Any, scratch: Path) -> Any:
+    def export(
+        _plan: Any, board: Any, _pcbnew: Any, scratch: Path, **options: Any
+    ) -> Any:
         """Write real report members while observing the selected native boundary."""
+        assert options["capture_cache"] is controls._owned_capture_cache
+        assert options["capture_identity"] == (
+            str(Path(controls.board_path).resolve()),
+            "A",
+        )
+        assert options["source_context"]() == _plan.snapshot
+        appearance = options["appearance_context"]()
+        assert appearance == "current-theme"
         rendered_boards.append(board)
         scratch_paths.append(scratch)
-        return _reports(scratch)
+        reports = replace(_reports(scratch), appearance=appearance)
+        assert options["source_context"]() == _plan.snapshot
+        assert options["appearance_context"]() == appearance
+        return reports
 
     monkeypatch.setattr(generation.module, "export_impedance_reports", export)
     generation.run()
@@ -660,11 +691,23 @@ def test_impedance_reports_use_reviewed_output_variant_before_publication(
         generation.assert_previous_outputs()
         assert generation.store.get_generation_count() == 1
         assert generation.hooks == ["pre"]
-    expected_reads = {None: 3, "render": 1, "archive": 2, "publication": 3}[change_at]
+    expected_stages = [
+        boundaries["render"],
+        # Fresh reuse precheck, followed by this isolated report consumer's
+        # before/after source checks, all inside the timed export operation.
+        *(["Generating controlled-impedance workbook and HTML report"] * 3),
+        boundaries["archive"],
+        boundaries["publication"],
+    ]
+    if change_at is not None:
+        expected_stages = expected_stages[
+            : expected_stages.index(boundaries[change_at]) + 1
+        ]
     expected_read = (
         report_board,
         generation.window.pcbnew,
         generation.window.pcbnew.GetBoard(),
     )
-    assert reads == [expected_read] * expected_reads
+    assert read_stages == expected_stages
+    assert reads == [expected_read] * len(expected_stages)
     generation.assert_released()

@@ -10,6 +10,7 @@ import pytest
 
 from .test_impedance_capture_evidence import OTHER_PNG, _session
 from .test_impedance_controls import PNG, harness
+from .test_impedance_report_pipeline import _png
 
 __all__ = ["harness"]
 
@@ -17,6 +18,7 @@ __all__ = ["harness"]
 def _entry(api: SimpleNamespace, section: Any) -> Any:
     """Use a real immutable entry with small PNGs at the capture-cache boundary."""
     module = importlib.import_module(api.integration.__package__ + ".spacing_review")
+    detail_width, detail_height = module.DETAIL_RECT[2:]
     return module.SpacingReviewEntry(
         spec_id=section.spec_id,
         layer=section.layer,
@@ -27,7 +29,7 @@ def _entry(api: SimpleNamespace, section: Any) -> Any:
         issue_code="too_wide",
         caption="Spacing concern",
         bounds=section.bounds,
-        viewport_nm=(0, 0, 1_000_000, 1_000_000),
+        viewport_nm=(0, 0, detail_width * 1000, detail_height * 1000),
         input_digest="a" * 64,
         source_traces=section.traces,
         mate_traces=(),
@@ -58,6 +60,47 @@ def _install_spacing_renderer(
     return calls
 
 
+def _install_original_renderer(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, *, failure: str = ""
+) -> list[Any]:
+    """Expose an independently captured, unannotated comparison image."""
+    module = importlib.import_module(api.integration.__package__ + ".render")
+    calls: list[Any] = []
+
+    def render_original(
+        renderer: Any, entry: Any, destination: Path, **dimensions: int
+    ) -> Path:
+        """Keep original pixels distinct from the approved composite."""
+        assert not renderer.closed
+        assert not dimensions or dimensions == {
+            "width_px": entry.width_px,
+            "height_px": entry.height_px,
+        }
+        calls.append(entry)
+        if failure == "render":
+            raise RuntimeError("original render failed")
+        if failure == "path":
+            return destination.with_name("unexpected-original.png")
+        destination.write_bytes(
+            b"invalid PNG" if failure == "png" else _original_png(entry)
+        )
+        return destination
+
+    monkeypatch.setattr(
+        module.SectionRenderer,
+        "render_spacing_original",
+        render_original,
+        raising=False,
+    )
+    return calls
+
+
+def _original_png(entry: Any) -> bytes:
+    """Capture the original at its detail-panel resolution, independently of PNG size."""
+    width, height = entry.composition.detail_rect[2:]
+    return _png(width, height, b"\x90\x20\x40")
+
+
 def test_spacing_images_never_enter_manufacturing_cache_or_evidence(
     harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -72,7 +115,7 @@ def test_spacing_images_never_enter_manufacturing_cache_or_evidence(
         assert diagnostic.data == OTHER_PNG
         assert tuple(captures.images) == (section,)
         assert tuple(captures.spacing_images) == (entry,)
-        assert diagnostic.viewport_nm == entry.viewport_nm
+        assert diagnostic.viewport_nm is None
         evidence = captures.verify_captures(captures.snapshot(), (section,))
         assert evidence.current and evidence.hashes == {section: original.sha256}
         assert calls == [entry]
@@ -80,6 +123,157 @@ def test_spacing_images_never_enter_manufacturing_cache_or_evidence(
         assert calls == [entry]
         assert len(harness.renders) == 1
         assert state.reads > 0
+    finally:
+        captures.close()
+
+
+@pytest.mark.parametrize("operation", ["preview_spacing", "verify_spacing_captures"])
+def test_superseded_spacing_constructor_preserves_the_newer_capture(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    """Nested diagnostic work keeps its renderer, hashes and pending PNG ownership."""
+    captures, state, section = _session(harness, tmp_path)
+    calls = _install_spacing_renderer(harness, monkeypatch)
+    entry = _entry(harness, section)
+    selected = replace(entry, issue_id="newer-concern", view_id="newer-spacing-view")
+    render = importlib.import_module(f"{harness.integration.__package__}.render")
+    original = render.SectionRenderer
+    nested: list[Any] = []
+
+    def construct(*args: Any, **kwargs: Any) -> Any:
+        """Publish a newer diagnostic while the older allocation remains local."""
+        candidate = original(*args, **kwargs)
+        if len(harness.renderers) == 1:
+            nested.append(captures.preview_spacing(selected))
+        return candidate
+
+    monkeypatch.setattr(render, "SectionRenderer", construct)
+    try:
+        if operation == "preview_spacing":
+            with pytest.raises(harness.model.ValidationError, match="changed|closed"):
+                captures.preview_spacing(entry)
+        else:
+            failed = captures.verify_spacing_captures(state.snapshot, (entry,))
+            assert not failed.current and failed.hashes == {entry: None}
+        older, current = harness.renderers
+        assert older.closed and older.close_calls == 1
+        assert captures.renderer is current and not current.closed
+        assert captures.revision[0] == state.snapshot
+        assert captures.spacing_images == {selected: nested[0]}
+        assert captures._spacing_hashes[selected] == nested[0].sha256
+        assert captures.spacing_image_bytes == nested[0].byte_size
+        assert len(captures._pending_owned) == 1
+        key, pending = next(iter(captures._pending_owned.items()))
+        assert key.kind == "spacing" and key.inputs == selected
+        assert pending is nested[0] and not captures.owned_captures._images
+        assert not captures.images and not captures._hashes
+        assert captures.preview_spacing(selected) is nested[0]
+        assert calls == [selected]
+        evidence = captures.verify_spacing_captures(state.snapshot, (selected,))
+        assert evidence.current and evidence.hashes == {selected: nested[0].sha256}
+        assert not captures._pending_owned and len(captures.owned_captures._images) == 1
+    finally:
+        captures.close()
+    assert all(renderer.close_calls == 1 for renderer in harness.renderers)
+
+
+def test_spacing_review_defers_distinct_original_until_html_export(
+    harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native review owns only approved pixels; HTML comparisons are deferred."""
+    captures, state, section = _session(harness, tmp_path)
+    composites = _install_spacing_renderer(harness, monkeypatch)
+    originals = _install_original_renderer(harness, monkeypatch)
+    entry = _entry(harness, section)
+    try:
+        image = captures.preview(entry)
+        assert image.viewport_nm is None
+        assert image.original is None
+        assert image.data == OTHER_PNG
+        assert captures.spacing_image_bytes == len(OTHER_PNG)
+        assert captures.preview(entry) is image
+        assert composites == [entry] and originals == []
+        evidence = captures.verify_spacing_captures(state.snapshot, (entry,))
+        assert evidence.current and evidence.hashes == {entry: image.sha256}
+        assert not captures.images and not captures._hashes
+    finally:
+        captures.close()
+
+
+def test_spacing_review_reopening_reuses_combined_pixels_without_approving_them(
+    harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Saved consent is still separate from frame-owned current PNG evidence."""
+    captures, state, section = _session(harness, tmp_path)
+    composites = _install_spacing_renderer(harness, monkeypatch)
+    originals = _install_original_renderer(harness, monkeypatch)
+    entry = _entry(harness, section)
+    first = captures.preview(entry)
+    assert captures.verify_spacing_captures(state.snapshot, (entry,)).current
+    controls = captures.controls
+    captures.close()
+    reopened = harness.integration.CaptureSession(controls, tmp_path)
+    try:
+        evidence = reopened.verify_spacing_captures(reopened.snapshot(), (entry,))
+        assert evidence.current and evidence.hashes == {entry: first.sha256}
+        assert reopened.preview(entry).data == first.data
+        assert composites == [entry] and originals == []
+        assert reopened.renderer is None
+        assert not hasattr(controls._owned_capture_cache, "review_tracking")
+    finally:
+        reopened.close()
+
+
+def test_spacing_review_lru_contains_only_requested_composites(
+    harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deferred Original comparisons cannot consume the native review PNG budget."""
+    captures, _state, section = _session(harness, tmp_path)
+    _install_spacing_renderer(harness, monkeypatch)
+    _install_original_renderer(harness, monkeypatch)
+    entry = _entry(harness, section)
+    owned_bytes = len(OTHER_PNG)
+    monkeypatch.setattr(
+        harness.integration, "MAX_SPACING_CAPTURE_CACHE_BYTES", owned_bytes * 2
+    )
+    entries = tuple(replace(entry, view_id=f"combined-{index}") for index in range(5))
+    try:
+        manufacturing = captures.preview(section)
+        for item in entries:
+            captures.preview(item)
+        assert tuple(captures.spacing_images) == entries[-2:]
+        assert captures.spacing_image_bytes == owned_bytes * 2
+        assert captures.images == {section: manufacturing}
+        # Refresh must subtract old pixels before retaining their replacement.
+        captures.preview(entries[-1], refresh=True)
+        assert tuple(captures.spacing_images) == entries[-2:]
+        assert captures.spacing_image_bytes == owned_bytes * 2
+    finally:
+        captures.close()
+
+
+@pytest.mark.parametrize("failure", ["render", "path", "png"])
+def test_unrequested_original_failure_does_not_delay_native_review(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Original failures belong to the HTML operation that requests those pixels."""
+    captures, state, section = _session(harness, tmp_path)
+    _install_spacing_renderer(harness, monkeypatch)
+    _install_original_renderer(harness, monkeypatch, failure=failure)
+    entry = _entry(harness, section)
+    try:
+        image = captures.preview(entry)
+        assert image.original is None
+        assert captures.spacing_images[entry] is image
+        assert captures.spacing_image_bytes == len(OTHER_PNG)
+        evidence = captures.verify_spacing_captures(state.snapshot, (entry,))
+        assert evidence.current and evidence.hashes == {entry: image.sha256}
     finally:
         captures.close()
 
@@ -114,7 +308,7 @@ def test_spacing_preparation_is_cached_without_manufacturing_evidence(
         first = captures.prepare(snapshot, entry)
         second = captures.prepare(snapshot, entry)
         assert first is second and calls == [entry]
-        assert state.reads == 2
+        assert state.reads == 3  # Includes the first actual native binding.
         assert not captures.images and not captures._hashes
         assert captures.spacing_images[entry] is first
     finally:
@@ -173,7 +367,7 @@ def test_revision_change_releases_both_capture_collections(
 
 @pytest.mark.parametrize("count", [1, 25])
 @pytest.mark.parametrize("warm", [False, True])
-def test_spacing_batch_verifies_all_pngs_with_two_fresh_source_boundaries(
+def test_spacing_batch_checks_boundaries_and_any_actual_native_binding(
     harness: SimpleNamespace,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -203,14 +397,15 @@ def test_spacing_batch_verifies_all_pngs_with_two_fresh_source_boundaries(
         assert evidence.current
         expected_sha = harness.integration.CapturedImage.from_bytes(OTHER_PNG).sha256
         assert evidence.hashes == dict.fromkeys(entries, expected_sha)
-        assert state.reads - before[0] == 2
-        assert len(appearances) - before[2] == 2
+        expected_checks = 2 if warm else 3
+        assert state.reads - before[0] == expected_checks
+        assert len(appearances) - before[2] == expected_checks
         assert len(calls) - before[1] == (0 if warm else count)
         assert not captures.images and not captures._hashes
         again = captures.verify_spacing_captures(state.snapshot, entries)
         assert again == evidence
-        assert state.reads - before[0] == 4
-        assert len(appearances) - before[2] == 4
+        assert state.reads - before[0] == expected_checks + 2
+        assert len(appearances) - before[2] == expected_checks + 2
         assert len(calls) - before[1] == (0 if warm else count)
     finally:
         captures.close()
@@ -264,13 +459,14 @@ def test_spacing_batch_only_renders_missing_entries_and_uses_each_owned_png_sha(
     entry = _entry(harness, section)
     changed = replace(entry, input_digest="b" * 64)
     missing = replace(entry, view_id="missing")
+    changed_png = _png(1, 1, b"\x90\x20\x40")
 
     def distinct_png(
         renderer: Any, item: Any, destination: Path, **kwargs: int
     ) -> Path:
         result = render(renderer, item, destination, **kwargs)
         if item == changed:
-            destination.write_bytes(PNG)
+            destination.write_bytes(changed_png)
         return result
 
     monkeypatch.setattr(renderer_module.SectionRenderer, "render_spacing", distinct_png)
@@ -280,7 +476,7 @@ def test_spacing_batch_only_renders_missing_entries_and_uses_each_owned_png_sha(
         evidence = captures.verify_spacing_captures(
             state.snapshot, (entry, changed, missing)
         )
-        png_sha = harness.integration.CapturedImage.from_bytes(PNG).sha256
+        png_sha = harness.integration.CapturedImage.from_bytes(changed_png).sha256
         assert evidence.current
         assert evidence.hashes == {
             entry: original.sha256,

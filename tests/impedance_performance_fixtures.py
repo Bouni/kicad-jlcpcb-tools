@@ -169,6 +169,187 @@ def routed_workbook(api: SimpleNamespace, image_sha256: str) -> RoutedWorkbook:
     )
 
 
+def differential_routed_draft(api: SimpleNamespace) -> tuple[BoardSnapshot, Config]:
+    """Create twelve independently paired, segmented routes for spacing budgets.
+
+    Keep this separate from the existing single-ended opening/Save workloads:
+    changing those counts would obscure whether their original budgets regress.
+    There is no stackup or calculator result: spacing assessment is offline.
+    """
+    model = api.model
+    traces = []
+    memberships = []
+    pairs = []
+    classes = tuple(f"Differential{index}" for index in range(CLASS_COUNT))
+    for class_index, net_class in enumerate(classes):
+        for pair_index in range(NETS_PER_CLASS):
+            route = class_index * NETS_PER_CLASS + pair_index
+            layer = "F.Cu" if pair_index % 2 == 0 else "In2.Cu"
+            width_nm = 150_000 + pair_index * 25_000
+            pair = (f"{net_class}_PAIR{pair_index}+", f"{net_class}_PAIR{pair_index}-")
+            pairs.append(pair)
+            for side, net in enumerate(pair):
+                memberships.append((net, (net_class,)))
+                y_nm = route * 3_000_000 + side * (width_nm + 150_000)
+                for segment in range(SEGMENTS_PER_ROUTE):
+                    traces.append(
+                        model.Trace(
+                            f"pair-{route}-{side}-segment-{segment}",
+                            layer,
+                            net,
+                            width_nm,
+                            (
+                                (segment * 500_000, y_nm),
+                                ((segment + 1) * 500_000, y_nm),
+                            ),
+                        )
+                    )
+    snapshot = model.BoardSnapshot(
+        layers=("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
+        traces=tuple(traces),
+        context_digest="representative-768-differential-track-items",
+        net_classes=classes,
+        net_class_memberships=tuple(memberships),
+        net_class_context_digest="four-differential-classes-three-pairs-each",
+        differential_pairs=tuple(pairs),
+        board_bounds=(-1_000_000, -1_000_000, 18_000_000, 38_000_000),
+    )
+    config = model.Config(
+        enabled=True,
+        specifications=tuple(
+            model.Specification(
+                f"differential-class-{index}",
+                net_class,
+                "90",
+                "differential",
+                net_class,
+                (
+                    model.LayerSettings("F.Cu", ("In1.Cu",), 150_000),
+                    model.LayerSettings("In2.Cu", ("In1.Cu", "B.Cu"), 150_000),
+                ),
+            )
+            for index, net_class in enumerate(classes)
+        ),
+    )
+    return snapshot, config
+
+
+def differential_terminal_draft(
+    api: SimpleNamespace, gap_nm: int = 150_000
+) -> tuple[BoardSnapshot, Config]:
+    """Add real terminal contacts to every segmented paired performance route."""
+    snapshot, config = differential_routed_draft(api)
+    model = api.model
+    traces = []
+    features = []
+    for pair in snapshot.differential_pairs:
+        for side, net in enumerate(pair):
+            route = tuple(trace for trace in snapshot.traces if trace.net == net)
+            offset = side * (gap_nm - 150_000)
+            route = tuple(
+                replace(trace, points=tuple((x, y + offset) for x, y in trace.points))
+                for trace in route
+            )
+            traces.extend(route)
+            first, last = route[0], route[-1]
+            for end, trace, point in (
+                ("left", first, first.points[0]),
+                ("right", last, last.points[-1]),
+            ):
+                terminal = (
+                    point[0] + (-600_000 if end == "left" else 600_000),
+                    point[1] + (-400_000 if side == 0 else 400_000),
+                )
+                traces.append(
+                    model.Trace(
+                        f"terminal-{net}-{end}",
+                        trace.layer,
+                        net,
+                        trace.width_nm,
+                        (terminal, point),
+                    )
+                )
+                features.append(
+                    model.CopperFeature(
+                        f"terminal-pad-{net}-{end}",
+                        net,
+                        trace.layer,
+                        "pad",
+                        "rect",
+                        terminal,
+                        400_000,
+                        400_000,
+                    )
+                )
+    return replace(
+        snapshot,
+        traces=tuple(traces),
+        copper_features=tuple(features),
+        context_digest="representative-segmented-differential-terminal-fanouts",
+        board_bounds=(-3_000_000, -1_000_000, 19_000_000, 38_000_000),
+    ), config
+
+
+def populate_native_terminal_pair(
+    board: Any,
+    pcbnew: Any,
+    nets: tuple[Any, Any],
+    *,
+    origin_nm: tuple[int, int] = (0, 0),
+    gap_nm: int = 150_000,
+    launch_nm: int = 600_000,
+) -> SimpleNamespace:
+    """Create actual pads and two diagonal launches around one routed trunk.
+
+    The default 0.6 mm launches fit within the explicit one-pitch landing region
+    of the 1 mm-pitch pads. A longer launch deliberately leaves that region and
+    must be checked, even when it eventually reaches a correct-gap trunk.
+    """
+    tracks = []
+    pads = []
+    footprints = []
+    for side, net in enumerate(nets):
+        terminal_y = origin_nm[1] + side * 1_000_000
+        trunk_y = origin_nm[1] + 400_000 + side * (150_000 + gap_nm)
+        points = (
+            (origin_nm[0], terminal_y),
+            (origin_nm[0] + launch_nm, trunk_y),
+            (origin_nm[0] + launch_nm + 12_000_000, trunk_y),
+            (origin_nm[0] + 2 * launch_nm + 12_000_000, terminal_y),
+        )
+        for start, end in zip(points, points[1:]):
+            track = pcbnew.PCB_TRACK(board)
+            track.SetStart(pcbnew.VECTOR2I(*start))
+            track.SetEnd(pcbnew.VECTOR2I(*end))
+            track.SetWidth(150_000)
+            track.SetLayer(pcbnew.F_Cu)
+            track.SetNet(net)
+            board.Add(track)
+            tracks.append(track)
+        for end, point in enumerate((points[0], points[-1])):
+            footprint = pcbnew.FOOTPRINT(board)
+            footprint.SetReference(f"TP_SPACING_{net.GetNetCode()}_{end}")
+            footprint.SetPosition(pcbnew.VECTOR2I(*point))
+            footprint.Reference().SetVisible(False)
+            footprint.Value().SetVisible(False)
+            board.Add(footprint)
+            pad = pcbnew.PAD(footprint)
+            pad.SetAttribute(pcbnew.PAD_ATTRIB_SMD)
+            pad.SetShape(pcbnew.PAD_SHAPE_RECT)
+            pad.SetSize(pcbnew.VECTOR2I(400_000, 400_000))
+            pad.SetPosition(pcbnew.VECTOR2I(*point))
+            layers = pcbnew.LSET()
+            layers.AddLayer(pcbnew.F_Cu)
+            pad.SetLayerSet(layers)
+            pad.SetNet(net)
+            footprint.Add(pad)
+            pads.append(pad)
+            footprints.append(footprint)
+    return SimpleNamespace(
+        tracks=tuple(tracks), pads=tuple(pads), footprints=tuple(footprints)
+    )
+
+
 def historical_approval(
     api: SimpleNamespace,
     snapshot: BoardSnapshot,

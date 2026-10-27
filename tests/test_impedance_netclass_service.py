@@ -17,11 +17,16 @@ from impedance.matching import analyze, preview_sections
 from impedance.model import BoardSnapshot, Config, LayerSettings, Section, Specification
 from impedance.review_tracking import SpacingImageReview, spacing_capture_fingerprint
 from impedance.spacing_checks import SpacingContext
-from impedance.spacing_review import SpacingReviewEntry, spacing_review_entries
+from impedance.spacing_review import (
+    SPACING_IMAGE_HEIGHT,
+    SPACING_IMAGE_WIDTH,
+    SpacingReviewEntry,
+    spacing_review_entries,
+)
 from tests.rf_impedance_fixtures import COPPER_LAYERS, RF_CASES, RFCase
 from tests.test_impedance_workbook import _NS, _png
 
-SPACING_PNG = _png(1200, 800)
+SPACING_PNG = _png(SPACING_IMAGE_WIDTH, SPACING_IMAGE_HEIGHT)
 
 
 def _class_plan(case: RFCase) -> service.ExportPlan:

@@ -1,13 +1,16 @@
-"""Verify native feature lane selection and retained failure evidence."""
+"""Keep KiCad 10 fixture integrations separate from older native compatibility lanes."""
 
 from collections import Counter
 from collections.abc import Callable
+from contextlib import suppress
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -16,10 +19,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_CASES = {
     "tests/test_impedance_capture_examples.py": 20,
+    "tests/test_impedance_capture_optimizations.py": 1,
     "tests/test_impedance_connector_captures.py": 2,
     "tests/test_impedance_metadata_native.py": 15,
     "tests/test_impedance_netclass_fixtures.py": 28,
     "tests/test_impedance_performance_native.py": 3,
+    "tests/test_impedance_spacing_native.py::test_native_spacing_closeup_preserves_manufacturing_png_and_reads_actual_gap": 2,
+    "tests/test_impedance_spacing_guides_native.py::test_native_reported_spacing_guides_approval_save_reopen_and_export": 4,
+    "tests/test_impedance_source_evidence_native.py": 31,
     "tests/test_rf_impedance_fixture_realism.py": 16,
     "tests/test_rf_impedance_native.py": 168,
     "tests/test_rf_impedance_showcases.py": 2,
@@ -36,6 +43,7 @@ def run_lane(
     *,
     status: int = 0,
     environment: Optional[dict[str, str]] = None,
+    asynchronous: bool = False,
 ) -> Any:
     """Run the real dispatcher with labeled command stand-ins, retaining its shell behavior."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -65,7 +73,7 @@ def run_lane(
     native.parent.mkdir(parents=True)
     native.write_text(
         f"#!{sys.executable}\n"
-        "import json,os,pathlib,sys\n"
+        "import json,os,pathlib,signal,sys,time\n"
         "args=sys.argv[1:]\n"
         "if args[:2]==['-m','pip']: sys.exit(0)\n"
         "root=pathlib.Path(os.environ['STUB_ROOT'])\n"
@@ -77,6 +85,19 @@ def run_lane(
         " if flag in args:\n"
         "  output=pathlib.Path(args[args.index(flag)+1]);output.mkdir(exist_ok=True)\n"
         "  (output/'command.json').write_text(json.dumps(args))\n"
+        "if os.environ.get('STUB_WAIT_FOR_TERM')=='1':\n"
+        " def stop(number: int,frame: object) -> None:\n"
+        "  signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+        "  time.sleep(0.1)\n"
+        "  (output/'partial-report.json').write_text(json.dumps({'status':'CANCELLED'}))\n"
+        "  print('native cancellation diagnostics',flush=True)\n"
+        "  (root/'native-stopped').touch()\n"
+        "  sys.exit(143)\n"
+        " signal.signal(signal.SIGTERM,stop)\n"
+        " ready=root/'native-ready.tmp'\n"
+        " ready.write_text(json.dumps({'pid':os.getpid(),'output':str(output)}))\n"
+        " ready.replace(root/'native-ready.json')\n"
+        " while True: signal.pause()\n"
         "proof='tests/test_impedance_source_evidence_native.py' in args\n"
         "probe='scripts/native_impedance_source_probe.py' in args\n"
         "print('proof output' if proof else 'probe output' if probe else 'native stdout')\n"
@@ -102,15 +123,29 @@ def run_lane(
         PROBE_EXIT="0",
     )
     values.update(environment or {})
+    command = [
+        "bash",
+        "-c",
+        '/usr/bin/python3() { :; }; source "$1" --inside "$2" amd64',
+        "lane-fixture",
+        str(ROOT / "scripts/run_test_lane.sh"),
+        lane,
+    ]
+    if asynchronous:
+        return SimpleNamespace(
+            process=subprocess.Popen(
+                command,
+                cwd=directory,
+                env=values,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            ),
+            artifacts=artifacts,
+        )
     process = subprocess.run(
-        [
-            "bash",
-            "-c",
-            '/usr/bin/python3() { :; }; source "$1" --inside "$2" amd64',
-            "lane-fixture",
-            str(ROOT / "scripts/run_test_lane.sh"),
-            lane,
-        ],
+        command,
         cwd=directory,
         env=values,
         capture_output=True,
@@ -130,20 +165,23 @@ def run_lane(
     )
 
 
-@pytest.mark.parametrize("major", ["7"])
-@pytest.mark.parametrize("status", [0, 1, 2, 124, 137])
-def test_native_log_capture_preserves_test_runner_and_timeout_failures(
-    tmp_path: Path, major: str, status: int
+def test_native_functional_smoke_budget_allows_all_individual_image_reviews(
+    tmp_path: Path,
 ) -> None:
-    """Retain complete logs and a failed lane through pipelines and external-output cleanup."""
-    run = run_lane(tmp_path, f"native-kicad-{major}", status=status)
-    assert run.process.returncode == status, run.process.stderr
-    assert run.timeouts == ["900s"]
-    log = "pytest.log"
-    lines = (run.artifacts / log).read_text().splitlines()
-    assert sorted(lines) == ["native stderr", "native stdout"]
-    assert not run.process.stderr
-    assert bool(run.calls) == (status < 124)
+    """Keep functional review allowance separate from native interaction limits."""
+    source = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    native_row = source.split("          - lane: native-kicad-10\n", 1)[1].split(
+        "    env:\n", 1
+    )[0]
+    job_budget = re.search(r"^            timeout_minutes: (\d+)$", native_row, re.M)
+    assert job_budget is not None and int(job_budget[1]) * 60 >= 3000 + 300
+    normal = run_lane(tmp_path / "normal")
+    smoke = run_lane(tmp_path / "smoke", environment={"NATIVE_SMOKE_BENCHMARK": "1"})
+    assert normal.process.returncode == smoke.process.returncode == 0
+    assert normal.timeouts == smoke.timeouts == ["3000s"]
+    assert normal.calls[0][0] == "scripts/native_kicad_runner.py"
+    assert smoke.calls[0][0] == "scripts/linux_native_impedance_smoke.py"
+    assert smoke.calls[0][smoke.calls[0].index("--timeout") + 1] == "1800"
 
 
 def test_native_controls_keep_parallelism_with_feature_review_allowance(
@@ -154,13 +192,128 @@ def test_native_controls_keep_parallelism_with_feature_review_allowance(
     assert run.process.returncode == 0, run.process.stderr
     assert run.timeouts == ["900s"]
     arguments = run.calls[0]
-    assert "--require-native=wx" in arguments
-    assert arguments[arguments.index("-n") + 1] == "auto"
-    assert "--maxprocesses=4" in arguments
-    assert "--dist=loadfile" in arguments
-    assert (
-        arguments[arguments.index("-m", 2) + 1] == "not native_kicad and not os_input"
+    assert arguments[:2] == ["-m", "scripts.run_wx_tests"]
+    assert Path(arguments[arguments.index("--artifacts") + 1]) == run.artifacts
+
+
+@pytest.mark.parametrize("major", ["7", "10"])
+@pytest.mark.parametrize("status", [0, 1, 2, 124, 137])
+def test_native_log_capture_preserves_test_runner_and_timeout_failures(
+    tmp_path: Path, major: str, status: int
+) -> None:
+    """Retain complete logs and a failed lane through pipelines and external-output cleanup."""
+    run = run_lane(tmp_path, f"native-kicad-{major}", status=status)
+    assert run.process.returncode == status, run.process.stderr
+    assert run.timeouts == ["3000s" if major == "10" else "900s"]
+    log = "native-runner.log" if major == "10" else "pytest.log"
+    lines = (run.artifacts / log).read_text().splitlines()
+    assert sorted(lines) == ["native stderr", "native stdout"]
+    assert not run.process.stderr
+    assert bool(run.calls) == (status < 124)
+    if major == "10" and run.calls:
+        arguments = run.calls[0]
+        output = Path(arguments[arguments.index("--artifacts") + 1])
+        assert ROOT not in output.parents
+        assert not output.exists(), "External state must be removed after retention"
+        assert json.loads((run.artifacts / "command.json").read_text()) == arguments
+
+
+@pytest.mark.parametrize(
+    ("generate", "smoke", "expected"),
+    [
+        ("0", "0", []),
+        ("0", "1", []),
+        (
+            "1",
+            "0",
+            [
+                "--generate-only",
+                "--generate-runs",
+                "3",
+                "--generate-budget-seconds",
+                "60",
+            ],
+        ),
+    ],
+)
+def test_manual_smoke_retains_sequential_stage_arguments(
+    tmp_path: Path, generate: str, smoke: str, expected: list[str]
+) -> None:
+    """Manual measurement profiles launch once and retain sequential smoke defaults."""
+    run = run_lane(
+        tmp_path,
+        environment={
+            "NATIVE_GENERATE_BENCHMARK": generate,
+            "NATIVE_SMOKE_BENCHMARK": smoke,
+            "NATIVE_GENERATE_RUNS": "3",
+        },
     )
+    assert run.process.returncode == 0, run.process.stderr
+    assert len(run.calls) == 1
+    arguments = run.calls[0]
+    assert "--workers" not in arguments
+    if generate == "1" or smoke == "1":
+        assert arguments[0] == "scripts/linux_native_impedance_smoke.py"
+        assert arguments[arguments.index("--timeout") + 2 :] == expected
+    else:
+        assert arguments[0] == "scripts/native_kicad_runner.py"
+        assert len(arguments) == 3
+
+
+def test_normal_native10_overlaps_functional_checks_without_duplicate_smoke(
+    tmp_path: Path,
+) -> None:
+    """Normal KiCad 10 runs the audited orchestrator once, including its smoke phase."""
+    run = run_lane(tmp_path)
+    assert run.process.returncode == 0, run.process.stderr
+    assert len(run.calls) == 1
+    assert run.calls[0][0] == "scripts/native_kicad_runner.py"
+    assert (run.artifacts / "command.json").is_file()
+    assert not (run.artifacts / "impedance.log").exists()
+
+
+@pytest.mark.parametrize(
+    ("interrupt", "expected"),
+    [(signal.SIGTERM, 143), (signal.SIGINT, 130)],
+    ids=["term", "interrupt"],
+)
+def test_native_cancellation_waits_for_partial_evidence_before_retaining_it(
+    tmp_path: Path, interrupt: int, expected: int
+) -> None:
+    """Terminating the actual dispatcher must reap native work before copying its diagnostics."""
+    run = run_lane(tmp_path, environment={"STUB_WAIT_FOR_TERM": "1"}, asynchronous=True)
+    parent = run.process
+    try:
+        ready = tmp_path / "native-ready.json"
+        deadline = time.monotonic() + 5
+        while not ready.exists():
+            assert parent.poll() is None, "The native worker exited before readiness"
+            assert time.monotonic() < deadline, "The native worker did not become ready"
+            time.sleep(0.01)
+        native = json.loads(ready.read_text())
+        parent.send_signal(interrupt)
+        stdout, stderr = parent.communicate(timeout=3)
+        assert parent.returncode == expected, stdout + stderr
+        assert (tmp_path / "native-stopped").exists()
+        with pytest.raises(ProcessLookupError):
+            os.kill(native["pid"], 0)
+        assert not Path(native["output"]).exists()
+        assert json.loads((run.artifacts / "partial-report.json").read_text()) == {
+            "status": "CANCELLED"
+        }
+        assert (
+            "native cancellation diagnostics"
+            in (run.artifacts / "native-runner.log").read_text()
+        )
+    finally:
+        with suppress(ProcessLookupError):
+            os.killpg(parent.pid, signal.SIGTERM)
+        try:
+            parent.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            with suppress(ProcessLookupError):
+                os.killpg(parent.pid, signal.SIGKILL)
+            parent.communicate(timeout=3)
 
 
 def _fixture_case(nodeid: str) -> str:
@@ -174,18 +327,24 @@ def _fixture_case(nodeid: str) -> str:
 
 @pytest.fixture(scope="module")
 def matrix_selections(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
-    """Resolve every compatibility selector from the actual lane dispatcher."""
+    """Resolve the marker argument actually passed by each native workflow lane."""
     directory = tmp_path_factory.mktemp("native-lane-selection")
-    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
-    majors = re.findall(r"^          - lane: native-kicad-(\d+)$", workflow, re.M)
+    source = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    majors = re.findall(r"^          - lane: native-kicad-(\d+)$", source, re.M)
     assert set(majors) == {"7", "8", "9", "10"}
     result = {}
     for major in majors:
         lane = run_lane(directory / major, f"native-kicad-{major}")
         assert lane.process.returncode == 0, lane.process.stderr
-        arguments = next(call for call in lane.calls if call[:2] == ["-m", "pytest"])
-        assert f"--kicad-major={major}" in arguments
-        result[major] = arguments[arguments.index("-m", 2) + 1]
+        arguments = lane.calls[0]
+        if major == "10":
+            assert arguments[0] == "scripts/native_kicad_runner.py"
+            # The orchestration's three actual pytest phases enforce this same
+            # selector in test_each_pytest_phase_keeps_strict_kicad_flags_and_exact_partition.
+            result[major] = "native_kicad"
+        else:
+            assert f"--kicad-major={major}" in arguments
+            result[major] = arguments[arguments.index("-m", 2) + 1]
     return result
 
 

@@ -5,12 +5,10 @@ import os
 from pathlib import Path
 import re
 import shutil
-import struct
 import subprocess
 import sys
 from typing import Any, Optional
 from xml.etree import ElementTree as ET
-import zlib
 
 import pytest
 
@@ -26,11 +24,7 @@ from impedance.model import (
 )
 from impedance.palette import ThemeContext
 from impedance.render import annotated_svg, section_viewport
-from scripts.generate_impedance_captures import (
-    capture_theme,
-    export_board_layers,
-    export_example_svg,
-)
+from scripts.generate_impedance_captures import capture_theme, export_board_layers
 from scripts.generate_rf_impedance_captures import (
     DEFAULT_EXAMPLES,
     native_snapshot,
@@ -41,6 +35,11 @@ from tests.impedance_capture_fixtures import (
     EXAMPLES,
     CaptureExample,
     board_text,
+)
+from tests.impedance_capture_pixels import (
+    PackedPixels,
+    assert_protected_pixels_match,
+    png_pixels as _png_pixels,
 )
 from tests.rf_impedance_combined import COMBINED_BOARDS, CombinedBoard
 from tests.rf_impedance_fixtures import RF_CASES, RFCase
@@ -250,13 +249,10 @@ def test_gallery_exercises_required_lengths_and_stable_native_boards() -> None:
 @pytest.mark.kicad10_impedance
 @pytest.mark.parametrize("example", EXAMPLES, ids=lambda item: item.name)
 def test_real_kicad_cli_plots_feed_production_capture(
-    tmp_path: Path, example: CaptureExample
+    native_plot_gallery: Path, example: CaptureExample
 ) -> None:
     """Use actual KiCad SVG geometry when an explicit or PATH CLI is available."""
-    executable = os.environ.get("KICAD_CLI") or shutil.which("kicad-cli")
-    if executable is None:
-        pytest.skip("Set KICAD_CLI to enable native KiCad SVG capture integration")
-    plot = export_example_svg(Path(executable), example, tmp_path)
+    plot = native_plot_gallery / f"{example.name}-native.svg"
     source = plot.read_text(encoding="utf-8")
     # Real KiCad plots contain many paths, unlike the unit rasterizer's stub.
     assert len(re.findall(r"<path\b", source)) > 20
@@ -522,6 +518,67 @@ def test_rf_gallery_matches_actual_on_disk_board_and_pairs_each_layer(
         assert len({trace.layer for trace in section.traces}) == 1
 
 
+def test_rf_gallery_html_preview_requires_no_invented_spacing_approval(
+    tmp_path: Path, rf_examples: Path
+) -> None:
+    """An unapproved contributor preview cannot become manufacturing consent."""
+    from impedance import service
+    from impedance.model import ValidationError
+    from impedance.spacing_review import spacing_review_entries
+    from scripts import generate_rf_impedance_captures as gallery
+    from tests.test_impedance_report_pipeline import _html_images, _png
+
+    case = next(case for case in RF_CASES if case.paired)
+    snapshot = gallery.fixture_snapshot(
+        case, native_snapshot(rf_examples / f"{case.name}.kicad_pcb")
+    )
+    config, sections = reviewed_sections(case, snapshot)
+    assert spacing_review_entries(config, snapshot, sections)
+    assert not config.review_tracking.spacing_images
+    before = config.to_dict()
+    for index, section in enumerate(sections, 1):
+        (tmp_path / f"row-{index}-{section.layer.replace('.', '_')}.png").write_bytes(
+            _png()
+        )
+    with pytest.raises(ValidationError, match="Spacing.*individual approval"):
+        service.prepare(config, snapshot)
+    output = gallery.write_case_report(tmp_path, case, config, snapshot, sections)
+    markup = output.read_text(encoding="utf-8")
+    assert "Sample preview" in markup and "unapproved" in markup
+    assert _html_images(output) == [_png()] * len(sections)
+    assert config.to_dict() == before
+    assert not config.review_tracking.spacing_images
+    assert not tuple(tmp_path.glob("*.xlsx"))
+    with pytest.raises(ValidationError, match="Spacing.*individual approval"):
+        service.prepare(config, snapshot)
+
+
+@pytest.mark.parametrize("change", ["duplicate", "wrong_identity", "stale_review"])
+def test_rf_gallery_preview_rejects_changed_capture_scope_before_reading_images(
+    tmp_path: Path, rf_examples: Path, change: str
+) -> None:
+    """The HTML-only preview still verifies exact current captured identities."""
+    from dataclasses import replace
+
+    from impedance.model import ValidationError
+    from scripts import generate_rf_impedance_captures as gallery
+
+    case = RF_CASES[0]
+    snapshot = gallery.fixture_snapshot(
+        case, native_snapshot(rf_examples / f"{case.name}.kicad_pcb")
+    )
+    config, sections = reviewed_sections(case, snapshot)
+    if change == "duplicate":
+        sections += sections[:1]
+    elif change == "wrong_identity":
+        sections = (replace(sections[0], section_id="unrelated"),) + sections[1:]
+    else:
+        config = replace(config, reviewed_digest="0" * 64)
+    with pytest.raises((ValidationError, ValueError), match="review|captured sections"):
+        gallery.write_case_report(tmp_path, case, config, snapshot, sections)
+    assert not tuple(tmp_path.iterdir())
+
+
 @pytest.mark.parametrize("board", COMBINED_BOARDS, ids=lambda board: board.name)
 def test_shipped_combined_boards_capture_all_actual_signal_copper(
     board: CombinedBoard,
@@ -605,68 +662,6 @@ def test_rf_native_reader_accepts_numeric_and_named_net_serialization(
     assert snapshot.traces[0].width_nm == 350_000
 
 
-def _png_pixels(path: Path) -> tuple[int, int, list[tuple[int, int, int, int]]]:
-    """Decode real wx RGB/RGBA PNG samples, including every adaptive row filter."""
-    data = path.read_bytes()
-    assert data[:8] == b"\x89PNG\r\n\x1a\n"
-    width, height, depth, color, _, _, interlace = struct.unpack(
-        ">IIBBBBB", data[16:29]
-    )
-    assert depth == 8 and color in (2, 6) and interlace == 0
-    channels = 3 if color == 2 else 4
-    offset, compressed = 8, bytearray()
-    while offset < len(data):
-        length = struct.unpack(">I", data[offset : offset + 4])[0]
-        kind = data[offset + 4 : offset + 8]
-        payload = data[offset + 8 : offset + 8 + length]
-        assert (
-            zlib.crc32(kind + payload) & 0xFFFFFFFF
-            == struct.unpack(">I", data[offset + 8 + length : offset + 12 + length])[0]
-        )
-        if kind == b"IDAT":
-            compressed.extend(payload)
-        offset += length + 12
-    raw = zlib.decompress(compressed)
-    stride = width * channels
-    assert len(raw) == (stride + 1) * height
-    previous = bytearray(stride)
-    pixels = []
-    for row_number in range(height):
-        start = row_number * (stride + 1)
-        filter_type = raw[start]
-        row = bytearray(raw[start + 1 : start + 1 + stride])
-        for index in range(stride):
-            left = row[index - channels] if index >= channels else 0
-            above = previous[index]
-            upper_left = previous[index - channels] if index >= channels else 0
-            if filter_type == 0:
-                predictor = 0
-            elif filter_type == 1:
-                predictor = left
-            elif filter_type == 2:
-                predictor = above
-            elif filter_type == 3:
-                predictor = (left + above) // 2
-            else:
-                assert filter_type == 4
-                estimate = left + above - upper_left
-                predictor = min(
-                    (left, above, upper_left), key=lambda value: abs(estimate - value)
-                )
-            row[index] = (row[index] + predictor) & 255
-        for index in range(0, stride, channels):
-            pixels.append(
-                (
-                    row[index],
-                    row[index + 1],
-                    row[index + 2],
-                    row[index + 3] if channels == 4 else 255,
-                )
-            )
-        previous = row
-    return width, height, pixels
-
-
 def _verify_native_box(
     svg: Path,
     png: Path,
@@ -674,7 +669,7 @@ def _verify_native_box(
     native_context: Path,
     section: Section,
     board_bounds: Bounds,
-) -> list[tuple[int, int, int, int]]:
+) -> PackedPixels:
     """Keep native geometry/alpha and verify the box adds no ink over emphasized copper."""
     root = ET.fromstring(svg.read_text(encoding="utf-8"))  # noqa: S314 - generated local SVG.
     native = ET.fromstring(native_context.read_text(encoding="utf-8"))  # noqa: S314 - native local KiCad SVG.
@@ -856,7 +851,7 @@ def _verify_native_box(
     width, height, pixels = _png_pixels(png)
     baseline_width, baseline_height, baseline = _png_pixels(baseline_png)
     assert (width, height) == (baseline_width, baseline_height) == (800, 420)
-    assert all(pixel[3] == 255 for pixel in pixels)
+    assert pixels.opaque
     for index in range(17):
         fraction = index / 16
         for x, y in (
@@ -876,21 +871,7 @@ def _verify_native_box(
     # The 3 px stroke's square miter and raster pixel coverage extend past
     # a 2 px centerline allowance. Real wx/GTK 3.2.4 rendered the short-route
     # corner 2.987 px from its geometric border; reserve only this 3 px band.
-    border_margin = 3
-    for index, (actual, original) in enumerate(zip(pixels, baseline)):
-        x, y = index % width, index // width
-        horizontal = (
-            left - border_margin <= x <= right + border_margin
-            and min(abs(y - top), abs(y - bottom)) <= border_margin
-        )
-        vertical = (
-            top - border_margin <= y <= bottom + border_margin
-            and min(abs(x - left), abs(x - right)) <= border_margin
-        )
-        if not (horizontal or vertical):
-            assert actual == original, (
-                f"Yellow box repainted the emphasized capture at {x}, {y}"
-            )
+    assert_protected_pixels_match(pixels, baseline, (left, top, right, bottom))
     for trace in section.traces:
         for x, y in trace.points:
             assert left < (x - viewport.left) * scale < right
@@ -933,34 +914,37 @@ def _verify_muted_native_paints(path: Path) -> None:
 
 
 @pytest.fixture(scope="module")
-def native_capture_gallery(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Isolate wx's native app from fake-wx unit tests when explicitly requested."""
-    if os.environ.get("KICAD_CAPTURE_PNG") != "1":
-        pytest.skip("Set KICAD_CAPTURE_PNG=1 and KICAD_CLI for real PNG gallery tests")
+def native_plot_gallery(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Generate one fresh exact-input gallery for both native SVG and PNG proofs."""
     executable = os.environ.get("KICAD_CLI") or shutil.which("kicad-cli")
     if executable is None:
-        pytest.skip("Native PNG examples require a KiCad CLI")
+        pytest.skip("Native SVG/PNG examples require a KiCad CLI")
     directory = tmp_path_factory.mktemp("native-impedance-captures")
     script = (
         Path(__file__).resolve().parents[1]
         / "scripts"
         / "generate_impedance_captures.py"
     )
-    subprocess.run(
-        [
-            sys.executable,
-            str(script),
-            "--output",
-            str(directory),
-            "--kicad-cli",
-            executable,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    command = [
+        sys.executable,
+        str(script),
+        "--output",
+        str(directory),
+        "--kicad-cli",
+        executable,
+    ]
+    if os.environ.get("KICAD_CAPTURE_PNG") != "1":
+        command.append("--svg-only")
+    subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
     return directory
+
+
+@pytest.fixture(scope="module")
+def native_capture_gallery(native_plot_gallery: Path) -> Path:
+    """Share the current native invocation's plots; never reuse another run's output."""
+    if os.environ.get("KICAD_CAPTURE_PNG") != "1":
+        pytest.skip("Set KICAD_CAPTURE_PNG=1 and KICAD_CLI for real PNG gallery tests")
+    return native_plot_gallery
 
 
 @pytest.mark.native_kicad
@@ -1096,7 +1080,12 @@ def native_rf_capture_gallery(
     ]
     for case_name in RF_NATIVE_CASES:
         command.extend(("--case", case_name))
-    subprocess.run(command, check=True, capture_output=True, text=True, timeout=300)
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=300)
+    except subprocess.CalledProcessError as error:
+        pytest.fail(
+            f"Native RF gallery failed:\n{error.stdout}\n{error.stderr}", pytrace=False
+        )
     return directory
 
 

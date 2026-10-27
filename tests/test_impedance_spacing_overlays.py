@@ -348,3 +348,27 @@ def test_long_uniform_concern_has_one_readable_measured_ruler() -> None:
         assert 1 <= len(ticks) <= 3
         for tick in ticks:
             assert math.dist(tick.start, tick.end) == pytest.approx(50_000)
+
+
+def test_certified_clearance_envelope_uses_one_true_facing_edge() -> None:
+    """A source edge and its target offset define a real finite clearance band."""
+    from impedance.matching import analyze
+    from impedance.spacing_review import spacing_review_entries
+
+    from .test_impedance_spacing_checks import _parallel
+    from .test_impedance_spacing_review_entries import _config
+
+    config, snapshot = _config(), _parallel(250_000, length=1_000_000)
+    entry = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )[0]
+    envelopes = [
+        guide for guide in spacing_guide_paths(entry) if guide.facing_edge is not None
+    ]
+    assert len(envelopes) == 1
+    guide = envelopes[0]
+    edge = guide.facing_edge
+    assert abs(guide.start[1] - edge.start[1]) == 150_000
+    assert abs(guide.end[1] - edge.end[1]) == 150_000
+    assert {edge.start[1], edge.end[1]} == {325_000}
+    assert sorted((edge.start[0], edge.end[0])) == [0, 1_000_000]

@@ -4,6 +4,25 @@ on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      generate_benchmark:
+        description: Measure the complete Generate group
+        type: boolean
+        default: false
+      smoke_benchmark:
+        description: Measure all seven impedance smoke stages
+        type: boolean
+        default: false
+      source_snapshot_probe:
+        description: Verify and measure complete source evidence
+        type: boolean
+        default: false
+      generate_runs:
+        description: Independent Generate measurements
+        type: choice
+        default: '3'
+        options: ['1', '3']
 jobs:
   tests:
     name: ${{ matrix.name }}
@@ -44,12 +63,22 @@ jobs:
             name: Native KiCad 10
             target: kicad
             kicad: '10'
-            timeout_minutes: 35
+            timeout_minutes: 70
     env:
       ARCHITECTURE: ${{ matrix.kicad && matrix.kicad != '10' && 'amd64' || vars.KICAD_VALIDATION_ARCHITECTURE || 'amd64' }}
       KICAD_CLI: /usr/bin/kicad-cli
       KICAD_CAPTURE_PNG: '1'
       KICAD_IMPEDANCE_NATIVE_BUDGET_PROFILE: ci
+      NATIVE_GENERATE_BENCHMARK: >-
+        ${{ github.event_name == 'workflow_dispatch' && matrix.kicad == '10' &&
+        (inputs.generate_benchmark == true || inputs.generate_benchmark == 'true') && '1' || '0' }}
+      NATIVE_SMOKE_BENCHMARK: >-
+        ${{ github.event_name == 'workflow_dispatch' && matrix.kicad == '10' &&
+        (inputs.smoke_benchmark == true || inputs.smoke_benchmark == 'true') && '1' || '0' }}
+      NATIVE_SOURCE_SNAPSHOT_PROBE: >-
+        ${{ github.event_name == 'workflow_dispatch' && matrix.kicad == '10' &&
+        (inputs.source_snapshot_probe == true || inputs.source_snapshot_probe == 'true') && '1' || '0' }}
+      NATIVE_GENERATE_RUNS: ${{ inputs.generate_runs || '1' }}
     steps:
       - uses: actions/checkout@v7
       - name: Cache Python downloads

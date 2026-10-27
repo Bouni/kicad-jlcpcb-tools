@@ -123,6 +123,104 @@ def test_grouped_caption_summarizes_many_witnesses_without_losing_geometry() -> 
     assert entries[0].caption.count("Too wide") == 1
 
 
+def test_late_bridge_connects_existing_concern_groups_independently_of_native_ids() -> (
+    None
+):
+    """A segment discovered last joins both neighbors into one physical concern."""
+    snapshot = _snapshot(
+        *(
+            _line(prefix + net, net, ((start, y), (end, y)))
+            for prefix, start, end in (
+                ("a", 0, 10_000_000),
+                ("b", 20_000_000, 30_000_000),
+                ("z", 10_000_000, 20_000_000),
+            )
+            for net, y in (("P", 0), ("N", 400_000))
+        )
+    )
+    config = _config()
+    entries = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )
+    assert len(entries) == 1
+    assert {trace.trace_id for trace in entries[0].traces} == {
+        trace.trace_id for trace in snapshot.traces
+    }
+    renamed = replace(
+        snapshot,
+        traces=tuple(
+            replace(
+                trace,
+                trace_id="a" + trace.trace_id
+                if trace.trace_id.startswith("z")
+                else "z" + trace.trace_id,
+            )
+            for trace in reversed(snapshot.traces)
+        ),
+    )
+    changed = spacing_review_entries(config, renamed, analyze(config, renamed).sections)
+    assert len(changed) == 1
+    assert changed[0].issue_id == entries[0].issue_id
+    assert changed[0].view_id == entries[0].view_id
+
+
+def test_varying_concern_reports_full_certified_range_and_its_worst_native_detail() -> (
+    None
+):
+    """The merged worst witness is not the range of the entire physical concern."""
+    snapshot = _snapshot(
+        _line("p", "P", ((0, 0), (10_000_000, 0))),
+        _line("n", "N", ((0, 400_000), (10_000_000, 600_000))),
+        _line("far-p", "P", ((20_000_000, 0), (21_000_000, 0))),
+        _line("far-n", "N", ((20_000_000, 1_150_000), (21_000_000, 1_150_000))),
+    )
+    config = _config()
+    entries = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )
+    assert len(entries) == 2
+    entry = next(entry for entry in entries if entry.bounds[0] < 10_000_000)
+    separate = next(other for other in entries if other is not entry)
+    assert (
+        separate.region_gap_nm.lower_nm == separate.region_gap_nm.upper_nm == 1_000_000
+    )
+    # These exact endpoint gaps are independently known from the native lines.
+    # Outward solver bounds may conservatively include one nanometre.
+    assert 249_999 <= entry.region_gap_nm.lower_nm <= 250_000
+    assert 450_000 <= entry.region_gap_nm.upper_nm <= 450_001
+    assert entry.composition.actual_gap_nm == pytest.approx(450_000)
+    assert entry.representative.source_point == (10_000_000, 600_000)
+    assert entry.representative.mate_point == (10_000_000, 0)
+    assert "0.249999–0.450001 mm" in entry.caption
+
+
+def test_concern_without_authoritative_raw_witnesses_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A located merged concern alone cannot invent a regional range or detail."""
+    from impedance.spacing_checks import SpacingContext
+
+    config, snapshot = _config(), _parallel(250_000)
+    sections = analyze(config, snapshot).sections
+    context = SpacingContext(snapshot)
+    context.check(("N", "P"), "F.Cu", 150_000)
+    measurement = context.measurement(("N", "P"), "F.Cu")
+    monkeypatch.setattr(
+        context,
+        "measurement",
+        lambda *args: replace(
+            measurement,
+            traces=tuple(replace(trace, witnesses=()) for trace in measurement.traces),
+        ),
+    )
+    for derive in (spacing_review_entries, pending_spacing_reviews):
+        with pytest.raises(
+            ValidationError, match="authoritative native correspondence"
+        ):
+            derive(config, snapshot, sections, context=context)
+    assert config.review_tracking.spacing_images == ()
+
+
 def test_curved_review_is_one_concern_with_the_full_native_arc_in_overview() -> None:
     """One continuous curved issue gets one worst-gap detail and a full locator."""
     config = _config()
@@ -195,6 +293,141 @@ def test_each_affected_arc_crosssection_shows_both_actual_mates_together(
             x, y = radius * math.cos(angle), radius * math.sin(angle)
             assert left + 75_000 <= x <= left + width - 75_000
             assert top + 75_000 <= y <= top + height - 75_000
+
+
+@pytest.mark.parametrize(
+    "source_radius,mate_radius",
+    ((10_000_000, 22_000_000), (5_000_000, 18_000_000), (10_000_000, 24_000_000)),
+)
+@pytest.mark.parametrize("reversed_ids", ((), ("p",), ("n",), ("p", "n")))
+def test_oversized_arc_gap_fails_without_creating_approval_images(
+    source_radius: int,
+    mate_radius: int,
+    reversed_ids: tuple[str, ...],
+) -> None:
+    """The original extreme gaps cannot become one-sided or unreadable evidence."""
+    from impedance.spacing_checks import SpacingContext
+
+    snapshot = _snapshot(_arc("p", "P", source_radius), _arc("n", "N", mate_radius))
+    snapshot = replace(
+        snapshot,
+        traces=tuple(
+            replace(trace, points=tuple(reversed(trace.points)))
+            if trace.trace_id in reversed_ids
+            else trace
+            for trace in snapshot.traces
+        ),
+    )
+    config = _config()
+    sections = analyze(config, snapshot).sections
+    context = SpacingContext(snapshot)
+    # Fail both derivation and a subsequent pending-review lookup. A partial
+    # first attempt must not cache images that can later be approved.
+    for derive in (spacing_review_entries, pending_spacing_reviews):
+        with pytest.raises(ValidationError, match="both traces.*readable scale"):
+            derive(config, snapshot, sections, context=context)
+    assert not config.review_tracking.spacing_images
+
+
+@pytest.mark.parametrize(
+    "case_name",
+    (
+        "differential-stripline-inner-120mm",
+        "differential-buried-cpwg-inner-2mm",
+    ),
+)
+def test_wide_native_endpoint_concerns_fit_without_losing_physical_detail(
+    case_name: str,
+) -> None:
+    """A 6.2mm endpoint separation needs a wider physical panel, not smaller copper."""
+    from impedance.spacing_checks import SpacingContext
+    from tests.rf_impedance_fixtures import RF_CASES
+
+    case = next(case for case in RF_CASES if case.name == case_name)
+    config, snapshot = Config(True, case.specifications()), case.snapshot()
+    sections = analyze(config, snapshot).sections
+    context = SpacingContext(snapshot)
+    entries = spacing_review_entries(config, snapshot, sections, context=context)
+    wide = tuple(entry for entry in entries if entry.composition_layout == "wide")
+    assert wide
+    assert any(entry.composition_layout == "standard" for entry in entries)
+    for entry in wide:
+        composition = entry.composition
+        assert composition.detail_rect == (16, 70, 1568, 460)
+        assert composition.minimum_scale == 0.35
+        minimum_width = min(trace.width_nm for trace in entry.traces)
+        feature_pixels = (
+            minimum_width / entry.viewport_nm[2] * composition.detail_rect[2]
+        )
+        assert feature_pixels >= 24 - 1e-9
+        assert feature_pixels * composition.minimum_scale >= 8
+        assert entry.viewport_nm[2] > 6_200_000
+        traces = {trace.trace_id: trace for trace in entry.traces}
+        for member in entry.members:
+            intervals = (
+                (member.source_trace_id, *member.source_interval),
+                *member.mate_intervals,
+            )
+            for identity, lower, upper in intervals:
+                trace = traces[identity]
+                # These fixtures use straight tracks: the endpoint discs enclose
+                # every copper capsule, without a production coverage helper.
+                assert not trace.is_native_arc and len(trace.points) == 2
+                radius = trace.width_nm / 2
+                for parameter in (lower, upper):
+                    x, y = tuple(
+                        a + (b - a) * parameter
+                        for a, b in zip(trace.points[0], trace.points[1])
+                    )
+                    for left, top, width, height in (
+                        entry.viewport_nm,
+                        composition.overview_viewport_nm,
+                    ):
+                        assert left + radius <= x <= left + width - radius
+                        assert top + radius <= y <= top + height - radius
+    assert (
+        pending_spacing_reviews(config, snapshot, sections, context=context) == entries
+    )
+    assert snapshot == case.snapshot()
+
+
+def test_layout_metadata_rejects_mismatches_and_binds_metric_geometry() -> None:
+    """A saved physical transform must name its exact deterministic composition."""
+    config, snapshot = _config(), _parallel(250_000, length=1_000_000)
+    entry = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )[0]
+    with pytest.raises(ValidationError, match="unknown composition"):
+        _ = replace(entry, composition_layout="unknown").composition
+    with pytest.raises(ValidationError, match="viewport does not match"):
+        _ = replace(entry, composition_layout="wide").composition
+    composition = entry.composition
+    assert replace(composition, metric_columns=True).fingerprint_payload != (
+        composition.fingerprint_payload
+    )
+    assert replace(composition, overview_label_top=534).fingerprint_payload != (
+        composition.fingerprint_payload
+    )
+
+
+def test_wide_fallback_does_not_retry_unrelated_validation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only an explicitly undersized physical frame may select the wide layout."""
+    from impedance import spacing_review
+
+    calls = []
+
+    def fail(*args: object, **kwargs: object) -> tuple[object, ...]:
+        """Represent missing geometry or another non-readability validation error."""
+        calls.append((args, kwargs))
+        raise ValidationError("No authoritative native correspondence")
+
+    monkeypatch.setattr(spacing_review, "_viewports", fail)
+    config, snapshot = _config(), _parallel(250_000, length=1_000_000)
+    with pytest.raises(ValidationError, match="authoritative native correspondence"):
+        spacing_review_entries(config, snapshot, analyze(config, snapshot).sections)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("reversed_ids", (("p",), ("n",), ("p", "n")))
@@ -287,6 +520,96 @@ def test_long_uniform_issue_is_one_concern_with_full_overview_and_readable_detai
     assert source_pixels >= 24 - 1e-9
     assert source_pixels * entry.composition.minimum_scale >= 8
     assert entry.composition.actual_gap_nm == pytest.approx(50_000)
+
+
+@pytest.mark.parametrize("vertical", (False, True))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_endpoint_worst_detail_uses_the_route_side_of_its_readable_frame(
+    vertical: bool,
+    reverse: bool,
+) -> None:
+    """Keep the true endpoint witness visible without wasting half the detail."""
+    snapshot = _parallel(331_300, length=24_000_000)
+    snapshot = replace(
+        snapshot,
+        traces=tuple(
+            replace(
+                trace,
+                points=tuple(reversed(trace.points)) if reverse else trace.points,
+            )
+            for trace in snapshot.traces
+        ),
+    )
+    if vertical:
+        snapshot = replace(
+            snapshot,
+            traces=tuple(
+                replace(trace, points=tuple((y, x) for x, y in trace.points))
+                for trace in snapshot.traces
+            ),
+        )
+    config = _config()
+    spec = config.specifications[0]
+    config = replace(
+        config,
+        specifications=(
+            replace(
+                spec,
+                layer_settings=(replace(spec.layer_settings[0], spacing_nm=202_300),),
+            ),
+        ),
+    )
+    entries = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )
+    assert len(entries) == 1
+    entry = entries[0]
+    left, top, width, height = entry.viewport_nm
+    origin, extent = (top, height) if vertical else (left, width)
+    assert origin >= -1_000_000
+    assert origin + extent >= (2_500_000 if vertical else 5_000_000)
+    assert entry.composition.actual_gap_nm == pytest.approx(331_300)
+    witness = entry.representative
+    assert witness is not None
+    for point in (witness.source_point, witness.mate_point):
+        assert left + 75_000 <= point[0] <= left + width - 75_000
+        assert top + 75_000 <= point[1] <= top + height - 75_000
+        assert point[1 if vertical else 0] == 0
+
+
+def test_five_plus_two_repeated_pair_crops_become_two_concern_entries() -> None:
+    """The reported USB pair gaps need one approval each, irrespective of length."""
+    snapshot = _snapshot(
+        _line("p", "/PONG_D+", ((0, 0), (26_000_000, 0))),
+        _line("n", "/PONG_D-", ((0, 481_300), (26_000_000, 481_300))),
+        _line("in-p", "/PONG_IN_D+", ((0, 10_000_000), (10_000_000, 10_000_000))),
+        _line("in-n", "/PONG_IN_D-", ((0, 10_356_300), (10_000_000, 10_356_300))),
+    )
+    pairs = (("/PONG_D+", "/PONG_D-"), ("/PONG_IN_D+", "/PONG_IN_D-"))
+    snapshot = replace(
+        snapshot,
+        net_class_memberships=tuple((net, ("USB",)) for pair in pairs for net in pair),
+        differential_pairs=pairs,
+    )
+    config = _config()
+    spec = config.specifications[0]
+    config = replace(
+        config,
+        specifications=(
+            replace(
+                spec,
+                layer_settings=(replace(spec.layer_settings[0], spacing_nm=202_300),),
+            ),
+        ),
+    )
+    entries = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )
+    assert len(entries) == 2
+    assert {entry.pair for entry in entries} == {tuple(sorted(pair)) for pair in pairs}
+    assert sorted(
+        entry.composition.actual_gap_nm for entry in entries
+    ) == pytest.approx([206_300, 331_300])
 
 
 def test_splitting_same_copper_keeps_physical_concern_identity() -> None:
@@ -760,3 +1083,90 @@ def test_earlier_render_policy_approval_requires_new_diagnostic_review(
     assert CAPTURE_POLICY_REVISION == 8
     assert spacing_review.MIN_SPACING_FEATURE_PIXELS == 24
     assert spacing_review.MIN_SPACING_DISPLAY_FEATURE_PIXELS == 8
+
+
+def test_combined_panel_contract_uses_detail_pixels_and_preserves_region_bounds() -> (
+    None
+):
+    """The physical detail, not the full composition, sets coverage/readability."""
+    from impedance.spacing_review import MIN_SPACING_FEATURE_PIXELS
+
+    config, snapshot = _config(), _parallel(50_000, length=20_000_000)
+    entries = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )
+    for entry in entries:
+        composition = entry.composition
+        x, y, width, height = composition.detail_rect
+        assert 0 < x < x + width < entry.width_px
+        assert 0 < y < y + height < entry.height_px
+        assert entry.viewport_nm[2] / entry.viewport_nm[3] == pytest.approx(
+            width / height
+        )
+        assert (
+            50_000 / entry.viewport_nm[2] * width >= MIN_SPACING_FEATURE_PIXELS - 1e-9
+        )
+        assert composition.required_regions == (
+            composition.detail_rect,
+            composition.overview_rect,
+            composition.metrics_rect,
+            composition.region_rect,
+            composition.schematic_rect,
+        )
+        assert composition.minimum_scale == 0.35
+        assert MIN_SPACING_FEATURE_PIXELS * composition.minimum_scale >= 8
+        assert composition.region_gap_nm.lower_nm == 50_000
+        assert composition.region_gap_nm.upper_nm == 50_000
+        assert composition.actual_gap_nm == pytest.approx(50_000)
+
+
+@pytest.mark.parametrize("layout", ("standard", "wide"))
+@pytest.mark.parametrize("state", ("local", "regional", "target_absent", "target_zero"))
+def test_required_panels_include_percentage_footer_for_every_measurement_state(
+    state: str, layout: str
+) -> None:
+    """A percentage or explicit Unavailable footer always requires readable display."""
+    config, snapshot = _config(), _parallel(250_000, length=1_000_000)
+    entry = replace(
+        spacing_review_entries(config, snapshot, analyze(config, snapshot).sections)[0],
+        composition_layout=layout,
+    )
+    if layout == "wide":
+        from impedance.spacing_composition import WIDE_DETAIL_RECT
+
+        left, top, width, height = entry.viewport_nm
+        wide_width = height * WIDE_DETAIL_RECT[2] / WIDE_DETAIL_RECT[3]
+        entry = replace(
+            entry,
+            viewport_nm=(left - (wide_width - width) / 2, top, wide_width, height),
+        )
+    if state == "regional":
+        entry = replace(
+            entry,
+            members=tuple(
+                replace(member, cross_sections=()) for member in entry.members
+            ),
+            representative=None,
+        )
+    elif state == "target_absent":
+        entry = replace(entry, target_spacing_nm=None, representative=None)
+    elif state == "target_zero":
+        entry = replace(entry, target_spacing_nm=0, representative=None)
+    composition = entry.composition
+    expected = (
+        composition.detail_rect,
+        composition.overview_rect,
+        composition.metrics_rect,
+        composition.region_rect,
+        composition.schematic_rect,
+    )
+    if state == "local":
+        assert composition.actual_gap_nm is not None
+    else:
+        assert composition.actual_gap_nm is None
+    assert composition.required_regions == expected
+    assert composition.target_spacing_nm == entry.target_spacing_nm
+    if state == "regional":
+        changed_target = replace(entry, target_spacing_nm=200_000).composition
+        assert changed_target.required_regions == expected
+        assert changed_target.fingerprint_payload != composition.fingerprint_payload

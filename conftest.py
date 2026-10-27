@@ -116,6 +116,17 @@ def pytest_report_header(config: pytest.Config) -> Optional[str]:
     return config.stash.get(_NATIVE_RUNTIME, None)
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Reduce per-process contention by running strict Python budgets after bulk work."""
+    items.sort(
+        key=lambda item: item.path.name
+        in {
+            "test_impedance_spacing_performance.py",
+            "test_impedance_performance_budget.py",
+        }
+    )
+
+
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Reject a green run in which none of the promised native tests would run."""
     _skip_variant_tests_without_the_api(session.items)
@@ -145,7 +156,11 @@ def pytest_make_collect_report(
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[Any]
 ) -> Generator[None, Any, None]:
-    """Fail late fixture skips as well as missing-runtime preflight failures."""
+    """Retain worker identity and fail unexpected native fixture skips."""
+    if call.when == "setup":
+        worker = getattr(item.config, "workerinput", {}).get("workerid")
+        if worker:
+            item.user_properties.append(("native_worker_id", worker))
     report = (yield).get_result()
     mode = item.config.getoption("require_native")
     if (

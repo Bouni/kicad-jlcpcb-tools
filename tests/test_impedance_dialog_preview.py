@@ -1426,6 +1426,48 @@ def test_large_review_context_hashing_is_bounded_per_changed_binding(
     assert pane.image_digest(sections[0]) is None
 
 
+def test_equal_preview_context_adopts_latest_reference_without_resetting_view(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A no-op context refresh compares once while retaining painted evidence."""
+    api = pane_api
+    compared: list[object] = []
+
+    class CountedEquality(_CountedContext):
+        """Count semantic comparison independently of context interning hashes."""
+
+        __hash__ = _CountedContext.__hash__
+
+        def __eq__(self, other: object) -> bool:
+            """Preserve the existing context's equality contract."""
+            compared.append(other)
+            return super().__eq__(other)
+
+    hashes: list[str] = []
+    original = CountedEquality("board-a", hashes)
+    latest = CountedEquality("board-a", hashes)
+    pane = open_pane(api)
+    sections = (api.section,)
+    pane.set_sections(sections, original)
+    show(api, pane)
+    token, context = pane._context_token, pane._bound_context
+    viewed = dict(pane._viewed)
+    request = pane._request
+    compared.clear()
+    pane.set_sections(sections, latest)
+    assert len(compared) == 1
+    compared.clear()
+    for _attempt in range(5):
+        pane.set_sections(sections, latest)
+    assert compared == []
+    assert pane._context_key is latest
+    assert pane._context_token is token
+    assert pane._bound_context is context and context.value is original
+    assert pane._request == request
+    assert pane._viewed == viewed
+    assert pane.ready and pane.image_digest(api.section) == api.capture.sha256
+
+
 def test_review_list_only_rewrites_changed_row_state(
     pane_api: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
@@ -1589,6 +1631,35 @@ def test_spacing_thumbnail_paint_is_navigation_without_diagnostic_view_evidence(
     assert pane._key(spacing_index) not in pane._viewed
 
 
+@pytest.mark.parametrize("owner_state", ["closed", "inactive", "hidden"])
+def test_spacing_open_rejects_inactive_owner_before_constructing_modal(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_state: str,
+) -> None:
+    """Fresh source checking cannot make a previously painted dead owner reviewable."""
+    api = pane_api
+    current = {"active": True}
+    pane = open_pane(api, active=lambda: current["active"])
+    pane.set_sections((api.section,), "board-a", spacing_entries=(_spacing_entry(api),))
+    show(api, pane)
+    assert pane.displayed
+    if owner_state == "closed":
+        pane.close()
+    elif owner_state == "inactive":
+        current["active"] = False
+    else:
+        pane.window.on_screen = False
+    monkeypatch.setattr(
+        api.module,
+        "EnlargedCaptureDialog",
+        lambda *_args, **_kwargs: pytest.fail("An obsolete owner opened a modal"),
+    )
+    with pytest.raises(ValueError, match="spacing image"):
+        pane.approve_spacing_image(lambda *_args: pytest.fail("Unexpected consent"))
+    assert not pane.review_window_open
+
+
 def _readable_large_viewer(
     api: SimpleNamespace,
     *,
@@ -1641,6 +1712,225 @@ def _readable_large_viewer(
             x=10, y=top, width=width, height=20
         )
     return viewer, events, state
+
+
+def test_combined_spacing_requires_full_source_fit_at_readable_scale(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Automatic resizing requires a fresh, readable full-image paint before consent."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    resize(api, viewer, (300, 200))
+    paint(api, viewer)
+    assert not viewer.readable and "viewed" not in events
+    resize(api, viewer, (1000, 667))
+    assert not viewer.readable and not viewer.approve_button.enabled
+    paint(api, viewer)
+    assert viewer.readable and viewer.approve_button.enabled
+    assert events.count("viewed") == 1 and "approved" not in events
+    viewer.approve_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    assert viewer.approved and events[-1] == "approved"
+
+
+def test_enlarged_spacing_action_names_exception_without_granting_consent(
+    pane_api: SimpleNamespace,
+) -> None:
+    """The modal offers the same explicit exception approval only after current paint."""
+    viewer, events, _state = _readable_large_viewer(pane_api)
+    assert viewer.approve_button.label == "Approve spacing exception"
+    assert not viewer.approve_button.enabled
+    assert not viewer.approved and "approved" not in events
+    paint(pane_api, viewer)
+    assert viewer.readable and viewer.approve_button.enabled
+    assert "viewed" in events and "approved" not in events
+    viewer.EndModal(pane_api.wx.ID_CANCEL)
+    assert not viewer.approved and "approved" not in events
+
+
+def test_combined_spacing_automatic_fit_cannot_authorize_undersized_pixels(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Automatically fitting a small canvas cannot grant evidence or consent."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    resize(api, viewer, (300, 200))
+    paint(api, viewer)
+    assert viewer.canvas._painted_scale < 0.35
+    assert not viewer.readable and "viewed" not in events
+    viewer.approve_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    assert not viewer.approved and "approved" not in events
+
+
+def test_combined_spacing_thumbnail_crops_detail_and_opens_explicit_review(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A compact detail remains navigation and never reviews composite panels."""
+    api = pane_api
+    entry = _spacing_entry(api)
+    image_size = entry.width_px, entry.height_px
+    api.state.image = Image(image_size)
+    service = importlib.import_module(api.module.__package__ + ".service")
+    capture = service.CapturedImage.from_bytes(_png(size=image_size))
+    opened: list[bool] = []
+    viewed: list[object] = []
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda *_args, **_kwargs: capture,
+        open_spacing_review=lambda: opened.append(True),
+        spacing_image_viewed=lambda *args: viewed.append(args),
+    )
+    pane.set_sections((api.section,), "board-a")
+    pane.set_spacing_entries((entry,))
+    spacing_index = pane.entries.index(entry)
+    pane.select(spacing_index)
+    show(api, pane)
+    assert pane.displayed
+    assert pane.canvas._scaled_view == entry.composition.detail_rect
+    assert pane.open_spacing_button.shown and pane.open_spacing_button.enabled
+    pane.open_spacing_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    pane.canvas.bindings[api.wx.EVT_LEFT_UP](SimpleNamespace(Skip=lambda: None))
+    assert opened == [True, True]
+    assert viewed == [] and pane._key(spacing_index) not in pane._viewed
+
+
+def test_combined_compact_preview_keeps_range_summary_when_no_visible_witness(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A range-only tile retains short mm context and no duplicate main action."""
+    api = pane_api
+    checks = importlib.import_module(api.module.__package__ + ".spacing_checks")
+    entry = replace(
+        _spacing_entry(api),
+        target_spacing_nm=200_000,
+        region_gap_nm=checks.NmBounds(100_000, 100_000),
+    )
+    image_size = entry.width_px, entry.height_px
+    api.state.image = Image(image_size)
+    service = importlib.import_module(api.module.__package__ + ".service")
+    capture = service.CapturedImage.from_bytes(_png(size=image_size))
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda *_args, **_kwargs: capture,
+        open_spacing_review=lambda: None,
+        show_spacing_review_action=False,
+    )
+    pane.set_sections((api.section,), "board-a")
+    pane.set_spacing_entries((entry,))
+    spacing_index = pane.entries.index(entry)
+    pane.select(spacing_index)
+    show(api, pane)
+    assert pane.caption.label == "Region gap 0.1 mm · target 0.2 mm"
+    assert not pane.open_spacing_button.shown
+    assert pane.title.shown and pane.displayed
+
+
+def test_combined_fit_view_has_no_scroll_or_wheel_handlers(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Native gestures cannot move a full-image spacing review into a local viewport."""
+    api = pane_api
+    viewer, _events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    assert not hasattr(viewer.canvas, "_on_scroll")
+    assert not hasattr(viewer.canvas, "_on_mousewheel")
+    assert not viewer.canvas.style & (api.wx.HSCROLL | api.wx.VSCROLL)
+
+
+def test_combined_fractional_fit_preserves_all_source_pixels(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Fractional full-image scaling reaches each source edge without native scrolling."""
+    api = pane_api
+    viewer, _events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    viewer.canvas.client_size = (503, 303)
+    paint(api, viewer)
+    assert viewer.canvas._visible_source_rect == (0, 0, 1200, 800)
+    assert viewer.canvas._dimensions == (454, 303)
+    assert viewer.canvas._painted_scale >= 0.35
+
+
+def test_combined_queued_old_fit_cannot_record_resized_display(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Resize invalidates queued display work before the old Fit paint can be credited."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    paint(api, viewer, drain=False)
+    resize(api, viewer, (500, 300))
+    api.drain()
+    assert not viewer.readable and not viewer.canvas._recorded
+    assert "viewed" not in events
+    paint(api, viewer)
+    assert viewer.readable and events.count("viewed") == 1
+
+
+def test_combined_fit_letterboxes_without_clipping_source_pixels(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A wide canvas centers the whole image and cannot claim an off-canvas strip."""
+    api = pane_api
+    viewer, _events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    viewer.canvas.client_size = (922, 461)
+    paint(api, viewer)
+    assert viewer.canvas._dimensions == (692, 461)
+    assert viewer.canvas.drawn[-1][1:] == (115, 0)
+    assert viewer.canvas._visible_source_rect == (0, 0, 1200, 800)
+
+
+def test_combined_native_same_size_layout_settles_after_fresh_paint(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Wrapping unchanged status cannot invalidate every subsequent native paint."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(
+        api,
+        composition=SimpleNamespace(
+            detail_rect=(0, 0, 500, 300),
+            required_regions=((0, 0, 500, 300),),
+            minimum_scale=0.35,
+        ),
+    )
+    layouts: list[bool] = []
+
+    def native_layout() -> None:
+        """Model the same-size event that macOS wx emits during native Layout."""
+        layouts.append(True)
+        viewer.canvas._resize(SimpleNamespace(Skip=lambda: None))
+
+    viewer.Layout = native_layout
+    viewer._review_wrap_key = None
+    paint(api, viewer)
+    assert viewer.readable and viewer.approve_button.enabled
+    assert len(layouts) == 1
+    assert events.count("viewed") == 1
+
+
+def test_combined_fit_never_installs_native_scrollbars(
+    pane_api: SimpleNamespace,
+) -> None:
+    """The full-source paint path does not mutate its client bounds with scrollbars."""
+    api = pane_api
+    viewer, _events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+
+    def no_scrollbar(*_args: object) -> None:
+        raise AssertionError("A Fit-only review must not install scrollbars")
+
+    viewer.canvas.SetScrollbar = no_scrollbar
+    paint(api, viewer)
+    assert viewer.readable and viewer.canvas._recorded
 
 
 def test_readable_large_spacing_view_requires_fresh_full_paint_and_explicit_button(
@@ -1789,3 +2079,536 @@ def test_spacing_viewer_reserves_measured_chrome_within_small_work_area(
     assert viewer.position[0] + fitted.GetWidth() <= area.x + area.width
     assert viewer.position[1] + fitted.GetHeight() <= area.y + area.height
     assert 24 * min(width / 1200, height / 800) >= 8
+
+
+def test_atomic_binding_starts_with_spacing_without_incidental_trace_capture(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A fresh context queues its first spacing entry before any trace provider runs."""
+    api = pane_api
+    captured: list[object] = []
+    entry = _spacing_entry(api)
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda selected, **_options: captured.append(selected) or api.capture,
+        image_list=Control(),
+    )
+    pane.set_sections((api.section,), "board-a", spacing_entries=(entry,))
+    assert pane.entries == (entry, api.section)
+    assert pane.selected_entry is entry
+    assert "Spacing image 1" in pane.checklist.GetItemText(0, 1)
+    assert "Image 1" in pane.checklist.GetItemText(1, 1)
+    with pytest.raises(ValueError, match="Spacing image 1, Image 1"):
+        pane.ensure_reviewed()
+    show(api, pane)
+    assert captured == [entry]
+    pane.select(pane.entries.index(api.section))
+    show(api, pane)
+    replacement = replace(entry, caption="Updated diagnostic caption")
+    pane.set_sections((api.section,), "board-a", spacing_entries=(replacement,))
+    assert pane.selected_entry is api.section
+    pane.set_sections((api.section,), "board-b", spacing_entries=(replacement,))
+    assert pane.selected_entry is replacement
+
+
+def test_atomic_binding_detects_spacing_only_changes_and_explicit_selection(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Unchanged trace/context inputs cannot hide changed diagnostic entries."""
+    api = pane_api
+    pane = open_pane(api)
+    first = _spacing_entry(api)
+    second = replace(first, view_id="spacing-b", input_digest="b" * 64)
+    pane.set_sections((api.section,), "board-a", spacing_entries=(first,))
+    show(api, pane)
+    pane.set_sections(
+        (api.section,), "board-a", api.section.section_id, spacing_entries=(second,)
+    )
+    assert pane.entries == (second, api.section)
+    assert pane.selected_entry is api.section
+    pane.set_spacing_entries((first, second))
+    assert pane.entries == (first, second, api.section)
+    assert pane.selected_entry is api.section
+    assert "Spacing image 2" in pane.checklist.GetItemText(1, 1)
+    assert "Image 1" in pane.checklist.GetItemText(2, 1)
+
+
+def test_combined_spacing_automatically_fits_full_image_without_navigation(
+    pane_api: SimpleNamespace,
+) -> None:
+    """One legible full composition paint grants viewing, requiring later consent."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35, required_regions=())
+    )
+    assert {control.label for control in viewer.children}.isdisjoint(
+        {"Fit image", "Original image"}
+    )
+    viewer.canvas.client_size = (500, 300)
+    paint(api, viewer)
+    assert viewer.canvas._scaled_view == (0, 0, 1200, 800)
+    assert viewer.canvas._visible_source_rect == (0.0, 0.0, 1200.0, 800.0)
+    assert viewer.canvas._dimensions == (450, 300)
+    assert viewer.readable and events.count("viewed") == 1
+    assert not viewer.approved and "approved" not in events
+    assert not hasattr(viewer, "fit_image_button")
+    assert not hasattr(viewer, "original_button")
+    assert not hasattr(viewer, "_navigation_buttons")
+    assert not hasattr(viewer, "_on_original")
+    assert not hasattr(viewer, "_comparing_original")
+    assert not hasattr(viewer.canvas, "fit_image")
+    assert {control.label for control in viewer.children if control.shown} == {
+        "",
+        viewer.caption.label,
+        viewer.status.label,
+        "Approve spacing exception",
+    }
+    assert not hasattr(viewer, "readable_button")
+    assert not hasattr(viewer, "zoom_in_button")
+    assert not hasattr(viewer.canvas, "scroll_to")
+
+
+def test_combined_spacing_cropped_or_unreadable_paint_cannot_grant_consent(
+    pane_api: SimpleNamespace,
+) -> None:
+    """No local crop or undersized composition may substitute for current Fit proof."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35, required_regions=())
+    )
+    viewer.canvas.client_size = (300, 200)
+    paint(api, viewer)
+    assert not viewer.readable and "viewed" not in events
+    assert not any(word in viewer.status.label.lower() for word in ("zoom", "scroll"))
+    resize(api, viewer, (500, 300))
+    viewer.canvas._presentation_crop = (0, 0, 500, 300)
+    paint(api, viewer)
+    assert not viewer.readable and "viewed" not in events
+    viewer.approve_button.bindings[api.wx.EVT_BUTTON](SimpleNamespace())
+    assert not viewer.approved and "approved" not in events
+
+
+def test_spacing_capture_errors_name_the_diagnostic_group(
+    pane_api: SimpleNamespace,
+) -> None:
+    """A failed initial spacing capture never reports that a workbook PNG failed."""
+    api = pane_api
+    pane = open_pane(api)
+    entry = _spacing_entry(api)
+
+    def unavailable(_entry: Any, *, refresh: bool = False) -> Any:
+        raise ValueError("Native spacing pixels unavailable")
+
+    pane._preview = unavailable
+    pane.set_sections((api.section,), "board-a", spacing_entries=(entry,))
+    api.drain()
+    assert pane.selected_entry is entry
+    assert pane.failure.startswith("Spacing preview unavailable:")
+    assert "Native spacing pixels unavailable" in pane.failure
+    assert not pane.displayed
+
+
+def test_automatic_review_returns_from_manual_trace_to_pending_spacing_first(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Approving an explicitly chosen trace cannot auto-select another trace first."""
+    api = pane_api
+    pane = open_pane(api)
+    spacing = _spacing_entry(api)
+    second = replace(api.section, section_id="row-b")
+    pane.set_sections((api.section, second), "board-a", spacing_entries=(spacing,))
+    pane.select(pane.entries.index(api.section))
+    show(api, pane)
+    assert pane.advance_to_unreviewed()
+    assert pane.selected_entry is spacing
+    # The currently pending spacing entry remains selected until its own consent.
+    assert pane.advance_to_unreviewed()
+    assert pane.selected_entry is spacing
+    approved = {spacing.view_id, api.section.section_id}
+    assert pane.advance_to_unreviewed(approved)
+    assert pane.selected_entry is second
+
+
+def test_same_size_native_layout_keeps_current_full_fit_paint(
+    pane_api: SimpleNamespace,
+) -> None:
+    """Native Layout may emit size events without changing any displayed geometry."""
+    api = pane_api
+    viewer, events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    paint(api, viewer)
+    assert viewer.readable and viewer.approve_button.enabled
+    viewer.canvas.bindings[api.wx.EVT_SIZE](SimpleNamespace(Skip=lambda: None))
+    assert viewer.readable and viewer.canvas._recorded
+    assert viewer.approve_button.enabled and events.count("viewed") == 1
+
+
+@pytest.mark.parametrize("iconized", [True, False])
+def test_minimize_or_restore_requires_fresh_full_fit_paint(
+    pane_api: SimpleNamespace,
+    iconized: bool,
+) -> None:
+    """Window-state transitions remain fresh even when their client bounds are equal."""
+    api = pane_api
+    viewer, _events, _state = _readable_large_viewer(
+        api, composition=SimpleNamespace(minimum_scale=0.35)
+    )
+    paint(api, viewer)
+    assert viewer.readable
+    viewer.bindings[api.wx.EVT_ICONIZE](
+        SimpleNamespace(IsIconized=lambda: iconized, Skip=lambda: None)
+    )
+    assert not viewer.readable and not viewer.canvas._recorded
+    assert not viewer.approve_button.enabled
+    paint(api, viewer)
+    assert viewer.readable
+
+
+@pytest.mark.parametrize("kind", ["trace", "spacing"])
+def test_enlarged_window_lifecycle_reports_readonly_pause_without_review_events(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    """Pause cold work before construction until teardown without changing review guards."""
+    api = pane_api
+    transitions: list[bool] = []
+    phases: list[str] = []
+    reviews: list[object] = []
+    pane = open_pane(
+        api,
+        state_changed=lambda: transitions.append(
+            getattr(pane, "review_window_open", False)
+        ),
+        spacing_image_viewed=lambda *args: reviews.append(args),
+    )
+    entry = _spacing_entry(api)
+    pane.set_sections((api.section,), "board-a", spacing_entries=(entry,))
+    if kind == "trace":
+        pane.select(pane.entries.index(api.section))
+    show(api, pane)
+    assert getattr(pane, "review_window_open", False) is False
+    transitions.clear()
+    viewed = dict(pane._viewed)
+    real_constructor = api.module.EnlargedCaptureDialog
+    real_destroy = Control.Destroy
+
+    def construct(*args: Any, **kwargs: Any) -> Any:
+        assert getattr(pane, "review_window_open", False) and pane._active()
+        phases.append("construct")
+        return real_constructor(*args, **kwargs)
+
+    def show_modal(viewer: Any) -> int:
+        assert getattr(pane, "review_window_open", False) and pane._active()
+        phases.append("show")
+        if kind == "spacing":
+            assert viewer._active()
+            viewer._verify_current()
+            assert not viewer.approved
+        return api.wx.ID_CANCEL
+
+    def destroy(viewer: Any) -> None:
+        assert getattr(pane, "review_window_open", False)
+        phases.append("destroy")
+        real_destroy(viewer)
+
+    monkeypatch.setattr(api.module, "EnlargedCaptureDialog", construct)
+    monkeypatch.setattr(Control, "ShowModal", show_modal)
+    monkeypatch.setattr(Control, "Destroy", destroy)
+    if kind == "spacing":
+        assert not pane.approve_spacing_image(lambda *args: reviews.append(args))
+    else:
+        pane._open_enlarged_capture()
+    assert phases == ["construct", "show", "destroy"]
+    assert transitions == [True, False]
+    assert getattr(pane, "review_window_open", False) is False
+    assert pane._viewed == viewed and reviews == []
+    with pytest.raises(AttributeError):
+        pane.review_window_open = True
+
+
+@pytest.mark.parametrize("kind", ["trace", "spacing"])
+@pytest.mark.parametrize("failure", ["construct", "show", "destroy"])
+def test_enlarged_window_failure_resumes_background_work_in_finally(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    failure: str,
+) -> None:
+    """Every failure phase releases the pause without approving or stamping an image."""
+    api = pane_api
+    transitions: list[bool] = []
+    pane = open_pane(
+        api,
+        state_changed=lambda: transitions.append(
+            getattr(pane, "review_window_open", False)
+        ),
+    )
+    pane.set_sections((api.section,), "board-a", spacing_entries=(_spacing_entry(api),))
+    if kind == "trace":
+        pane.select(pane.entries.index(api.section))
+    show(api, pane)
+    transitions.clear()
+    viewed = dict(pane._viewed)
+    real_constructor = api.module.EnlargedCaptureDialog
+    real_destroy = Control.Destroy
+
+    def construct(*args: Any, **kwargs: Any) -> Any:
+        assert getattr(pane, "review_window_open", False)
+        if failure == "construct":
+            raise ValueError("Enlarged constructor failed")
+        return real_constructor(*args, **kwargs)
+
+    def show_modal(_viewer: Any) -> int:
+        assert getattr(pane, "review_window_open", False)
+        if failure == "show":
+            raise ValueError("Enlarged ShowModal failed")
+        return api.wx.ID_CANCEL
+
+    def destroy(viewer: Any) -> None:
+        assert getattr(pane, "review_window_open", False)
+        real_destroy(viewer)
+        if failure == "destroy":
+            raise ValueError("Enlarged Destroy failed")
+
+    monkeypatch.setattr(api.module, "EnlargedCaptureDialog", construct)
+    monkeypatch.setattr(Control, "ShowModal", show_modal)
+    monkeypatch.setattr(Control, "Destroy", destroy)
+    with pytest.raises(ValueError, match="Enlarged"):
+        if kind == "spacing":
+            pane.approve_spacing_image(lambda *_args: pytest.fail("Unexpected consent"))
+        else:
+            pane._open_enlarged_capture()
+    assert transitions == [True, False]
+    assert getattr(pane, "review_window_open", False) is False
+    assert pane._viewed == viewed
+
+
+def test_nested_enlarged_windows_keep_outer_pause_until_return(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nested modal teardown cannot resume cold work while its outer viewer stays open."""
+    api = pane_api
+    transitions: list[bool] = []
+    phases: list[str] = []
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda *_args, **_kwargs: api.capture,
+        state_changed=lambda: transitions.append(
+            getattr(pane, "review_window_open", False)
+        ),
+    )
+    pane.set_sections((api.section,), "board-a", spacing_entries=(_spacing_entry(api),))
+    show(api, pane)
+    transitions.clear()
+
+    def show_modal(viewer: Any) -> int:
+        assert getattr(pane, "review_window_open", False) and pane._active()
+        if phases:
+            phases.append("nested")
+            assert viewer._approve is None
+        else:
+            phases.append("outer")
+            pane._open_enlarged_capture()
+            assert getattr(pane, "review_window_open", False) and transitions == [True]
+        return api.wx.ID_CANCEL
+
+    monkeypatch.setattr(Control, "ShowModal", show_modal)
+    assert not pane.approve_spacing_image(
+        lambda *_args: pytest.fail("Unexpected consent")
+    )
+    assert phases == ["outer", "nested"]
+    assert transitions == [True, False]
+    assert getattr(pane, "review_window_open", False) is False
+
+
+def test_failed_enlarged_image_defers_bound_selected_retry_until_close(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed modal stays responsive while one selected retry waits for its return."""
+    api = pane_api
+    captures: list[tuple[object, bool]] = []
+    approvals: list[object] = []
+    views: list[object] = []
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda entry, *, refresh=False: captures.append((entry, refresh))
+        or api.capture,
+        spacing_image_viewed=lambda *args: views.append(args),
+    )
+    entry = _spacing_entry(api)
+    pane.set_sections((api.section,), "board-a", spacing_entries=(entry,))
+    show(api, pane)
+
+    def show_modal(viewer: Any) -> int:
+        viewer._on_canvas_failed("The enlarged native image could not paint")
+        retry = pane.window.bindings[api.wx.EVT_TIMER, pane._retry_timer]
+        for _tick in range(3):
+            pane._retry_timer.Stop()  # Native one-shot timers stop before delivering EVT_TIMER.
+            retry(SimpleNamespace())
+            api.drain()
+        assert captures == [(entry, False)]
+        assert not pane.capture_loaded and not viewer.approved
+        viewer._on_approve(SimpleNamespace())
+        assert not viewer.approved and approvals == views == []
+        return api.wx.ID_CANCEL
+
+    monkeypatch.setattr(Control, "ShowModal", show_modal)
+    assert not pane.approve_spacing_image(lambda *args: approvals.append(args))
+    assert captures == [(entry, False)]
+    assert len(api.queued) == 1
+    api.drain()
+    assert captures == [(entry, False), (entry, True)]
+    assert not pane.displayed and approvals == views == []
+
+
+def test_nested_modal_coalesces_latest_context_and_selected_image_until_outer_close(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated current-source replacements retain one latest render behind both modals."""
+    api = pane_api
+    captures: list[tuple[object, object, bool]] = []
+    approvals: list[object] = []
+    pane = api.module.WorkbookPreview(
+        Control(),
+        lambda entry, *, refresh=False: captures.append(
+            (pane._context_key, entry, refresh)
+        )
+        or api.capture,
+    )
+    entry = _spacing_entry(api)
+    pane.set_sections((api.section,), "board-a", spacing_entries=(entry,))
+    show(api, pane)
+    shown: list[Any] = []
+    latest = replace(api.section, section_id="latest-trace")
+
+    def show_modal(viewer: Any) -> int:
+        shown.append(viewer)
+        if len(shown) == 1:
+            pane._open_enlarged_capture()
+            assert pane.review_window_open and len(captures) == 1
+            assert api.queued == []
+            assert not viewer._active() and not viewer.approved
+        else:
+            for revision in range(20):
+                pane.set_sections(
+                    (latest,), f"board-{revision}", spacing_entries=(entry,)
+                )
+                api.drain()
+            pane.select(pane.entries.index(latest), refresh=True)
+            api.drain()
+            assert len(captures) == 1 and pane.review_window_open
+        return api.wx.ID_CANCEL
+
+    monkeypatch.setattr(Control, "ShowModal", show_modal)
+    assert not pane.approve_spacing_image(lambda *args: approvals.append(args))
+    assert len(shown) == 2 and len(api.queued) == 1
+    api.drain()
+    assert captures == [("board-a", entry, False), ("board-19", latest, True)]
+    assert approvals == [] and not pane.displayed
+
+
+@pytest.mark.parametrize("finish", ["clear", "close"])
+def test_modal_deferred_capture_is_discarded_after_context_clear_or_owner_close(
+    pane_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    finish: str,
+) -> None:
+    """Returning from an obsolete modal cannot resume cancelled native capture work."""
+    api = pane_api
+    captures: list[object] = []
+    pane = api.module.WorkbookPreview(
+        Control(), lambda entry, **_kwargs: captures.append(entry) or api.capture
+    )
+    entry = _spacing_entry(api)
+    pane.set_sections((api.section,), "board-a", spacing_entries=(entry,))
+    show(api, pane)
+
+    def show_modal(_viewer: Any) -> int:
+        pane.set_sections((api.section,), "board-b", spacing_entries=(entry,))
+        api.drain()
+        assert captures == [entry]
+        if finish == "clear":
+            pane.clear("The selected source no longer exists.")
+        else:
+            pane.close()
+        return api.wx.ID_CANCEL
+
+    monkeypatch.setattr(Control, "ShowModal", show_modal)
+    assert not pane.approve_spacing_image(
+        lambda *_args: pytest.fail("Unexpected consent")
+    )
+    api.drain()
+    assert captures == [entry]
+    assert not pane.review_window_open
+
+
+def test_maximized_review_geometry_accepts_measured_hidden_frame_border_only() -> None:
+    """The Openbox frame offset is valid only for an actually maximized native window."""
+    from .test_impedance_spacing_controls_native import _assert_review_geometry
+
+    area = (0, 0, 1920, 1080)
+    frame = (-1, -1, 1920, 1080)
+    client = (0, 19, 1920, 1061)
+    controls = {"canvas": (8, 60, 1904, 945), "approve": (249, 1038, 187, 34)}
+    _assert_review_geometry(area, frame, client, controls, maximized=True)
+    _assert_review_geometry(area, area, client, controls, maximized=False)
+    with pytest.raises(AssertionError):
+        _assert_review_geometry(area, frame, client, controls, maximized=False)
+
+
+@pytest.mark.parametrize("maximized", [False, True])
+@pytest.mark.parametrize(
+    "client",
+    [
+        (-1, 19, 1920, 1061),
+        (0, -1, 1920, 1080),
+        (0, 19, 1921, 1061),
+        (0, 19, 1920, 1062),
+    ],
+)
+def test_review_geometry_rejects_every_client_overflow_edge_in_both_window_states(
+    client: tuple[int, int, int, int],
+    maximized: bool,
+) -> None:
+    """Neither window state can authorize a client edge outside the work area."""
+    from .test_impedance_spacing_controls_native import _assert_review_geometry
+
+    with pytest.raises(AssertionError):
+        _assert_review_geometry(
+            (0, 0, 1920, 1080),
+            (-1, -1, 1920, 1080) if maximized else (0, 0, 1920, 1080),
+            client,
+            {},
+            maximized=maximized,
+        )
+
+
+@pytest.mark.parametrize(
+    "control",
+    [
+        (-1, 60, 100, 100),
+        (8, -1, 100, 100),
+        (1821, 60, 100, 100),
+        (8, 981, 100, 100),
+        (8, 18, 100, 17),
+    ],
+)
+def test_maximized_review_geometry_rejects_controls_outside_display_or_client(
+    control: tuple[int, int, int, int],
+) -> None:
+    """Every complete control must fit the display and client, including client-only clips."""
+    from .test_impedance_spacing_controls_native import _assert_review_geometry
+
+    with pytest.raises(AssertionError):
+        _assert_review_geometry(
+            (0, 0, 1920, 1080),
+            (-1, -1, 1920, 1080),
+            (0, 19, 1920, 1061),
+            {"canvas": control},
+            maximized=True,
+        )
