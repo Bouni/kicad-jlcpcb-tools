@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from base64 import b64decode
 from collections.abc import Callable, Iterator
 from copy import deepcopy
 from dataclasses import replace
@@ -19,9 +18,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-PNG = b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4/58BAAT/Af9dfQKHAAAAAElFTkSuQmCC"
-)
+from impedance.render import section_viewport
+from tests.test_impedance_report_pipeline import _png
+
+PNG = _png(800, 420)
 
 
 class Widget:
@@ -361,6 +361,13 @@ def harness(
                 raise state.render_error
             return destination
 
+        def viewport(
+            self, section: Any, width_px: int, height_px: int
+        ) -> tuple[float, float, float, float]:
+            """Expose the same real route-derived frame as the native consumer."""
+            frame = section_viewport(section, width_px, height_px, None)
+            return frame.left, frame.top, frame.width, frame.height
+
     def temporary_directory(prefix: str) -> TemporaryDirectory:
         """Track scratch directories while retaining real context-manager cleanup."""
         directory = TemporaryDirectory(prefix=prefix, dir=tmp_path)
@@ -393,7 +400,7 @@ def harness(
     monkeypatch.setitem(sys.modules, "wx.dataview", dataview)
     for module_name, symbols in (
         ("dialog", {"ImpedanceDialog": ConfigurationDialog}),
-        ("render", {"SectionRenderer": Renderer}),
+        ("render", {"SectionRenderer": Renderer, "section_viewport": section_viewport}),
     ):
         module = ModuleType(f"{package_name}.{module_name}")
         module.__dict__.update(symbols)
@@ -912,13 +919,13 @@ def test_late_calculator_cache_callback_preserves_board_identity_and_intent(
 
 
 @pytest.mark.parametrize("changed_identity", [False, True])
-def test_gui_queued_width_cache_callback_after_cancel_checks_its_original_board(
+def test_gui_queued_width_cache_callback_after_cancel_preserves_database(
     harness: SimpleNamespace,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     changed_identity: bool,
 ) -> None:
-    """The neighboring width callback also rejects Save As before delayed writes."""
+    """Closed owners cannot write even when their original board is still current."""
     path = tmp_path / "jlcpcb" / "project.db"
     controls = harness.integration.ImpedanceControls(harness.parent, harness.toolbar)
     controls.attach_store(Store(path))
@@ -946,14 +953,47 @@ def test_gui_queued_width_cache_callback_after_cancel_checks_its_original_board(
     if changed_identity:
         harness.board_path += ".renamed"
     queued.pop()()
-    if changed_identity:
-        assert not path.exists() and controls.repository is None
-    else:
-        assert controls.repository.load_width_results() == (result,)
-        assert controls.database.load_config(controls.repository.board_id) is None
+    assert not path.exists() and controls.repository is None
     assert controls.config == harness.model.Config() and controls.revision == 0
     assert not controls.checkbox.value
     assert not harness.errors
+
+
+def test_width_result_queued_while_open_cannot_write_during_cancel_event(
+    harness: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A queued settled job must check its owner at the eventual GUI write."""
+    path = tmp_path / "jlcpcb" / "project.db"
+    controls = harness.integration.ImpedanceControls(harness.parent, harness.toolbar)
+    controls.attach_store(Store(path))
+    monkeypatch.setattr(controls, "_snapshot", lambda: _snapshot(harness))
+    stackups = importlib.import_module(
+        f"{harness.integration.__package__}.stackup_model"
+    )
+    result = stackups.WidthResult(
+        spec_id="clock",
+        layer="F.Cu",
+        input_digest="a" * 64,
+        status="success",
+        target_width_nm=181_400,
+        calculated_at_utc="2026-09-26T00:00:00.000000Z",
+        model="CoatedMicrostrip1B",
+        calculation_digest="b" * 64,
+    )
+    queued = []
+    monkeypatch.setattr(harness.wx, "CallAfter", queued.append)
+
+    def cancel_after_result_queued(dialog: Any) -> None:
+        dialog.save_width_result(result)
+        assert len(queued) == 1 and not path.exists()
+        # Native Cancel marks closing before the modal returns or destroys wx.
+        dialog._closing = True
+        queued.pop()()
+        assert not path.exists() and controls.repository is None
+
+    harness.modal_action = cancel_after_result_queued
+    assert controls.on_configure(None) is False
+    assert not path.exists() and not harness.errors
 
 
 def test_disabled_preflight_reads_no_board_geometry(

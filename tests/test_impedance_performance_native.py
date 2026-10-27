@@ -142,6 +142,19 @@ _PNG = b64decode(
 )
 
 
+def _assert_save_source_freshness(sample: dict[str, Any]) -> None:
+    """Require a fresh native proof while avoiding an unchanged full reconstruction."""
+    functions = sample["save_functions"]
+    counts = {
+        name: functions.get(name, {}).get("calls", 0)
+        for name in ("source_currentness", "source_evidence", "snapshot")
+    }
+    sample["save_source_freshness"] = counts
+    assert counts["source_currentness"] == 1, counts
+    assert counts["source_evidence"] == 1, counts
+    assert counts["snapshot"] == 0, counts
+
+
 def _instrument_dialog(
     package_name: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -534,6 +547,7 @@ def test_native_kicad_configure_and_save_budgets(
                 "database": "database",
                 "repository": "repository",
                 "adapter": "pcbnew_adapter",
+                "source": "source_evidence",
                 "render": "render",
                 "copy": "board_copy",
                 "service": "service",
@@ -554,6 +568,8 @@ def test_native_kicad_configure_and_save_budgets(
 
     for owner, attribute, label in (
         (api.adapter, "snapshot_board", "snapshot"),
+        (api.integration.ImpedanceControls, "_live_snapshot", "source_currentness"),
+        (api.source, "acquire_source_evidence", "source_evidence"),
         (api.render.SectionRenderer, "render", "render"),
         (api.render.SectionRenderer, "_plot_layer", "native_plot"),
         (api.render, "copy_for_render", "board_copy"),
@@ -748,7 +764,7 @@ def test_native_kicad_configure_and_save_budgets(
                 )
                 metrics.phase = None
                 assert samples[-1]["opening_functions"]["matching"]["calls"] == 1
-                assert samples[-1]["save_functions"]["snapshot"]["calls"] == 1
+                _assert_save_source_freshness(samples[-1])
                 assert "matching" not in samples[-1]["save_functions"]
                 assert "render" not in samples[-1]["save_functions"]
                 if approved:
@@ -811,6 +827,7 @@ def _run_first_use(output: Path) -> None:
                     "catalog": "catalog_cache",
                     "matching": "matching",
                     "adapter": "pcbnew_adapter",
+                    "source": "source_evidence",
                     "render": "render",
                     "integration": "integration",
                 }.items()
@@ -873,6 +890,12 @@ def _run_first_use(output: Path) -> None:
                 for owner, attribute, label in (
                     (api.matching, "analyze", "matching"),
                     (api.adapter, "snapshot_board", "snapshot"),
+                    (
+                        api.integration.ImpedanceControls,
+                        "_live_snapshot",
+                        "source_currentness",
+                    ),
+                    (api.source, "acquire_source_evidence", "source_evidence"),
                     (api.render.SectionRenderer, "render", "render"),
                     (api.integration, "read_theme_context", "appearance"),
                     (api.repository.ImpedanceRepository, "load", "settings_load"),
@@ -957,7 +980,7 @@ def _run_first_use(output: Path) -> None:
                 metrics.phase = None
                 assert metrics.sample["opening_functions"]["matching"]["calls"] == 1
                 assert metrics.sample["opening_functions"]["render"]["calls"] == 1
-                assert metrics.sample["save_functions"]["snapshot"]["calls"] == 1
+                _assert_save_source_freshness(metrics.sample)
                 assert "matching" not in metrics.sample["save_functions"]
                 assert "render" not in metrics.sample["save_functions"]
                 persisted, saved_revision = repository.load()

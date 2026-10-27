@@ -2,9 +2,10 @@
 
 from base64 import b64decode
 from dataclasses import replace
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 
@@ -42,6 +43,396 @@ def _session(harness: SimpleNamespace, directory: Path) -> tuple[Any, Any, Any]:
     return captures, state, section
 
 
+def test_closing_and_reopening_review_reuses_owned_png_without_native_lifetime(
+    harness: SimpleNamespace, tmp_path: Path
+) -> None:
+    """A same-source reopening must verify bytes, without plotting them again."""
+    captures, state, section = _session(harness, tmp_path)
+    reviewed = captures.preview(section)
+    assert captures.verify_captures(captures.snapshot(), (section,)).current
+    renderer = captures.renderer
+    controls = captures.controls
+    captures.close()
+    assert renderer.closed and captures.renderer is None
+    reopened = harness.integration.CaptureSession(controls, tmp_path)
+    try:
+        evidence = reopened.verify_captures(reopened.snapshot(), (section,))
+        assert evidence.current and evidence.hashes == {section: reviewed.sha256}
+        assert reopened.preview(section).data == reviewed.data
+        assert len(harness.renders) == 1
+        assert reopened.renderer is None
+        assert state.reads >= 3
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize(
+    "change", ["source", "appearance", "policy", "inputs", "board"]
+)
+def test_reopened_review_renders_again_when_any_pixel_identity_changes(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    """Reopening cannot reuse old bytes solely because a section ID survived."""
+    captures, state, section = _session(harness, tmp_path)
+    controls = captures.controls
+    captures.preview(section)
+    captures.verify_captures(captures.snapshot(), (section,))
+    captures.close()
+    if change == "source":
+        state.snapshot = replace(state.snapshot, context_digest="new-source")
+    elif change == "appearance":
+        harness.palette = "new-palette"
+    elif change == "policy":
+        monkeypatch.setattr(harness.matching, "CAPTURE_POLICY_REVISION", 999)
+    elif change == "inputs":
+        section = replace(section, width_nm=section.width_nm + 1)
+    else:
+        controls.board_path = str(tmp_path / "other-board.kicad_pcb")
+    reopened = harness.integration.CaptureSession(controls, tmp_path)
+    try:
+        evidence = reopened.verify_captures(reopened.snapshot(), (section,))
+        assert evidence.current and evidence.hashes[section]
+        assert len(harness.renders) == 2
+    finally:
+        reopened.close()
+
+
+def test_unverified_render_cannot_enter_owned_cache_after_source_change(
+    harness: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Fresh post-render verification is required before sharing any pixels."""
+    captures, state, section = _session(harness, tmp_path)
+    captures.preview(section)
+    assert captures._pending_owned and not captures.owned_captures._images
+    state.snapshot = replace(state.snapshot, context_digest="render-changed-source")
+    assert not captures.verify_captures(captures.snapshot(), (section,)).current
+    assert not captures.owned_captures._images
+    assert not captures._pending_owned
+    captures.close()
+
+
+@pytest.mark.parametrize("change", ["close", "source"])
+@pytest.mark.parametrize("operation", ["preview", "prepare", "batch"])
+def test_renderer_construction_cannot_publish_after_session_invalidation(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+    operation: str,
+) -> None:
+    """Native constructor reentry must release its unpublished candidate once."""
+    captures, state, section = _session(harness, tmp_path)
+    render = importlib.import_module(f"{harness.integration.__package__}.render")
+    original = render.SectionRenderer
+
+    def construct(*args: Any, **kwargs: Any) -> Any:
+        """Invalidate the actual session before its renderer constructor returns."""
+        candidate = original(*args, **kwargs)
+        if change == "close":
+            captures.close()
+        else:
+            state.snapshot = replace(state.snapshot, context_digest="reentrant-edit")
+            captures.snapshot()
+        return candidate
+
+    monkeypatch.setattr(render, "SectionRenderer", construct)
+    try:
+        if operation == "batch":
+            evidence = captures.verify_captures(captures.snapshot(), (section,))
+            assert not evidence.current and evidence.hashes == {section: None}
+        else:
+            with pytest.raises(harness.model.ValidationError, match="changed|closed"):
+                if operation == "prepare":
+                    captures.prepare(captures.snapshot(), section)
+                else:
+                    captures.preview(section)
+        assert captures.renderer is None
+        assert captures.revision is None
+        if change == "close":
+            assert captures._evidence_revision is None
+        assert not harness.renders
+        assert not captures.images and not captures._pending_owned
+        assert not captures.owned_captures._images
+        assert len(harness.renderers) == 1
+        assert harness.renderers[0].closed
+        assert harness.renderers[0].close_calls == 1
+    finally:
+        captures.close()
+
+
+@pytest.mark.parametrize("changed_source", [False, True])
+@pytest.mark.parametrize("operation", ["preview", "prepare", "batch"])
+@pytest.mark.parametrize(
+    "failure",
+    [None, "board_access", "constructor", "candidate_close", "interrupt", "exit"],
+)
+def test_obsolete_renderer_constructor_preserves_a_newer_nested_preview(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_source: bool,
+    operation: str,
+    failure: Optional[str],
+) -> None:
+    """Discard the outer allocation without closing or reverting newer captures."""
+    captures, state, section = _session(harness, tmp_path)
+    selected = replace(section, section_id="selected-during-construction")
+    render = importlib.import_module(f"{harness.integration.__package__}.render")
+    original = render.SectionRenderer
+    nested: list[Any] = []
+
+    def newer_preview() -> None:
+        """Publish the newer request through the real session and renderer."""
+        if changed_source:
+            state.snapshot = replace(state.snapshot, context_digest="nested-edit")
+        nested.append(captures.preview(selected))
+
+    def construct(*args: Any, **kwargs: Any) -> Any:
+        """Complete a real nested render while the older candidate is unpublished."""
+        candidate = original(*args, **kwargs)
+        if len(harness.renderers) == 1 and failure != "board_access":
+            if failure == "candidate_close":
+                close = candidate.close
+
+                def failed_close() -> None:
+                    """Retain the native owner's state change before cleanup fails."""
+                    close()
+                    raise RuntimeError("obsolete renderer cleanup failed")
+
+                candidate.close = failed_close
+            newer_preview()
+            if failure in ("constructor", "interrupt", "exit"):
+                candidate.close()
+                if failure == "interrupt":
+                    raise KeyboardInterrupt("obsolete renderer interrupted")
+                if failure == "exit":
+                    raise SystemExit(7)
+                raise RuntimeError("obsolete renderer constructor failed")
+        return candidate
+
+    monkeypatch.setattr(render, "SectionRenderer", construct)
+    if failure == "board_access":
+        captures.controls.board_path = harness.board_path
+        entered = False
+
+        def get_board() -> Any:
+            """Fail the obsolete native getter after its callback finishes newer work."""
+            nonlocal entered
+            if not entered:
+                entered = True
+                newer_preview()
+                raise RuntimeError("obsolete board getter failed")
+            return harness.board
+
+        monkeypatch.setattr(harness.pcbnew, "GetBoard", get_board)
+    try:
+        interruption = {"interrupt": KeyboardInterrupt, "exit": SystemExit}.get(failure)
+        if operation == "batch" and interruption is None:
+            evidence = captures.verify_captures(captures.snapshot(), (section,))
+            assert not evidence.current and evidence.hashes == {section: None}
+        else:
+            with pytest.raises(
+                interruption or harness.model.ValidationError,
+                match="changed|closed" if interruption is None else None,
+            ) as caught:
+                if operation == "prepare":
+                    captures.prepare(captures.snapshot(), section)
+                elif operation == "batch":
+                    captures.verify_captures(captures.snapshot(), (section,))
+                else:
+                    captures.preview(section)
+            if failure == "exit":
+                assert caught.value.code == 7
+        if failure == "board_access":
+            assert len(harness.renderers) == 1
+            current = harness.renderers[0]
+        else:
+            assert len(harness.renderers) == 2
+            older, current = harness.renderers
+            assert older.closed and older.close_calls == 1
+        assert captures.renderer is current and not current.closed
+        assert captures.revision[0] == state.snapshot
+        assert captures.images == {selected: nested[0]}
+        assert len(captures._pending_owned) == 1
+        assert captures.preview(selected) is nested[0]
+        assert len(harness.renders) == 1
+    finally:
+        captures.close()
+    assert all(renderer.close_calls == 1 for renderer in harness.renderers)
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_renderer_cleanup_cannot_replace_the_original_cancellation(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: type[BaseException],
+) -> None:
+    """Dispose the unpublished candidate while preserving the initiating signal."""
+    captures, _state, section = _session(harness, tmp_path)
+    render = importlib.import_module(f"{harness.integration.__package__}.render")
+    original = render.SectionRenderer
+    variant = captures.controls._selected_output_variant
+
+    def cancelled_variant() -> Any:
+        captures.controls._selected_output_variant = variant
+        raise interruption("original cancellation")
+
+    def construct(*args: Any, **kwargs: Any) -> Any:
+        candidate = original(*args, **kwargs)
+        close = candidate.close
+
+        def failed_close() -> None:
+            close()
+            cleanup = (
+                SystemExit if interruption is KeyboardInterrupt else KeyboardInterrupt
+            )
+            raise cleanup("cleanup cancellation")
+
+        candidate.close = failed_close
+        captures.controls._selected_output_variant = cancelled_variant
+        return candidate
+
+    monkeypatch.setattr(render, "SectionRenderer", construct)
+    try:
+        with pytest.raises(interruption, match="original cancellation"):
+            captures.preview(section)
+        assert captures.renderer is None and not harness.renders
+        assert harness.renderers[0].closed and harness.renderers[0].close_calls == 1
+    finally:
+        captures.controls._selected_output_variant = variant
+        captures.close()
+
+
+@pytest.mark.parametrize("identity", [None, "", "unreadable"])
+def test_missing_stable_board_identity_keeps_the_native_cold_path_working(
+    harness: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    identity: Any,
+) -> None:
+    """An optional cache must not fabricate a cwd identity or block capture."""
+    captures, _state, section = _session(harness, tmp_path)
+    if identity is None:
+        board = object()
+    elif identity == "unreadable":
+
+        def failed_filename() -> str:
+            raise RuntimeError("native identity unavailable")
+
+        board = SimpleNamespace(GetFileName=failed_filename)
+    else:
+        board = SimpleNamespace(GetFileName=lambda: identity)
+    monkeypatch.setattr(harness.parent.pcbnew, "GetBoard", lambda: board)
+    captures.preview(section)
+    assert captures.verify_captures(captures.snapshot(), (section,)).current
+    assert not captures.owned_captures._images
+    controls = captures.controls
+    captures.close()
+    reopened = harness.integration.CaptureSession(controls, tmp_path)
+    try:
+        assert reopened.verify_captures(reopened.snapshot(), (section,)).current
+        assert len(harness.renders) == 2
+    finally:
+        reopened.close()
+
+
+def test_reopened_background_preparation_reuses_one_checked_owned_revision(
+    harness: SimpleNamespace, tmp_path: Path
+) -> None:
+    """A warm renderer-free batch cannot rescan the source for every image."""
+    captures, state, section = _session(harness, tmp_path)
+    sections = tuple(
+        replace(section, section_id=f"warm-{index}") for index in range(25)
+    )
+    for item in sections:
+        captures.preview(item)
+    captures.verify_captures(captures.snapshot(), sections)
+    controls = captures.controls
+    captures.close()
+    reopened = harness.integration.CaptureSession(controls, tmp_path)
+    before = state.reads
+    try:
+        snapshot = reopened.snapshot()
+        for item in sections:
+            assert reopened.prepare(snapshot, item).data == PNG
+        assert state.reads - before == 2
+        assert len(harness.renders) == len(sections)
+        assert reopened.renderer is None
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("change", ["source", "appearance"])
+def test_warm_preparation_requires_current_source_before_binding_cold_renderer(
+    harness: SimpleNamespace, tmp_path: Path, change: str
+) -> None:
+    """A cache hit across idle turns cannot authorize binding changed geometry."""
+    captures, state, section = _session(harness, tmp_path)
+    captures.preview(section)
+    captures.verify_captures(captures.snapshot(), (section,))
+    controls = captures.controls
+    captures.close()
+    reopened = harness.integration.CaptureSession(controls, tmp_path)
+    snapshot = reopened.snapshot()
+    missing = replace(section, section_id="uncached-after-idle")
+    try:
+        reopened.prepare(snapshot, section)
+        assert reopened.renderer is None
+        if change == "source":
+            state.snapshot = replace(snapshot, context_digest="changed-in-idle")
+        else:
+            harness.palette = "changed-in-idle"
+        with pytest.raises(harness.model.ValidationError, match="changed"):
+            reopened.prepare(snapshot, missing)
+        # Restoring later must not admit pixels from the intermediate source.
+        state.snapshot = snapshot
+        harness.palette = "original-palette"
+        assert len(harness.renders) == 1
+        assert not reopened._pending_owned
+        restored = reopened.prepare(snapshot, missing)
+        evidence = reopened.verify_captures(reopened.snapshot(), (missing,))
+        assert evidence.current and evidence.hashes == {missing: restored.sha256}
+        key = reopened._owned_key(missing)
+        owned = reopened.owned_captures.get(key)
+        assert owned is not None and owned.sha256 == restored.sha256
+        assert owned.viewport_nm == restored.viewport_nm
+        assert len(harness.renders) == 2
+    finally:
+        reopened.close()
+
+
+def test_renderer_failure_then_source_change_cannot_bind_old_preparation_revision(
+    harness: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Retrying failed native work must recheck its current live source."""
+    captures, state, section = _session(harness, tmp_path)
+    snapshot = captures.snapshot()
+    harness.render_error = RuntimeError("native render failed")
+    with pytest.raises(RuntimeError, match="native render failed"):
+        captures.prepare(snapshot, section)
+    assert captures.renderer is None and not captures._pending_owned
+    harness.render_error = None
+    state.snapshot = replace(snapshot, context_digest="changed-after-failure")
+    with pytest.raises(harness.model.ValidationError, match="changed"):
+        captures.prepare(snapshot, section)
+    state.snapshot = snapshot
+    assert not captures.owned_captures._images and not captures._pending_owned
+    assert len(harness.renders) == 1
+    restored = captures.prepare(snapshot, section)
+    evidence = captures.verify_captures(captures.snapshot(), (section,))
+    assert evidence.current and evidence.hashes == {section: restored.sha256}
+    key = captures._owned_key(section)
+    owned = captures.owned_captures.get(key)
+    assert owned is not None and owned.sha256 == restored.sha256
+    assert owned.viewport_nm == restored.viewport_nm
+    assert len(harness.renders) == 2
+    captures.close()
+
+
 @pytest.mark.parametrize("count", [1, 25])
 def test_known_capture_verification_has_one_source_check_for_any_image_count(
     harness: SimpleNamespace, tmp_path: Path, count: int
@@ -70,13 +461,13 @@ def test_background_capture_preparation_does_not_rescan_each_image(
     try:
         snapshot = captures.snapshot()
         hashes = {row: captures.prepare(snapshot, row).sha256 for row in sections}
-        assert state.reads == 2
+        assert state.reads == 3
         assert len(harness.renderers) == 1
         assert len(harness.renders) == count
         evidence = captures.verify_captures(captures.snapshot(), sections)
         assert evidence.current
         assert evidence.hashes == hashes
-        assert state.reads == 3
+        assert state.reads == 4
         assert len(harness.renders) == count
     finally:
         captures.close()
@@ -127,7 +518,7 @@ def test_png_lru_eviction_preserves_verified_hashes(
 def test_missing_historical_evidence_checks_only_batch_boundaries(
     harness: SimpleNamespace, tmp_path: Path, count: int
 ) -> None:
-    """Cold restoration checks source twice total, including the caller's read."""
+    """Cold restoration checks batch boundaries and the real native binding."""
     captures, state, section = _session(harness, tmp_path)
     sections = tuple(replace(section, section_id=f"image-{i}") for i in range(count))
     try:
@@ -135,12 +526,12 @@ def test_missing_historical_evidence_checks_only_batch_boundaries(
         assert evidence.current
         assert all(evidence.hashes.values())
         assert set(evidence.hashes) == set(sections)
-        assert state.reads == 2
+        assert state.reads == 3
         assert len(harness.renders) == count
         assert len(harness.renderers) == 1
         repeated = captures.verify_captures(captures.snapshot(), sections)
         assert repeated == evidence
-        assert state.reads == 3
+        assert state.reads == 4
         assert len(harness.renders) == count
     finally:
         captures.close()

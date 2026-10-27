@@ -3,6 +3,7 @@
 import argparse
 from contextlib import suppress
 import ipaddress
+import json
 import os
 from pathlib import Path
 import shutil
@@ -16,6 +17,7 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "org.kicad-jlcpcb-tools.validation-run"
+LANE_LABEL = "org.kicad-jlcpcb-tools.validation-lane"
 
 
 def docker(*arguments: str) -> str:
@@ -86,14 +88,66 @@ def run_process(command: list[str], log: Path, environment: dict[str, str]) -> i
                     process.wait()
 
 
-def cleanup(run_id: str) -> None:
-    """Remove only containers labelled for this invocation."""
+def cleanup(
+    run_id: str,
+    partial_output: Optional[Path] = None,
+    existing_volumes: Optional[set[str]] = None,
+) -> None:
+    """Let owned containers retain diagnostics before removing any survivors."""
     selector = ("--filter", f"label={LABEL}={run_id}")
     identifiers = docker("ps", "--all", "--quiet", *selector).split()
-    if identifiers:
-        docker("rm", "--force", *identifiers)
-    if docker("ps", "--all", "--quiet", *selector):
-        raise RuntimeError("Run-owned containers remain after cleanup")
+    workspaces: set[str] = set()
+    try:
+        if identifiers:
+            # Native supervisors publish partial reports when they receive TERM.
+            with suppress(subprocess.SubprocessError):
+                docker("stop", "--time", "15", *identifiers)
+        if partial_output is None:
+            return
+        native = []
+        for identifier in docker(
+            "ps", "--all", "--quiet", *selector, "--filter", f"label={LANE_LABEL}"
+        ).split():
+            container = json.loads(
+                docker("inspect", "--format", "{{json .}}", identifier)
+            )
+            # Recover only ACT's ephemeral checkouts, never shared tool caches.
+            workspaces.update(
+                mount["Name"]
+                for mount in container["Mounts"]
+                if mount["Type"] == "volume"
+                and mount["Destination"] == container["Config"]["WorkingDir"]
+                and mount["Name"].startswith("act-")
+                and existing_volumes is not None
+                and mount["Name"] not in existing_volumes
+            )
+            native.append((identifier, container))
+        for identifier, container in native:
+            config = container["Config"]
+            lane = config["Labels"][LANE_LABEL]
+            if lane not in {
+                "ordinary-tests",
+                "native-wx-0",
+                "native-wx-1",
+                "native-kicad-7",
+                "native-kicad-8",
+                "native-kicad-9",
+                "native-kicad-10",
+            }:
+                raise RuntimeError(f"Unknown retained test lane: {lane}")
+            destination = partial_output / lane
+            destination.mkdir(parents=True, exist_ok=True)
+            source = Path(config["WorkingDir"]) / ".cache/native-tests" / lane
+            docker("cp", f"{identifier}:{source}/.", str(destination))
+    finally:
+        if identifiers:
+            # --rm containers may already have disappeared after graceful shutdown.
+            with suppress(subprocess.SubprocessError):
+                docker("rm", "--force", *identifiers)
+        if docker("ps", "--all", "--quiet", *selector):
+            raise RuntimeError("Run-owned containers remain after cleanup")
+        if workspaces:
+            docker("volume", "rm", *sorted(workspaces))
 
 
 def copy_tracked(directory: Path) -> None:
@@ -158,8 +212,10 @@ def run_workflow(output: Path, cache: Path, selection: str, source: Path) -> int
         f"--env=ACTIONS_RUNTIME_URL=http://{hostname}:34567/",
     ]
     environment = dict(os.environ, ACTIONS_RUNTIME_URL=f"http://{hostname}:34567/")
+    existing_volumes = set(docker("volume", "ls", "--quiet").split())
     sys.stdout.write(f"Logs and artifacts: {output}\n")
     sys.stdout.flush()
+    status = 1
     try:
         # Initialize shared action repositories serially before concurrent jobs.
         result = run_process(
@@ -174,9 +230,10 @@ def run_workflow(output: Path, cache: Path, selection: str, source: Path) -> int
             output / "setup.log",
             environment,
         )
-        return result or run_process(command, output / "act.log", environment)
+        status = result or run_process(command, output / "act.log", environment)
+        return status
     finally:
-        cleanup(run_id)
+        cleanup(run_id, output / "partial-native" if status else None, existing_volumes)
 
 
 def run(output: Path, cache: Path, selection: str) -> int:

@@ -88,11 +88,21 @@ def _history(
     )
 
 
-def test_initial_selected_capture_has_four_reads_through_verified_paint(
+def test_initial_selected_capture_has_five_reads_including_native_binding(
     save_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Read once for rows, before render, before install, and after real paint."""
+    """Check rows, requested capture, actual native binding, install and real paint."""
     env = save_api
+    binding_reads: list[int] = []
+    ensure_renderer = env.captures._ensure_renderer
+
+    def bind_current_renderer() -> None:
+        before = len(env.state.source_reads)
+        ensure_renderer()
+        binding_reads.append(len(env.state.source_reads) - before)
+
+    monkeypatch.setattr(env.captures, "_ensure_renderer", bind_current_renderer)
     dialog = env.main(_config(env))
     env.api.drain()  # Constructor requests run while the dialog is still hidden.
     _paint_main(env, dialog)
@@ -103,7 +113,8 @@ def test_initial_selected_capture_has_four_reads_through_verified_paint(
     assert dialog.preview_pane.ready
     assert len(dialog.session.config.review_tracking.images) == 1
     assert len(env.state.renders) == 1
-    assert len(env.state.source_reads) == 4
+    assert binding_reads == [1]
+    assert len(env.state.source_reads) == 5
 
 
 @pytest.mark.parametrize("owner", ["main", "child"])

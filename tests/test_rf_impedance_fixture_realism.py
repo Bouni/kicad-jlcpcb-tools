@@ -14,6 +14,7 @@ import pytest
 from impedance.matching import analyze
 from impedance.model import Config, Trace
 from impedance.render import Viewport
+from tests.native_rf_artifacts import RFSourceFiles, prepare_native_rf_board
 from tests.rf_impedance_combined import COMBINED_BOARDS, CombinedBoard, CombinedCircuit
 from tests.rf_impedance_fixtures import RF_CASES, RFCase
 from tests.test_rf_impedance_native import (
@@ -210,7 +211,10 @@ def test_usb_launches_do_not_shorten_the_120mm_coupled_region(case: RFCase) -> N
     ids=lambda case: case.name,
 )
 def test_native_matrix_launches_pass_real_fill_and_connectivity(
-    case: RFCase, tmp_path: Path
+    case: RFCase,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """Check current generated source through KiCad, independently of stored copies."""
     from scripts.generate_rf_impedance_fixtures import custom_rules_text, project_text
@@ -224,22 +228,13 @@ def test_native_matrix_launches_pass_real_fill_and_connectivity(
     rules = custom_rules_text(case)
     if rules is not None:
         path.with_suffix(".kicad_dru").write_text(rules, encoding="utf-8")
-    report = tmp_path / "drc.json"
-    _run_native(
-        [
-            executable,
-            "pcb",
-            "drc",
-            "--refill-zones",
-            "--save-board",
-            "--format",
-            "json",
-            "--output",
-            str(report),
-            str(path),
-        ]
+    source = RFSourceFiles.read(path)
+    artifacts = prepare_native_rf_board(
+        source, executable, request, tmp_path_factory, _run_native
     )
-    result = json.loads(report.read_text(encoding="utf-8"))
+    filled_path = artifacts.filled.write_to(tmp_path / "native-filled")
+    assert RFSourceFiles.read(path) == source
+    result = json.loads(artifacts.report)
     assert result["unconnected_items"] == [], json.dumps(
         result["unconnected_items"], indent=2
     )
@@ -267,7 +262,7 @@ def test_native_matrix_launches_pass_real_fill_and_connectivity(
     ]
     assert unexpected == [], json.dumps(unexpected, indent=2)
     assert _track_geometry(
-        _parse_board(path.read_text(encoding="utf-8"))
+        _parse_board(filled_path.read_text(encoding="utf-8"))
     ) == _track_geometry(_parse_board(case.board_text()))
 
 

@@ -114,7 +114,7 @@ def _diagnostic_image() -> Any:
     return SpacingReviewImage(
         entry,
         service.CapturedImage.from_bytes(
-            _png(1200, 800, b"\x20\x90\x40"), viewport_nm=entry.viewport_nm
+            _png(entry.width_px, entry.height_px, b"\x20\x90\x40")
         ),
     )
 
@@ -160,7 +160,137 @@ def test_html_separate_spacing_cards_keep_caption_outside_exact_capture(
     assert "Approved" in markup and "2026-10-24 12:01:00 UTC" in markup
     assert "separate from the workbook" in markup
     assert '<svg class="spacing-overlay"' not in markup
-    assert _html_images(output) == [row.image.data, capture.data]
+    assert markup.index('id="spacing-review-1"') < markup.index('id="row-1"')
+    assert 'href="#spacing-review-1">Spacing image 1</a>' in markup
+    assert 'href="#row-1">Row 1</a>' in markup
+    assert "XLSX sheet row 2" in markup
+    assert _html_images(output) == [capture.data, row.image.data]
+
+
+def test_html_keeps_exact_composite_and_original_as_one_review_entry(
+    tmp_path: Path,
+) -> None:
+    """Comparison originals remain accessible without becoming extra approvals."""
+    diagnostic = _diagnostic_image()
+    original = service.CapturedImage.from_bytes(
+        _png(1200, 800, b"\x90\x20\x40"),
+        viewport_nm=diagnostic.entry.viewport_nm,
+    )
+    composite = replace(diagnostic.capture, viewport_nm=None, original=original)
+    diagnostic = replace(diagnostic, capture=composite)
+    row = _located_row()
+    output = html_report.write_html_report(
+        (row,), tmp_path / "combined.html", spacing_reviews=(diagnostic,)
+    )
+    markup = output.read_text(encoding="utf-8")
+    assert markup.count('class="spacing-review"') == 1
+    assert "Original image" in markup
+    assert "Not approved for this capture" in markup
+    assert markup.index('id="spacing-review-1"') < markup.index('id="row-1"')
+    assert _html_images(output) == [composite.data, original.data, row.image.data]
+    assert "0.1 mm" in markup and "0.15 mm" in markup
+    assert "µm" not in markup and "μm" not in markup
+
+
+def test_html_spacing_and_workbook_numbering_are_independent(tmp_path: Path) -> None:
+    """Multiple concern cards cannot shift canonical workbook or sheet references."""
+    diagnostic = _diagnostic_image()
+    second = replace(
+        diagnostic,
+        entry=replace(diagnostic.entry, issue_id="issue-2", view_id="view-2"),
+    )
+    row = _located_row()
+    output = html_report.write_html_report(
+        (row, row),
+        tmp_path / "numbering.html",
+        spacing_reviews=(diagnostic, second),
+    )
+    markup = output.read_text(encoding="utf-8")
+    assert markup.index('id="spacing-review-2"') < markup.index('id="row-1"')
+    assert 'href="#row-1">Row 1</a>' in markup
+    assert 'href="#row-2">Row 2</a>' in markup
+    assert "XLSX sheet row 2" in markup and "XLSX sheet row 3" in markup
+    assert _html_images(output) == [
+        diagnostic.capture.data,
+        second.capture.data,
+        row.image.data,
+        row.image.data,
+    ]
+
+
+@pytest.mark.parametrize("limit", ["diagnostic", "combined"])
+def test_original_comparison_bytes_cannot_bypass_html_resource_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str
+) -> None:
+    """Both owned images count before a previous report can be replaced."""
+    from impedance import spacing_review
+    from impedance.model import ValidationError
+
+    diagnostic = _diagnostic_image()
+    original = service.CapturedImage.from_bytes(_png(1200, 800, b"\x90\x20\x40"))
+    diagnostic = replace(
+        diagnostic,
+        capture=replace(diagnostic.capture, viewport_nm=None, original=original),
+    )
+    row = _row()
+    diagnostic_bytes = len(diagnostic.capture.data) + len(original.data)
+    if limit == "diagnostic":
+        monkeypatch.setattr(
+            spacing_review, "MAX_SPACING_REVIEW_BYTES", diagnostic_bytes - 1
+        )
+    else:
+        monkeypatch.setattr(
+            service,
+            "MAX_TOTAL_IMAGE_BYTES",
+            len(row.image.data) + diagnostic_bytes - 1,
+        )
+    output = tmp_path / "previous.html"
+    output.write_bytes(b"previous approved report")
+    with pytest.raises(ValidationError, match="Spacing|combined"):
+        html_report.write_html_report((row,), output, spacing_reviews=(diagnostic,))
+    assert output.read_bytes() == b"previous approved report"
+    assert tuple(tmp_path.iterdir()) == (output,)
+
+
+def test_original_approval_cannot_approve_the_combined_html_capture(
+    tmp_path: Path,
+) -> None:
+    """Even an exact comparison-image hash is unrelated to composite consent."""
+    from impedance.review_tracking import (
+        ReviewTracking,
+        SpacingImageReview,
+        spacing_capture_fingerprint,
+    )
+
+    diagnostic = _diagnostic_image()
+    original = service.CapturedImage.from_bytes(_png(1200, 800, b"\x90\x20\x40"))
+    diagnostic = replace(
+        diagnostic, capture=replace(diagnostic.capture, original=original)
+    )
+    entry = diagnostic.entry
+    wrong_digest = spacing_capture_fingerprint(entry.input_digest, original.sha256)
+    history = ReviewTracking(
+        spacing_images=(
+            SpacingImageReview(
+                entry.spec_id,
+                entry.layer,
+                entry.issue_id,
+                entry.view_id,
+                entry.input_digest,
+                wrong_digest,
+                "2026-10-24T12:00:00.000000Z",
+                wrong_digest,
+                "2026-10-24T12:01:00.000000Z",
+            ),
+        )
+    )
+    markup = html_report.write_html_report(
+        (_row(),),
+        tmp_path / "original-consent.html",
+        spacing_reviews=(diagnostic,),
+        review_tracking=history,
+    ).read_text(encoding="utf-8")
+    assert "Not approved for this capture" in markup
 
 
 @pytest.mark.parametrize("evidence", ["absent", "viewed", "old_pixels"])

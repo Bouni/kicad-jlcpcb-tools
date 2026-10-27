@@ -29,7 +29,11 @@ from impedance.model import (
 from impedance.render import section_viewport
 from impedance.review_tracking import SpacingImageReview, spacing_capture_fingerprint
 from impedance.spacing_checks import SpacingContext
-from impedance.spacing_review import spacing_review_entries
+from impedance.spacing_review import (
+    SPACING_IMAGE_HEIGHT,
+    SPACING_IMAGE_WIDTH,
+    spacing_review_entries,
+)
 from scripts import generate_rf_impedance_fixtures as fixture_generator
 from tests.rf_impedance_combined import COMBINED_BOARDS
 from tests.rf_impedance_fixtures import (
@@ -75,7 +79,9 @@ def _prepare(case: RFCase) -> tuple[Analysis, service.ExportPlan]:
     # These geometry/workbook fixtures provide explicit prior consent for each
     # deterministic diagnostic. Native UI tests exercise the approval actions.
     spacing_context = SpacingContext(snapshot)
-    capture = service.CapturedImage.from_bytes(_png(1200, 800))
+    capture = service.CapturedImage.from_bytes(
+        _png(SPACING_IMAGE_WIDTH, SPACING_IMAGE_HEIGHT)
+    )
     reviews = []
     for entry in spacing_review_entries(
         config, snapshot, grouped.sections, context=spacing_context
@@ -103,6 +109,119 @@ def _prepare(case: RFCase) -> tuple[Analysis, service.ExportPlan]:
     )
     assert plan is not None
     return grouped, plan
+
+
+class _PreparedMatrix:
+    """Supply isolated consumers with deterministic automatic preflight results."""
+
+    def __init__(self) -> None:
+        self._prepared: dict[RFCase, tuple[Analysis, service.ExportPlan]] = {}
+
+    def prepare(self, case: RFCase) -> tuple[Analysis, service.ExportPlan]:
+        """Reuse frozen inputs, giving every consumer a fresh mutable spacing context."""
+        if case not in self._prepared:
+            raw, plan = _prepare(case)
+            # Analysis, configuration and snapshot contain only frozen records
+            # and tuples. The mutable memo tables must never enter this cache.
+            self._prepared[case] = raw, replace(plan, spacing_context=None)
+        raw, plan = self._prepared[case]
+        return raw, replace(plan, spacing_context=SpacingContext(plan.snapshot))
+
+
+@pytest.fixture(scope="module")
+def prepared_matrix() -> _PreparedMatrix:
+    """Share fixture preparation only within this matrix's pytest module."""
+    return _PreparedMatrix()
+
+
+def test_matrix_prepares_each_exact_case_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Separate consumers reuse preflight without confusing cases with equal names."""
+    case = RF_CASES[0]
+    cold_prepare = _prepare
+    calls: list[RFCase] = []
+
+    def prepare(source: RFCase) -> tuple[Analysis, service.ExportPlan]:
+        """Count real cold preparations, retaining the actual automatic preflight."""
+        calls.append(source)
+        return cold_prepare(source)
+
+    monkeypatch.setitem(globals(), "_prepare", prepare)
+    matrix = _PreparedMatrix()
+    first = matrix.prepare(case)
+    second = matrix.prepare(replace(case))
+    changed = replace(case, target_ohms="51")
+    altered = matrix.prepare(changed)
+    assert calls == [case, changed]
+    assert first == second
+    assert first[0] is second[0]
+    assert first[1] is not second[1]
+    assert first[1].snapshot is second[1].snapshot
+    assert altered[1].config.specifications[0].target_ohms == "51"
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        RF_CASES[0],
+        next(case for case in RF_CASES if case.paired and len(case.legs) == 3),
+    ),
+    ids=lambda case: case.name,
+)
+def test_shared_matrix_preparation_matches_cold_preflight(case: RFCase) -> None:
+    """Real matching, review records and selected geometry equal the uncached path."""
+    matrix = _PreparedMatrix()
+    prepared = matrix.prepare(case)
+    assert prepared == _prepare(case)
+    assert matrix.prepare(case) == prepared
+
+
+def test_matrix_consumers_have_independent_spacing_contexts() -> None:
+    """A consumer cannot warm or clear another consumer's mutable spacing caches."""
+    case = next(case for case in RF_CASES if case.paired)
+    matrix = _PreparedMatrix()
+    _, first = matrix.prepare(case)
+    _, second = matrix.prepare(case)
+    assert first.spacing_context is not None
+    assert second.spacing_context is not None
+    assert first.spacing_context is not second.spacing_context
+    assert first.spacing_context.snapshot is first.snapshot
+    assert second.spacing_context.snapshot is second.snapshot
+    assert first.spacing_context._measurements == {}
+    first.spacing_context.measurement(case.net_names, case.legs[0].layer)
+    assert first.spacing_context._measurements
+    assert second.spacing_context._measurements == {}
+    assert second.spacing_context._checks == {}
+    first.spacing_context._measurements.clear()
+    _, third = matrix.prepare(case)
+    assert third.spacing_context is not None
+    assert third.spacing_context._measurements == {}
+
+
+def test_matrix_preparation_failure_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed cold preflight cannot publish a partial reusable fixture."""
+    case = RF_CASES[0]
+    cold_prepare = _prepare
+    attempts = 0
+
+    def prepare(source: RFCase) -> tuple[Analysis, service.ExportPlan]:
+        """Fail once at the real preparation boundary before allowing a retry."""
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("preflight interrupted")
+        return cold_prepare(source)
+
+    monkeypatch.setitem(globals(), "_prepare", prepare)
+    matrix = _PreparedMatrix()
+    with pytest.raises(RuntimeError, match="preflight interrupted"):
+        matrix.prepare(case)
+    prepared = matrix.prepare(case)
+    assert matrix.prepare(case) == prepared
+    assert attempts == 2
 
 
 def _length(traces: tuple[Trace, ...]) -> float:
@@ -467,10 +586,10 @@ def test_matrix_covers_every_layer_kind_and_required_length() -> None:
 
 @pytest.mark.parametrize("case", RF_CASES, ids=lambda case: case.name)
 def test_complete_segments_pair_grouping_and_physical_layer_references(
-    case: RFCase,
+    case: RFCase, prepared_matrix: _PreparedMatrix
 ) -> None:
     """A class covers all actual profiles, including USB launch layers and widths."""
-    raw, plan = _prepare(case)
+    raw, plan = prepared_matrix.prepare(case)
     profiles = {(trace.layer, trace.width_nm) for trace in case.traces()}
     assert {(row.layer, row.width_nm) for row in raw.sections} == profiles
     assert len(raw.sections) >= len(profiles)
@@ -529,10 +648,10 @@ def test_complete_segments_pair_grouping_and_physical_layer_references(
 
 @pytest.mark.parametrize("case", RF_CASES, ids=lambda case: case.name)
 def test_rf_capture_contains_complete_assigned_regions_and_minimum_board_context(
-    case: RFCase,
+    case: RFCase, prepared_matrix: _PreparedMatrix
 ) -> None:
     """Every native track assigned to a region fits completely in its capture."""
-    _, plan = _prepare(case)
+    _, plan = prepared_matrix.prepare(case)
     for section in plan.sections:
         viewport = section_viewport(section, 800, 420, board_bounds=BOARD_BOUNDS)
         assert viewport.width / viewport.height == pytest.approx(800 / 420)
@@ -668,10 +787,10 @@ def test_signal_vias_join_real_endpoints_without_joining_export_rows(
 
 @pytest.mark.parametrize("case", RF_CASES, ids=lambda case: case.name)
 def test_matrix_workbook_contains_actual_layer_specific_row_values(
-    case: RFCase, tmp_path: Path
+    case: RFCase, tmp_path: Path, prepared_matrix: _PreparedMatrix
 ) -> None:
     """Inspect real OOXML cells rather than trusting fixture metadata or a fake writer."""
-    _, plan = _prepare(case)
+    _, plan = prepared_matrix.prepare(case)
     image = tmp_path / "geometry-placeholder.png"
     image.write_bytes(_png())
     rows = service.report_rows(

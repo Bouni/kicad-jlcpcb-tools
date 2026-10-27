@@ -107,10 +107,12 @@ def _approved_editor(
         choose_layer(api, old, layer)
         view_all_rows(api, old)
         old.preview_pane.select(
-            next(
-                index
-                for index, section in enumerate(old.preview_pane.sections)
-                if not section.exclusion_reason
+            old.preview_pane.entries.index(
+                next(
+                    section
+                    for section in old.preview_pane.sections
+                    if not section.exclusion_reason
+                )
             )
         )
         apply_layer(api, old)
@@ -437,11 +439,11 @@ def test_optional_stub_inspection_preserves_unchanged_layer_approval(
     reopened = _reopen_editor(api, board, old, api.preview)
     assert reopened._layer_drafts["F.Cu"].confirmed
     stub = next(
-        index
-        for index, section in enumerate(reopened.preview_pane.sections)
+        section
+        for section in reopened.preview_pane.sections
         if section.exclusion_reason
     )
-    reopened.preview_pane.select(stub)
+    reopened.preview_pane.select(reopened.preview_pane.entries.index(stub))
     api.drain()
     api.paint(reopened.preview_pane)
     assert reopened._layer_drafts["F.Cu"].confirmed
