@@ -425,10 +425,23 @@ def test_generate_configure_reuses_prepared_copper_and_one_empty_zone_decision(
     monkeypatch.setattr(runtime, "GenerationReviewDialog", pane)
     empty_dialog = MagicMock()
     monkeypatch.setattr(runtime, "EmptyCopperZonesDialog", empty_dialog)
+
+    def report_stub(
+        plan: Any, _board: Any, _pcbnew: Any, scratch: Path, **options: Any
+    ) -> Any:
+        """Keep report writing isolated while checking the real reuse provenance seam."""
+        assert options["capture_identity"] == (
+            str(Path(harness.board_path).resolve()),
+            None,
+        )
+        assert options["source_context"]() == plan.snapshot == filled
+        assert options["appearance_context"]() == harness.palette
+        return _reports(scratch)
+
     monkeypatch.setattr(
         runtime,
         "export_impedance_reports",
-        lambda _plan, _board, _pcbnew, scratch: _reports(scratch),
+        report_stub,
     )
     runtime.JLCPCBTools.generate_fabrication_data(window)
     window.fabrication.fill_zones.assert_called_once_with()
@@ -587,7 +600,15 @@ def test_enabled_verification_storage_failure_cannot_silently_drop_reports(
             unavailable()
         return True
 
-    def export(_plan: Any, _board: Any, _pcbnew: Any, scratch: Path) -> Any:
+    def export(
+        _plan: Any, _board: Any, _pcbnew: Any, scratch: Path, **options: Any
+    ) -> Any:
+        assert options["capture_identity"] == (
+            str(Path(harness.board_path).resolve()),
+            None,
+        )
+        assert options["source_context"]() == _plan.snapshot
+        assert options["appearance_context"]() == harness.palette
         reports = _reports(scratch)
         assert reports.workbook.read_bytes() == b"workbook"
         assert reports.html_report.read_text() == "<html>report</html>"

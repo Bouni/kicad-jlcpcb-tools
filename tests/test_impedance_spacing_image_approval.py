@@ -1,8 +1,10 @@
-"""Require explicit close-up approval independently of manufacturing rows."""
+"""Require explicit spacing-concern approval independently of manufacturing rows."""
 
 from __future__ import annotations
 
 from dataclasses import replace
+import importlib
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -40,6 +42,29 @@ def _session(api: SimpleNamespace) -> Any:
     return session
 
 
+def _separate_concern_board(api: SimpleNamespace, *, count: int = 2) -> Any:
+    """Keep short, physically disconnected departures on the same net pair."""
+    board = _gap_board(api, 250_000)
+    return replace(
+        board,
+        traces=(
+            *board.traces,
+            *(
+                replace(
+                    trace,
+                    trace_id=f"separate-{index}-{trace.trace_id}",
+                    points=tuple(
+                        (x + index * 60_000_000, y + index * 5_000_000)
+                        for x, y in trace.points
+                    ),
+                )
+                for index in range(1, count)
+                for trace in board.traces[:2]
+            ),
+        ),
+    )
+
+
 def _show(api: SimpleNamespace, dialog: Any, index: int) -> None:
     """Deliver loading and the production pane's successful paint callback."""
     dialog.preview_pane.select(index)
@@ -62,6 +87,30 @@ def _editor(api: SimpleNamespace, *, history: Any = None) -> Any:
     api.paint(editor.preview_pane)
     assert editor.preview_pane.spacing_entries
     return editor
+
+
+def test_editor_list_selection_names_the_spacing_exception_action(
+    draft_api: SimpleNamespace,
+) -> None:
+    """The actual image-list handler distinguishes exception consent from trace review."""
+    api = draft_api
+    editor = _editor(api)
+    pane = editor.preview_pane
+    trace, spacing = pane.sections[0], pane.spacing_entries[0]
+    for entry, label in (
+        (trace, "Approve image"),
+        (spacing, "Approve spacing exception"),
+        (trace, "Approve image"),
+        (spacing, "Approve spacing exception"),
+    ):
+        pane.checklist.Select(pane.entries.index(entry))
+        pane.checklist.emit(api.wx.EVT_LIST_ITEM_SELECTED)
+        api.drain()
+        api.paint(pane)
+        assert pane.selected_entry is entry
+        assert editor.approve_layer.GetLabel() == label
+        assert not editor.review_tracking.spacing_images
+    assert not editor._layer_drafts["F.Cu"].confirmed
 
 
 def test_workbook_approval_cannot_bulk_approve_spacing_images(
@@ -259,6 +308,175 @@ def test_editor_cancel_and_apply_keep_diagnostic_events_transactional(
     assert (
         reopened.review_tracking.spacing_images == editor.review_tracking.spacing_images
     )
+
+
+def test_policy6_to_percentage_review_requires_new_consent_and_preserves_saved_history(
+    draft_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Preparation/Cancel cannot consent or write; explicit policy-7 approval retains both histories."""
+    from impedance.model import Config as StoredConfig
+
+    from .test_impedance_dialog_preview import _png
+    from .test_impedance_netclass_dialog import _drive_spacing_viewer, apply_layer
+    from .test_impedance_spacing_tracking import _repository
+
+    api = draft_api
+    policies = importlib.import_module(api.dialog.__package__ + ".spacing_review")
+    service = importlib.import_module(api.dialog.__package__ + ".service")
+    tracking = api.dialog.tracking
+    capture = service.CapturedImage.from_bytes(
+        _png(size=(policies.SPACING_IMAGE_WIDTH, policies.SPACING_IMAGE_HEIGHT))
+    )
+    monkeypatch.setattr(api, "capture", capture)
+    monkeypatch.setattr(api, "preview", lambda *_args, **_kwargs: capture)
+    with monkeypatch.context() as old_renderer:
+        old_renderer.setattr(policies, "SPACING_RENDER_POLICY_REVISION", 6)
+        old_renderer.setattr(tracking, "utc_now", lambda: STAMP)
+        editor = _editor(api)
+        old_entries = editor.preview_pane.spacing_entries
+        apply_layer(api, editor)
+        assert editor._layer_drafts["F.Cu"].confirmed
+        session = api.dialog.ReviewSession(
+            replace(_config(api), review_tracking=editor.review_tracking),
+            _gap_board(api, 250_000),
+        )
+        session.refresh()
+        session.capture_digests.update(editor.capture_digests)
+        session.spacing_capture_digests.update(editor.spacing_capture_digests)
+        session.approve()
+        saved = session.save_result()
+    historical = saved.review_tracking
+    assert historical.images and historical.layers and historical.spacing_images
+    assert all(record.approved_at_utc == STAMP for record in historical.spacing_images)
+    repository = _repository(tmp_path)
+    revision = [repository.save(StoredConfig.from_dict(saved.to_dict()), 0)]
+    stored_before = repository.database.load_config(repository.board_id)
+    database_before = repository.database.path.read_bytes()
+    writes: list[Any] = []
+
+    def persist(config: Any) -> None:
+        """Write the real Save event's candidate through the board-scoped SQLite repository."""
+        writes.append(config)
+        revision[0] = repository.save(
+            StoredConfig.from_dict(config.to_dict()), revision[0]
+        )
+
+    def reopen() -> Any:
+        """Reload saved bytes and exercise the actual owner, capture, and paint handlers."""
+        config, current_revision = repository.load()
+        assert current_revision == revision[0]
+        dialog = api.dialog.ImpedanceDialog(
+            None,
+            api.model.Config.from_dict(config.to_dict()),
+            session.snapshot,
+            api.preview,
+            lambda: session.snapshot,
+            save_config=persist,
+        )
+        dialog.on_screen = True
+        dialog._on_main_paint(SimpleNamespace(Skip=lambda: None))
+        api.drain()
+        api.paint(dialog.preview_pane)
+        api.finish_preparation(dialog)
+        return dialog
+
+    current = reopen()
+    entries = current.preview_pane.spacing_entries
+    assert current.session.pending_spacing_reviews == entries and entries
+    assert policies.SPACING_RENDER_POLICY_REVISION == 7
+    assert {entry.view_id for entry in entries}.isdisjoint(
+        entry.view_id for entry in old_entries
+    )
+    assert current.session.config.review_tracking == historical
+    assert all(
+        current.session.spacing_capture_digests[entry.view_id]
+        == tracking.spacing_capture_fingerprint(entry.input_digest, api.capture.sha256)
+        for entry in entries
+    )
+    assert {
+        section.section_id for section in current.preview_pane.sections
+    } <= current._approved_main_image_ids()
+    assert not current.session.approved
+    with pytest.raises(api.model.ValidationError, match="individual approval"):
+        service.prepare(current.session.config, session.snapshot)
+
+    def cancel_readable_view(viewer: Any) -> int:
+        """Cancel only after the real enlarged canvas records readable current pixels."""
+        result = _drive_spacing_viewer(api, viewer, approve=False)
+        assert viewer._composition is not None
+        assert (
+            viewer._composition.schematic_rect in viewer._composition.required_regions
+        )
+        assert viewer.canvas._recorded and not viewer.approved
+        return result
+
+    with monkeypatch.context() as cancelled_view:
+        cancelled_view.setattr(api.wx.Dialog, "ShowModal", cancel_readable_view)
+        current.spacing_approve_button.emit(api.wx.EVT_BUTTON)
+    new_view = tracking.find_spacing_image(
+        current.session.config.review_tracking,
+        entries[0].spec_id,
+        entries[0].layer,
+        entries[0].view_id,
+    )
+    assert (
+        new_view is not None and new_view.viewed_digest and not new_view.approved_digest
+    )
+    assert current.session.pending_spacing_reviews == entries
+    assert all(
+        record in current.session.config.review_tracking.spacing_images
+        for record in historical.spacing_images
+    )
+    assert current.session.config.review_tracking.images == historical.images
+    assert current.session.config.review_tracking.layers == historical.layers
+    current.emit(api.wx.EVT_BUTTON, api.wx.ID_CANCEL)
+    assert current._closing and writes == []
+    assert repository.database.load_config(repository.board_id) == stored_before
+    assert repository.database.path.read_bytes() == database_before
+    assert repository.load()[1] == 1
+
+    current = reopen()
+    assert current.session.config.review_tracking == historical
+    assert (
+        current.session.pending_spacing_reviews == current.preview_pane.spacing_entries
+    )
+    fresh_stamp = "2026-10-27T12:00:00.000000Z"
+    monkeypatch.setattr(tracking, "utc_now", lambda: fresh_stamp)
+    for entry in current.preview_pane.spacing_entries:
+        _show(api, current, current.preview_pane.entries.index(entry))
+        current.spacing_approve_button.emit(api.wx.EVT_BUTTON)
+        assert current.session.spacing_review_current(entry)
+    assert current.session.approved
+    assert current.session.config.review_tracking.images == historical.images
+    assert current.session.config.review_tracking.layers == historical.layers
+    current.emit(api.wx.EVT_BUTTON, api.wx.ID_OK)
+    assert current.modal_result == api.wx.ID_OK and len(writes) == 1
+    persisted_history = current.session.config.review_tracking
+    assert len(persisted_history.spacing_images) == len(old_entries) + len(entries)
+    assert all(
+        record in persisted_history.spacing_images
+        for record in historical.spacing_images
+    )
+    assert {
+        record.approved_at_utc
+        for record in persisted_history.spacing_images
+        if record.view_id in {entry.view_id for entry in entries}
+    } == {fresh_stamp}
+
+    def unexpected_event() -> str:
+        raise AssertionError(
+            "Reopening current captures must not manufacture review events"
+        )
+
+    monkeypatch.setattr(tracking, "utc_now", unexpected_event)
+    final = reopen()
+    assert revision == [2] and final.session.approved
+    assert final.session.config.review_tracking == persisted_history
+    assert final.session.config.review_tracking.images == historical.images
+    assert final.session.config.review_tracking.layers == historical.layers
+    assert service.prepare(final.session.config, session.snapshot) is not None
 
 
 def test_two_spacing_images_require_two_individual_approvals(
@@ -1290,26 +1508,3 @@ def test_cold_spacing_restore_can_exceed_thirty_seconds_without_new_consent(
         assert dialog.session.pending_spacing_reviews
         assert dialog.session.config.review_tracking == history
         assert events == []
-
-
-def _separate_concern_board(api: SimpleNamespace, *, count: int = 2) -> Any:
-    """Keep short, physically disconnected departures on the same net pair."""
-    board = _gap_board(api, 250_000)
-    return replace(
-        board,
-        traces=(
-            *board.traces,
-            *(
-                replace(
-                    trace,
-                    trace_id=f"separate-{index}-{trace.trace_id}",
-                    points=tuple(
-                        (x + index * 60_000_000, y + index * 5_000_000)
-                        for x, y in trace.points
-                    ),
-                )
-                for index in range(1, count)
-                for trace in board.traces[:2]
-            ),
-        ),
-    )

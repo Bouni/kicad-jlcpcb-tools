@@ -215,6 +215,30 @@ def test_refresh_removes_contained_row_and_keeps_surviving_selection(
     assert dialog.session.approved is False
 
 
+def test_context_only_refresh_keeps_the_actual_preview_trace(
+    draft_api: SimpleNamespace,
+) -> None:
+    """A changed board context retains the chosen trace when no concern takes priority."""
+    api = draft_api
+    config, board = _scenario(api, nested=False)
+    dialog = _open(api, config, board)
+    selected = next(
+        index
+        for index, section in enumerate(dialog.session.analysis.sections)
+        if section.net_names == ("/OTHER",)
+    )
+    dialog.sections.SelectRow(selected)
+    dialog._on_preview(selected)
+    selected_entry = dialog.preview_pane.selected_entry
+    assert not dialog.session.spacing_entries
+
+    assert dialog._refresh_rows(replace(board, context_digest="new board context"))
+
+    assert dialog.sections.GetSelectedRow() == selected
+    assert dialog.preview_pane.selected_entry == selected_entry
+    assert not dialog.session.approved
+
+
 @pytest.mark.parametrize("included_inner", [False, True])
 def test_old_saved_inner_row_cannot_restore_a_suppressed_candidate(
     draft_api: SimpleNamespace,

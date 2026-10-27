@@ -377,13 +377,25 @@ def write_case_report(
     snapshot: BoardSnapshot,
     sections: tuple[Section, ...],
 ) -> Path:
-    """Use the production HTML writer with already-captured, ordered PNGs."""
-    from impedance.html_report import OUTPUT_FILENAME, write_html_report
-    from impedance.service import CapturedImage, prepare, report_rows
+    """Write an explicitly unapproved contributor preview from captured PNGs.
 
-    plan = prepare(config, snapshot)
-    if plan is None or plan.sections != sections:
+    This gallery never fabricates a workbook or supplies manufacturing consent.
+    Check the captured section identities against current analysis, retaining
+    the configuration's absent or historical review evidence without stamping
+    artificial viewing or approval events.
+    """
+    from impedance.html_report import OUTPUT_FILENAME, write_html_report
+    from impedance.service import CapturedImage, ExportPlan, report_rows
+
+    analysis = analyze(config, snapshot)
+    validate_review(config, analysis)
+    included = set(config.included_section_ids)
+    current_sections = tuple(
+        section for section in analysis.sections if section.section_id in included
+    )
+    if not config.enabled or not sections or current_sections != sections:
         raise ValueError("The example report no longer matches its captured sections")
+    plan = ExportPlan(config, snapshot, analysis, sections)
     images = tuple(
         directory / f"row-{index}-{section.layer.replace('.', '_')}.png"
         for index, section in enumerate(sections, 1)
@@ -391,7 +403,7 @@ def write_case_report(
     return write_html_report(
         report_rows(plan, tuple(CapturedImage.load(path) for path in images)),
         directory / OUTPUT_FILENAME,
-        board_name=case.title,
+        board_name=f"{case.title} — Sample preview (unapproved)",
     )
 
 

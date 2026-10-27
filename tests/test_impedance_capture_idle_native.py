@@ -170,20 +170,45 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
         selected_id = dialog._row_ids[1]
 
         def inspect() -> None:
-            wait_until(
-                wx,
-                lambda: bool(progress["callback"])
-                and bool(progress["timer"])
-                and len(worker_results) == 3
-                and dialog._calculation_cancel is None
-                and len(dialog.session.config.width_results) == 3
-                and dialog.sections.GetSelectedRow() == 1
-                and dialog.preview_pane.selected_section is not None
-                and dialog.preview_pane.selected_section.section_id == selected_id
-                and dialog.preview_pane.displayed,
-                timeout_ms=5000,
-                reason="Background captures starved completion, native input or visible paint",
-            )
+            try:
+                wait_until(
+                    wx,
+                    lambda: bool(progress["callback"])
+                    and bool(progress["timer"])
+                    and len(worker_results) == 3
+                    and dialog._calculation_cancel is None
+                    and len(dialog.session.config.width_results) == 3
+                    and dialog.sections.GetSelectedRow() == 1
+                    and dialog.preview_pane.selected_section is not None
+                    and dialog.preview_pane.selected_section.section_id == selected_id
+                    and dialog.preview_pane.displayed,
+                    timeout_ms=5000,
+                    reason="Background captures starved completion, native input or visible paint",
+                )
+            except AssertionError as error:
+                selected = dialog.preview_pane.selected_section
+                row = dialog.sections.GetSelectedRow()
+                states = {
+                    "callback": bool(progress["callback"]),
+                    "timer": bool(progress["timer"]),
+                    "worker_results": len(worker_results) == 3,
+                    "calculation_finished": dialog._calculation_cancel is None,
+                    "width_results": len(dialog.session.config.width_results) == 3,
+                    "selected_row": row == 1,
+                    "preview_selected": selected is not None,
+                    "preview_target": selected is not None
+                    and selected.section_id == selected_id,
+                    "displayed": dialog.preview_pane.displayed,
+                }
+                raise AssertionError(
+                    f"{error}; readiness={states}; expected_id={selected_id!r}; "
+                    f"grid_id={dialog._row_ids[row] if 0 <= row < len(dialog._row_ids) else None!r}; "
+                    f"preview_id={selected.section_id if selected else None!r}; "
+                    f"row_epoch={dialog.sections._row_epoch}; "
+                    f"completed_workers={worker_results!r}; "
+                    f"pending_captures={len(dialog._capture_prepare_sections)}; "
+                    f"painted_ids={painted!r}"
+                ) from error
             assert warm_started == [True], "Warming preceded the first selected paint"
             assert progress["callback"][0] > 0 and progress["timer"][0] > 0
             assert dialog._capture_prepare_sections, (
@@ -201,6 +226,134 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
         finally:
             release_worker.set()
             probe.Stop()
+            dialog.Destroy()
+            pump(wx)
+
+    run_native(exercise)
+
+
+def test_native_width_completion_preserves_pending_row_navigation(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    """A completed width batch cannot discard navigation queued by real mouse input."""
+    if isolated_native(request, "KICAD_IMPEDANCE_PENDING_SELECTION_CHILD"):
+        return
+    api = _api(monkeypatch)
+    snapshot, config, capture = _fixture(api)
+    snapshot = replace(
+        snapshot,
+        traces=snapshot.traces[:3],
+        net_class_memberships=snapshot.net_class_memberships[:3],
+        net_class_context_digest="native-pending-selection-three-routes",
+    )
+    config = replace(config, stackup=_stackup(api))
+    stackup_model = importlib.import_module(f"{api.dialog.__package__}.stackup_model")
+    worker_results: list[str] = []
+
+    def calculate(stackup: Any, spec: Any, layer: str, *, cancel: Any) -> Any:
+        worker_results.append(spec.spec_id)
+        return stackup_model.WidthResult(
+            spec.spec_id,
+            layer,
+            stackup_model.calculation_fingerprint(stackup, spec, layer),
+            "success",
+            150_000,
+            calculated_at_utc="2026-10-20T00:00:00.000000Z",
+            model="Microstrip1B",
+            calculation_digest="b" * 64,
+        )
+
+    def exercise(frame: Any, wx: Any) -> None:
+        captures: list[str] = []
+        painted: list[str] = []
+        held: list[tuple[Any, ...]] = []
+        delivered: list[tuple[int, int]] = []
+        errors: list[BaseException] = []
+
+        def render(section: Any, **_options: Any) -> Any:
+            captures.append(section.section_id)
+            return capture
+
+        dialog = api.dialog.ImpedanceDialog(
+            frame,
+            config,
+            snapshot,
+            preview=render,
+            refresh_snapshot=lambda: snapshot,
+            fetch_stackup_catalog=lambda *_args, **_options: (),
+            calculate_width=calculate,
+        )
+        original_call_after = wx.CallAfter
+        width_delivery = api.dialog._deliver_width_results
+
+        def call_after(callback: Any, *args: Any, **kwargs: Any) -> None:
+            """Order actual completion before notification, outside the input handler."""
+            if callback is width_delivery and args[0]() is dialog:
+                held.append(args)
+                return
+            if callback == dialog.sections._notify_selection and held:
+                completion = held.pop()
+
+                def complete_then_notify() -> None:
+                    try:
+                        old_epoch = dialog.sections._row_epoch
+                        width_delivery(*completion)
+                        delivered.append((old_epoch, dialog.sections._row_epoch))
+                    except BaseException as error:
+                        errors.append(error)
+                    finally:
+                        original_call_after(callback, *args, **kwargs)
+
+                original_call_after(complete_then_notify)
+                return
+            original_call_after(callback, *args, **kwargs)
+
+        monkeypatch.setattr(wx, "CallAfter", call_after)
+
+        def observe_paint(event: Any) -> None:
+            selected = dialog.preview_pane.selected_section
+            if selected is not None:
+                painted.append(selected.section_id)
+            event.Skip()
+
+        dialog.preview_pane.canvas.Bind(wx.EVT_PAINT, observe_paint)
+        selected_id = dialog._row_ids[1]
+
+        def inspect() -> None:
+            wait_until(wx, lambda: bool(held) and dialog.preview_pane.displayed)
+            assert len(worker_results) == 3
+            assert dialog.session.config.width_results == ()
+            assert dialog.preview_pane.selected_section.section_id != selected_id
+            captures.clear()
+            painted.clear()
+            _post_row_click(wx, dialog.sections, 1)
+            wait_until(
+                wx,
+                lambda: bool(errors)
+                or bool(delivered)
+                and dialog._calculation_cancel is None
+                and len(dialog.session.config.width_results) == 3
+                and dialog._row_ids[dialog.sections.GetSelectedRow()] == selected_id
+                and dialog.preview_pane.selected_section is not None
+                and dialog.preview_pane.selected_section.section_id == selected_id
+                and dialog.preview_pane.displayed
+                and selected_id in painted,
+                reason="Width completion discarded pending native row navigation",
+            )
+            if errors:
+                raise errors[0]
+            assert len(delivered) == 1 and delivered[0][1] > delivered[0][0]
+            assert selected_id in captures
+            assert (
+                dialog.preview_pane.image_digest(dialog.preview_pane.selected_section)
+                == capture.sha256
+            )
+            _click(wx, dialog.FindWindow(wx.ID_CANCEL))
+
+        try:
+            assert _modal(wx, dialog, inspect) == wx.ID_CANCEL
+        finally:
+            monkeypatch.setattr(wx, "CallAfter", original_call_after)
             dialog.Destroy()
             pump(wx)
 

@@ -3,9 +3,11 @@
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import replace
+from functools import wraps
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import struct
@@ -53,6 +55,366 @@ def _svg_paint(node: ET.Element) -> dict[str, str]:
     style = paint.pop("style", "")
     paint.update(field.split(":", 1) for field in style.split(";") if ":" in field)
     return paint
+
+
+@pytest.mark.native_wx
+@pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native raster checks require an enabled desktop session",
+)
+@pytest.mark.parametrize(
+    "variant, prepared",
+    (
+        ("trace", False),
+        ("original", False),
+        ("original", True),
+        ("combined", False),
+        ("combined", True),
+    ),
+)
+@pytest.mark.parametrize("scene", ("gradient", "inline-transform", "malformed-path"))
+def test_native_raster_roundtrip_preserves_inherited_gradient_stops(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    variant: str,
+    prepared: bool,
+    scene: str,
+) -> None:
+    """Internal XML pruning must retain NanoSVG's literal xlink:href references."""
+    from tests.native_wx_support import isolated_native
+
+    if isolated_native(request, "KICAD_IMPEDANCE_GRADIENT_RASTER_CHILD"):
+        return
+    wx = pytest.importorskip("wx")
+    svg = pytest.importorskip("wx.svg")
+    from impedance.spacing_review import SPACING_RENDER_POLICY_REVISION
+
+    app = wx.GetApp() or wx.App(False)
+    assert app
+    geometry = (
+        '<defs><linearGradient id="base" x1="0%" y1="0%" x2="100%" y2="0%">'
+        '<stop offset="0%" stop-color="#ff0000"/>'
+        '<stop offset="100%" stop-color="#0000ff"/>'
+        '</linearGradient><linearGradient id="derived" xlink:href="#base"/></defs>'
+        '<rect x="10" y="10" width="100" height="60" fill="url(#derived)"/>'
+        '<circle cx="5000" cy="5000" r="5" fill="#00ff00"/>'
+    )
+    height = 80
+    if scene == "inline-transform":
+        geometry = '<circle cx="500" cy="50" r="10" fill="#ff0000" style="transform:translate(-450,0)"/>'
+    elif scene == "malformed-path":
+        geometry = '<path d="M 500 50 L 500 M 60 500 L 70 500 L 80 500 L 90" fill="none" stroke="#ff0000" stroke-width="10"/>'
+        height = 1000
+    attributes = (
+        'xmlns="http://www.w3.org/2000/svg" '
+        f'xmlns:xlink="http://www.w3.org/1999/xlink" width="120" height="{height}" '
+        f'viewBox="0 0 120 {height}"'
+    )
+    background = f'<rect width="120" height="{height}" fill="#10151d"/>'
+    view = (
+        "data-impedance-view" if variant == "trace" else "data-impedance-spacing-view"
+    )
+    group = (
+        f'<g {view}="detail" transform="translate(0.000000,0.000000) scale(1.000000000)">'
+        + geometry
+        + "</g>"
+    )
+    expected_source = tmp_path / "expected.svg"
+    expected_source.write_text(f"<svg {attributes}>{background}{group}</svg>")
+    if variant == "trace":
+        content = expected_source.read_text()
+    else:
+        marker = (
+            f' data-spacing-composition="{SPACING_RENDER_POLICY_REVISION}"'
+            if variant == "combined"
+            else ""
+        )
+        content = (
+            f"<svg {attributes}{marker}>{background}"
+            f'<svg x="0" y="0" width="120" height="{height}" data-spacing-raster-panel="detail">'
+            + background
+            + group
+            + "</svg></svg>"
+        )
+    source = tmp_path / "capture.svg"
+    source.write_text(content)
+    expected_bitmap = svg.SVGimage.CreateFromFile(str(expected_source)).ConvertToBitmap(
+        width=120, height=height
+    )
+    expected = expected_bitmap.ConvertToImage()
+    destination = tmp_path / "actual.png"
+    prepared_panels = None
+    if prepared:
+        document = ET.fromstring(content)  # noqa: S314 -- Literal local SVG.
+        renderer_module._raster_svg_namespaces(document)
+        panel = next(
+            node for node in document.iter() if node.get("data-spacing-raster-panel")
+        )
+        group = next(node for node in panel if node.get("data-impedance-spacing-view"))
+        fragments = tuple(
+            renderer_module._prepare_raster_fragment(
+                node, renderer_module._style(group)
+            )
+            for node in group
+        )
+        visible = "".join(
+            fragment.visible((0, 0, 120, height), 2) for fragment in fragments
+        )
+        selected = ET.fromstring(  # noqa: S314 -- Locally generated fragments.
+            '<g xmlns:xlink="http://www.w3.org/1999/xlink">' + visible + "</g>"
+        )
+        renderer_module._raster_svg_namespaces(selected)
+        group[:] = list(selected)
+        renderer_module._raster_svg_namespaces(panel)
+        prepared_panels = (ET.tostring(panel, encoding="unicode"),)
+    _wx_rasterize(source, destination, 120, height, prepared_panels=prepared_panels)
+    actual = wx.Image(str(destination))
+    assert actual.IsOk()
+    # These independently sampled colors establish that the baseline gradient
+    # uses its inherited stops rather than both images silently painting black.
+    if scene == "gradient":
+        assert expected.GetRed(20, 40) > expected.GetBlue(20, 40)
+        assert expected.GetBlue(100, 40) > expected.GetRed(100, 40)
+    elif scene == "inline-transform":
+        assert expected.GetRed(50, 50) > 200
+    else:
+        assert expected.GetRed(70, 500) > 200
+    assert bytes(actual.GetData()) == bytes(expected.GetData())
+
+
+@pytest.mark.native_wx
+@pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native raster checks require an enabled desktop session",
+)
+def test_native_generated_original_preserves_existing_gradient_capture(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A real generated Original keeps the prefix accepted by the prior NanoSVG path."""
+    from impedance.matching import analyze
+    from impedance.spacing_review import spacing_review_entries
+    from tests.native_wx_support import isolated_native
+    from tests.test_impedance_spacing_checks import _parallel
+    from tests.test_impedance_spacing_render import _renderer
+    from tests.test_impedance_spacing_review_entries import _config
+
+    if isolated_native(request, "KICAD_IMPEDANCE_GENERATED_GRADIENT_CHILD"):
+        return
+    wx = pytest.importorskip("wx")
+    svg = pytest.importorskip("wx.svg")
+    app = wx.GetApp() or wx.App(False)
+    assert app
+    config, snapshot = _config(), _parallel(250_000)
+    entry = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )[0]
+    renderer, _ = _renderer(monkeypatch)
+    native = (
+        renderer.context_svg(entry.layer)
+        .replace("<svg ", '<svg xmlns:xlink="http://www.w3.org/1999/xlink" ', 1)
+        .replace(
+            "</svg>",
+            '<defs><linearGradient id="base"><stop offset="0" stop-color="#ff0000"/>'
+            '<stop offset="1" stop-color="#0000ff"/></linearGradient>'
+            '<linearGradient id="derived" xlink:href="#base"/></defs>'
+            '<rect x="0" y="0" width="1000" height="1000" fill="url(#derived)"/></svg>',
+        )
+    )
+    monkeypatch.setattr(renderer, "context_svg", lambda layer: native)
+    renderer._rasterizer = _wx_rasterize
+    renderer._use_native_panels = True
+    original = renderer.spacing_original_svg(entry)
+    dimensions = entry.composition.detail_rect[2:]
+    expected = (
+        svg.SVGimage.CreateFromBytes(original.encode())
+        .ConvertToBitmap(width=dimensions[0], height=dimensions[1])
+        .ConvertToImage()
+    )
+    x, y = dimensions[0] // 2, dimensions[1] // 2
+    assert expected.GetRed(x, y) > 40 or expected.GetBlue(x, y) > 40
+    destination = tmp_path / "original.png"
+    renderer.render_spacing_original(entry, destination)
+    assert renderer.spacing_original_svg(entry) == original
+    actual = wx.Image(str(destination))
+    assert actual.IsOk()
+    assert bytes(actual.GetData()) == bytes(expected.GetData())
+
+
+@pytest.mark.native_wx
+@pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native raster checks require an enabled desktop session",
+)
+def test_native_trace_png_reuses_prepared_layer_before_applying_emphasis(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Native PNG paint work is proportional to visible copper, with identical pixels."""
+    from impedance.matching import analyze
+    from impedance.spacing_review import spacing_review_entries
+    from tests.native_wx_support import isolated_native
+    from tests.test_impedance_spacing_checks import _parallel
+    from tests.test_impedance_spacing_review_entries import _config
+
+    if isolated_native(request, "KICAD_IMPEDANCE_TRACE_PREPARED_CHILD"):
+        return
+    wx = pytest.importorskip("wx")
+    svg = pytest.importorskip("wx.svg")
+    app = wx.GetApp() or wx.App(False)
+    assert app
+    native = SVG.replace(
+        "</svg>",
+        "".join(
+            f'<path d="M {i},0 L {i},10" fill="none" stroke="#c83434" stroke-width="1"/>'
+            for i in range(500)
+        )
+        + "</svg>",
+    )
+    module = pcbnew()
+    fake_plotter(module, tmp_path, sources={0: native})
+    config, snapshot = _config(), _parallel(250_000)
+    entry = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )[0]
+    with SectionRenderer(FakeBoard(), module) as renderer:
+        renderer.spacing_svg(entry)
+        full = renderer.svg(section())
+        expected_bitmap = svg.SVGimage.CreateFromBytes(full.encode()).ConvertToBitmap(
+            width=800, height=420
+        )
+        expected = expected_bitmap.ConvertToImage()
+        emphasized: list[int] = []
+        parsed: list[str] = []
+        emphasize = renderer_module._emphasize_native_traces
+        bounds = renderer_module._native_shape_bounds
+
+        def count_emphasis(root: ET.Element, *args: Any, **kwargs: Any) -> None:
+            """Count the real paint traversal without replacing its behavior."""
+            emphasized.append(
+                sum(node.tag in renderer_module._SHAPES for node in root.iter())
+            )
+            emphasize(root, *args, **kwargs)
+
+        def count_bounds(node: ET.Element) -> Any:
+            """Detect geometry decoding after immutable scene preparation."""
+            parsed.append(node.tag)
+            return bounds(node)
+
+        monkeypatch.setattr(renderer_module, "_emphasize_native_traces", count_emphasis)
+        monkeypatch.setattr(renderer_module, "_native_shape_bounds", count_bounds)
+        destination = tmp_path / "trace.png"
+        renderer.render(section(), destination)
+        actual = wx.Image(str(destination))
+        assert bytes(actual.GetData()) == bytes(expected.GetData())
+        assert emphasized == [1]
+        assert parsed == []
+        monkeypatch.setattr(renderer_module, "_emphasize_native_traces", emphasize)
+        assert renderer.svg(section()) == full
+
+
+@pytest.mark.native_wx
+@pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native raster checks require an enabled desktop session",
+)
+@pytest.mark.parametrize("method", ("svg", "spacing_svg", "spacing_original_svg"))
+@pytest.mark.parametrize("scope", ("instance", "subclass"))
+def test_native_png_respects_public_svg_overrides(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    method: str,
+    scope: str,
+) -> None:
+    """Native optimizations retain pixels explicitly supplied by public methods."""
+    from impedance.matching import analyze
+    from impedance.spacing_review import spacing_review_entries
+    from tests.native_wx_support import isolated_native
+    from tests.test_impedance_spacing_checks import _parallel
+    from tests.test_impedance_spacing_review_entries import _config
+
+    if isolated_native(request, "KICAD_IMPEDANCE_PUBLIC_SVG_OVERRIDE_CHILD"):
+        return
+    wx = pytest.importorskip("wx")
+    app = wx.GetApp() or wx.App(False)
+    assert app
+    module = pcbnew()
+    fake_plotter(module, tmp_path)
+    config, snapshot = _config(), _parallel(250_000)
+    entry = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )[0]
+    dimensions = (
+        (800, 420)
+        if method == "svg"
+        else (
+            (1600, 1000)
+            if method == "spacing_svg"
+            else entry.composition.detail_rect[2:]
+        )
+    )
+    width, height = dimensions
+    supplied = f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><rect width="{width}" height="{height}" fill="#ff0000"/></svg>'
+    renderer_type = (
+        SectionRenderer
+        if scope == "instance"
+        else type(
+            "CustomSectionRenderer",
+            (SectionRenderer,),
+            {method: lambda *args, **kwargs: supplied},
+        )
+    )
+    with renderer_type(FakeBoard(), module) as renderer:
+        if scope == "instance":
+            monkeypatch.setattr(renderer, method, lambda *args, **kwargs: supplied)
+        destination = tmp_path / "override.png"
+        if method == "svg":
+            renderer.render(section(), destination)
+        elif method == "spacing_svg":
+            renderer.render_spacing(entry, destination)
+        else:
+            renderer.render_spacing_original(entry, destination)
+        image = wx.Image(str(destination))
+        assert (
+            image.GetRed(width // 2, height // 2),
+            image.GetGreen(width // 2, height // 2),
+            image.GetBlue(width // 2, height // 2),
+        ) == (255, 0, 0)
+
+
+@pytest.mark.parametrize("explicit", (False, True))
+def test_wrapped_four_argument_default_backend_keeps_public_svg_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, explicit: bool
+) -> None:
+    """A wraps decorator cannot imply support for private rasterizer keywords."""
+    from impedance.matching import analyze
+    from impedance.spacing_review import spacing_review_entries
+    from tests.test_impedance_spacing_checks import _parallel
+    from tests.test_impedance_spacing_review_entries import _config
+
+    captured: list[str] = []
+
+    @wraps(renderer_module._wx_rasterize)
+    def four_arguments(
+        source: Path, destination: Path, width: int, height: int
+    ) -> None:
+        """Keep the established four-argument callback despite wrapped metadata."""
+        captured.append(source.read_text())
+        png_rasterizer(source, destination, width, height)
+
+    if not explicit:
+        monkeypatch.setattr(renderer_module, "_wx_rasterize", four_arguments)
+    module = pcbnew()
+    fake_plotter(module, tmp_path)
+    config, snapshot = _config(), _parallel(250_000)
+    entry = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )[0]
+    with SectionRenderer(
+        FakeBoard(), module, rasterizer=four_arguments if explicit else None
+    ) as renderer:
+        expected = renderer.spacing_svg(entry)
+        renderer.render_spacing(entry, tmp_path / "wrapped.png")
+    assert captured == [expected]
 
 
 @pytest.fixture(autouse=True)
