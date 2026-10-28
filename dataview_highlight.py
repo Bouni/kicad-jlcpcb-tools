@@ -13,9 +13,9 @@ except ImportError:  # pragma: no cover - test environments may not have wx
     dv = None  # type: ignore[assignment]
 
 try:
-    from .value_normalize import canonicalize, quantity_for_reference
+    from .value_normalize import canonicalize, quantity_for_reference, sign_spellings
 except ImportError:  # pragma: no cover - test import fallback
-    from value_normalize import canonicalize, quantity_for_reference
+    from value_normalize import canonicalize, quantity_for_reference, sign_spellings
 
 
 _HIGHLIGHT_FG = (180, 120, 0)
@@ -276,7 +276,9 @@ def expand_value(reference: str, value: str) -> list[str]:
             # such as 103 is the thing to match.
             number = f"0{raw}" if raw.startswith(".") else raw
             variants = [f"{number}Ω"]
-        variants.append(canonical)
+        # The catalog mostly writes a micro sign as u, but some descriptions
+        # write µ or μ, so 2u2 is looked for as 2.2µF and 2.2μF too.
+        variants.extend(sign_spellings(canonical))
 
     # Highlighting folds case, so 10KΩ already covers the catalog's 10kΩ.
     deduped = []

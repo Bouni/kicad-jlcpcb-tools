@@ -188,6 +188,14 @@ def _params_spans(reference, value, params):
     return [text[a:b] for a, b in find_highlight_spans(text, terms, whole_values=True)]
 
 
+def test_catalog_spelling_lights_each_micro_sign():
+    """A micro prefix lights however the catalog writes it: u, µ or μ."""
+    for params in ("2.2uF 25V", "2.2µF 25V", "2.2μF 25V"):
+        assert _params_spans("C1", "2u2", params) == [params.split()[0]]
+    for params in ("2.2uH 1A", "2.2µH 1A", "2.2μH 1A"):
+        assert _params_spans("L1", "2u2", params) == [params.split()[0]]
+
+
 def test_thermistor_keeps_its_bare_code():
     """A thermistor's params show its part number, where its code is the match."""
     assert "103" in expand_value("TH1", "103")
