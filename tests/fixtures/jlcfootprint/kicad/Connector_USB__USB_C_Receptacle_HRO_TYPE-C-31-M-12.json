@@ -1,0 +1,213 @@
+{
+ "library": "Connector_USB",
+ "name": "USB_C_Receptacle_HRO_TYPE-C-31-M-12",
+ "version": "20260206",
+ "pads": [
+  {
+   "number": "A1",
+   "x": -3.25,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "A4",
+   "x": -2.45,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "A5",
+   "x": -1.25,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "A6",
+   "x": -0.25,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "A7",
+   "x": 0.25,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "A8",
+   "x": 1.25,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "A9",
+   "x": 2.45,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "A12",
+   "x": 3.25,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B1",
+   "x": 3.25,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B4",
+   "x": 2.45,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B5",
+   "x": 1.75,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B6",
+   "x": 0.75,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B7",
+   "x": -0.75,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B8",
+   "x": -1.75,
+   "y": -4.045,
+   "width": 0.3,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B9",
+   "x": -2.45,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "B12",
+   "x": -3.25,
+   "y": -4.045,
+   "width": 0.6,
+   "height": 1.45,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "roundrect"
+  },
+  {
+   "number": "SH",
+   "x": -4.32,
+   "y": -3.13,
+   "width": 1.0,
+   "height": 2.1,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "oval"
+  },
+  {
+   "number": "SH",
+   "x": -4.32,
+   "y": 1.05,
+   "width": 1.0,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "oval"
+  },
+  {
+   "number": "SH",
+   "x": 4.32,
+   "y": -3.13,
+   "width": 1.0,
+   "height": 2.1,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "oval"
+  },
+  {
+   "number": "SH",
+   "x": 4.32,
+   "y": 1.05,
+   "width": 1.0,
+   "height": 1.6,
+   "rotation": 0.0,
+   "pin_function": "",
+   "shape": "oval"
+  }
+ ],
+ "courtyard": [
+  -5.32,
+  -5.27,
+  5.32,
+  4.15
+ ]
+}
