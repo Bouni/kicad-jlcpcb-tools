@@ -201,6 +201,7 @@ def test_partdetails_savepdf_climbs_hierarchy_to_post_message(
     dialog = object.__new__(PartDetailsDialog)
     dialog.parent = selector
     dialog.pdfurl = None
+    dialog.datasheet_file_id = None
     dialog.logger = Mock()
 
     dialog.savepdf()
@@ -229,6 +230,7 @@ def test_partdetails_savepdf_terminates_on_cyclic_parent_references(
     dialog = object.__new__(PartDetailsDialog)
     dialog.parent = parent_b
     dialog.pdfurl = None
+    dialog.datasheet_file_id = None
     dialog.logger = Mock()
 
     dialog.savepdf()
@@ -253,6 +255,7 @@ def test_partdetails_savepdf_handles_empty_string_url(
     dialog = object.__new__(PartDetailsDialog)
     dialog.parent = main_frame
     dialog.pdfurl = ""
+    dialog.datasheet_file_id = ""
     dialog.logger = Mock()
 
     dialog.savepdf()
@@ -279,6 +282,7 @@ def test_partdetails_savepdf_falls_back_to_parent_when_no_ancestor_has_display_m
     dialog = object.__new__(PartDetailsDialog)
     dialog.parent = parent
     dialog.pdfurl = None
+    dialog.datasheet_file_id = None
     dialog.logger = Mock()
 
     dialog.savepdf()
@@ -286,3 +290,235 @@ def test_partdetails_savepdf_falls_back_to_parent_when_no_ancestor_has_display_m
     assert len(posted_events) == 1
     assert posted_events[0][0] is parent
     assert posted_events[0][1].title == "Error"
+
+
+JLC_DATASHEET = (
+    "https://jlcpcb.com/api/file/downloadByFileSystemAccessId/8579706381320323072"
+)
+LCSC_DATASHEET = "https://www.lcsc.com/datasheet/lcsc_datasheet_C25804.pdf"
+
+
+def _saving_dialog(
+    tmp_path: Path,
+    *,
+    file_id: Any,
+    pdfurl: Any,
+    results: list[dict[str, Any]],
+) -> Any:
+    """Return a Part Details dialog whose downloads answer with ``results``."""
+    dialog = object.__new__(PartDetailsDialog)
+    dialog.parent = SimpleNamespace(display_message=Mock())
+    dialog.part = "C25804"
+    dialog.pdfurl = pdfurl
+    dialog.datasheet_file_id = file_id
+    dialog.datasheet_path = tmp_path / "datasheets"
+    dialog.logger = Mock()
+    dialog.lcsc_api = Mock()
+    dialog.lcsc_api.download_datasheet.side_effect = results
+    return dialog
+
+
+def _posted(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Collect the message events the dialog posts."""
+    posted: list[Any] = []
+    monkeypatch.setattr(
+        partdetails.wx, "PostEvent", lambda _target, event: posted.append(event)
+    )
+    return posted
+
+
+def test_partdetails_savepdf_downloads_the_jlc_file_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The datasheet's JLCPCB file is the PDF; LCSC's link is not needed then."""
+    posted = _posted(monkeypatch)
+    dialog = _saving_dialog(
+        tmp_path,
+        file_id="8579706381320323072",
+        pdfurl=LCSC_DATASHEET,
+        results=[{"success": True, "msg": "Saved"}],
+    )
+
+    dialog.savepdf()
+
+    dialog.lcsc_api.download_datasheet.assert_called_once_with(
+        JLC_DATASHEET, tmp_path / "datasheets" / "lcsc_datasheet_C25804.pdf"
+    )
+    assert [(event.title, event.text) for event in posted] == [("Success", "Saved")]
+
+
+def test_partdetails_savepdf_falls_back_to_the_lcsc_link(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """LCSC's link is tried when the JLCPCB file gives no PDF."""
+    posted = _posted(monkeypatch)
+    dialog = _saving_dialog(
+        tmp_path,
+        file_id="8579706381320323072",
+        pdfurl=LCSC_DATASHEET,
+        results=[
+            {"success": False, "msg": "The datasheet link did not return a PDF."},
+            {"success": True, "msg": "Saved"},
+        ],
+    )
+
+    dialog.savepdf()
+
+    assert [
+        call.args[0] for call in dialog.lcsc_api.download_datasheet.call_args_list
+    ] == [JLC_DATASHEET, LCSC_DATASHEET]
+    assert [(event.title, event.text) for event in posted] == [("Success", "Saved")]
+
+
+def test_partdetails_savepdf_names_a_datasheet_without_a_link_after_the_part(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With only a file id the PDF is named after the part, and a failure shows."""
+    posted = _posted(monkeypatch)
+    dialog = _saving_dialog(
+        tmp_path,
+        file_id="8579706381320323072",
+        pdfurl=None,
+        results=[{"success": False, "msg": "non-OK HTTP response status"}],
+    )
+
+    dialog.savepdf()
+
+    dialog.lcsc_api.download_datasheet.assert_called_once_with(
+        JLC_DATASHEET, tmp_path / "datasheets" / "C25804.pdf"
+    )
+    assert [(event.title, event.text) for event in posted] == [
+        ("Error", "non-OK HTTP response status")
+    ]
+
+
+def test_partdetails_savepdf_reports_the_first_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When both sources fail, JLCPCB's error shows, not LCSC's expected one."""
+    posted = _posted(monkeypatch)
+    dialog = _saving_dialog(
+        tmp_path,
+        file_id="8579706381320323072",
+        pdfurl=LCSC_DATASHEET,
+        results=[
+            {"success": False, "msg": "Failed to download datasheet: timed out"},
+            {"success": False, "msg": "The datasheet link did not return a PDF."},
+        ],
+    )
+
+    dialog.savepdf()
+
+    assert [(event.title, event.text) for event in posted] == [
+        ("Error", "Failed to download datasheet: timed out")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("record", "enabled"),
+    [
+        (
+            {
+                "dataManualUrl": LCSC_DATASHEET,
+                "dataManualFileAccessId": "8579706381320323072",
+            },
+            True,
+        ),
+        ({"dataManualFileAccessId": "8579706381320323072"}, True),
+        ({"dataManualUrl": LCSC_DATASHEET}, True),
+        ({}, False),
+    ],
+    ids=["both", "file-id-only", "link-only", "neither"],
+)
+def test_partdetails_part_record_names_the_datasheet_to_download(
+    record: dict[str, str], enabled: bool
+) -> None:
+    """Download keeps the record's file id and link, and is enabled by either."""
+    dialog = object.__new__(PartDetailsDialog)
+    dialog.data_list = Mock()
+    dialog.savepdf_button = Mock()
+    dialog.openpdf_button = Mock()
+    dialog.openpage_button = Mock()
+
+    dialog._apply_part_data({"success": True, "data": {"data": record}}, None)
+
+    assert dialog.pdfurl == record.get("dataManualUrl")
+    assert dialog.datasheet_file_id == record.get("dataManualFileAccessId")
+    dialog.savepdf_button.Enable.assert_called_once_with(enabled)
+
+
+@pytest.mark.parametrize(
+    ("pdfurl", "filename"),
+    [
+        (LCSC_DATASHEET, "lcsc_datasheet_C25804.pdf"),
+        ("/", "C25804.pdf"),
+        ("https://www.findernet.com/en/products/series-95/", "C25804.pdf"),
+        ("https://uk.rs-online.com/web/p/5442601?cm_mmc=aff-_-cn", "C25804.pdf"),
+        ("https://www.lcsc.com/datasheet/SETsafe--|--SETfuse_C25804.pdf", "C25804.pdf"),
+    ],
+    ids=["pdf-name", "slash", "trailing-slash", "query", "reserved-character"],
+)
+def test_partdetails_savepdf_keeps_lcsc_names_only_when_they_are_file_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pdfurl: str, filename: str
+) -> None:
+    """A link that doesn't end in a plain PDF name saves as <part>.pdf."""
+    _posted(monkeypatch)
+    dialog = _saving_dialog(
+        tmp_path,
+        file_id="8579706381320323072",
+        pdfurl=pdfurl,
+        results=[{"success": True, "msg": "Saved"}],
+    )
+
+    dialog.savepdf()
+
+    dialog.lcsc_api.download_datasheet.assert_called_once_with(
+        JLC_DATASHEET, tmp_path / "datasheets" / filename
+    )
+
+
+def test_partdetails_download_is_enabled_when_a_row_fails_to_display() -> None:
+    """The datasheet is taken before the rows, so a bad row cannot lose it."""
+    dialog = object.__new__(PartDetailsDialog)
+    dialog.data_list = Mock()
+    dialog.data_list.AppendItem.side_effect = TypeError("bad value")
+    dialog.savepdf_button = Mock()
+    dialog.openpdf_button = Mock()
+    dialog.openpage_button = Mock()
+
+    with pytest.raises(TypeError):
+        dialog._apply_part_data(
+            {
+                "success": True,
+                "data": {
+                    "data": {
+                        "componentCode": "C25804",
+                        "dataManualFileAccessId": "8579706381320323072",
+                    }
+                },
+            },
+            None,
+        )
+
+    assert dialog.datasheet_file_id == "8579706381320323072"
+    dialog.savepdf_button.Enable.assert_called_once_with(True)
+
+
+def test_partdetails_savepdf_reports_a_datasheets_folder_it_cannot_use(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The button doesn't touch the folder itself, so a bad one is reported, not raised."""
+    posted = _posted(monkeypatch)
+    (tmp_path / "datasheets").write_text("not a folder")
+    dialog = _saving_dialog(
+        tmp_path,
+        file_id="8579706381320323072",
+        pdfurl=None,
+        results=[{"success": False, "msg": "Could not save the datasheet"}],
+    )
+
+    dialog.savepdf()
+
+    assert [(event.title, event.text) for event in posted] == [
+        ("Error", "Could not save the datasheet")
+    ]
