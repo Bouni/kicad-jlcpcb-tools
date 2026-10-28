@@ -1,0 +1,5 @@
+Comment,Designator,Footprint,LCSC,Quantity
+100n,"C1,C2",C_0603_1608Metric,C14663,2
+22k,"R1,R2",R_0603_1608Metric,C31850,2
+Conn_01x02,J1,PinHeader_1x02_P2.54mm_Vertical,C49257,1
+NE5532,U1,SOIC-8_3.9x4.9mm_P1.27mm,C7426,1
