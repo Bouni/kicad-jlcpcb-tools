@@ -182,7 +182,7 @@ def test_population_reaches_the_view_as_resets_only(
     workflow: types.SimpleNamespace,
     catalog_window: Callable[..., Any],
 ) -> None:
-    """A refresh empties the list and refills it with one Cleared(), never per row."""
+    """A refresh that changes the rows refills them with one Cleared(), never per row."""
     window = catalog_window(
         [part("R1"), part("R2"), part("U1", "C2", exclude_from_pos=True)],
         {"C1": details(99), "C2": details(1000)},
@@ -199,9 +199,39 @@ def test_population_reaches_the_view_as_resets_only(
             window._invalidate_catalog_details()
         model.notifications.clear()
         window.populate_footprint_list()
-        assert model.notifications == [("cleared", ()), ("cleared", ())]
+        assert model.notifications == [("cleared", ())]
         assert [row[0] for row in model.data] == references
         workflow.drain()
+
+
+def test_refreshing_unchanged_rows_rewrites_them_in_place(
+    workflow: types.SimpleNamespace,
+    catalog_window: Callable[..., Any],
+) -> None:
+    """The rows and their view items survive, so the list keeps its scroll position.
+
+    A reset scrolls a macOS list to its first row. Each row is repainted once
+    here, because a rebuild clears the price label the estimator set, and
+    the catalog lookups repaint nothing.
+    """
+    window = catalog_window(
+        [part("R1"), part("R2"), part("U1", "C2")],
+        {"C1": details(99), "C2": details(1000)},
+    )
+    model = window.partlist_data_model
+    window.populate_footprint_list()
+    workflow.drain()
+    rows = list(model.data)
+    window._invalidate_catalog_details()
+    model.notifications.clear()
+
+    window.populate_footprint_list()
+
+    assert len(model.data) == len(rows)
+    assert all(new is old for new, old in zip(model.data, rows))
+    assert model.notifications == [("changed", (row,)) for row in rows]
+    workflow.drain()
+    assert all(row[model.columns["PRICE_COL"]] for row in model.data)
 
 
 def test_new_and_equivalently_spelled_lcsc_numbers_share_one_lookup(
