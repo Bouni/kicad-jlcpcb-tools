@@ -1,0 +1,11 @@
+--workflows=.github/workflows/tests.yml
+--container-architecture=linux/amd64
+--platform=ubuntu-24.04=ghcr.io/catthehacker/ubuntu:runner-24.04
+--container-options=--user=0
+--artifact-server-addr=127.0.0.1
+--cache-server-addr=127.0.0.1
+--concurrent-jobs=6
+--bind=false
+--use-gitignore=true
+--use-new-action-cache
+--rm
