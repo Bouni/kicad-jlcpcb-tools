@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 import pytest
 
+from .native_wx_support import create_native_app
 from .wx_harness import load_siblings
 
 # Plotting needs a desktop session; native lanes enable it explicitly.
@@ -30,7 +31,7 @@ def native_bindings() -> Iterator[SimpleNamespace]:
     pcbnew = pytest.importorskip("pcbnew", reason="KiCad pcbnew is unavailable")
     wx = pytest.importorskip("wx", reason="KiCad plotting requires wxPython")
     owns_app = wx.GetApp() is None
-    app = wx.App(False) if owns_app else wx.GetApp()
+    app = create_native_app(wx) if owns_app else wx.GetApp()
     try:
         yield SimpleNamespace(pcbnew=pcbnew, wx=wx, app=app)
     finally:
