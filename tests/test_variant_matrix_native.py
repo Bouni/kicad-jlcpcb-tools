@@ -1,6 +1,8 @@
 """Independently collected native matrix rendering and state-preservation workflows."""
 
+from collections.abc import Callable
 from dataclasses import replace
+import time
 from types import ModuleType
 from typing import Any, Optional
 
@@ -403,6 +405,126 @@ def test_native_supplier_resort_does_not_interrupt_header_drag(
     run_native(exercise)
 
 
+def _physical_matrix_harness(
+    frame: Any, wx: Any, modules: tuple[ModuleType, ModuleType]
+) -> MatrixHarness:
+    """Mount the physical-input fixture using the product's pre-show lifecycle."""
+    if wx.Platform != "__WXGTK__":
+        return MatrixHarness(frame, wx, *modules)
+    # Adding/refreezing the initial grid in an already mapped GTK frame can
+    # leave its new native child at 1x1 while wx reports its requested full size.
+    frame.Hide()
+    try:
+        return MatrixHarness(frame, wx, *modules)
+    finally:
+        frame.Show()
+
+
+def _wait_physical_header_allocation(wx: Any, view: Any) -> None:
+    """Wait for the newly frozen GTK pane to receive its native allocation."""
+    if wx.Platform != "__WXGTK__":
+        return
+    frozen = view.GetFrozenColGridWindow()
+    painted: Optional[tuple[int, int]] = None
+
+    def observe(event: Any) -> None:
+        nonlocal painted
+        size = frozen.GetClientSize()
+        # GTK can still own a 1x1 child after wx reports the requested pane
+        # geometry. Its real paint region, unlike cached sizes, proves allocation.
+        complete = (
+            size.width
+            == sum(view.GetColSize(col) for col in range(view.GetNumberFrozenCols()))
+            and size.height > 1
+            and frozen.GetUpdateRegion().Contains(wx.Rect((0, 0), size)) == wx.InRegion
+        )
+        if complete:
+            painted = (size.width, size.height)
+        event.Skip()
+
+    frozen.Bind(wx.EVT_PAINT, observe)
+    try:
+        frozen.Refresh()
+        wait_until(
+            wx,
+            lambda: painted is not None
+            and painted[0]
+            == frozen.GetClientSize().width
+            == sum(view.GetColSize(col) for col in range(view.GetNumberFrozenCols()))
+            and painted[1] >= frozen.GetClientSize().height,
+            reason="The native frozen pane must be allocated before physical header input",
+        )
+    finally:
+        frozen.Unbind(wx.EVT_PAINT, handler=observe)
+
+
+def _physical_header_drag(
+    wx: Any,
+    view: Any,
+    header: Any,
+    delivered: list[bool],
+    resolve_points: Callable[[bool, int], tuple[Any, Any]],
+) -> None:
+    """Deliver real held input before release, preserving Cocoa's native drag API."""
+    simulator = wx.UIActionSimulator()
+    # Simulator construction itself dispatches native events on X11. Resolve
+    # the source afterwards, rather than retaining pre-layout screen positions.
+    first, last = resolve_points(False, 3000)
+    if wx.Platform != "__WXGTK__":
+        # Cocoa MouseMove emits plain motion even while a button is held.
+        assert simulator.MouseDragDrop(first.x, first.y, last.x, last.y)
+        return
+    assert simulator.MouseMove(first.x, first.y)
+
+    def remaining() -> int:
+        return max(0, int((deadline - time.monotonic()) * 1000))
+
+    deadline = time.monotonic() + 3
+    try:
+        assert simulator.MouseDown()
+        wait_until(
+            wx,
+            lambda: view._header_drag is not None
+            and view._header_drag.variant == "B"
+            and header.HasCapture(),
+            timeout_ms=remaining(),
+            reason="The OS must deliver the B header press before held motion",
+        )
+        # Press/focus delivery can finish native frozen-pane layout and move
+        # the header. Locate A in that captured geometry before held movement.
+        _first, last = resolve_points(False, remaining())
+        assert simulator.MouseMove(last.x, last.y)
+        wait_until(
+            wx,
+            lambda: bool(delivered)
+            and view._header_drag is not None
+            and view._header_drag.active
+            and header.HasCapture(),
+            timeout_ms=remaining(),
+            reason="The OS must deliver supplier data during the captured held motion",
+        )
+        # Keep the same press and capture while aiming within A again after
+        # the actual supplier handler and pending native layout have run.
+        _first, last = resolve_points(True, remaining())
+        assert time.monotonic() < deadline, (
+            "Held input target resolution exceeded its deadline"
+        )
+        assert simulator.MouseMove(last.x, last.y)
+        wait_until(
+            wx,
+            lambda: bool(delivered)
+            and view._header_drag is not None
+            and view._header_drag.active
+            and view._header_drag.valid
+            and view._header_drag.before == "A"
+            and header.HasCapture(),
+            timeout_ms=remaining(),
+            reason="The OS must deliver a valid B-before-A drag and supplier update before release",
+        )
+    finally:
+        assert simulator.MouseUp()
+
+
 @pytest.mark.os_input
 def test_native_physical_header_drag_survives_supplier_update(
     modules: tuple[ModuleType, ModuleType], request: pytest.FixtureRequest
@@ -414,11 +536,12 @@ def test_native_physical_header_drag_survives_supplier_update(
     result: dict[str, Any] = {}
 
     def exercise(frame: Any, wx: Any) -> None:
-        harness = MatrixHarness(frame, wx, *modules)
+        harness = _physical_matrix_harness(frame, wx, modules)
         view = harness.view
         header = view.GetGridColLabelWindow()
         header.Unbind(wx.EVT_MOTION, handler=harness._ignore_unpressed_os_motion)
         frame.Raise()
+        is_gtk = wx.Platform == "__WXGTK__"
         frame.SetFocus()
         wait_until(
             wx,
@@ -428,12 +551,58 @@ def test_native_physical_header_drag_survives_supplier_update(
         origin = view.GetGridWindowOffset(view.GetGridWindow()).x
         view.Scroll(max(0, harness.bounds("A")[0] - origin), 0)
         settle(wx)
-        left, right = harness.viewport()
-        source_left, source_right = harness.bounds("B")
-        start = (max(source_left, left) + min(source_right, right)) // 2 - left
-        # Release past the strip where a held drag auto-scrolls: "" sits left of
-        # the viewport, so a late release there would carry the drop past A.
-        destination = max(harness.bounds("A")[0] - left, view._header_scroll_edge()) + 5
+        _wait_physical_header_allocation(wx, view)
+        points: list[Any] = []
+
+        def header_ready(published: bool) -> bool:
+            """Locate actual B/A hit targets after native scroll/layout delivery."""
+            left, right = harness.viewport()
+            source_left, source_right = harness.bounds("B")
+            visible_left, visible_right = (
+                max(source_left, left),
+                min(source_right, right),
+            )
+            if not header.IsShownOnScreen() or visible_left >= visible_right:
+                return False
+            start = (visible_left + visible_right) // 2 - left
+            if is_gtk:
+                target_left, target_right = harness.bounds("A")
+                edge = view._header_scroll_edge()
+                # Aim inside A's insertion half, clear of edge-scroll strips.
+                drop_left = max(target_left - left, edge + 5)
+                drop_right = min(
+                    (target_left + target_right) // 2 - left, right - left - edge - 5
+                )
+                if drop_left >= drop_right:
+                    return False
+                # Use distinct interior points for the two held motions, with
+                # both remaining in A's insertion half and clear of edge scroll.
+                fraction = 2 if published else 1
+                destination = drop_left + (drop_right - drop_left) * fraction // 3
+            else:
+                destination = (
+                    max(harness.bounds("A")[0] - left, view._header_scroll_edge()) + 5
+                )
+            first = wx.Point(start, view._group_header_height // 2)
+            last = wx.Point(destination, view._group_header_height // 2)
+            if (
+                view._header_variant_at(first) != "B"
+                or view._header_variant_at(last) != "A"
+            ):
+                return False
+            points[:] = [header.ClientToScreen(first), header.ClientToScreen(last)]
+            return True
+
+        def resolve_points(published: bool, timeout_ms: int) -> tuple[Any, Any]:
+            """Resolve screen positions at the native boundary that will use them."""
+            wait_until(
+                wx,
+                lambda: header_ready(published),
+                timeout_ms=timeout_ms,
+                reason="Native scrolling must expose the B source and A drop target before physical input",
+            )
+            return points[0], points[1]
+
         initial = view.model
         updated = modules[1].MatrixModel(
             initial.snapshot,
@@ -443,28 +612,38 @@ def test_native_physical_header_drag_survives_supplier_update(
             },
         )
         delivered = []
-
         update_drag = view._update_header_drag
 
         def on_held_motion(position: Any) -> None:
             update_drag(position)
-            if view._header_drag.active and not delivered:
+            if (
+                view._header_drag is not None
+                and view._header_drag.active
+                and not delivered
+            ):
                 assert header.HasCapture()
                 table = view.GetTable()
+                drag = view._header_drag
+                widths = tuple(
+                    view.GetColSize(col) for col in range(view.GetNumberCols())
+                )
+                columns = view.model.columns
+                order = view.model.variant_order
                 view.set_model(updated)
-                assert view.GetTable() is table and header.HasCapture()
+                assert view.GetTable() is table
+                assert view.GetGridColLabelWindow() is header and header.HasCapture()
+                assert view._header_drag is drag
+                assert (
+                    tuple(view.GetColSize(col) for col in range(view.GetNumberCols()))
+                    == widths
+                )
+                assert view.model.columns == columns
+                assert view.model.variant_order == order
                 delivered.append(True)
 
         view._update_header_drag = on_held_motion
-        first = header.ClientToScreen(wx.Point(start, view._group_header_height // 2))
-        last = header.ClientToScreen(
-            wx.Point(destination, view._group_header_height // 2)
-        )
-        # On Cocoa MouseMove always posts a plain mouse-moved event, even after
-        # MouseDown. MouseDragDrop posts the actual held-button drag event.
-        simulator = wx.UIActionSimulator()
         result.update(view=view, header=header, delivered=delivered)
-        assert simulator.MouseDragDrop(first.x, first.y, last.x, last.y)
+        _physical_header_drag(wx, view, header, delivered, resolve_points)
 
     def verify(_frame: Any, _wx: Any) -> None:
         view, header = result["view"], result["header"]
