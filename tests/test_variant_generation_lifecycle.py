@@ -179,8 +179,68 @@ def test_readonly_counter_preserves_published_files(generation: Generation) -> N
         database.chmod(0o644)
 
 
-def test_counter_commit_failure_restores_published_files(
+def _observe_counter_connections(
+    generation: Generation,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail_promptly: bool,
+) -> list[int]:
+    """Observe real transaction connections without changing unrelated SQLite users."""
+    store_module = importlib.import_module(type(generation.store).__module__)
+    counter = importlib.import_module(
+        store_module.generation_count_transaction.__module__
+    )
+    observed: list[int] = []
+
+    def connect(database: Any, **kwargs: Any) -> sqlite3.Connection:
+        """Keep actual transactions and report the native connection timeout."""
+        assert Path(database) == Path(generation.store.dbfile)
+        if fail_promptly:
+            assert "timeout" not in kwargs
+            kwargs["timeout"] = 0.02
+        connection = sqlite3.connect(database, **kwargs)
+        observed.append(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+        return connection
+
+    monkeypatch.setattr(counter, "sqlite3", SimpleNamespace(connect=connect))
+    return observed
+
+
+@pytest.fixture
+def fast_counter_connections(
     generation: Generation, monkeypatch: pytest.MonkeyPatch
+) -> list[int]:
+    """Bound only the deliberate contention tests' real transaction waits."""
+    return _observe_counter_connections(generation, monkeypatch, fail_promptly=True)
+
+
+def test_production_generation_counter_uses_default_sqlite_timeout(
+    generation: Generation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The optimization must leave production's five-second contention policy intact."""
+    observed = _observe_counter_connections(
+        generation, monkeypatch, fail_promptly=False
+    )
+    assert generation.store.increment_generation_count() == 2
+    assert observed == [5000]
+
+
+def _assert_successful_retry(generation: Generation) -> None:
+    """Verify the handler succeeds after the independent database blocker closes."""
+    generation.wx.MessageBox.reset_mock()
+    generation.hooks.clear()
+    generation.run()
+    generation.wx.MessageBox.assert_not_called()
+    generation.assert_generated_outputs()
+    assert generation.store.get_generation_count() == 2
+    assert generation.hooks == ["pre", "post"]
+    generation.assert_released()
+
+
+def test_counter_commit_failure_restores_published_files(
+    generation: Generation,
+    monkeypatch: pytest.MonkeyPatch,
+    fast_counter_connections: list[int],
 ) -> None:
     """A real SQLite reader blocks COMMIT after all files have been replaced."""
     replaced: list[Path] = []
@@ -208,9 +268,14 @@ def test_counter_commit_failure_restores_published_files(
         assert generation.store.get_generation_count() == 1
         assert generation.hooks == ["pre"]
         generation.assert_released()
+    assert fast_counter_connections == [20]
+    _assert_successful_retry(generation)
+    assert fast_counter_connections == [20, 20]
 
 
-def test_locked_counter_preserves_published_files(generation: Generation) -> None:
+def test_locked_counter_preserves_published_files(
+    generation: Generation, fast_counter_connections: list[int]
+) -> None:
     """An existing SQLite writer prevents export without replacing prior output."""
     with closing(sqlite3.connect(generation.store.dbfile)) as writer:
         writer.execute("BEGIN IMMEDIATE")
@@ -220,6 +285,9 @@ def test_locked_counter_preserves_published_files(generation: Generation) -> Non
         assert generation.store.get_generation_count() == 1
         assert generation.hooks == ["pre"]
         generation.assert_released()
+    assert fast_counter_connections == [20]
+    _assert_successful_retry(generation)
+    assert fast_counter_connections == [20, 20]
 
 
 def test_handler_respects_publication_guard_and_retries_after_release(
@@ -239,14 +307,7 @@ def test_handler_respects_publication_guard_and_retries_after_release(
         assert generation.hooks == ["pre"]
         generation.assert_released()
 
-    generation.wx.MessageBox.reset_mock()
-    generation.hooks.clear()
-    generation.run()
-    generation.wx.MessageBox.assert_not_called()
-    generation.assert_generated_outputs()
-    assert generation.store.get_generation_count() == 2
-    assert generation.hooks == ["pre", "post"]
-    generation.assert_released()
+    _assert_successful_retry(generation)
 
 
 @pytest.mark.parametrize("stage", ["plot", "validation"])
@@ -284,14 +345,7 @@ def test_board_copy_error_releases_generation_and_allows_retry(
     assert generation.hooks == ["pre"]
     generation.assert_released()
 
-    generation.wx.MessageBox.reset_mock()
-    generation.hooks.clear()
-    generation.run()
-    generation.wx.MessageBox.assert_not_called()
-    generation.assert_generated_outputs()
-    assert generation.store.get_generation_count() == 2
-    assert generation.hooks == ["pre", "post"]
-    generation.assert_released()
+    _assert_successful_retry(generation)
 
 
 def test_second_publication_failure_rolls_back_counter_and_first_file(

@@ -385,31 +385,14 @@ In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hook
 
 ### Tests
 
-Report ordinary Python tests, real wx controls, and real KiCad tests separately.
-A passing test that uses a fake board does not verify KiCad's file handling,
-project state, or native object cleanup.
+With Docker and [`act`](https://nektosact.com/installation/) installed, run the
+complete test workflow:
 
 ```sh
-python -m pytest -rs -m 'not native_wx and not native_kicad'
-python -m pytest -rs --require-native=wx -m 'not native_kicad and not os_input'
-python -m pytest -rs --require-native=wx -m os_input
-python -m pytest -rs --require-native=kicad -m native_kicad
+python scripts/run_tests.py
 ```
 
-The required native modes reject missing libraries, empty native selections, and
-skipped native tests. The KiCad mode accepts three skips: tests of design variants
-on a KiCad without them, the forced-DRC test on KiCad 10, whose DRC crashes
-outside KiCad, and the golden-output tests on a KiCad with no outputs recorded
-in `tests/golden/kicad_builds.json`. Run them with Python libraries matching
-the installed KiCad or wx packages. Mouse/keyboard tests require an isolated desktop with a window
-manager; Linux native tests can use Xvfb.
-
-To reproduce CI locally, use an Ubuntu 24.04 Docker container with the same CPU
-architecture, KiCad packages, dependencies, and commands as
-[the test workflow](.github/workflows/tests.yml). Copy the tracked source tree so
-untracked test files cannot change collection. Include the tested revision,
-Python/wx/KiCad versions, command, and pass/skip/deselection counts when reporting
-results. A required lane that was not run remains unvalidated.
+See [testing instructions](docs/testing.md) for architecture and output options.
 
 ### Settings
 
