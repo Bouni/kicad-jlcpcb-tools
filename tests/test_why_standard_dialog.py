@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from .native_wx_support import create_native_app
 from .wx_harness import load_siblings
 
 pytestmark = pytest.mark.skipif(
@@ -22,7 +23,7 @@ def native_dialog() -> Iterator[SimpleNamespace]:
     """Load real siblings and construct actual controls without starting KiCad."""
     wx = pytest.importorskip("wx")
     dv = pytest.importorskip("wx.dataview")
-    app = wx.App.Get() or wx.App(False)
+    app = wx.App.Get() or create_native_app(wx)
     with load_siblings(
         "_why_standard_native",
         ("why_standard_dialog", "bom_estimation.assembly_mode"),
