@@ -34,6 +34,8 @@ def run_lane(
     version: str = "10.0.6",
     kicad_major: Optional[str] = None,  # noqa: UP045
     golden_update: str = "",
+    parallel: bool = False,
+    real_wx: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run the real pytest hooks with isolated, deliberately limited bindings.
 
@@ -48,13 +50,14 @@ def run_lane(
         "[pytest]\nmarkers =\n    native_wx\n    native_kicad\n    os_input\n"
         "    kicad_variants\n    kicad_standalone_drc\n    kicad_golden\n"
     )
-    (tmp_path / "wx").mkdir()
-    (tmp_path / "wx" / "__init__.py").write_text(
-        "raise ImportError('missing wx binding')\n"
-        if broken == "wx"
-        else "def version(): return '4.2.1 gtk3 (wxWidgets 3.2.4)'\n"
-    )
-    (tmp_path / "wx" / "grid.py").write_text("class Grid: pass\n")
+    if not real_wx:
+        (tmp_path / "wx").mkdir()
+        (tmp_path / "wx" / "__init__.py").write_text(
+            "raise ImportError('missing wx binding')\n"
+            if broken == "wx"
+            else "def version(): return '4.2.1 gtk3 (wxWidgets 3.2.4)'\n"
+        )
+        (tmp_path / "wx" / "grid.py").write_text("class Grid: pass\n")
     (tmp_path / "pcbnew.py").write_text(
         "raise ModuleNotFoundError('missing pcbnew binding')\n"
         if broken == "pcbnew"
@@ -68,6 +71,8 @@ def run_lane(
         + f"def GetBuildVersion(): return {version!r}\n"
     )
     (tmp_path / "test_probe.py").write_text("import pytest\n" + source)
+    if parallel:
+        (tmp_path / "test_other.py").write_text("import pytest\n" + source)
     if collection_skip:
         (tmp_path / "test_skipped.py").write_text(
             "import pytest\npytest.skip('missing at collection', allow_module_level=True)\n"
@@ -88,6 +93,15 @@ def run_lane(
         command.append(f"--require-native={mode}")
     if kicad_major:
         command.append(f"--kicad-major={kicad_major}")
+    if parallel:
+        command += [
+            "-p",
+            "xdist.plugin",
+            "-n",
+            "2",
+            "--dist=loadfile",
+            "--max-worker-restart=0",
+        ]
     return subprocess.run(
         command,
         cwd=tmp_path,
@@ -1089,3 +1103,126 @@ def test_physical_drag_waits_for_delivery_and_releases_mouse_on_failure(
         if failure == "press"
         else [3000, 2750, 2500]
     )
+
+
+def _assert_worker_resources_released(states: list[dict[str, str]]) -> None:
+    """Verify the controller releases displays and state even after a crash."""
+    import ctypes
+
+    x11 = ctypes.CDLL("libX11.so.6")
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    for state in states:
+        assert not Path(state["XDG_CONFIG_HOME"]).parent.exists()
+        assert not x11.XOpenDisplay(state["DISPLAY"].encode())
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("Xvfb") is None,
+    reason="Requires Linux Xvfb",
+)
+def test_parallel_native_workers_isolate_desktops_and_reuse_them_in_children(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh wx startup and exact-node children share a desktop that cannot reset."""
+    pytest.importorskip("xdist")
+    pytest.importorskip("wx")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "shared"))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    result = run_lane(
+        tmp_path,
+        monkeypatch,
+        "wx",
+        "import ctypes, json, os, subprocess, sys, tempfile\n"
+        "from pathlib import Path\n"
+        "@pytest.mark.native_wx\n"
+        "def test_native(request):\n"
+        "    if os.environ.get('EXACT_CHILD') != '1':\n"
+        "        parent = os.getppid()\n"
+        "        servers = []\n"
+        "        for pid in Path(f'/proc/{parent}/task/{parent}/children').read_text().split():\n"
+        "            try:\n"
+        "                command = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\\0')\n"
+        "            except FileNotFoundError:\n"
+        "                continue\n"
+        "            if command[0].rsplit(b'/', 1)[-1] == b'Xvfb':\n"
+        "                servers.append(command)\n"
+        "        assert len(servers) == 2 and all(b'-noreset' in cmd for cmd in servers), servers\n"
+        "    x11 = ctypes.CDLL('libX11.so.6')\n"
+        "    x11.XOpenDisplay.restype = ctypes.c_void_p\n"
+        "    display = x11.XOpenDisplay(None)\n"
+        "    assert display, 'Private display is unavailable'\n"
+        "    x11.XCloseDisplay(ctypes.c_void_p(display))\n"
+        "    import wx\n"
+        "    assert wx.GetApp() is None\n"
+        "    app = wx.App(False)\n"
+        "    try:\n"
+        "        assert wx.GetApp() is app\n"
+        "    finally:\n"
+        "        app.Destroy()\n"
+        "    state = {key: os.environ[key] for key in ('DISPLAY', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR', 'KICAD_CONFIG_HOME', 'TMPDIR')}\n"
+        "    assert request.config.getini('cache_dir') == state['XDG_CACHE_HOME']\n"
+        "    assert request.config.cache.mkdir('worker-probe').is_relative_to(Path(state['XDG_CACHE_HOME']))\n"
+        "    assert tempfile.gettempdir() == state['TMPDIR']\n"
+        "    assert all(Path(value).stat().st_mode & 0o777 == 0o700 for key, value in state.items() if key != 'DISPLAY')\n"
+        "    if os.environ.get('EXACT_CHILD') == '1':\n"
+        "        assert not hasattr(request.config, 'workerinput')\n"
+        "        assert state == json.loads(os.environ['EXPECTED_STATE'])\n"
+        "        return\n"
+        "    child = subprocess.run([sys.executable, '-m', 'pytest', '-q', request.node.nodeid],\n"
+        "        env=dict(os.environ, EXACT_CHILD='1', EXPECTED_STATE=json.dumps(state)),\n"
+        "        capture_output=True, text=True, timeout=10)\n"
+        "    assert child.returncode == 0, child.stdout + child.stderr\n"
+        "    Path(__file__).with_suffix('.json').write_text(json.dumps(state))\n",
+        parallel=True,
+        real_wx=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    states = [json.loads(path.read_text()) for path in tmp_path.glob("test_*.json")]
+    assert len(states) == 2
+    for key in states[0]:
+        assert states[0][key] != states[1][key], (key, states)
+    _assert_worker_resources_released(states)
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("Xvfb") is None,
+    reason="Requires Linux Xvfb",
+)
+@pytest.mark.parametrize(
+    "source, message",
+    [
+        (
+            "@pytest.mark.native_wx\ndef test_native(): assert False, 'probe assertion'\n",
+            "probe assertion",
+        ),
+        (
+            "@pytest.fixture\ndef broken(): raise RuntimeError('probe fixture')\n"
+            "@pytest.mark.native_wx\ndef test_native(broken): pass\n",
+            "probe fixture",
+        ),
+        ("raise RuntimeError('probe collection')\n", "probe collection"),
+        (
+            "@pytest.mark.native_wx\ndef test_native(): pytest.skip('probe skip')\n",
+            "Required native test skipped",
+        ),
+        (
+            "import json, os\nfrom pathlib import Path\n@pytest.mark.native_wx\n"
+            "def test_native():\n"
+            "    Path(__file__).with_suffix('.json').write_text(json.dumps({key: os.environ[key] for key in ('DISPLAY', 'XDG_CONFIG_HOME')}))\n"
+            "    os._exit(4)\n",
+            "crashed",
+        ),
+    ],
+)
+def test_parallel_native_worker_failures_fail_the_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, message: str
+) -> None:
+    """Standard workers propagate phase failures, required skips and crashes."""
+    pytest.importorskip("xdist")
+    result = run_lane(tmp_path, monkeypatch, "wx", source, parallel=True)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert message in result.stdout + result.stderr
+    if message == "crashed":
+        states = [json.loads(path.read_text()) for path in tmp_path.glob("test_*.json")]
+        assert len(states) == 2
+        _assert_worker_resources_released(states)
