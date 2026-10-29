@@ -2,88 +2,91 @@
 name: Tests
 on:  # yamllint disable-line rule:truthy
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
 jobs:
   tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-      - name: Install pytest
-        run: pip install pytest
-      - name: Install python packages
-        run: pip install .
-      - name: Run tests
-        run: pytest -m 'not native_wx and not native_kicad'
-  native-wx:
-    name: Native wx (${{ matrix.lane }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: controls
-            selection: not native_kicad and not os_input
-          - lane: isolated input
-            selection: os_input
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-      - name: Install wx and virtual display
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-wxgtk4.0 python3-venv xvfb xauth
-          /usr/bin/python3 -m venv --system-site-packages .venv-wx
-      - name: Install test dependencies
-        run: .venv-wx/bin/python -m pip install '.[dev]'
-      - name: Install a window manager for input and focus checks
-        if: matrix.lane == 'isolated input'
-        run: sudo apt-get install -y --no-install-recommends openbox
-      - name: Run tests with native wx
-        run: |
-          timeout 360s xvfb-run -a -s '-screen 0 1920x1080x24' sh -c '
-            if [ "$1" = "os_input" ]; then
-              openbox >/dev/null 2>&1 &
-              window_manager=$!
-              trap "kill $window_manager 2>/dev/null || true" EXIT
-            fi
-            .venv-wx/bin/python -m pytest -rs --require-native=wx -m "$1"
-          ' sh '${{ matrix.selection }}'
-  native-kicad:
-    name: Native KiCad ${{ matrix.kicad }}
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      max-parallel: 6
       matrix:
         include:
-          # Ubuntu 24.04's own KiCad 7.0.11, the last 7.x. The KiCad 7 PPA
-          # stops at 7.0.9 for noble, and its occt-misc breaks noble's libocct.
-          - kicad: "7"
-          - kicad: "8"
-            ppa: ppa:kicad/kicad-8.0-releases
-          - kicad: "9"
-            ppa: ppa:kicad/kicad-9.0-releases
-          - kicad: "10"
-            ppa: ppa:kicad/kicad-10.0-releases
+          - lane: ordinary-tests
+            name: tests
+            target: ordinary
+          - lane: native-wx-0
+            name: Native wx (controls)
+            target: wx
+          - lane: native-wx-1
+            name: Native wx (isolated input)
+            target: wx
+          # KiCad 7 goldens use AMD64; the 8/9 PPAs lack ARM64 bindings.
+          - lane: native-kicad-7
+            name: Native KiCad 7
+            target: kicad
+            kicad: '7'
+          - lane: native-kicad-8
+            name: Native KiCad 8
+            target: kicad
+            kicad: '8'
+          - lane: native-kicad-9
+            name: Native KiCad 9
+            target: kicad
+            kicad: '9'
+          - lane: native-kicad-10
+            name: Native KiCad 10
+            target: kicad
+            kicad: '10'
+    env:
+      ARCHITECTURE: ${{ matrix.kicad && matrix.kicad != '10' && 'amd64' || vars.KICAD_VALIDATION_ARCHITECTURE || 'amd64' }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-      - name: Install KiCad ${{ matrix.kicad }} and matching system Python bindings
+      - uses: actions/checkout@v7
+      - name: Cache Python downloads
+        uses: actions/cache@v4
+        with:
+          path: .cache/native-tests/pip
+          key: pip-lanes-${{ env.ARCHITECTURE }}-${{ hashFiles('pyproject.toml') }}
+      - name: Prepare hosted image builder
+        if: ${{ !env.ACT }}
+        uses: docker/setup-buildx-action@v4
+      - name: Build hosted dependency image
+        if: ${{ !env.ACT }}
+        id: hosted
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: docker
+          file: docker/native-tests.Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/${{ env.ARCHITECTURE }}
+          build-args: KICAD_MAJOR=${{ matrix.kicad }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=tests-${{ matrix.target }}-${{ matrix.kicad }}-${{ env.ARCHITECTURE }}
+          cache-to: type=gha,mode=max,scope=tests-${{ matrix.target }}-${{ matrix.kicad }}-${{ env.ARCHITECTURE }}
+      - name: Build local dependency image
+        if: ${{ env.ACT }}
+        id: local
         run: |
-          if [ -n "${{ matrix.ppa }}" ]; then
-            sudo add-apt-repository --yes ${{ matrix.ppa }}
-          fi
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends 'kicad=${{ matrix.kicad }}.*' python3-wxgtk4.0 python3-venv xvfb xauth
-          /usr/bin/python3 -m venv --system-site-packages .venv-kicad
-      - name: Install test dependencies
-        run: .venv-kicad/bin/python -m pip install '.[dev]'
-      - name: Require the native KiCad checks
-        run: >-
-          timeout 300s xvfb-run -a -s '-screen 0 1920x1080x24'
-          .venv-kicad/bin/python -m pytest -rs
-          --require-native=kicad --kicad-major=${{ matrix.kicad }} -m native_kicad
+          docker build --load --platform "linux/$ARCHITECTURE" --target '${{ matrix.target }}' \
+            --build-arg KICAD_MAJOR='${{ matrix.kicad }}' --file docker/native-tests.Dockerfile \
+            --iidfile "$RUNNER_TEMP/image-id" docker
+          echo "image=$(cat "$RUNNER_TEMP/image-id")" >> "$GITHUB_OUTPUT"
+      - name: Run tests in dependency image
+        env:
+          IMAGE: ${{ steps.local.outputs.image || steps.hosted.outputs.imageid }}
+          LANE: ${{ matrix.lane }}
+        run: bash scripts/run_test_lane.sh "$IMAGE" "$LANE" "$ARCHITECTURE"
+      - name: Retain test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.lane }}
+          path: .cache/native-tests/${{ matrix.lane }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
