@@ -94,18 +94,26 @@ def placeholder_findings(count: int) -> list[Finding]:
 def empty_zone_findings(pours: Sequence[str]) -> list[Finding]:
     """Flag each copper zone layer that holds no filled copper.
 
-    Each entry names a zone's net and layer, such as "GND on B.Cu".
+    Each entry names a zone's net and layer, such as "GND on B.Cu", with a
+    generated-teardrop suffix when KiCad identifies that item type.
     """
-    return [
-        Finding(
-            Severity.ERROR,
-            "Copper zones",
-            f"Copper zone {pour} has no fill",
-            "This zone contains no filled copper. "
-            "Plotting now ships the board without that copper.",
+    findings = []
+    teardrop_suffix = " — generated teardrop"
+    for pour in pours:
+        teardrop = pour.endswith(teardrop_suffix)
+        name = pour.removesuffix(teardrop_suffix) if teardrop else pour
+        kind = "Generated teardrop" if teardrop else "Copper zone"
+        subject = "This generated teardrop" if teardrop else "This zone"
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "Copper zones",
+                f"{kind} {name} has no fill",
+                f"{subject} contains no filled copper. "
+                "Plotting now ships the board without that copper.",
+            )
         )
-        for pour in pours
-    ]
+    return findings
 
 
 def drc_findings(count: int, messages: Sequence[str]) -> list[Finding]:

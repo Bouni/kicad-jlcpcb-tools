@@ -1,11 +1,14 @@
 """Keep optional desktop checks strict when a CI lane promises native coverage."""
 
 from collections.abc import Generator
+from contextlib import ExitStack
 import importlib
 import json
 import os
 from pathlib import Path
 import re
+import shlex
+import tempfile
 from typing import Any, Optional
 
 import pytest
@@ -32,6 +35,46 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=os.environ.get("KICAD_JLCPCB_KICAD_MAJOR", "10"),
         help="The KiCad major version a required native KiCad lane must find.",
     )
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_setupnodes(config: pytest.Config, specs: list[Any]) -> None:
+    """Own private wx desktops and state before workers parse configuration."""
+    if config.getoption("require_native") != "wx":
+        return
+    from pyvirtualdisplay import Display
+
+    resources = ExitStack()
+    config.add_cleanup(resources.close)
+    for spec in specs:
+        root = Path(
+            resources.enter_context(tempfile.TemporaryDirectory(prefix="native-wx-"))
+        )
+        environment = {}
+        for key, name in (
+            ("XDG_CONFIG_HOME", "config"),
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_RUNTIME_DIR", "runtime"),
+            ("KICAD_CONFIG_HOME", "kicad"),
+            ("TMPDIR", "tmp"),
+        ):
+            directory = root / name
+            directory.mkdir(mode=0o700)
+            environment[key] = str(directory)
+        # wx closes its display probe before GTK opens the real connection.
+        display = Display(
+            size=(1920, 1080), manage_global_env=False, extra_args=["-noreset"]
+        )
+        resources.callback(display.stop)
+        display.start()
+        environment["DISPLAY"] = display.new_display_var
+        # Only cache options enter the environment. Exact-node child pytest
+        # processes inherit this desktop without inheriting CLI worker flags.
+        options = shlex.split(os.environ.get("PYTEST_ADDOPTS", ""))
+        environment["PYTEST_ADDOPTS"] = shlex.join(
+            options + ["-o", f"cache_dir={environment['XDG_CACHE_HOME']}"]
+        )
+        spec.env.update(environment)
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -73,6 +116,17 @@ def pytest_report_header(config: pytest.Config) -> Optional[str]:
     return config.stash.get(_NATIVE_RUNTIME, None)
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Reduce per-process contention by running strict Python budgets after bulk work."""
+    items.sort(
+        key=lambda item: item.path.name
+        in {
+            "test_impedance_spacing_performance.py",
+            "test_impedance_performance_budget.py",
+        }
+    )
+
+
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Reject a green run in which none of the promised native tests would run."""
     _skip_variant_tests_without_the_api(session.items)
@@ -102,7 +156,11 @@ def pytest_make_collect_report(
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[Any]
 ) -> Generator[None, Any, None]:
-    """Fail late fixture skips as well as missing-runtime preflight failures."""
+    """Retain worker identity and fail unexpected native fixture skips."""
+    if call.when == "setup":
+        worker = getattr(item.config, "workerinput", {}).get("workerid")
+        if worker:
+            item.user_properties.append(("native_worker_id", worker))
     report = (yield).get_result()
     mode = item.config.getoption("require_native")
     if (

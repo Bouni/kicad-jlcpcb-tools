@@ -1,13 +1,16 @@
 """Exercise publication and bookkeeping through the real generation handler."""
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
+import hashlib
 import importlib
+import json
 from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Optional
+from unittest.mock import MagicMock
 from zipfile import ZipFile
 
 import pytest
@@ -18,6 +21,7 @@ from .test_mainwindow_empty_zone_warning import (
     _make_window,
     mainwindow_module as handler_module,
 )
+from .test_mainwindow_impedance_flow import _reports, _reviewed_plan
 from .variant_data_support import _native_session
 
 modules = fabrication_modules
@@ -179,8 +183,68 @@ def test_readonly_counter_preserves_published_files(generation: Generation) -> N
         database.chmod(0o644)
 
 
-def test_counter_commit_failure_restores_published_files(
+def _observe_counter_connections(
+    generation: Generation,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail_promptly: bool,
+) -> list[int]:
+    """Observe real transaction connections without changing unrelated SQLite users."""
+    store_module = importlib.import_module(type(generation.store).__module__)
+    counter = importlib.import_module(
+        store_module.generation_count_transaction.__module__
+    )
+    observed: list[int] = []
+
+    def connect(database: Any, **kwargs: Any) -> sqlite3.Connection:
+        """Keep actual transactions and report the native connection timeout."""
+        assert Path(database) == Path(generation.store.dbfile)
+        if fail_promptly:
+            assert "timeout" not in kwargs
+            kwargs["timeout"] = 0.02
+        connection = sqlite3.connect(database, **kwargs)
+        observed.append(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+        return connection
+
+    monkeypatch.setattr(counter, "sqlite3", SimpleNamespace(connect=connect))
+    return observed
+
+
+@pytest.fixture
+def fast_counter_connections(
     generation: Generation, monkeypatch: pytest.MonkeyPatch
+) -> list[int]:
+    """Bound only the deliberate contention tests' real transaction waits."""
+    return _observe_counter_connections(generation, monkeypatch, fail_promptly=True)
+
+
+def test_production_generation_counter_uses_default_sqlite_timeout(
+    generation: Generation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The optimization must leave production's five-second contention policy intact."""
+    observed = _observe_counter_connections(
+        generation, monkeypatch, fail_promptly=False
+    )
+    assert generation.store.increment_generation_count() == 2
+    assert observed == [5000]
+
+
+def _assert_successful_retry(generation: Generation) -> None:
+    """Verify the handler succeeds after the independent database blocker closes."""
+    generation.wx.MessageBox.reset_mock()
+    generation.hooks.clear()
+    generation.run()
+    generation.wx.MessageBox.assert_not_called()
+    generation.assert_generated_outputs()
+    assert generation.store.get_generation_count() == 2
+    assert generation.hooks == ["pre", "post"]
+    generation.assert_released()
+
+
+def test_counter_commit_failure_restores_published_files(
+    generation: Generation,
+    monkeypatch: pytest.MonkeyPatch,
+    fast_counter_connections: list[int],
 ) -> None:
     """A real SQLite reader blocks COMMIT after all files have been replaced."""
     replaced: list[Path] = []
@@ -208,9 +272,14 @@ def test_counter_commit_failure_restores_published_files(
         assert generation.store.get_generation_count() == 1
         assert generation.hooks == ["pre"]
         generation.assert_released()
+    assert fast_counter_connections == [20]
+    _assert_successful_retry(generation)
+    assert fast_counter_connections == [20, 20]
 
 
-def test_locked_counter_preserves_published_files(generation: Generation) -> None:
+def test_locked_counter_preserves_published_files(
+    generation: Generation, fast_counter_connections: list[int]
+) -> None:
     """An existing SQLite writer prevents export without replacing prior output."""
     with closing(sqlite3.connect(generation.store.dbfile)) as writer:
         writer.execute("BEGIN IMMEDIATE")
@@ -220,6 +289,9 @@ def test_locked_counter_preserves_published_files(generation: Generation) -> Non
         assert generation.store.get_generation_count() == 1
         assert generation.hooks == ["pre"]
         generation.assert_released()
+    assert fast_counter_connections == [20]
+    _assert_successful_retry(generation)
+    assert fast_counter_connections == [20, 20]
 
 
 def test_handler_respects_publication_guard_and_retries_after_release(
@@ -239,14 +311,7 @@ def test_handler_respects_publication_guard_and_retries_after_release(
         assert generation.hooks == ["pre"]
         generation.assert_released()
 
-    generation.wx.MessageBox.reset_mock()
-    generation.hooks.clear()
-    generation.run()
-    generation.wx.MessageBox.assert_not_called()
-    generation.assert_generated_outputs()
-    assert generation.store.get_generation_count() == 2
-    assert generation.hooks == ["pre", "post"]
-    generation.assert_released()
+    _assert_successful_retry(generation)
 
 
 @pytest.mark.parametrize("stage", ["plot", "validation"])
@@ -284,14 +349,7 @@ def test_board_copy_error_releases_generation_and_allows_retry(
     assert generation.hooks == ["pre"]
     generation.assert_released()
 
-    generation.wx.MessageBox.reset_mock()
-    generation.hooks.clear()
-    generation.run()
-    generation.wx.MessageBox.assert_not_called()
-    generation.assert_generated_outputs()
-    assert generation.store.get_generation_count() == 2
-    assert generation.hooks == ["pre", "post"]
-    generation.assert_released()
+    _assert_successful_retry(generation)
 
 
 def test_second_publication_failure_rolls_back_counter_and_first_file(
@@ -497,4 +555,159 @@ def test_post_hook_failure_warns_after_committing_outputs(
     generation.assert_generated_outputs()
     assert generation.store.get_generation_count() == 2
     assert generation.hooks == ["pre", "post"]
+    generation.assert_released()
+
+
+@pytest.mark.parametrize("change_at", [None, "render", "archive", "publication"])
+def test_impedance_reports_use_reviewed_output_variant_before_publication(
+    generation: Generation,
+    monkeypatch: pytest.MonkeyPatch,
+    change_at: Optional[str],
+) -> None:
+    """Only a reviewed output clone can accompany the variant's real ZIP and CSVs."""
+    plan = _reviewed_plan(generation.module)
+    report_board = SimpleNamespace(
+        filename=generation.exporter.board.GetFileName(), variant="A"
+    )
+    report_board.GetFileName = lambda: report_board.filename
+    report_board.GetCurrentVariant = lambda: report_board.variant
+    snapshot = plan.snapshot
+    # Approval describes output A; the native reader below independently supplies
+    # the actual plot board snapshot when the real output verifier reads it.
+    output_context = hashlib.sha256(
+        json.dumps((snapshot.context_digest, "A"), ensure_ascii=True).encode("ascii")
+    ).hexdigest()
+    approved_snapshot = replace(snapshot, context_digest=output_context)
+    service = importlib.import_module(
+        generation.module.export_impedance_reports.__module__
+    )
+    approved_config = replace(
+        plan.config,
+        reviewed_digest=service.analyze(plan.config, approved_snapshot).digest,
+    )
+    plan = service.prepare(approved_config, approved_snapshot)
+    assert plan is not None
+    from .test_impedance_controls import Widget
+
+    integration = importlib.import_module(
+        generation.module.ImpedanceControls.__module__
+    )
+    for widget in ("CheckBox", "Button", "StaticText"):
+        monkeypatch.setattr(integration.wx, widget, Widget, raising=False)
+    monkeypatch.setattr(
+        integration, "read_theme_context", lambda _pcbnew: "current-theme"
+    )
+    controls = generation.module.ImpedanceControls(
+        generation.window, SimpleNamespace(AddControl=lambda _control: None)
+    )
+    controls.preflight = MagicMock(return_value=plan)
+    controls.verify_current = MagicMock()
+    controls.verify_disabled = MagicMock()
+    generation.window._impedance = controls
+    monkeypatch.setattr(
+        generation.module, "ArchiveEntry", generation.archive.ArchiveEntry
+    )
+    monkeypatch.setattr(
+        generation.exporter,
+        "get_report_board",
+        MagicMock(return_value=report_board),
+        raising=False,
+    )
+    reads: list[tuple[Any, Any, Any]] = []
+    read_stages: list[str] = []
+    boundaries = {
+        "render": "Validating controlled-impedance output variant",
+        "archive": "Validating controlled-impedance captures before archive",
+        "publication": "Validating controlled-impedance captures before publication",
+    }
+
+    def read_snapshot(board: Any, pcbnew: Any, *, netclass_source: Any = None) -> Any:
+        """Read output state separately from the saved approval and production verifier."""
+        reads.append((board, pcbnew, netclass_source))
+        stage = generation.window._current_generation_step
+        read_stages.append(stage)
+        assert board is report_board
+        assert netclass_source is generation.window.pcbnew.GetBoard()
+        if change_at is not None and stage == boundaries[change_at]:
+            return replace(snapshot, context_digest="different output variant text")
+        return snapshot
+
+    adapter = importlib.import_module(
+        f"{generation.module.ImpedanceControls.__module__.rsplit('.', 1)[0]}.pcbnew_adapter"
+    )
+    monkeypatch.setattr(
+        adapter,
+        "snapshot_board",
+        read_snapshot,
+    )
+    rendered_boards = []
+    scratch_paths = []
+
+    def export(
+        _plan: Any, board: Any, _pcbnew: Any, scratch: Path, **options: Any
+    ) -> Any:
+        """Write real report members while observing the selected native boundary."""
+        assert options["capture_cache"] is controls._owned_capture_cache
+        assert options["capture_identity"] == (
+            str(Path(controls.board_path).resolve()),
+            "A",
+        )
+        assert options["source_context"]() == _plan.snapshot
+        appearance = options["appearance_context"]()
+        assert appearance == "current-theme"
+        rendered_boards.append(board)
+        scratch_paths.append(scratch)
+        reports = replace(_reports(scratch), appearance=appearance)
+        assert options["source_context"]() == _plan.snapshot
+        assert options["appearance_context"]() == appearance
+        return reports
+
+    monkeypatch.setattr(generation.module, "export_impedance_reports", export)
+    generation.run()
+
+    assert all(not path.exists() for path in scratch_paths)
+    if change_at is None:
+        generation.wx.MessageBox.assert_not_called()
+        assert rendered_boards == [report_board]
+        generation.assert_generated_outputs()
+        with ZipFile(generation.paths["gerber_zip"]) as archive:
+            assert archive.read("Required_impedance_control.xlsx") == b"workbook"
+            assert (
+                archive.read("Required_impedance_control.html")
+                == b"<html>report</html>"
+            )
+        assert generation.store.get_generation_count() == 2
+        assert generation.hooks == ["pre", "post"]
+    else:
+        generation.wx.MessageBox.assert_called_once()
+        message = generation.wx.MessageBox.call_args.args[0]
+        boundary = {
+            "render": "Validating controlled-impedance output variant",
+            "archive": "Validating controlled-impedance captures before archive",
+            "publication": "Validating controlled-impedance captures before publication",
+        }[change_at]
+        assert boundary in message
+        assert rendered_boards == ([] if change_at == "render" else [report_board])
+        generation.assert_previous_outputs()
+        assert generation.store.get_generation_count() == 1
+        assert generation.hooks == ["pre"]
+    expected_stages = [
+        boundaries["render"],
+        # Fresh reuse precheck, followed by this isolated report consumer's
+        # before/after source checks, all inside the timed export operation.
+        *(["Generating controlled-impedance workbook and HTML report"] * 3),
+        boundaries["archive"],
+        boundaries["publication"],
+    ]
+    if change_at is not None:
+        expected_stages = expected_stages[
+            : expected_stages.index(boundaries[change_at]) + 1
+        ]
+    expected_read = (
+        report_board,
+        generation.window.pcbnew,
+        generation.window.pcbnew.GetBoard(),
+    )
+    assert read_stages == expected_stages
+    assert reads == [expected_read] * len(expected_stages)
     generation.assert_released()

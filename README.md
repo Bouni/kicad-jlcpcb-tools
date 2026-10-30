@@ -18,6 +18,7 @@ Plugin to generate all files necessary for JLCPCB board fabrication and assembly
 - Excellon files
 - BOM file
 - CPL file
+- JLCPCB controlled-impedance workbook and self-contained HTML companion, when enabled for the board
 
 Furthermore it lets you search the JLCPCB parts database and assign parts directly to the footprints which result in them being put into the BOM file.
 
@@ -155,6 +156,20 @@ marker and **Drop before Economy** label show the destination. Release the
 header to change the order to **Default**, **Premium**, **Economy**.
 
 ![Dragging Premium before Economy shows a translucent column preview and drop position, followed by the reordered variant columns.](images/design-variants-column-dragging.gif)
+
+### Controlled impedance
+
+Controlled impedance is an option that JLCPCB offers. To convey which traces should be impedance matched JLCPCB requires a `Required_impedance_control.xlsx` to be included in the design .zip file. If one is not included in your design package, JLCPCB will contact you and request that you provide this file.
+
+It can be somewhat time consuming and repetative to update this file each time your layout changes, but not any more. This plugin can automatically generate the complete `Required_impedance_control.xlsx` file, including target impedances, reference layers AND all of the highlighted nets from the layout.
+
+![Highlighted 50 ohm CPWG net](images/controlled_impedance_example.png)
+
+Generation also includes a self-contained `Required_impedance_control.html` companion in the board's Gerber ZIP for web viewing of the generated output.
+
+Review tracking records the latest workbook-preview view time and each signal layer's approval time in that same database. Image-view dates are hidden during review; the HTML companion shows UTC and distinguishes current from historical captures/settings. Older records show **Not recorded**. Timestamps are saved with the configuration, not on Cancel, and do not replace the required image/layer review.
+
+For inspection and regression testing, [two combined RF example boards](examples/impedance/README.md) cover short and long top/bottom/inner routes, single-ended and differential coplanar/noncoplanar designs, and layer transitions with different widths. These repository test assets are separate from production settings; their impedance dimensions are nominal, not solver-certified.
 
 ## Keyboard shortcuts
 
@@ -328,7 +343,7 @@ Generate all necessary assembly files for your board with a simple click.
 
 A new directory called `jlcpcb` is created, and in there, two separate folders are created, `gerber` and `production_files`.
 
-In the gerber folder all necessary `*.gbr` and `*.drl` files are generated and zipped into the `production_files` folder, ready for upload to JLCPCB.
+In `gerber/<board-name>`, all necessary `*.gbr` and `*.drl` files are generated and zipped into the `production_files` folder, ready for upload to JLCPCB. Each board has a separate plotting directory.
 The zipfile is named `GERBER-<projectname>.zip`
 
 Also in the `production_files` folder, two files are generated, `BOM-<projectname>.csv` and `CPL-<projectname>.csv`.
@@ -385,31 +400,14 @@ In the near future I'll add `ruff` / `pylint` and possibly other pre-commit-hook
 
 ### Tests
 
-Report ordinary Python tests, real wx controls, and real KiCad tests separately.
-A passing test that uses a fake board does not verify KiCad's file handling,
-project state, or native object cleanup.
+With Docker and [`act`](https://nektosact.com/installation/) installed, run the
+complete test workflow:
 
 ```sh
-python -m pytest -rs -m 'not native_wx and not native_kicad'
-python -m pytest -rs --require-native=wx -m 'not native_kicad and not os_input'
-python -m pytest -rs --require-native=wx -m os_input
-python -m pytest -rs --require-native=kicad -m native_kicad
+python scripts/run_tests.py
 ```
 
-The required native modes reject missing libraries, empty native selections, and
-skipped native tests. The KiCad mode accepts three skips: tests of design variants
-on a KiCad without them, the forced-DRC test on KiCad 10, whose DRC crashes
-outside KiCad, and the golden-output tests on a KiCad with no outputs recorded
-in `tests/golden/kicad_builds.json`. Run them with Python libraries matching
-the installed KiCad or wx packages. Mouse/keyboard tests require an isolated desktop with a window
-manager; Linux native tests can use Xvfb.
-
-To reproduce CI locally, use an Ubuntu 24.04 Docker container with the same CPU
-architecture, KiCad packages, dependencies, and commands as
-[the test workflow](.github/workflows/tests.yml). Copy the tracked source tree so
-untracked test files cannot change collection. Include the tested revision,
-Python/wx/KiCad versions, command, and pass/skip/deselection counts when reporting
-results. A required lane that was not run remains unvalidated.
+See [testing instructions](docs/testing.md) for architecture and output options.
 
 ### Settings
 

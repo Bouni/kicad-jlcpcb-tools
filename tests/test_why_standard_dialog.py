@@ -1,4 +1,4 @@
-"""Native dialog regressions; enable with KICAD_NATIVE_WX_TESTS=1 on a desktop."""
+"""Native dialog regressions selected by the required wx test lane."""
 
 from __future__ import annotations
 
@@ -9,12 +9,17 @@ from typing import Any
 
 import pytest
 
+from .native_wx_support import create_native_app
 from .wx_harness import load_siblings
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("KICAD_NATIVE_WX_TESTS") != "1",
-    reason="Native wx tests require KICAD_NATIVE_WX_TESTS=1 and a desktop session",
-)
+pytestmark = [
+    pytest.mark.native_wx,
+    pytest.mark.skipif(
+        os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1"
+        and os.environ.get("KICAD_NATIVE_WX_TESTS") != "1",
+        reason="Native wx tests require an enabled desktop session",
+    ),
+]
 
 
 @pytest.fixture
@@ -22,7 +27,7 @@ def native_dialog() -> Iterator[SimpleNamespace]:
     """Load real siblings and construct actual controls without starting KiCad."""
     wx = pytest.importorskip("wx")
     dv = pytest.importorskip("wx.dataview")
-    app = wx.App.Get() or wx.App(False)
+    app = wx.App.Get() or create_native_app(wx)
     with load_siblings(
         "_why_standard_native",
         ("why_standard_dialog", "bom_estimation.assembly_mode"),

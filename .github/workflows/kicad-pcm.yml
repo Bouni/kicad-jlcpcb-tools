@@ -5,7 +5,6 @@
 name: KiCAD PCM packaging
 on:  # yamllint disable-line rule:truthy
   release:
-    branches: [main]
     types:
       - published
   workflow_dispatch:
