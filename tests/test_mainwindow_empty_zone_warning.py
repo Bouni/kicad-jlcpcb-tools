@@ -166,7 +166,7 @@ def test_no_empty_zones_generates_without_a_pane(
     mainwindow.JLCPCBTools.generate_fabrication_data(window)
 
     assert "Filling copper zones" in steps
-    window.fabrication.fill_zones.assert_called_once_with()
+    window.fabrication.fill_zone_regions.assert_called_once_with()
     window.pcbnew.GetBoard.assert_not_called()
     assert pane.instances == []
     wx.MessageDialog.assert_not_called()
@@ -175,6 +175,34 @@ def test_no_empty_zones_generates_without_a_pane(
     window.fabrication.generate_geber.assert_called_once_with(None)
     window.generate_button.Enable.assert_any_call(False)
     window.generate_button.Enable.assert_any_call(True)
+
+
+@pytest.mark.parametrize("is_teardrop", [True, False, None])
+def test_generate_reviews_zone_records_without_parsing_labels(
+    mainwindow_module: tuple[ModuleType, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    is_teardrop: Optional[bool],
+) -> None:
+    """Generation keeps the native zone kind through its single review decision."""
+    mainwindow, wx = mainwindow_module
+    pane = _install_pane(mainwindow, monkeypatch, wx.ID_CANCEL)
+    window, _steps = _make_window(mainwindow, [])
+    window.fabrication.fill_zones.side_effect = AssertionError(
+        "Generation must retain the structured zone result"
+    )
+    window.fabrication.fill_zone_regions.return_value = [
+        EmptyCopperZone("zone", "VEXT", 0, "F.Cu", (), is_teardrop=is_teardrop)
+    ]
+
+    mainwindow.JLCPCBTools.generate_fabrication_data(window)
+
+    (shown,) = pane.instances
+    kind = "Generated teardrop" if is_teardrop is True else "Copper zone"
+    assert shown.findings[0].title == f"{kind} VEXT on F.Cu has no fill"
+    assert shown.findings[0].severity.name == "ERROR"
+    window.fabrication.fill_zone_regions.assert_called_once_with()
+    window.fabrication.generate_geber.assert_not_called()
+    window.store.increment_generation_count.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -201,7 +229,9 @@ def test_generate_anyway_logs_all_zones_and_uses_refill_aware_wording(
     assert expected_step in steps
     (shown,) = pane.instances
     assert shown.parent is window
-    assert list(shown.findings) == mainwindow.empty_zone_findings(empty_pours)
+    assert list(shown.findings) == mainwindow.empty_zone_findings(
+        window.fabrication.fill_zone_regions.return_value
+    )
     assert [(f.severity.name, f.title) for f in shown.findings] == [
         ("ERROR", "Copper zone GND on F.Cu has no fill"),
         ("ERROR", "Copper zone VCC on In1.Cu has no fill"),

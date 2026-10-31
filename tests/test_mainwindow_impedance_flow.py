@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from copper_zones import EmptyCopperZone
 from impedance.service import ExportArtifacts
 
 from .modal_test_support import review_pane
@@ -278,7 +279,7 @@ def test_zone_fill_precedes_impedance_preflight_so_approval_can_match(
     window, steps = _window(runtime, plan)
     observed: list[str] = []
 
-    def fill_zones(*_args: Any) -> list[str]:
+    def fill_zones(*_args: Any) -> list[EmptyCopperZone]:
         observed.append("fill")
         return []
 
@@ -287,7 +288,7 @@ def test_zone_fill_precedes_impedance_preflight_so_approval_can_match(
         observed.append("preflight")
         return plan
 
-    window.fabrication.fill_zones.side_effect = fill_zones
+    window.fabrication.fill_zone_regions.side_effect = fill_zones
     window._impedance.preflight.side_effect = preflight
 
     def export(_plan: Any, _board: Any, _pcbnew: Any, scratch: Path) -> ExportArtifacts:
@@ -319,10 +320,10 @@ def test_impedance_preflight_precedes_one_aggregated_findings_decision(
     }
     observed: list[str] = []
 
-    def fill_zones() -> list[str]:
+    def fill_zones() -> list[EmptyCopperZone]:
         """Generate prepares its retained fabrication board without an override."""
         observed.append("fill")
-        return ["GND on B.Cu"]
+        return [EmptyCopperZone("ground", "GND", 0, "B.Cu", ())]
 
     def preflight(_layer_count: Any) -> object:
         assert observed == ["fill"]
@@ -350,7 +351,7 @@ def test_impedance_preflight_precedes_one_aggregated_findings_decision(
     monkeypatch.setattr(pane, "ShowModal", show_findings)
     monkeypatch.setattr(runtime, "GenerationReviewDialog", pane)
     monkeypatch.setattr(runtime, "export_impedance_reports", export)
-    window.fabrication.fill_zones.side_effect = fill_zones
+    window.fabrication.fill_zone_regions.side_effect = fill_zones
     window._impedance.preflight.side_effect = preflight
     window.drc_review_findings.side_effect = drc_findings
 
@@ -364,7 +365,7 @@ def test_impedance_preflight_precedes_one_aggregated_findings_decision(
         "Copper zones",
         "DRC",
     ]
-    window.fabrication.fill_zones.assert_called_once_with()
+    window.fabrication.fill_zone_regions.assert_called_once_with()
     window._impedance.preflight.assert_called_once_with(None)
     window._impedance.on_configure.assert_not_called()
     runtime.wx.MessageDialog.assert_not_called()
@@ -537,7 +538,7 @@ def test_failure_stops_publication_and_restores_controls(
     window.generate_button.Enable.assert_any_call(True)
     runtime.wx.EndBusyCursor.assert_called_once()
     if failure == "preflight":
-        window.fabrication.fill_zones.assert_called_once()
+        window.fabrication.fill_zone_regions.assert_called_once()
         window.drc_review_findings.assert_not_called()
         window.run_generate_hook.assert_not_called()
         window._impedance.on_configure.assert_not_called()

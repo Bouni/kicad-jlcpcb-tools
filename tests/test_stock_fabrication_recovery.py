@@ -138,7 +138,7 @@ def generation_window(
     real_init = fabrication.Fabrication.__init__
     real_prepare = fabrication.Fabrication.prepare_cpl
     real_consistency = fabrication.Fabrication.get_part_consistency_warnings
-    real_zones = fabrication.Fabrication.fill_zones
+    real_zones = fabrication.Fabrication.fill_zone_regions
 
     def initialize(generator: Any, parent: Any, board: Any) -> None:
         """Count attempts while executing the complete production constructor."""
@@ -173,7 +173,7 @@ def generation_window(
     monkeypatch.setattr(
         fabrication.Fabrication, "get_part_consistency_warnings", consistency
     )
-    monkeypatch.setattr(fabrication.Fabrication, "fill_zones", zones)
+    monkeypatch.setattr(fabrication.Fabrication, "fill_zone_regions", zones)
     workers: list[Callable[[], None]] = []
     monkeypatch.setattr(
         library_module,

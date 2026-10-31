@@ -12,6 +12,8 @@ from zipfile import ZipFile
 
 import pytest
 
+from copper_zones import EmptyCopperZone
+
 from .modal_test_support import review_pane
 from .test_impedance_controls import Store, _configuration, _controls, _record, harness
 from .test_impedance_output_variant import _approve, _variant_controls
@@ -324,8 +326,8 @@ def test_guarded_reset_stops_generation_after_prepared_source_changes(
     assert len(harness.dialogs) == int(when == "review_modal")
     assert controls.config == harness.model.Config()
     assert len(harness.errors) == 1 and "prepared board changed" in harness.errors[0]
-    window.fabrication.fill_zones.assert_called_once_with()
-    window.fabrication.fill_zone_regions.assert_not_called()
+    window.fabrication.fill_zone_regions.assert_called_once_with()
+    window.fabrication.fill_zones.assert_not_called()
     window.fabrication.generate_geber.assert_not_called()
     window.fabrication.generate_excellon.assert_not_called()
     window.fabrication.zip_gerber_excellon.assert_not_called()
@@ -414,11 +416,11 @@ def test_generate_configure_reuses_prepared_copper_and_one_empty_zone_decision(
         harness.current_snapshot, context_digest="generation-filled-copper"
     )
 
-    def fill() -> list[str]:
+    def fill() -> list[EmptyCopperZone]:
         harness.current_snapshot = filled
-        return ["GND on B.Cu"]
+        return [EmptyCopperZone("ground", "GND", 0, "B.Cu", ())]
 
-    window.fabrication.fill_zones.side_effect = fill
+    window.fabrication.fill_zone_regions.side_effect = fill
     harness.modal_result = harness.wx.ID_OK
     harness.modal_action = lambda dialog: _approve(harness, dialog)
     pane = review_pane(runtime.wx.ID_OK)
@@ -444,8 +446,8 @@ def test_generate_configure_reuses_prepared_copper_and_one_empty_zone_decision(
         report_stub,
     )
     runtime.JLCPCBTools.generate_fabrication_data(window)
-    window.fabrication.fill_zones.assert_called_once_with()
-    window.fabrication.fill_zone_regions.assert_not_called()
+    window.fabrication.fill_zone_regions.assert_called_once_with()
+    window.fabrication.fill_zones.assert_not_called()
     empty_dialog.assert_not_called()
     assert len(harness.dialogs) == 1
     assert harness.dialogs[0].snapshot == filled
@@ -736,11 +738,11 @@ def test_generate_configure_reuses_prepared_source_for_selected_output_variant(
         runtime, "ImpedanceStorageError", harness.integration.ImpedanceStorageError
     )
 
-    def fill() -> list[str]:
+    def fill() -> list[EmptyCopperZone]:
         state.version = "prepared-source"
-        return ["GND on B.Cu"]
+        return [EmptyCopperZone("ground", "GND", 0, "B.Cu", ())]
 
-    window.fabrication.fill_zones.side_effect = fill
+    window.fabrication.fill_zone_regions.side_effect = fill
     harness.modal_result = harness.wx.ID_OK
     harness.modal_action = lambda dialog: _approve(harness, dialog)
     pane = review_pane(runtime.wx.ID_CANCEL)
@@ -752,8 +754,8 @@ def test_generate_configure_reuses_prepared_source_for_selected_output_variant(
     assert state.live.variant == "B"
     assert all(renderer.board.variant == "A" for renderer in harness.renderers)
     assert all(owner.closed for owner in state.owners)
-    window.fabrication.fill_zones.assert_called_once_with()
-    window.fabrication.fill_zone_regions.assert_not_called()
+    window.fabrication.fill_zone_regions.assert_called_once_with()
+    window.fabrication.fill_zones.assert_not_called()
     assert len(pane.instances) == 1
     window.fabrication.zip_gerber_excellon.assert_not_called()
     assert not harness.errors

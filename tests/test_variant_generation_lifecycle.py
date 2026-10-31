@@ -15,6 +15,8 @@ from zipfile import ZipFile
 
 import pytest
 
+from copper_zones import EmptyCopperZone
+
 from .fabrication_test_support import Point, modules as fabrication_modules
 from .modal_test_support import review_pane
 from .test_mainwindow_empty_zone_warning import (
@@ -131,7 +133,7 @@ def generation(mainwindow_module: Any, modules: Any, tmp_path: Path) -> Generati
     window.build_generate_hook_env = (
         window_module.JLCPCBTools.build_generate_hook_env.__get__(window)
     )
-    exporter.fill_zones = lambda: []
+    exporter.fill_zone_regions = lambda: []
 
     def plot(*_args: Any) -> None:
         """Represent native plotter output with an actual nonempty file."""
@@ -486,7 +488,9 @@ def test_cancel_at_review_writes_nothing_and_releases_publication(
     """A finding cancelled at the pane leaves every earlier artifact in place."""
     pane = review_pane(generation.wx.ID_CANCEL)
     monkeypatch.setattr(generation.module, "GenerationReviewDialog", pane)
-    generation.exporter.fill_zones = lambda: ["GND on B.Cu"]
+    generation.exporter.fill_zone_regions = lambda: [
+        EmptyCopperZone("ground", "GND", 0, "B.Cu", ())
+    ]
 
     generation.run()
 
@@ -508,7 +512,9 @@ def test_generate_anyway_publishes_what_a_clean_board_publishes(
     clean = _published(generation)
     pane = review_pane(generation.wx.ID_OK)
     monkeypatch.setattr(generation.module, "GenerationReviewDialog", pane)
-    generation.exporter.fill_zones = lambda: ["GND on B.Cu"]
+    generation.exporter.fill_zone_regions = lambda: [
+        EmptyCopperZone("ground", "GND", 0, "B.Cu", ())
+    ]
     generation.hooks.clear()
 
     generation.run()

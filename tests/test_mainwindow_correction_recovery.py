@@ -527,7 +527,7 @@ def test_generation_blocks_unavailable_or_unmigrated_storage(
 
     assert steps == ["Validating corrections"]
     window.fabrication.write_cpl.assert_not_called()
-    window.fabrication.fill_zones.assert_not_called()
+    window.fabrication.fill_zone_regions.assert_not_called()
     window.store.increment_generation_count.assert_not_called()
     runtime.wx.EndBusyCursor.assert_called_once_with()
     window.generate_button.Enable.assert_called_with(True)
@@ -629,7 +629,7 @@ def test_generation_event_keeps_snapshot_for_real_cpl_then_blocks_and_recovers(
     matcher = MagicMock(wraps=fabrication._correction_for_footprint)
     fabrication._correction_for_footprint = matcher
     for method in (
-        "fill_zones",
+        "fill_zone_regions",
         "generate_geber",
         "generate_excellon",
         "zip_gerber_excellon",
@@ -693,7 +693,7 @@ def test_generation_prepares_placements_before_any_output_or_board_changes(
     destination = Path(fabrication.get_cpl_csv_path())
     destination.write_bytes(b"previous complete CPL\x00\xff")
     later_steps = (
-        "fill_zones",
+        "fill_zone_regions",
         "generate_geber",
         "generate_excellon",
         "zip_gerber_excellon",

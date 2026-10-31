@@ -3,8 +3,11 @@
 from collections.abc import Iterator
 import logging
 from types import ModuleType
+from typing import Optional
 
 import pytest
+
+from copper_zones import EmptyCopperZone
 
 from .wx_harness import load_siblings
 
@@ -103,7 +106,12 @@ def test_each_empty_zone_layer_is_an_error_with_its_consequence(
     review: ModuleType,
 ) -> None:
     """Every empty pour is its own red row, in the order the check found them."""
-    findings = review.empty_zone_findings(["GND on B.Cu", "no net on F.Cu"])
+    findings = review.empty_zone_findings(
+        [
+            EmptyCopperZone("ground", "GND", 0, "B.Cu", ()),
+            EmptyCopperZone("unconnected", "", 1, "F.Cu", ()),
+        ]
+    )
 
     assert [(f.severity, f.check, f.title) for f in findings] == [
         (review.Severity.ERROR, "Copper zones", "Copper zone GND on B.Cu has no fill"),
@@ -122,12 +130,35 @@ def test_each_empty_zone_layer_is_an_error_with_its_consequence(
 
 def test_empty_teardrop_export_finding_names_the_item_type(review: ModuleType) -> None:
     """Generated teardrops stay serious findings with a recognizable item type."""
-    (finding,) = review.empty_zone_findings(["VEXT on F.Cu — generated teardrop"])
+    (finding,) = review.empty_zone_findings(
+        [EmptyCopperZone("teardrop", "VEXT", 0, "F.Cu", (), is_teardrop=True)]
+    )
 
     assert finding.severity == review.Severity.ERROR
     assert finding.title == "Generated teardrop VEXT on F.Cu has no fill"
     assert "This generated teardrop contains no filled copper." in finding.detail
     assert "Plotting now ships the board without that copper." in finding.detail
+
+
+@pytest.mark.parametrize("is_teardrop", [False, None])
+def test_empty_zone_type_does_not_come_from_display_text(
+    review: ModuleType, is_teardrop: Optional[bool]
+) -> None:
+    """A custom layer name cannot turn ordinary or unknown copper into a teardrop."""
+    (finding,) = review.empty_zone_findings(
+        [
+            EmptyCopperZone(
+                "ordinary",
+                "GND",
+                0,
+                "F.Cu — generated teardrop",
+                (),
+                is_teardrop=is_teardrop,
+            )
+        ]
+    )
+    assert finding.title == "Copper zone GND on F.Cu — generated teardrop has no fill"
+    assert finding.detail.startswith("This zone contains no filled copper.")
 
 
 def test_drc_errors_are_one_finding_listing_every_message(
@@ -303,7 +334,7 @@ def test_every_builder_title_is_one_line(review: ModuleType) -> None:
         *review.value_mismatch_findings({"C1": {"1k": ["R1"], "1K": ["R2"]}}),
         *review.placeholder_findings(0),
         *review.placeholder_findings(2),
-        *review.empty_zone_findings(["GND on F.Cu"]),
+        *review.empty_zone_findings([EmptyCopperZone("ground", "GND", 0, "F.Cu", ())]),
         *review.drc_findings(3, ["[a]: one", "[b]: two", "[c]: three"]),
         review.drc_failed_finding("first line\nsecond line"),
     ]

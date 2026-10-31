@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from copper_zones import EmptyCopperZone
+
 from .native_wx_support import pump, run_native, wait_until
 from .wx_harness import load_siblings
 
@@ -49,7 +51,7 @@ def _findings(
             {"C14663": {"100n": ["C3", "C4"], "0.1uF": ["C7"]}}
         ),
         *review.placeholder_findings(0),
-        *review.empty_zone_findings(["GND on B.Cu"]),
+        *review.empty_zone_findings([EmptyCopperZone("ground", "GND", 0, "B.Cu", ())]),
         *review.drc_findings(len(drc_messages), drc_messages),
         review.Finding(
             review.Severity.INFO,
