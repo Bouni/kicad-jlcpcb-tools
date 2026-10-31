@@ -12,8 +12,16 @@ if [[ ${1:-} != --inside ]]; then
     fi
     owner=${KICAD_VALIDATION_RUN_ID:-$(cat /proc/sys/kernel/random/uuid)}
     name="kicad-tests-$owner-$lane"
-    receipt=".cache/native-tests/$lane/container-id"
-    trap 'if [[ -s $receipt ]]; then docker rm -f "$(cat "$receipt")" >/dev/null 2>&1 || true; fi' EXIT
+    # Docker needs a nonexistent cidfile; keep its parent private to this attempt.
+    receipt_directory=$(mktemp -d "${TMPDIR:-/tmp}/kicad-test-lane.XXXXXXXXXX")
+    receipt="$receipt_directory/container-id"
+    trap '
+        if [[ -s $receipt ]]; then
+            docker rm -f "$(cat "$receipt")" >/dev/null 2>&1 || true
+        fi
+        rm -f "$receipt"
+        rmdir "$receipt_directory"
+    ' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     docker run --rm --init --tmpfs /tmp:exec --user=0 --name "$name" --cidfile "$receipt" --platform "linux/$architecture" \
