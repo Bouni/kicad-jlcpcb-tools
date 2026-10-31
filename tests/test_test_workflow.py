@@ -53,6 +53,9 @@ def lane_environment(tmp_path: Path) -> dict[str, str]:
             if arguments[0] == 'rm':
                 (state / arguments[-1]).unlink(missing_ok=True)
                 sys.exit(0)
+            if arguments[0] == 'stop':
+                (state / arguments[-1]).write_text('stopped')
+                sys.exit(0)
             if arguments[0] != 'run':
                 sys.exit('Unexpected Docker command')
             if os.environ.get('DOCKER_FAILURE') == 'start':
@@ -81,6 +84,18 @@ def lane_environment(tmp_path: Path) -> dict[str, str]:
         )
     )
     executable.chmod(0o755)
+    native_cat = shutil.which("cat")
+    assert native_cat is not None
+    uuid_reader = executable.parent / "cat"
+    uuid_reader.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "if sys.argv[1:] == ['/proc/sys/kernel/random/uuid']:\n"
+        "    print('this-run')\n"
+        "else:\n"
+        f"    os.execv({native_cat!r}, [{native_cat!r}, *sys.argv[1:]])\n"
+    )
+    uuid_reader.chmod(0o755)
     state = tmp_path / "docker-state"
     state.mkdir()
     receipts = tmp_path / "receipts"
@@ -123,10 +138,11 @@ def test_direct_lane_can_run_twice(
 
 
 @pytest.mark.parametrize("failure", ["success", "tests", "start", "empty", "signal"])
+@pytest.mark.parametrize("managed", [True, False])
 def test_lane_ignores_stale_receipts_without_removing_unrelated_containers(
-    tmp_path: Path, lane_environment: dict[str, str], failure: str
+    tmp_path: Path, lane_environment: dict[str, str], failure: str, managed: bool
 ) -> None:
-    """Success and failures clean up only the container created by this attempt."""
+    """Only this attempt's container is cleaned or retained for failure artifacts."""
     receipt = tmp_path / ".cache/native-tests/ordinary-tests/container-id"
     receipt.parent.mkdir(parents=True)
     receipt.write_text("unrelated-container")
@@ -137,13 +153,19 @@ def test_lane_ignores_stale_receipts_without_removing_unrelated_containers(
         DOCKER_FAILURE=failure,
         DOCKER_STATUS="7" if failure == "tests" else "0",
     )
+    if not managed:
+        lane_environment.pop("KICAD_VALIDATION_RUN_ID")
     result = run_lane(tmp_path, lane_environment)
     expected = {"success": 0, "tests": 7, "start": 125, "empty": 125, "signal": 143}[
         failure
     ]
     assert result.returncode == expected, result.stderr
     assert unrelated.exists(), "The stale receipt must not authorize container removal"
-    assert not (state / "kicad-tests-this-run-ordinary-tests").exists()
+    current = state / "kicad-tests-this-run-ordinary-tests"
+    if managed and failure in ("tests", "signal"):
+        assert current.read_text() == "stopped"
+    else:
+        assert not current.exists()
     assert receipt.read_text() == "unrelated-container"
     assert not list(Path(lane_environment["TMPDIR"]).iterdir())
     calls = [json.loads(line) for line in (state / "calls").read_text().splitlines()]
