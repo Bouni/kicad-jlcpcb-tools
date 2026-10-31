@@ -108,9 +108,10 @@ def wait_until(
     timeout_ms: int = 3000,
     *,
     reason: str = "Native state did not reach its expected value before the deadline",
+    track_workflow: bool = True,
 ) -> None:
-    """Wait for observable native state, propagating predicate errors to pytest."""
-    workflow = _workflows[-1] if _workflows else None
+    """Wait for native state; teardown may opt out of outer workflow cancellation."""
+    workflow = _workflows[-1] if track_workflow and _workflows else None
     if workflow is not None:
         workflow.check()
     if predicate():
@@ -191,6 +192,15 @@ def run_native(
         except BaseException as error:
             failures.append(error)
             return False
+
+    def leave_workflow() -> None:
+        ordered = bool(_workflows) and _workflows[-1] is workflow
+        for index, active in enumerate(_workflows):
+            if active is workflow:
+                del _workflows[index]
+                break
+        if not ordered:
+            raise AssertionError("Native workflow stack lost its ownership order")
 
     def finish(callback: Optional[Callable[[Any, Any], None]] = None) -> None:
         nonlocal completed
@@ -287,7 +297,7 @@ def run_native(
         if watchdog is not None:
             attempt(watchdog.Stop)
         if entered:
-            assert _workflows.pop() is workflow
+            attempt(leave_workflow)
         requested: set[Any] = set()
         dispatched = False
 
@@ -315,7 +325,9 @@ def run_native(
                 wx.CallAfter(mark_dispatched)
             return dispatched and not created
 
-        attempt(lambda: wait_until(wx, cleanup_complete))
+        # An outer workflow may already be canceled. Its failure must not stop
+        # this runner draining destruction events for its own windows.
+        attempt(lambda: wait_until(wx, cleanup_complete, track_workflow=False))
         if owned_app:
             attempt(app.Destroy)
         else:

@@ -1018,9 +1018,343 @@ def test_native_owned_app_finalizer_preserves_later_capture(
         assert errors.getvalue() == "later stderr\n"
 
 
+@pytest.mark.native_wx
+@pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native wx windows require an enabled desktop session",
+)
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("primary", [False, True])
+@pytest.mark.parametrize("stack", ["empty", "mismatch"])
+def test_native_stack_failure_cleans_windows_and_allows_modal_reuse(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    existing: bool,
+    primary: bool,
+    stack: str,
+) -> None:
+    """A broken ownership stack must not interrupt teardown or poison later modals."""
+    if isolated_native(request, "KICAD_NATIVE_STACK_CHILD"):
+        return
+    import wx
+
+    from . import native_wx_support as runner
+
+    app = create_native_app(wx) if existing else None
+    host = wx.Frame(None, title="Existing host") if existing else None
+    if app is not None:
+        app.SetTopWindow(host)
+    previous_stack = list(runner._workflows)
+    unrelated = [runner._Workflow(), runner._Workflow()] if stack == "mismatch" else []
+    runner._workflows.extend(unrelated[:1])
+    created, registered, watchdogs, results = [], [], [], []
+    allow_modal = [True]
+    original_hook, call_later = wx.ModalDialogHook, wx.CallLater
+    primary_error = RuntimeError("primary exercise failure")
+
+    class Hook(original_hook):
+        def Register(self) -> None:
+            super().Register()
+            registered.append(self)
+
+        def Unregister(self) -> None:
+            super().Unregister()
+            registered.remove(self)
+
+    def schedule(delay: int, callback: Any, *args: Any, **kwargs: Any) -> Any:
+        timer = call_later(delay, callback, *args, **kwargs)
+        if delay == 20000:
+            watchdogs.append(timer)
+        return timer
+
+    def exercise(frame: Any, _wx: Any) -> None:
+        created.append(frame)
+
+        def destroy(event: Any) -> None:
+            if allow_modal[0]:
+                dialog = wx.Dialog(None, title="Cleanup modal")
+                created.append(dialog)
+                results.append(dialog.ShowModal())
+                dialog.Destroy()
+                wx.CallAfter(
+                    lambda: created.append(wx.Frame(None, title="Late window"))
+                )
+            event.Skip()
+
+        frame.Bind(wx.EVT_WINDOW_DESTROY, destroy)
+        if stack == "empty":
+            runner._workflows.clear()
+        else:
+            runner._workflows.append(unrelated[1])
+        if primary:
+            raise primary_error
+
+    def reuse(frame: Any, _wx: Any) -> None:
+        dialog = wx.Dialog(frame, title="Later modal")
+
+        def close() -> None:
+            if dialog and dialog.IsModal():
+                dialog.EndModal(wx.ID_OK)
+
+        wx.CallAfter(close)
+        try:
+            assert dialog.ShowModal() == wx.ID_OK
+        finally:
+            dialog.Destroy()
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(wx, "ModalDialogHook", Hook)
+            patch.setattr(wx, "CallLater", schedule)
+            with pytest.raises(
+                RuntimeError if primary else AssertionError,
+                match="primary exercise failure" if primary else "workflow stack",
+            ) as error:
+                run_native(exercise)
+            if primary:
+                assert error.value is primary_error
+        assert not registered
+        assert watchdogs and all(not timer.IsRunning() for timer in watchdogs)
+        assert results == [wx.ID_CANCEL]
+        assert len(created) == 3 and all(not window for window in created)
+        assert wx.GetApp() is app
+        assert set(wx.GetTopLevelWindows()) == ({host} if existing else set())
+        if app is not None:
+            assert app.GetTopWindow() is host and host.IsEnabled()
+        assert len(runner._workflows) == len(previous_stack) + len(unrelated)
+        assert all(
+            actual is expected
+            for actual, expected in zip(runner._workflows, previous_stack + unrelated)
+        )
+        run_native(reuse)
+        assert wx.GetApp() is app
+    finally:
+        allow_modal[0] = False
+        for hook in list(registered):
+            hook.Unregister()
+        for timer in watchdogs:
+            timer.Stop()
+        runner._workflows[:] = previous_stack
+        remaining = wx.GetApp()
+        if remaining is not None:
+            for window in wx.GetTopLevelWindows():
+                window.Destroy()
+            wait_until(wx, lambda: not wx.GetTopLevelWindows())
+            remaining.Destroy()
+
+
+@pytest.mark.native_wx
+@pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native wx windows require an enabled desktop session",
+)
+@pytest.mark.parametrize("primary", [False, True])
+def test_nested_native_cleanup_survives_outer_workflow_cancellation(
+    request: pytest.FixtureRequest, primary: bool
+) -> None:
+    """An outer cancellation cannot prevent a nested runner cleaning its windows."""
+    if isolated_native(request, "KICAD_NATIVE_OUTER_CANCEL_CHILD"):
+        return
+    import wx
+
+    from . import native_wx_support as runner
+
+    app = create_native_app(wx)
+    host = wx.Frame(None, title="Existing host")
+    app.SetTopWindow(host)
+    primary_error = RuntimeError("inner exercise failure")
+    cancellation = AssertionError("outer workflow cancellation")
+    created, results, phases = [], [], []
+
+    def outer(frame: Any, _wx: Any) -> None:
+        outer_workflow = runner._workflows[-1]
+
+        def inner(inner_frame: Any, _wx: Any) -> None:
+            created.append(inner_frame)
+
+            def destroy(event: Any) -> None:
+                dialog = wx.Dialog(None, title="Nested cleanup modal")
+                created.append(dialog)
+                results.append(dialog.ShowModal())
+                dialog.Destroy()
+                wx.CallAfter(
+                    lambda: created.append(wx.Frame(None, title="Late nested window"))
+                )
+                event.Skip()
+
+            inner_frame.Bind(wx.EVT_WINDOW_DESTROY, destroy)
+            outer_workflow.failure = cancellation
+            if primary:
+                raise primary_error
+
+        if primary:
+            with pytest.raises(RuntimeError, match="inner exercise failure") as error:
+                run_native(inner)
+            assert error.value is primary_error
+        else:
+            run_native(inner)
+        assert len(runner._workflows) == 1
+        assert runner._workflows[-1] is outer_workflow
+        assert outer_workflow.failure is cancellation
+        assert len(created) == 3 and all(not window for window in created)
+        assert results == [wx.ID_CANCEL]
+        assert app.GetTopWindow() is frame
+        assert set(wx.GetTopLevelWindows()) == {host, frame}
+        phases.append("inner cleaned")
+
+    def reuse(frame: Any, _wx: Any) -> None:
+        dialog = wx.Dialog(frame, title="Later modal")
+
+        def close() -> None:
+            if dialog and dialog.IsModal():
+                dialog.EndModal(wx.ID_OK)
+
+        wx.CallAfter(close)
+        try:
+            assert dialog.ShowModal() == wx.ID_OK
+        finally:
+            dialog.Destroy()
+
+    try:
+        with pytest.raises(
+            AssertionError, match="outer workflow cancellation"
+        ) as error:
+            run_native(outer)
+        assert error.value is cancellation
+        assert phases == ["inner cleaned"]
+        assert not runner._workflows
+        assert app.GetTopWindow() is host and host.IsEnabled()
+        assert set(wx.GetTopLevelWindows()) == {host}
+        run_native(reuse)
+        assert app.GetTopWindow() is host
+    finally:
+        runner._workflows.clear()
+        for window in wx.GetTopLevelWindows():
+            window.Destroy()
+        wait_until(wx, lambda: not wx.GetTopLevelWindows())
+        app.Destroy()
+
+
+@pytest.mark.native_wx
+@pytest.mark.skipif(
+    os.environ.get("KICAD_JLCPCB_NATIVE_TESTS") != "1",
+    reason="native wx windows require an enabled desktop session",
+)
+def test_optimized_native_runner_removes_its_workflow() -> None:
+    """Import outside pytest rewriting so optimized Python really removes asserts."""
+    source = """
+import wx
+from typing import Any
+from tests import native_wx_support as runner
+
+app = runner.create_native_app(wx)
+host = wx.Frame(None)
+app.SetTopWindow(host)
+try:
+    for primary in (False, True):
+        error = RuntimeError('primary exercise failure')
+        def exercise(frame: Any, wx: Any) -> None:
+            if primary:
+                raise error
+        try:
+            runner.run_native(exercise)
+        except RuntimeError as caught:
+            if not primary or caught is not error:
+                raise
+        else:
+            if primary:
+                raise RuntimeError('primary failure was lost')
+        if runner._workflows:
+            raise RuntimeError('optimized runner leaked its workflow')
+        if app.GetTopWindow() is not host or set(wx.GetTopLevelWindows()) != {host}:
+            raise RuntimeError('optimized runner did not restore host windows')
+finally:
+    runner._workflows.clear()
+    for window in wx.GetTopLevelWindows():
+        window.Destroy()
+    runner.wait_until(wx, lambda: not wx.GetTopLevelWindows())
+    app.Destroy()
+"""
+    result = subprocess.run(
+        [sys.executable, "-O", "-c", source],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=45,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("platform", ["__WXGTK__", "__WXOSX__"])
+def test_optimized_physical_drag_executes_and_checks_input(platform: str) -> None:
+    """Both native input paths must keep their actions and failures under -O."""
+    source = """
+import sys
+from types import SimpleNamespace
+from typing import Any
+from tests import test_variant_matrix_native as matrix
+
+platform = sys.argv[1]
+actions = ('move:10', 'down', 'move:20', 'move:21', 'up') if platform == '__WXGTK__' else ('drag',)
+for refused in (None, *actions):
+    events, delivered = [], []
+    state = SimpleNamespace(capture=False)
+    view = SimpleNamespace(_header_drag=None)
+    def action(name: str) -> bool:
+        events.append(name)
+        if name == 'down':
+            state.capture = True
+            view._header_drag = SimpleNamespace(variant='B', active=False)
+        elif name.startswith('move:') and name != 'move:10':
+            view._header_drag.active = True
+            view._header_drag.valid = True
+            view._header_drag.before = 'A'
+            delivered.append(True)
+        elif name == 'up':
+            state.capture = False
+        return name != refused
+    simulator = SimpleNamespace(
+        MouseMove=lambda x, y: action(f'move:{x}'),
+        MouseDown=lambda: action('down'),
+        MouseUp=lambda: action('up'),
+        MouseDragDrop=lambda *args: action('drag'),
+    )
+    wx = SimpleNamespace(Platform=platform, UIActionSimulator=lambda: simulator)
+    header = SimpleNamespace(HasCapture=lambda: state.capture)
+    def wait(wx: Any, predicate: Any, **kwargs: Any) -> None:
+        if not predicate():
+            raise RuntimeError('required native input was not delivered')
+    def locate(published: bool, timeout_ms: int) -> tuple[Any, Any]:
+        return SimpleNamespace(x=10, y=5), SimpleNamespace(x=20 + int(published), y=5)
+    matrix.wait_until = wait
+    matrix.time = SimpleNamespace(monotonic=lambda: 100.0)
+    try:
+        matrix._physical_header_drag(wx, view, header, delivered, locate)
+    except AssertionError:
+        if refused is None:
+            raise
+    else:
+        if refused is not None:
+            raise RuntimeError('refused simulator action was not reported')
+    if refused is None and tuple(events) != actions:
+        raise RuntimeError(f'optimized input actions were omitted: {events}')
+    if 'down' in events and (events.count('up') != 1 or state.capture):
+        raise RuntimeError('optimized drag did not release the mouse exactly once')
+"""
+    result = subprocess.run(
+        [sys.executable, "-O", "-c", source, platform],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("release_failure", ["", "false", "raise"])
 @pytest.mark.parametrize("failure", ["", "down", "press", "target"])
 def test_physical_drag_waits_for_delivery_and_releases_mouse_on_failure(
-    monkeypatch: pytest.MonkeyPatch, failure: str
+    monkeypatch: pytest.MonkeyPatch, failure: str, release_failure: str
 ) -> None:
     """Posting input cannot authorize motion, and a failed wait must release it."""
     from . import test_variant_matrix_native as matrix
@@ -1029,6 +1363,8 @@ def test_physical_drag_waits_for_delivery_and_releases_mouse_on_failure(
     clock = [100.0]
     state = SimpleNamespace(capture=False, origin=0, waits=0)
     view = SimpleNamespace(_header_drag=None)
+    delivery_error = AssertionError("delivery failure")
+    release_error = RuntimeError("mouse release failure")
 
     def move(x: int, _y: int) -> bool:
         events.append(f"move:{x}")
@@ -1058,7 +1394,9 @@ def test_physical_drag_waits_for_delivery_and_releases_mouse_on_failure(
     def release() -> bool:
         events.append("up")
         state.capture = False
-        return True
+        if release_failure == "raise":
+            raise release_error
+        return release_failure != "false"
 
     def wait(_wx: Any, predicate: Any, **_kwargs: Any) -> None:
         assert not predicate(), "The native event must be delivered before continuing"
@@ -1067,7 +1405,7 @@ def test_physical_drag_waits_for_delivery_and_releases_mouse_on_failure(
         if failure == (
             "press" if state.waits == 1 else "target" if state.waits == 3 else None
         ):
-            raise AssertionError("delivery failure")
+            raise delivery_error
         pending.pop(0)()
         clock[0] += 0.25
         assert predicate()
@@ -1083,11 +1421,24 @@ def test_physical_drag_waits_for_delivery_and_releases_mouse_on_failure(
     header = SimpleNamespace(HasCapture=lambda: state.capture)
     monkeypatch.setattr(matrix, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     monkeypatch.setattr(matrix, "wait_until", wait)
-    if failure:
+    if failure or release_failure:
         with pytest.raises(
-            AssertionError, match="delivery failure" if failure != "down" else None
-        ):
+            RuntimeError
+            if not failure and release_failure == "raise"
+            else AssertionError,
+            match=(
+                "delivery failure"
+                if failure in ("press", "target")
+                else "mouse release failure"
+                if not failure and release_failure == "raise"
+                else None
+            ),
+        ) as error:
             matrix._physical_header_drag(wx, view, header, delivered, locate)
+        if failure in ("press", "target"):
+            assert error.value is delivery_error
+        elif not failure and release_failure == "raise":
+            assert error.value is release_error
     else:
         matrix._physical_header_drag(wx, view, header, delivered, locate)
     assert events == (
