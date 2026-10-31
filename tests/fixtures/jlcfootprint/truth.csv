@@ -1,0 +1,48 @@
+reference,observed_rotation,note,origin_dx_mm,origin_dy_mm
+C1,0,,0,0
+C2,180,,0,0
+C3,0,,0,0
+C4,0,,0,0
+C5,0,"tantalum: the band is the + end and sits at the boxed pad-1 end at zero, so RD puts the band (positive) on the left",0,0
+C6,0,"CASE-B, no token or label: the + marks of the symbol and the footprint decide; preview presses 0",0,0
+C7,0,unpolarized?,0,0
+C8,0,unpolarized,0,0
+D3,0,,0,0
+D4,0,,0,0
+D5,180,"by construction: D4's silkscreen, anode wired to pad 1, so D4 plus 180; the preview cannot show it",0,0
+D6,0,,0,0
+D7,0,,0,0
+D8,90,,0,0
+D9,90,,0,0
+D10,0,,0,0
+D11,0,,0,0
+D12,0,"name token and symbol label disagree; the footprint's + mark breaks the tie; preview presses 0",0,0
+D13,90,unpolarized,0,0
+D1,0,,0,0
+J1,0,,0,-1.571
+L1,0,,0,0
+LED1,0,,0,0
+LED2,180,,0,0
+LED3,90,,0,0
+Q1,180,,0.099,0
+Q2,270,,0.099,0
+Q3,0,,0.099,0
+Q4,90,,0.099,0
+R1,0,unpolarized,0,0
+R2,0,unpolarized,0,0
+R3,90,unpolarized,0,0
+R4,0,unpolarized,0,0
+U1,270,,0,0
+U2,0,,0,0
+U4,270,,0,0
+U5,180,,-0.008,0
+U7,,wrong pick (SOT-23-5 on SOT-23-6 pads); preview presses 180,,
+U6,270,,0,0
+U8,180,,-0.18,0
+U9,0,,-1.565,0
+U10,270,,3.81,3.81
+D2,90,,0,0
+Q5,0,,0.099,0
+Q6,270,,0.099,0
+U3,90,,0,0
+Q7,,refused by design,,

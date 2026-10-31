@@ -1,0 +1,48 @@
+### Uploaded with no correction rules, so the CPL carries the raw placed angles; degrees pressed (90 CCW per press) in JLC's preview, per part.
+### Blank second cell = the resolver must refuse the part (its presses are kept in the note).
+C1,0
+C2,180
+C3,0
+C4,0
+C5,0,"tantalum: the band is the + end and sits at the boxed pad-1 end at zero, so RD puts the band (positive) on the left"
+C6,0,"CASE-B, no token or label; resolved by the drawings' + marks"
+C7,0,"unpolarized?"
+C8,0,"unpolarized"
+D3,0
+D4,0
+D5,180,"by construction: D4's silkscreen, anode wired to pad 1, so D4 plus 180; the preview cannot show it"
+D6,0
+D7,0
+D8,180
+D9,180
+D10,0
+D11,0
+D12,0,"name token and symbol label disagree; the footprint's + mark breaks the tie"
+D13,0,"unpolarized"
+D1,0
+J1,0
+L1,0
+LED1,0
+LED2,180
+LED3,0
+Q1,180
+Q2,180
+Q3,180
+Q4,180
+R1,0,"unpolarized"
+R2,0,"unpolarized"
+R3,0,"unpolarized"
+R4,0,"unpolarized"
+U1,270
+U2,270
+U4,270
+U5,180
+U7,,"wrong pick (SOT-23-5 on SOT-23-6 pads); preview presses 180"
+U6,270
+U8,180
+U9,0
+U10,270
+D2,0
+Q5,180
+Q6,180
+U3,270

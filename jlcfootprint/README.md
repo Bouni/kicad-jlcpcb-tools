@@ -160,11 +160,36 @@ The status is **green** when the part fits and its rotation is known, **yellow**
 - **The body caveat.** When the footprint drawing has a body outline and the KiCad footprint a courtyard, the courtyard is moved by the placement and compared with JLC's body. An overhang of more than 10 % of the courtyard's shorter side (never less than 0.15 mm nor more than 1.5 mm) is noted; the status and the rotation stand.
 - **The package origin.** `Verdict.origin` is the point the placement carries onto the drawing's own origin: where JLC's package origin sits in the footprint frame, for green and yellow verdicts only.
 
+## The gate
+
+Two KiCad boards under `tests/fixtures/jlcfootprint/boards/` were uploaded to JLC, and for each part checked the rotation JLC's placement preview settled on was written down (D5's by construction, as its note says: it is D4 with the anode wired to pad 1, which the preview cannot show). The gate is that the resolver, run offline on the same boards and the recorded EasyEDA answers, reproduces every one of them.
+
+- `corner_case/` has 47 footprints from KiCad's own library: SOT-23s at all four rotations and on both sides, SOIC-8, QFN, SOT-223, DPAK, DIP-8, USB-C, diodes, LEDs, electrolytic and tantalum capacitors, resistors, a 0603 part on 0402 pads, a wrong pick (SOT-23-5 on SOT-23-6 pads) and a SOT-23 whose JLC drawing numbers its pins clockwise (`-CW`). `tools/jlcfootprint/make_corner_case_board.py` builds it with pcbnew from `cases.csv` and `blank.kicad_pcb`.
+- `pin_functions_and_marks/` has 16: DPAKs, most of whose JLC drawings number the tab differently, paired by pin function; tantalums whose polarity comes from their `+` marks and tokens, one on the bottom side; and an electrolytic on a footprint too small for its body, beside the same part on one that fits.
+
+**The truth files.** `tests/fixtures/jlcfootprint/truth.csv` belongs to the corner-case board and `truth_pin_functions_and_marks.csv` to the second. Each row is one part:
+
+- `observed_rotation` is JLC's angle for the part after it was aligned in the preview. Blank means the part must get no derived rotation (a wrong pick, or a refusal by design).
+- `origin_dx_mm` and `origin_dy_mm`, where present, pin the package origin the resolver derives, in the footprint frame, within 5 µm; blank means no origin. They are the resolver's own output, rounded, kept so that a change to it shows: the preview shows no offset that small. The origin the preview does settle is the TO-252-2's, 0.72 mm from its pad box (`test_jlcfootprint_origin.py`).
+- `note` says why, and is not read.
+
+The preview does not show an angle. It turns a part 90 degrees counter-clockwise per press of the space bar, so the corner-case board was uploaded with the raw placed angles and the presses were written down per part (`truth_presses.csv`); `tools/jlcfootprint/truth_from_presses.py` adds them to the uploaded CPL's angles. Q7's row and the origin columns were then added to `truth.csv` by hand, so the tool alone does not rebuild that file; the gate tests fail if a row or an origin goes missing.
+
+**The validator.** `tools/jlcfootprint/validate_board.py` reads the board with `boardfile`, without pcbnew, and each part's recorded EasyEDA answer: the classic responses by default, or the Pro host's batch, footprint and symbol documents with `--pro-fixtures`. It resolves every part, works out the CPL rotation the plugin's `Fabrication` would write (a bottom-side angle mirrored as 180 minus the angle, then the correction added), and compares it with the truth, within 0.001 degrees either way round the circle. A part aligned by its axis, or a marked inductor, compares modulo 180; a part aligned by pad shape fits one way round only and compares modulo 360. Any disagreement, or a truth row for a part that is not on the board, exits 1. `--report` writes the per-part table; the committed `pre_upload_report.txt` beside each board is that table, so a change in any verdict, note or origin shows up as a diff.
+
+```bash
+B=tests/fixtures/jlcfootprint/boards; FX=tests/fixtures/jlcfootprint; T=tools/jlcfootprint
+python3 $T/validate_board.py $B/corner_case/corner_case.kicad_pcb --truth $FX/truth.csv --report /tmp/r.txt && cmp /tmp/r.txt $B/corner_case/pre_upload_report.txt
+python3 $T/validate_board.py $B/corner_case/corner_case.kicad_pcb --truth $FX/truth.csv --pro-fixtures $FX/easyeda_pro --report /tmp/r.txt && cmp /tmp/r.txt $B/corner_case/pre_upload_report.txt
+python3 $T/validate_board.py $B/pin_functions_and_marks/pin_functions_and_marks.kicad_pcb --truth $FX/truth_pin_functions_and_marks.csv --pro-fixtures $FX/easyeda_pro --report /tmp/r.txt && cmp /tmp/r.txt $B/pin_functions_and_marks/pre_upload_report.txt
+```
+
+All 47 parts on the corner-case board agree, from the classic answers and from the Pro host's, with the same report; on the second board all 16 agree. `tests/test_jlcfootprint_gate.py` runs the same comparisons in the test suite, compares each report with the committed one byte for byte, and pins a few of the verdicts.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **The gate**: the resolver checked offline against parts whose rotations were read from JLC's placement preview.
 - **Background fetch and storage**: the EasyEDA client, a paced worker, the response cache and per-project verdicts.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.

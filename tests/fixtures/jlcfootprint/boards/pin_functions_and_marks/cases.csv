@@ -1,0 +1,17 @@
+reference,lib,footprint,lcsc,value,rotation,layer,pinfunctions,expect
+U1,Package_TO_SOT_SMD,TO-252-3_TabPin2,C42441713,3095K (JLC numbers the tab 3; functions G/D/S pair the pins),0,F,1=G;2=D;3=S,rotation
+U2,Package_TO_SOT_SMD,TO-252-3_TabPin2,C42441713,3095K (functions IN/D/S; G by elimination),0,F,1=IN;2=D;3=S,rotation
+U3,Package_TO_SOT_SMD,TO-252-3_TabPin2,C42441713,3095K placed at 90,90,F,1=G;2=D;3=S,rotation
+U4,Package_TO_SOT_SMD,TO-252-3_TabPin2,C20717,MC78M08CDTRKG (TL-CW; tab is pin 2 on both sides),0,F,,rotation
+U5,Package_TO_SOT_SMD,TO-252-2,C42441713,3095K without pin functions: numbering differs and stays red,0,F,,red
+C1,Capacitor_Tantalum_SMD,CP_EIA-3216-18_Kemet-A,C7175,TAJA105K025RNJ (CASE-A; + marks beside pad 1),0,F,,rotation
+C2,Capacitor_Tantalum_SMD,CP_EIA-3216-12_Kemet-S,C90056,F930J107MAA (CASE-A),0,F,,rotation
+C3,Capacitor_Tantalum_SMD,CP_EIA-3216-10_Kemet-I,C600600,T527I107M006ATE070 (no token),0,F,,rotation
+C4,Capacitor_Tantalum_SMD,CP_EIA-6032-20_AVX-F,C140418,CA45-C-16V-47uF-K (CASE-C; pad 1 on the right),0,F,,rotation
+C5,Capacitor_Tantalum_SMD,CP_EIA-3528-15_AVX-H,C7192,TAJB105K035RNJ (-R-RD: the token and the + marks agree),0,F,,rotation
+C6,Capacitor_Tantalum_SMD,CP_EIA-3528-21_Kemet-B,C110035,293D106X9025B2TE3 (-R-RD),0,F,,rotation
+C7,Capacitor_Tantalum_SMD,CP_EIA-6032-15_Kemet-U,C122911,CA45-C010K107T (-R-RD),0,F,,rotation
+C8,Capacitor_Tantalum_SMD,CP_EIA-2012-15_AVX-P,C1969735,TMCP1A106MTRF (-FD: the token and both + marks say 0; preview 0),0,F,,rotation
+C9,Capacitor_SMD,CP_Elec_4x5.8,C88744,35TZV100M6.3X8 on a 4 mm footprint: fits with the body caveat,0,F,,rotation
+C10,Capacitor_SMD,CP_Elec_6.3x5.9,C88744,35TZV100M6.3X8 on a 6.3 mm footprint: plain fit,0,F,,rotation
+C11,Capacitor_Tantalum_SMD,CP_EIA-3216-18_Kemet-A,C7175,TAJA105K025RNJ on the bottom at 90,90,B,,rotation
