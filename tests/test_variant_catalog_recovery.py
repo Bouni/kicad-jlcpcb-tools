@@ -62,7 +62,7 @@ def test_catalog_retry_restores_assignment_and_generation(
 
         exporter.generate_geber = partial(plot, "copper.gbr")
         exporter.generate_excellon = partial(plot, "drill.drl")
-        exporter.fill_zones = lambda: []
+        exporter.fill_zone_regions = lambda: []
         dialog.settings["gerber"]["force_drc"] = False
         dialog.settings["general"]["order_number"] = False
         choose_output(ui, "A")

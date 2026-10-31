@@ -614,7 +614,7 @@ def test_post_hook_reads_published_variant_plots_before_generation_cleanup(
         exporter.generate_excellon = partial(
             write_plot, "drill.drl", b"variant drill\n"
         )
-        exporter.fill_zones = lambda: []
+        exporter.fill_zone_regions = lambda: []
         dialog.settings["hooks"] = {"post_script": str(hook)}
         dialog.settings["gerber"]["force_drc"] = False
         dialog.settings["general"]["order_number"] = False

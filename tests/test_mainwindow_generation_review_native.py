@@ -8,6 +8,8 @@ from zipfile import ZipFile
 
 import pytest
 
+from copper_zones import EmptyCopperZone
+
 from .native_window_support import (
     _SelectableFootprint,
     _SelectedItem,
@@ -47,7 +49,9 @@ def _prepare(ui: Any) -> Any:
 
     exporter.generate_geber = partial(plot, "copper.gbr")
     exporter.generate_excellon = partial(plot, "drill.drl")
-    exporter.fill_zones = lambda: ["GND on B.Cu"]
+    exporter.fill_zone_regions = lambda: [
+        EmptyCopperZone("ground", "GND", 0, "B.Cu", ())
+    ]
     exporter.get_part_consistency_warnings = lambda: {
         "C999": {"10k": ["R1"], "22k": ["R2"]}
     }
@@ -155,10 +159,10 @@ def test_generate_anyway_publishes_what_a_clean_board_publishes(
     def check(ui: Any) -> None:
         exporter = _prepare(ui)
         find_zones, find_values = (
-            exporter.fill_zones,
+            exporter.fill_zone_regions,
             exporter.get_part_consistency_warnings,
         )
-        exporter.fill_zones = list
+        exporter.fill_zone_regions = list
         exporter.get_part_consistency_warnings = dict
         with modal_handler(
             ui, ui.mainwindow.GenerationReviewDialog, _unexpected
@@ -166,7 +170,7 @@ def test_generate_anyway_publishes_what_a_clean_board_publishes(
             ui.dialog.generate_fabrication_data()
         assert shown == []
         clean = _published(exporter)
-        exporter.fill_zones = find_zones
+        exporter.fill_zone_regions = find_zones
         exporter.get_part_consistency_warnings = find_values
 
         def generate_anyway(pane: Any) -> None:

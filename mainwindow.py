@@ -3437,7 +3437,7 @@ class JLCPCBTools(wx.Frame):
             findings += empty_zone_findings(
                 self.run_generation_step(
                     "Filling copper zones" if refill else "Checking copper zone fills",
-                    self.fabrication.fill_zones,
+                    self.fabrication.fill_zone_regions,
                 )
             )
             # Match Configure: prepare copper before the review digest is checked.

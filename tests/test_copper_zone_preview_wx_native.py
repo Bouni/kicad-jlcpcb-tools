@@ -9,6 +9,7 @@ from .native_wx_support import run_native
 from .test_copper_zone_preview import SVG, preview  # noqa: F401 -- pytest fixture.
 
 pytestmark = pytest.mark.native_wx
+wx = pytest.importorskip("wx")
 
 
 @pytest.mark.parametrize("zoom,label", [(False, "20 mm"), (True, "1 mm")])

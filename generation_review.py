@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import enum
 import logging
 
+from .copper_zones import EmptyCopperZone
+
 
 class Severity(enum.IntEnum):
     """How much a finding matters, most severe first."""
@@ -91,24 +93,18 @@ def placeholder_findings(count: int) -> list[Finding]:
     return [Finding(Severity.WARNING, "Order number", title, _PLACEHOLDER_DETAIL)]
 
 
-def empty_zone_findings(pours: Sequence[str]) -> list[Finding]:
-    """Flag each copper zone layer that holds no filled copper.
-
-    Each entry names a zone's net and layer, such as "GND on B.Cu", with a
-    generated-teardrop suffix when KiCad identifies that item type.
-    """
+def empty_zone_findings(pours: Sequence[EmptyCopperZone]) -> list[Finding]:
+    """Flag missing copper using the native item type copied during preparation."""
     findings = []
-    teardrop_suffix = " — generated teardrop"
     for pour in pours:
-        teardrop = pour.endswith(teardrop_suffix)
-        name = pour.removesuffix(teardrop_suffix) if teardrop else pour
+        teardrop = pour.is_teardrop is True
         kind = "Generated teardrop" if teardrop else "Copper zone"
         subject = "This generated teardrop" if teardrop else "This zone"
         findings.append(
             Finding(
                 Severity.ERROR,
                 "Copper zones",
-                f"{kind} {name} has no fill",
+                f"{kind} {pour.label} has no fill",
                 f"{subject} contains no filled copper. "
                 "Plotting now ships the board without that copper.",
             )
