@@ -47,6 +47,11 @@ def snapshot_path(library: str, name: str) -> Path:
     return KICAD_SNAPSHOTS / f"{library}__{name}.json"
 
 
+def footprints_available() -> bool:
+    """Return True when library footprints can be read: recorded snapshots or an installed KiCad."""
+    return KICAD_SNAPSHOTS.is_dir() or KICAD_FOOTPRINTS.is_dir()
+
+
 def installed_library_footprint(
     library: str, name: str
 ) -> tuple[list[Pad], Optional[Box]]:
@@ -80,3 +85,13 @@ def library_footprint(library: str, name: str) -> tuple[list[Pad], Optional[Box]
         f"no snapshot {snapshot.name} and no KiCad footprint libraries at {KICAD_FOOTPRINTS}; "
         f"run tools/jlcfootprint/snapshot_kicad_footprints.py {library}:{name} on a machine with KiCad"
     )
+
+
+def library_pads(library: str, name: str) -> list[Pad]:
+    """Return a KiCad library footprint's pads in the footprint frame (see ``library_footprint``)."""
+    return library_footprint(library, name)[0]
+
+
+def with_functions(pads: list[Pad], functions: dict[str, str]) -> list[Pad]:
+    """Return the pads with pin functions assigned by pad number, as a schematic would."""
+    return [pad._replace(pin_function=functions.get(pad.number, "")) for pad in pads]

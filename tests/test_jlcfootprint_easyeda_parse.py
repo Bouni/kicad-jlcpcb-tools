@@ -103,10 +103,12 @@ def test_a_classic_pin_without_a_number_is_skipped_and_counted_as_pro_ones_are()
         ([SymbolPin("1", "+"), SymbolPin("2", "-")], "A"),
         ([SymbolPin("1", "1"), SymbolPin("2", "2")], None),
         ([SymbolPin("2", "K")], None),
+        ([SymbolPin("1", "K")], None),
+        ([SymbolPin("1", "C"), SymbolPin("2", "B"), SymbolPin("3", "E")], None),
     ],
 )
 def test_pin1_polarity(pins, expected):
-    """Pin-1 polarity follows the label sets; unlabelled pins give None."""
+    """Pin-1 polarity follows the label sets on two-pin symbols; anything else gives None."""
     assert pin1_polarity(pins) == expected
 
 
