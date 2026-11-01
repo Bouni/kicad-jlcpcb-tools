@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 AS ordinary
 ENV DEBIAN_FRONTEND=noninteractive LC_CTYPE=C.UTF-8
-# Bump this revision to refresh packages without changing the base image.
+# The workflow supplies its manual revision prefix and current UTC week.
+# Standalone image builds use this default unless a revision is supplied.
 ARG DEPENDENCY_REVISION=1
 RUN test -n "$DEPENDENCY_REVISION" \
     && apt-get -o APT::Update::Error-Mode=any update \

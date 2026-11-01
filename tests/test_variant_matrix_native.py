@@ -472,16 +472,20 @@ def _physical_header_drag(
     first, last = resolve_points(False, 3000)
     if wx.Platform != "__WXGTK__":
         # Cocoa MouseMove emits plain motion even while a button is held.
-        assert simulator.MouseDragDrop(first.x, first.y, last.x, last.y)
+        if not simulator.MouseDragDrop(first.x, first.y, last.x, last.y):
+            raise AssertionError("Native mouse drag was refused")
         return
-    assert simulator.MouseMove(first.x, first.y)
+    if not simulator.MouseMove(first.x, first.y):
+        raise AssertionError("Native mouse motion was refused")
 
     def remaining() -> int:
         return max(0, int((deadline - time.monotonic()) * 1000))
 
     deadline = time.monotonic() + 3
+    failures: list[BaseException] = []
     try:
-        assert simulator.MouseDown()
+        if not simulator.MouseDown():
+            raise AssertionError("Native mouse press was refused")
         wait_until(
             wx,
             lambda: view._header_drag is not None
@@ -493,7 +497,8 @@ def _physical_header_drag(
         # Press/focus delivery can finish native frozen-pane layout and move
         # the header. Locate A in that captured geometry before held movement.
         _first, last = resolve_points(False, remaining())
-        assert simulator.MouseMove(last.x, last.y)
+        if not simulator.MouseMove(last.x, last.y):
+            raise AssertionError("Native held mouse motion was refused")
         wait_until(
             wx,
             lambda: bool(delivered)
@@ -506,10 +511,10 @@ def _physical_header_drag(
         # Keep the same press and capture while aiming within A again after
         # the actual supplier handler and pending native layout have run.
         _first, last = resolve_points(True, remaining())
-        assert time.monotonic() < deadline, (
-            "Held input target resolution exceeded its deadline"
-        )
-        assert simulator.MouseMove(last.x, last.y)
+        if time.monotonic() >= deadline:
+            raise AssertionError("Held input target resolution exceeded its deadline")
+        if not simulator.MouseMove(last.x, last.y):
+            raise AssertionError("Native held mouse motion was refused")
         wait_until(
             wx,
             lambda: bool(delivered)
@@ -521,8 +526,16 @@ def _physical_header_drag(
             timeout_ms=remaining(),
             reason="The OS must deliver a valid B-before-A drag and supplier update before release",
         )
+    except BaseException as error:
+        failures.append(error)
     finally:
-        assert simulator.MouseUp()
+        try:
+            if not simulator.MouseUp():
+                raise AssertionError("Native mouse release was refused")
+        except BaseException as error:
+            failures.append(error)
+    if failures:
+        raise failures[0]
 
 
 @pytest.mark.os_input

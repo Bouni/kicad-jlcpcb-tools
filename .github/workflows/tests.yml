@@ -40,10 +40,20 @@ jobs:
             name: Native KiCad 10
             target: kicad
             kicad: '10'
-    env:
-      ARCHITECTURE: ${{ matrix.kicad && matrix.kicad != '10' && 'amd64' || vars.KICAD_VALIDATION_ARCHITECTURE || 'amd64' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Prepare dependency image
+        env:
+          KICAD_MAJOR: ${{ matrix.kicad }}
+          LOCAL_ARCHITECTURE: ${{ vars.KICAD_VALIDATION_ARCHITECTURE }}
+        run: |
+          architecture=amd64
+          if [[ ${ACT:-} == true && ( -z "$KICAD_MAJOR" || "$KICAD_MAJOR" == 10 ) ]]; then
+            architecture=${LOCAL_ARCHITECTURE:-amd64}
+          fi
+          echo "ARCHITECTURE=$architecture" >> "$GITHUB_ENV"
+          # Bump the prefix to refresh dependencies before the next UTC week.
+          echo "DEPENDENCY_REVISION=1-$(date -u +%G-W%V)" >> "$GITHUB_ENV"
       - name: Cache Python downloads
         uses: actions/cache@v4
         with:
@@ -63,7 +73,9 @@ jobs:
           file: docker/native-tests.Dockerfile
           target: ${{ matrix.target }}
           platforms: linux/${{ env.ARCHITECTURE }}
-          build-args: KICAD_MAJOR=${{ matrix.kicad }}
+          build-args: |
+            KICAD_MAJOR=${{ matrix.kicad }}
+            DEPENDENCY_REVISION=${{ env.DEPENDENCY_REVISION }}
           load: true
           push: false
           cache-from: type=gha,scope=tests-${{ matrix.target }}-${{ matrix.kicad }}-${{ env.ARCHITECTURE }}
@@ -73,7 +85,8 @@ jobs:
         id: local
         run: |
           docker build --load --platform "linux/$ARCHITECTURE" --target '${{ matrix.target }}' \
-            --build-arg KICAD_MAJOR='${{ matrix.kicad }}' --file docker/native-tests.Dockerfile \
+            --build-arg KICAD_MAJOR='${{ matrix.kicad }}' \
+            --build-arg "DEPENDENCY_REVISION=$DEPENDENCY_REVISION" --file docker/native-tests.Dockerfile \
             --iidfile "$RUNNER_TEMP/image-id" docker
           echo "image=$(cat "$RUNNER_TEMP/image-id")" >> "$GITHUB_OUTPUT"
       - name: Run tests in dependency image
