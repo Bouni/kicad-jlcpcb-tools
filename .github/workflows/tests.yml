@@ -4,6 +4,8 @@ on:  # yamllint disable-line rule:truthy
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 0 * * 1'
 jobs:
   tests:
     name: ${{ matrix.name }}
