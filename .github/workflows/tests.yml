@@ -55,7 +55,7 @@ jobs:
           # Bump the prefix to refresh dependencies before the next UTC week.
           echo "DEPENDENCY_REVISION=1-$(date -u +%G-W%V)" >> "$GITHUB_ENV"
       - name: Cache Python downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache/native-tests/pip
           key: pip-lanes-${{ env.ARCHITECTURE }}-${{ hashFiles('pyproject.toml') }}
