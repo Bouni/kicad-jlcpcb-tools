@@ -1,7 +1,7 @@
 """Geometry-oracle regressions for routed differential-pair spacing diagnostics."""
 
 from dataclasses import replace
-from math import isqrt
+from math import dist, isqrt
 from typing import Any
 
 import pytest
@@ -327,6 +327,89 @@ def test_budget_exhaustion_has_no_unqualified_match() -> None:
     assert any("work limit" in reason for reason in check.reasons)
 
 
+def test_incomplete_retry_retains_newly_discovered_interior_squeeze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry can prove a previously unsampled violation without finishing coverage."""
+    import impedance.spacing_checks as checks
+
+    snapshot = _snapshot(
+        _line("p", "P", ((0, 0), (20_000_000, 0))),
+        _line(
+            "n",
+            "N",
+            (
+                (0, 300_000),
+                (7_123_000, 300_000),
+                (7_124_000, 200_000),
+                (7_126_000, 200_000),
+                (7_127_000, 300_000),
+                (20_000_000, 300_000),
+            ),
+        ),
+    )
+    original = checks._measure_primitive
+    attempts = []
+
+    def measure(source: Any, *args: Any, **kwargs: Any) -> Any:
+        result = original(source, *args, **kwargs)
+        if source.trace.trace_id == "p":
+            attempts.append(result)
+        return result
+
+    monkeypatch.setattr(checks, "_measure_primitive", measure)
+    measurement = measure_pair_spacing(
+        snapshot,
+        ("P", "N"),
+        "F.Cu",
+        limits=SpacingLimits(max_evaluations=1_000, max_intervals=20),
+    )
+    assert len(attempts) == 2 and all(result[3] for result in attempts)
+    assert min(issue.gap_nm.upper_nm for issue in attempts[0][2]) >= 149_000
+    assert min(issue.gap_nm.upper_nm for issue in attempts[1][2]) < 100_000
+    source_only = replace(
+        measurement,
+        traces=tuple(trace for trace in measurement.traces if trace.trace_id == "p"),
+    )
+    check = compare_pair_spacing(source_only, 150_000)
+    assert check.coverage == "partial"
+    assert check.verdict == "deviation"
+    assert any(
+        issue.code == "too_tight" and issue.gap_nm.upper_nm < 100_000
+        for issue in check.issues
+    )
+
+
+def test_an_early_search_stop_cannot_erase_a_completed_neighbor_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One source can stop before producing samples while its next span is fully proved."""
+    import impedance.spacing_checks as checks
+
+    snapshot = _snapshot(
+        _line("p", "P", ((0, 0), (10_000_000, 0), (20_000_000, 0))),
+        _line("n", "N", ((0, 300_000), (20_000_000, 300_000))),
+    )
+    original = checks._measure_primitive
+
+    def measure(
+        source: Any, mates: Any, index: Any, budget: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        if source.trace.trace_id == "p" and source.source_interval[0] == 0:
+            while True:
+                budget.consume()
+        return original(source, mates, index, budget, *args, **kwargs)
+
+    monkeypatch.setattr(checks, "_measure_primitive", measure)
+    measurement = measure_pair_spacing(snapshot, ("P", "N"), "F.Cu")
+    source = next(trace for trace in measurement.traces if trace.trace_id == "p")
+    assert not source.verified and source.assessed_length_nm == 10_000_000
+    check = compare_pair_spacing(measurement, 150_000)
+    assert check.coverage == "partial" and check.verdict == "undetermined"
+    assert check.assessed_length_nm == 30_000_000
+    assert check.unverified_length_nm == 10_000_000
+
+
 def test_signed_overlap_zero_lengths_locations_and_deltas_format() -> None:
     """Shared formatter handles values rejected by positive fabrication fields."""
     details = spacing_check_details(_check(_parallel(-50_000)))
@@ -418,6 +501,136 @@ def test_fractional_parallel_distance_reports_outward_bounds() -> None:
     check = _check(snapshot)
     lower = isqrt(80_000_000_000) - 150_000
     assert check.minimum_gap_nm == NmBounds(lower, lower + 1)
+
+
+def test_odd_normal_diagonal_witness_retains_sub_nanometre_projection() -> None:
+    """A half-nm projection must not move outside its measured outward gap bounds."""
+    snapshot = _snapshot(
+        _line("p", "P", ((0, 0), (1_000_000, -1_000_000))),
+        _line("n", "N", ((-1_787_868, 2_212_133), (2_212_133, -1_787_868))),
+    )
+    measurement = measure_pair_spacing(snapshot, ("P", "N"), "F.Cu")
+    source = next(trace for trace in measurement.traces if trace.trace_id == "p")
+    for issue in source.witnesses:
+        assert issue.location is not None and issue.location.cross_sections
+        for section in issue.location.cross_sections:
+            actual = (
+                dist(section.source_point, section.mate_point)
+                - (section.source_width_nm + section.mate_width_nm) / 2
+            )
+            assert issue.gap_nm.lower_nm <= actual <= issue.gap_nm.upper_nm
+    first = source.witnesses[0].location.cross_sections[0]
+    assert first.source_point == (0, 0)
+    assert first.mate_point == (212_132.5, 212_132.5)
+
+
+def test_interval_witness_selects_actual_nearest_mate_at_each_native_sample() -> None:
+    """A short midpoint winner cannot stand in for the endpoint's different native mate."""
+    snapshot = _snapshot(
+        _line("p", "P", ((0, 0), (4_000, 0))),
+        _line("n_long", "N", ((0, 300_000), (4_000, 300_000))),
+        _line("n_short", "N", ((1_999, 299_998), (2_001, 299_998))),
+    )
+    measurement = measure_pair_spacing(snapshot, ("P", "N"), "F.Cu")
+    source = next(trace for trace in measurement.traces if trace.trace_id == "p")
+    assert source.witnesses
+    for issue in source.witnesses:
+        for section in issue.location.cross_sections:
+            actual = (
+                dist(section.source_point, section.mate_point)
+                - (section.source_width_nm + section.mate_width_nm) / 2
+            )
+            assert issue.gap_nm.lower_nm <= actual <= issue.gap_nm.upper_nm
+    assert {
+        identity
+        for issue in source.witnesses
+        for identity in issue.location.mate_trace_ids
+    } == {"n_long", "n_short"}
+
+
+def test_work_limit_keeps_one_continuous_proven_wide_span_in_one_concern() -> None:
+    """Coarse interval bounds can prove a continuous violation before extrema settle."""
+    snapshot = _snapshot(
+        _line("p", "P", ((0, 0), (2_000_000, 0))),
+        _line("n", "N", ((0, 800_000), (1_000_000, 700_000), (2_000_000, 800_000))),
+    )
+    measurement = measure_pair_spacing(
+        snapshot, ("P", "N"), "F.Cu", limits=SpacingLimits(max_evaluations=600)
+    )
+    source_only = replace(
+        measurement,
+        traces=tuple(trace for trace in measurement.traces if trace.trace_id == "p"),
+    )
+    check = compare_pair_spacing(source_only, 150_000)
+    # All native mate points are at least 700 um above this horizontal source;
+    # subtracting the two 75 um half-widths proves the complete span too wide.
+    assert check.verdict == "deviation" and check.coverage == "partial"
+    assert 0 < check.assessed_length_nm < 2_000_000
+    assert check.unverified_length_nm > 0
+    assert len(check.issues) == 1
+    covered = 0.0
+    for lower, upper in sorted(
+        member.source_interval for member in check.issues[0].members
+    ):
+        assert lower <= covered + 1e-12
+        covered = max(covered, upper)
+    assert covered == 1.0
+
+
+def test_coarse_bounds_crossing_the_band_do_not_bridge_separate_defects() -> None:
+    """Two wide ends remain separate when their intervening native trunk matches."""
+    snapshot = _snapshot(
+        _line("p", "P", ((0, 0), (2_000_000, 0))),
+        _line(
+            "n",
+            "N",
+            (
+                (0, 800_000),
+                (500_000, 300_000),
+                (1_500_000, 300_000),
+                (2_000_000, 800_000),
+            ),
+        ),
+    )
+    measurement = measure_pair_spacing(
+        snapshot, ("P", "N"), "F.Cu", limits=SpacingLimits(max_evaluations=600)
+    )
+    source = next(trace for trace in measurement.traces if trace.trace_id == "p")
+    assert any(
+        issue.code == "bounded"
+        and issue.gap_nm.lower_nm <= 151_000 < issue.gap_nm.upper_nm
+        for issue in source.witnesses
+    )
+    check = compare_pair_spacing(replace(measurement, traces=(source,)), 150_000)
+    assert check.verdict == "deviation" and check.coverage == "partial"
+    assert len(check.issues) == 2
+    assert all(
+        not (member.source_interval[0] < 0.5 < member.source_interval[1])
+        for issue in check.issues
+        for member in issue.members
+    )
+
+
+@pytest.mark.parametrize("coarse_first", [False, True])
+def test_duplicate_native_certificates_keep_the_precise_proof(
+    coarse_first: bool,
+) -> None:
+    """A retry's broader certificate cannot overwrite a valid precise location proof."""
+    import impedance.spacing_checks as checks
+
+    source = checks._primitives(_line("p", "P", ((0, 0), (2_000_000, 0))))[0]
+    mates = checks._primitives(_line("n", "N", ((0, 750_000), (2_000_000, 750_000))))
+    location = checks._location(source, mates, 0.0, 1.0)
+    precise = checks.SpacingIssue(
+        "measured", ("p", "n"), None, NmBounds(600_000, 600_001), "Precise", location
+    )
+    coarse = replace(
+        precise, code="bounded", gap_nm=NmBounds(550_000, 650_000), message="Coarse"
+    )
+    proofs = (coarse, precise) if coarse_first else (precise, coarse)
+    combined = checks._combine_witness_bounds(proofs)
+    assert len(combined) == 1
+    assert combined[0].code == "measured" and combined[0].gap_nm == precise.gap_nm
 
 
 @pytest.mark.parametrize("switch", [5_000_000, 7_123_456])

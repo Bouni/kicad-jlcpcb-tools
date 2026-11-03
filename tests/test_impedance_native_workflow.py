@@ -35,6 +35,207 @@ _GERBER = b"G04 Synthetic validation fixture*\n%FSLAX46Y46*%\n%MOMM*%\nM02*\n"
 _DRILL = b"M48\nMETRIC\nT1C0.800\n%\nT1\nX1.0Y1.0\nM30\n"
 
 
+def test_first_export_reuses_all_75_reviewed_spacing_and_32_trace_pngs() -> None:
+    """The measured native receipt remains valid when geometry yields 75 concerns."""
+    from scripts.native_impedance_workflow import first_export_reuses_reviewed_pngs
+
+    approved_spacing = {f"approved-spacing-{index}": 1 for index in range(75)}
+    receipt = {
+        "rendered": {"trace": 0, "spacing": 0, "original": 75},
+        "rendered_inputs": {
+            "trace": {},
+            "spacing": {},
+            "original": dict(approved_spacing),
+        },
+        "cache_hits": 107,
+        "cache_misses": 0,
+    }
+    assert first_export_reuses_reviewed_pngs(receipt, approved_spacing, 75 + 32)
+
+
+@pytest.mark.parametrize("spacing_count", [0, 1, 65, 75])
+def test_first_export_requires_each_current_original_at_any_fixture_cardinality(
+    spacing_count: int,
+) -> None:
+    """Every current concern gets exactly one Original without rerendering review PNGs."""
+    from scripts.native_impedance_workflow import first_export_reuses_reviewed_pngs
+
+    approved_spacing = {f"concern-{index}": 1 for index in range(spacing_count)}
+    receipt = {
+        "rendered": {"trace": 0, "spacing": 0, "original": spacing_count},
+        "rendered_inputs": {
+            "trace": {},
+            "spacing": {},
+            "original": dict(approved_spacing),
+        },
+        "cache_hits": spacing_count + 32,
+        "cache_misses": 0,
+    }
+    assert first_export_reuses_reviewed_pngs(
+        receipt, approved_spacing, spacing_count + 32
+    )
+    # Other verified cache lookups are permitted; every required lookup still
+    # has to be present and native review rendering must remain absent.
+    receipt["cache_hits"] += 1
+    assert first_export_reuses_reviewed_pngs(
+        receipt, approved_spacing, spacing_count + 32
+    )
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "missing_original",
+        "duplicate_original",
+        "foreign_original",
+        "original_count",
+        "trace_rerender",
+        "spacing_rerender",
+        "missing_hit",
+        "cache_miss",
+    ],
+)
+def test_first_export_rejects_incomplete_or_repeated_capture_work(defect: str) -> None:
+    """Correct totals cannot conceal lost identity, duplicate work, or missing cache proof."""
+    from scripts.native_impedance_workflow import first_export_reuses_reviewed_pngs
+
+    approved_spacing = {f"concern-{index}": 1 for index in range(75)}
+    originals = dict(approved_spacing)
+    receipt = {
+        "rendered": {"trace": 0, "spacing": 0, "original": 75},
+        "rendered_inputs": {"trace": {}, "spacing": {}, "original": originals},
+        "cache_hits": 107,
+        "cache_misses": 0,
+    }
+    if defect == "missing_original":
+        originals.pop("concern-0")
+    elif defect == "duplicate_original":
+        originals.pop("concern-0")
+        originals["concern-1"] = 2
+    elif defect == "foreign_original":
+        originals.pop("concern-0")
+        originals["unapproved-concern"] = 1
+    elif defect == "original_count":
+        receipt["rendered"]["original"] = 74
+    elif defect == "trace_rerender":
+        receipt["rendered"]["trace"] = 1
+        receipt["rendered_inputs"]["trace"] = {"trace-0": 1}
+    elif defect == "spacing_rerender":
+        receipt["rendered"]["spacing"] = 1
+        receipt["rendered_inputs"]["spacing"] = {"concern-0": 1}
+    elif defect == "missing_hit":
+        receipt["cache_hits"] = 106
+    elif defect == "cache_miss":
+        receipt["cache_misses"] = 1
+    assert not first_export_reuses_reviewed_pngs(receipt, approved_spacing, 75 + 32)
+
+
+def test_complete_workload_requires_two_passes_of_all_75_current_approvals() -> None:
+    """Two independently planned passes of 75 concerns require 150 explicit approvals."""
+    from scripts.native_impedance_workflow import complete_generate_workload
+
+    expected = tuple(f"concern-{index}" for index in range(75))
+    approval_passes = [
+        {"expected": expected, "approved": list(expected)},
+        {"expected": expected, "approved": list(expected)},
+    ]
+    counts = {
+        "approval_passes": 2,
+        "spacing_explicit_approvals": 150,
+        "workbook_preview_visits": 72,
+        "generate_toolbar_events": 5,
+    }
+    assert complete_generate_workload(counts, 32, approval_passes)
+
+
+@pytest.mark.parametrize("spacing_count", [1, 65, 75])
+def test_complete_workload_follows_independently_planned_per_pass_identities(
+    spacing_count: int,
+) -> None:
+    """Each pass may have its own current identities, and approval order is immaterial."""
+    from scripts.native_impedance_workflow import complete_generate_workload
+
+    first = tuple(f"first-{index}" for index in range(spacing_count))
+    second = tuple(f"second-{index}" for index in range(spacing_count + 1))
+    approval_passes = [
+        {"expected": first, "approved": list(reversed(first))},
+        {"expected": second, "approved": list(reversed(second))},
+    ]
+    counts = {
+        "approval_passes": 2,
+        "spacing_explicit_approvals": len(first) + len(second),
+        "workbook_preview_visits": 72,
+        "generate_toolbar_events": 5,
+    }
+    assert complete_generate_workload(counts, 32, approval_passes)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "missing_approval",
+        "duplicate_approval",
+        "foreign_approval",
+        "missing_pass",
+        "extra_pass",
+        "duplicate_plan",
+        "empty_plan",
+        "approval_total",
+        "pass_total",
+        "preview_total",
+        "workbook_total",
+        "toolbar_total",
+    ],
+)
+def test_complete_workload_rejects_incomplete_or_substituted_approvals(
+    defect: str,
+) -> None:
+    """A correct aggregate count cannot conceal gaps in either planned approval pass."""
+    from scripts.native_impedance_workflow import complete_generate_workload
+
+    expected = tuple(f"concern-{index}" for index in range(75))
+    first = list(expected)
+    second = list(expected)
+    approval_passes = [
+        {"expected": expected, "approved": first},
+        {"expected": expected, "approved": second},
+    ]
+    counts = {
+        "approval_passes": 2,
+        "spacing_explicit_approvals": 150,
+        "workbook_preview_visits": 72,
+        "generate_toolbar_events": 5,
+    }
+    workbook_images = 32
+    if defect == "missing_approval":
+        first.pop()
+    elif defect == "duplicate_approval":
+        first[0] = first[1]
+    elif defect == "foreign_approval":
+        first[0] = "unplanned-concern"
+    elif defect == "missing_pass":
+        approval_passes.pop()
+    elif defect == "extra_pass":
+        approval_passes.append({"expected": expected, "approved": list(expected)})
+    elif defect == "duplicate_plan":
+        duplicated = (*expected[:-1], expected[0])
+        approval_passes[0] = {"expected": duplicated, "approved": list(duplicated)}
+    elif defect == "empty_plan":
+        approval_passes[0] = {"expected": (), "approved": []}
+        counts["spacing_explicit_approvals"] = 75
+    elif defect == "approval_total":
+        counts["spacing_explicit_approvals"] = 130
+    elif defect == "pass_total":
+        counts["approval_passes"] = 1
+    elif defect == "preview_total":
+        counts["workbook_preview_visits"] = 71
+    elif defect == "workbook_total":
+        workbook_images = 31
+    elif defect == "toolbar_total":
+        counts["generate_toolbar_events"] = 4
+    assert not complete_generate_workload(counts, workbook_images, approval_passes)
+
+
 def test_phase_measurements_include_failed_work_and_keep_nested_timings_separate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -345,6 +346,32 @@ def test_an_optional_run_isolates_a_kicad_test_on_the_kicad_it_has(
         assert "KiCad pcbnew is unavailable" in result.stdout
     else:
         assert "1 passed" in result.stdout
+
+
+def test_isolated_native_reports_signal_after_passing_assertions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A passing child must still expose its fatal shutdown and late stack support."""
+    monkeypatch.delenv("KICAD_NATIVE_EXIT_DIAGNOSTIC_CHILD", raising=False)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    probe = tmp_path / "test_shutdown.py"
+    probe.write_text(
+        "import atexit,faulthandler,os,signal\n"
+        "def stop():\n"
+        " print('late-faulthandler='+str(faulthandler.is_enabled()),flush=True)\n"
+        " os.kill(os.getpid(),signal.SIGTERM)\n"
+        "def test_shutdown(): atexit.register(stop)\n"
+    )
+    request = SimpleNamespace(node=SimpleNamespace(nodeid=f"{probe}::test_shutdown"))
+    with pytest.raises(AssertionError) as failure:
+        isolated_native(request, "KICAD_NATIVE_EXIT_DIAGNOSTIC_CHILD")
+    message = str(failure.value)
+    assert "1 passed" in message
+    assert f"returncode={-signal.SIGTERM}" in message
+    assert "SIGTERM" in message
+    assert "late-faulthandler=True" in message
+    assert str(probe) in message
 
 
 def test_variant_tests_collect_where_kicad_is_missing(

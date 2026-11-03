@@ -276,7 +276,7 @@ def test_concern_render_policy_retains_old_approval_as_history_after_reopen(
         raise AssertionError("Opening a revised image cannot manufacture consent")
 
     monkeypatch.setattr(tracking, "utc_now", unexpected_clock)
-    assert SPACING_CHECK_POLICY_REVISION == 4
+    assert SPACING_CHECK_POLICY_REVISION == 5
     reopened, revision = _repository(tmp_path).load()
     current = spacing_review.spacing_review_entries(
         reopened, plan.snapshot, plan.analysis.sections

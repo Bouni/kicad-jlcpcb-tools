@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -73,14 +74,32 @@ def isolated_native(
         if found:
             env["KICAD_JLCPCB_KICAD_MAJOR"] = found.group(1)
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", request.node.nodeid],
+        [
+            sys.executable,
+            "-X",
+            "faulthandler",
+            "-m",
+            "pytest",
+            "-q",
+            request.node.nodeid,
+        ],
         env=env,
         capture_output=True,
         text=True,
         check=False,
         timeout=45,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    ending = "normal exit" if result.returncode == 0 else "nonzero exit status"
+    if result.returncode < 0:
+        try:
+            ending = signal.Signals(-result.returncode).name
+        except ValueError:
+            ending = "unrecognized native exit status"
+    assert result.returncode == 0, (
+        f"Isolated native case {request.node.nodeid}: "
+        f"returncode={result.returncode} ({ending}); Python={sys.version}; "
+        f"executable={sys.executable}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
     return True
 
 

@@ -144,9 +144,7 @@ def _spacing_record_current(
     approved: bool = False,
 ) -> bool:
     """Bind diagnostic history to its exact issue as well as inputs and pixels."""
-    record = tracking.find_spacing_image(
-        history, entry.spec_id, entry.layer, entry.view_id
-    )
+    record = tracking.find_spacing_review(history, entry)
     return (
         record is not None
         and record.issue_id == entry.issue_id
@@ -198,7 +196,7 @@ def _spacing_review_presentation(
     approved_ids: set[str] = set()
     for entry in entries:
         digest = digests.get(entry.view_id)
-        record = records.get((entry.spec_id, entry.layer, entry.view_id))
+        record = tracking.find_spacing_review(history, entry, records=records)
         if (
             entry.view_id not in failures
             and digest is not None
@@ -558,6 +556,7 @@ class ReviewSession:
         self.spacing_display_failures: set[str] = set()
         self._spacing_entries_key: object = None
         self._spacing_entries: tuple[SpacingReviewEntry, ...] = ()
+        self._spacing_review_error = ""
         self._restoring_saved_review = True
         self.config = self.save_result(snapshot)
         self._restoring_saved_review = False
@@ -583,7 +582,11 @@ class ReviewSession:
     @property
     def approved(self) -> bool:
         """Derive readiness from the current revision, never a parallel flag."""
-        return self.workbook_review_current and not self.pending_spacing_reviews
+        return (
+            not self.spacing_review_error
+            and self.workbook_review_current
+            and not self.pending_spacing_reviews
+        )
 
     @property
     def workbook_review_current(self) -> bool:
@@ -614,14 +617,31 @@ class ReviewSession:
             SPACING_RENDER_POLICY_REVISION,
         )
         if key != self._spacing_entries_key:
-            self._spacing_entries = spacing_review_entries(
-                replace(self.config, enabled=True),
-                self.snapshot,
-                self.analysis.sections,
-                context=_spacing_context_for_snapshot(self, self.snapshot),
-            )
+            try:
+                self._spacing_entries = spacing_review_entries(
+                    replace(self.config, enabled=True),
+                    self.snapshot,
+                    self.analysis.sections,
+                    context=_spacing_context_for_snapshot(self, self.snapshot),
+                )
+                self._spacing_review_error = ""
+            except ValueError as error:
+                # Strict report derivation still rejects incomplete diagnostics.
+                # An editable session retains its current rows and draft intent.
+                self._spacing_entries = ()
+                self._spacing_review_error = (
+                    str(error) or "Spacing images could not be derived."
+                )
+                self.spacing_capture_digests.clear()
+                self.invalidate_review()
         self._spacing_entries_key = key
         return self._spacing_entries
+
+    @property
+    def spacing_review_error(self) -> str:
+        """Distinguish unavailable diagnostics from a successfully empty review."""
+        _ = self.spacing_entries
+        return self._spacing_review_error if self.analysis is not None else ""
 
     @property
     def pending_spacing_reviews(self) -> tuple[SpacingReviewEntry, ...]:
@@ -663,9 +683,7 @@ class ReviewSession:
                 "The spacing review image has changed. Select its current entry."
             )
         digest = tracking.spacing_capture_fingerprint(entry.input_digest, image_sha256)
-        previous = tracking.find_spacing_image(
-            self.config.review_tracking, entry.spec_id, entry.layer, entry.view_id
-        )
+        previous = tracking.find_spacing_review(self.config.review_tracking, entry)
         if previous is not None and previous.viewed_digest != digest:
             self.invalidate_review()
         self.spacing_capture_digests[entry.view_id] = digest
@@ -697,9 +715,7 @@ class ReviewSession:
     ) -> None:
         """Approve only one previously displayed current diagnostic image."""
         digest = tracking.spacing_capture_fingerprint(entry.input_digest, image_sha256)
-        previous = tracking.find_spacing_image(
-            self.config.review_tracking, entry.spec_id, entry.layer, entry.view_id
-        )
+        previous = tracking.find_spacing_review(self.config.review_tracking, entry)
         if entry not in self.spacing_entries or not _spacing_record_current(
             self.config.review_tracking, entry, digest
         ):
@@ -714,7 +730,10 @@ class ReviewSession:
             review_tracking=tracking.put_spacing_image(
                 self.config.review_tracking,
                 replace(
-                    previous, approved_digest=digest, approved_at_utc=tracking.utc_now()
+                    previous,
+                    view_id=entry.view_id,
+                    approved_digest=digest,
+                    approved_at_utc=tracking.utc_now(),
                 ),
             ),
         )
@@ -853,6 +872,8 @@ class ReviewSession:
 
     def approve(self, captures: Optional[Mapping[str, str]] = None) -> None:
         """Approve exactly the checked rows of the current document."""
+        if self.spacing_review_error:
+            raise ValueError("Spacing review unavailable: " + self.spacing_review_error)
         if self.analysis is None or not self.included:
             raise ValueError("Include at least one current PCB section.")
         if self.pending_spacing_reviews:
@@ -955,6 +976,8 @@ class ReviewSession:
     def save_result(self, snapshot: Optional[BoardSnapshot] = None) -> Config:
         """Save valid intent independently of whether report review is complete."""
         validate_storage_config(self.config)
+        if self.spacing_review_error:
+            self.invalidate_review()
         if self.config.reviewed_digest:
             try:
                 reviewed = replace(self.config, enabled=True)
@@ -1866,9 +1889,7 @@ class SpecificationDialog(wx.Dialog):
         self._capture_errors.pop(entry, None)
         self._capture_retry_at.pop(entry, None)
         self._capture_retry_attempts.pop(entry, None)
-        previous = tracking.find_spacing_image(
-            self.review_tracking, entry.spec_id, entry.layer, entry.view_id
-        )
+        previous = tracking.find_spacing_review(self.review_tracking, entry)
         digest = tracking.spacing_capture_fingerprint(entry.input_digest, image_hash)
         self.review_tracking = tracking.put_spacing_image(
             self.review_tracking,
@@ -1902,9 +1923,7 @@ class SpecificationDialog(wx.Dialog):
         self, entry: SpacingReviewEntry, image_hash: str
     ) -> None:
         """Persist consent from the verified readable modal's explicit button."""
-        previous = tracking.find_spacing_image(
-            self.review_tracking, entry.spec_id, entry.layer, entry.view_id
-        )
+        previous = tracking.find_spacing_review(self.review_tracking, entry)
         if entry != self.preview_pane.selected_entry or previous is None:
             raise ValueError("The spacing image changed. Review its current capture.")
         digest = tracking.spacing_capture_fingerprint(entry.input_digest, image_hash)
@@ -1914,7 +1933,10 @@ class SpecificationDialog(wx.Dialog):
             self.review_tracking = tracking.put_spacing_image(
                 self.review_tracking,
                 replace(
-                    previous, approved_digest=digest, approved_at_utc=tracking.utc_now()
+                    previous,
+                    view_id=entry.view_id,
+                    approved_digest=digest,
+                    approved_at_utc=tracking.utc_now(),
                 ),
             )
 
@@ -4323,7 +4345,9 @@ class ImpedanceDialog(wx.Dialog):
         }
         result: list[SpacingReviewEntry] = []
         for entry in self.session.spacing_entries:
-            record = records.get((entry.spec_id, entry.layer, entry.view_id))
+            record = tracking.find_spacing_review(
+                self.session.config.review_tracking, entry, records=records
+            )
             if (
                 record is not None
                 and record.issue_id == entry.issue_id
@@ -5224,7 +5248,7 @@ class ImpedanceDialog(wx.Dialog):
                     for result in results
                     if result.status in ("success", "unsupported")
                 )
-                if not successes and self.session.approved:
+                if not successes and self.session.workbook_review_current:
                     # Keep an approved workbook untouched when every job failed.
                     raise ValueError(alert)
                 merged = merge_width_results(config.width_results, results)
@@ -5699,6 +5723,12 @@ class ImpedanceDialog(wx.Dialog):
             text = self._width_refresh_alert
         elif self._rows_error:
             text = self._rows_error + " Settings can still be saved as a draft."
+        elif self.session.spacing_review_error:
+            text = (
+                "Spacing review unavailable: "
+                + self.session.spacing_review_error
+                + " Settings can still be saved as a draft."
+            )
         elif self.preview_pane.failure:
             text = self.preview_pane.failure
         elif any(
@@ -5766,7 +5796,9 @@ class ImpedanceDialog(wx.Dialog):
             self.session.workbook_review_current and not spacing_pending and not pending
         )
         self.review_status.SetLabel(
-            "Verifying saved images"
+            "Spacing review unavailable"
+            if self.session.spacing_review_error
+            else "Verifying saved images"
             if pending
             else f"✓ {rows} approved"
             if reviewed
@@ -5790,9 +5822,16 @@ class ImpedanceDialog(wx.Dialog):
             bool(self.session.analysis and count and self.preview_pane.ready)
             and not reviewed
             and not self._rows_error
+            and not self.session.spacing_review_error
             and not pending
         )
-        self.retry_button.Show(bool(self._rows_error or self.preview_pane.failure))
+        self.retry_button.Show(
+            bool(
+                self._rows_error
+                or self.session.spacing_review_error
+                or self.preview_pane.failure
+            )
+        )
         self.retry_button.Enable(True)
         # Draft saves remain allowed; the label must not imply export readiness.
         save = self.FindWindow(wx.ID_OK)
@@ -5835,7 +5874,7 @@ class ImpedanceDialog(wx.Dialog):
                 save_calculator_config=self.save_calculator_config,
                 save_width_result=self.save_width_result,
                 skip_stub_review=self.skip_stub_review,
-                preserve_approved_width_results=self.session.approved,
+                preserve_approved_width_results=self.session.workbook_review_current,
             )
         except Exception as error:
             self._error(str(error))
@@ -5891,7 +5930,7 @@ class ImpedanceDialog(wx.Dialog):
                     if (
                         section.section_id not in verified
                         and not changed
-                        and self.session.approved
+                        and self.session.workbook_review_current
                     ):
                         # Pending child warm-up is not failed pixel evidence.
                         # Keep this parent's current proof (or its pending saved

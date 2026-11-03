@@ -11,7 +11,7 @@ from typing import Optional
 
 from .review_tracking import (
     ReviewTracking,
-    find_spacing_image,
+    find_spacing_review,
     format_timestamp,
     spacing_capture_fingerprint,
     spacing_image_current,
@@ -358,11 +358,7 @@ def _spacing_card(
 ) -> str:
     """Show a native close-up with external labels and exact approval evidence."""
     entry, capture = image.entry, image.capture
-    record = (
-        find_spacing_image(tracking, entry.spec_id, entry.layer, entry.view_id)
-        if tracking is not None
-        else None
-    )
+    record = find_spacing_review(tracking, entry) if tracking is not None else None
     current = (
         record is not None
         and record.issue_id == entry.issue_id

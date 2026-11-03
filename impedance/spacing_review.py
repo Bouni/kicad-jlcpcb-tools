@@ -82,6 +82,7 @@ class SpacingReviewEntry:
     region_gap_nm: Optional[NmBounds] = None
     composition_layout: str = "standard"
     representative: Optional[SpacingCrossSection] = None
+    legacy_view_id: str = ""
 
     @cached_property
     def _structural_hash(self) -> tuple[object, int]:
@@ -703,8 +704,8 @@ def _concerns(
                 math.dist(section.source_point, section.mate_point)
                 - (section.source_width_nm + section.mate_width_nm) / 2
             )
-            # Native witnesses are rounded to integer nanometres; sub-nm noise
-            # must not relocate an otherwise identical split/reversed route.
+            # Rank precise witnesses at 1 nm resolution so sub-nm ranking noise
+            # cannot relocate an otherwise identical split/reversed route.
             certified = certificates[section]
             worst = certified.upper_nm if is_tight else -certified.lower_nm
             severity = round(actual) if is_tight else -round(actual)
@@ -908,7 +909,12 @@ def _derive_spacing_review_entries(
                     target=target,
                 )
             for viewport in viewports:
-                view_id = _digest((issue_id, viewport, SPACING_RENDER_POLICY_REVISION))
+                legacy_view_id = _digest(
+                    (issue_id, viewport, SPACING_RENDER_POLICY_REVISION)
+                )
+                # Target guides change the composition even if its physical crop
+                # stays fixed. Keep their histories separate when an edit reverts.
+                view_id = _digest((legacy_view_id, target))
                 caption = _concern_caption(concern, target)
                 caption += " · Dashed lines: target facing edges; ticks: measured gap."
                 result.append(
@@ -931,6 +937,7 @@ def _derive_spacing_review_entries(
                         region_gap_nm=concern.gap_nm,
                         representative=concern.representative,
                         composition_layout=layout,
+                        legacy_view_id=legacy_view_id,
                     )
                 )
                 result[-1] = replace(
@@ -958,13 +965,11 @@ def pending_spacing_reviews(
     context: Optional[SpacingContext] = None,
 ) -> tuple[SpacingReviewEntry, ...]:
     """List every current diagnostic entry without matching explicit approval."""
-    from .review_tracking import find_spacing_image, spacing_image_current
+    from .review_tracking import find_spacing_review, spacing_image_current
 
     pending = []
     for entry in spacing_review_entries(config, snapshot, sections, context=context):
-        record = find_spacing_image(
-            config.review_tracking, entry.spec_id, entry.layer, entry.view_id
-        )
+        record = find_spacing_review(config.review_tracking, entry)
         if (
             record is None
             or record.issue_id != entry.issue_id

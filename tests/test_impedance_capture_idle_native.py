@@ -5,11 +5,13 @@ workers, native input queues, timers, modal ownership and paints remain real.
 The bounded provider workload tests dispatch order, not rendering performance.
 """
 
+from collections import deque
 from dataclasses import replace
 import hashlib
 import importlib
+import json
 import os
-from threading import Event
+from threading import Event, current_thread
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -104,8 +106,22 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
     config = replace(config, stackup=_stackup(api))
     release_worker = Event()
     worker_results: list[str] = []
+    started = time.monotonic()
+    timeline: deque[dict[str, Any]] = deque(maxlen=256)
+
+    def note(stage: str, **details: Any) -> None:
+        """Retain bounded transition evidence without printing inside native dispatch."""
+        timeline.append(
+            {
+                "ms": round((time.monotonic() - started) * 1000, 3),
+                "stage": stage,
+                "thread": current_thread().name,
+                **details,
+            }
+        )
 
     def calculate(stackup: Any, spec: Any, layer: str, *, cancel: Any) -> Any:
+        note("worker.wait", spec_id=spec.spec_id)
         assert release_worker.wait(10), "The first background image never ran"
         result = stackup_model.WidthResult(
             spec.spec_id,
@@ -118,29 +134,73 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
             calculation_digest="b" * 64,
         )
         worker_results.append(spec.spec_id)
+        note("worker.result", spec_id=spec.spec_id)
         return result
 
     def exercise(frame: Any, wx: Any) -> None:
         warm_started: list[bool] = []
         progress: dict[str, list[int]] = {"callback": [], "timer": []}
         painted: list[str] = []
+        captures = 0
+
+        def preview_state() -> dict[str, Any]:
+            """Distinguish queued loading, native paint and post-paint confirmation."""
+            pane = dialog.preview_pane
+            canvas = pane.canvas
+            if not dialog or not pane.window or not canvas:
+                return {"native_destroyed": True}
+            selected = pane.selected_section
+            display = pane._display
+            return {
+                "selected_id": selected.section_id if selected is not None else None,
+                "display_id": display[2].section_id if display is not None else None,
+                "request": pane._request,
+                "canvas_generation": canvas._generation,
+                "capture_loaded": pane.capture_loaded,
+                "ready": pane.ready,
+                "recorded": canvas._recorded,
+                "paint_pending": canvas._pending,
+                "image_loaded": canvas._image is not None,
+                "canvas_size": tuple(canvas.GetClientSize()),
+                "canvas_shown": canvas.IsShownOnScreen(),
+                "window_shown": pane.window.IsShownOnScreen(),
+                "active": pane._active(),
+                "failure": pane.failure,
+                "row": dialog.sections.GetSelectedRow(),
+                "row_epoch": dialog.sections._row_epoch,
+                "pending_captures": len(dialog._capture_prepare_sections),
+                "captures_started": captures,
+            }
+
+        def gui_note(stage: str, **details: Any) -> None:
+            note(stage, **preview_state(), **details)
+
+        def foreground(kind: str) -> None:
+            progress[kind].append(len(dialog._capture_prepare_sections))
+            gui_note(kind)
 
         def render(section: Any, **_options: Any) -> Any:
+            nonlocal captures
             assert wx.IsMainThread()
+            captures += 1
             selected = dialog.preview_pane.selected_section
+            selected_capture = section == selected
+            observed = selected_capture or captures <= 4 or captures % 100 == 0
+            if observed:
+                gui_note("capture.start", capture_id=section.section_id)
             if selected is not None and section != selected and not warm_started:
                 warm_started.append(dialog.preview_pane.displayed)
-                wx.CallAfter(
-                    lambda: progress["callback"].append(
-                        len(dialog._capture_prepare_sections)
-                    )
-                )
+                gui_note("warming.probes-queued")
+                wx.CallAfter(foreground, "callback")
                 probe.StartOnce(1)
                 _post_row_click(wx, dialog.sections, 1)
                 release_worker.set()
             _capture_work()
+            if observed:
+                gui_note("capture.finish", capture_id=section.section_id)
             return capture
 
+        note("constructor.start", wx=wx.version())
         dialog = api.dialog.ImpedanceDialog(
             frame,
             config,
@@ -150,12 +210,45 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
             fetch_stackup_catalog=lambda *_args, **_options: (),
             calculate_width=calculate,
         )
+        gui_note("constructor.finish")
+
+        def trace_method(target: Any, name: str) -> None:
+            """Observe the real method; preserve its scheduling and native handlers."""
+            original = getattr(target, name)
+
+            def traced(*args: Any, **kwargs: Any) -> Any:
+                details = (
+                    {"delivery_generation": args[0]}
+                    if name in {"_show_selected", "_after_paint", "_finish_calculation"}
+                    and args
+                    else {}
+                )
+                gui_note(name + ".start", **details)
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    gui_note(name + ".finish", **details)
+
+            monkeypatch.setattr(target, name, traced)
+
+        for target, names in (
+            (
+                dialog,
+                (
+                    "_finish_calculation",
+                    "_populate_sections",
+                    "_reset_main_capture_preparation",
+                ),
+            ),
+            (dialog.preview_pane, ("select", "set_sections", "_show_selected")),
+            (dialog.preview_pane.canvas, ("clear", "set_capture", "_after_paint")),
+        ):
+            for name in names:
+                trace_method(target, name)
         probe = wx.Timer(dialog)
         dialog.Bind(
             wx.EVT_TIMER,
-            lambda _event: progress["timer"].append(
-                len(dialog._capture_prepare_sections)
-            ),
+            lambda _event: foreground("timer"),
             probe,
         )
 
@@ -163,6 +256,7 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
             selected = dialog.preview_pane.selected_section
             if selected is not None:
                 painted.append(selected.section_id)
+            gui_note("native.paint")
             event.Skip()
 
         dialog.preview_pane.canvas.Bind(wx.EVT_PAINT, observe_paint)
@@ -170,6 +264,7 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
         selected_id = dialog._row_ids[1]
 
         def inspect() -> None:
+            gui_note("wait.start", timeout_ms=5000)
             try:
                 wait_until(
                     wx,
@@ -186,6 +281,7 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
                     reason="Background captures starved completion, native input or visible paint",
                 )
             except AssertionError as error:
+                gui_note("wait.failure")
                 selected = dialog.preview_pane.selected_section
                 row = dialog.sections.GetSelectedRow()
                 states = {
@@ -207,8 +303,10 @@ def test_native_warming_yields_to_worker_input_timer_and_selected_paint(
                     f"row_epoch={dialog.sections._row_epoch}; "
                     f"completed_workers={worker_results!r}; "
                     f"pending_captures={len(dialog._capture_prepare_sections)}; "
-                    f"painted_ids={painted!r}"
+                    f"painted_ids={painted!r}; "
+                    f"timeline={json.dumps(list(timeline), sort_keys=True)}"
                 ) from error
+            gui_note("wait.success")
             assert warm_started == [True], "Warming preceded the first selected paint"
             assert progress["callback"][0] > 0 and progress["timer"][0] > 0
             assert dialog._capture_prepare_sections, (

@@ -92,6 +92,32 @@ def test_nearby_wrong_net_pad_does_not_exempt_fanout() -> None:
     assert _check(snapshot).verdict == "deviation"
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_unmatched_pad_has_no_extra_full_width_uncertainty_ring(reverse: bool) -> None:
+    """Only actual stroke-to-pad contact is excluded without an associated pair."""
+    traces = (
+        _trace("p", "P", ((0, 0), (2_000_000, 0))),
+        _trace("n", "N", ((0, 400_000), (2_000_000, 400_000))),
+    )
+    if reverse:
+        traces = tuple(
+            replace(trace, points=tuple(reversed(trace.points))) for trace in traces
+        )
+    check = _check(
+        BoardSnapshot(
+            ("F.Cu",),
+            traces,
+            differential_pairs=(("P", "N"),),
+            copper_features=(_pad("unmatched", "P", (0, 0)),),
+        )
+    )
+    assert check.verdict == "deviation"
+    assert check.coverage == "complete", check.reasons
+    assert check.unverified_length_nm == 0
+    assert 274_999 <= check.transition_length_nm <= 275_001
+    assert check.assessed_length_nm + check.transition_length_nm == 4_000_000
+
+
 def test_wrong_gap_after_pad_region_inside_one_native_line_remains_checked() -> None:
     """A later established trunk cannot extend the explicit landing-pad region."""
     snapshot = _fanout()
@@ -440,7 +466,7 @@ def test_budget_exhaustion_keeps_only_point_sized_confirmed_issue_locations() ->
     from impedance.spacing_checks import SpacingLimits
 
     p = _trace("p", "P", ((0, 0), (10_000_000, 0)))
-    n = _trace("n", "N", ((0, 250_000), (10_000_000, 350_000)))
+    n = _trace("n", "N", ((0, 250_000), (5_000_000, 350_000), (10_000_000, 250_000)))
     snapshot = BoardSnapshot(("F.Cu",), (p, n), differential_pairs=(("P", "N"),))
     check = compare_pair_spacing(
         measure_pair_spacing(
@@ -727,6 +753,55 @@ def test_merging_adjacent_leaves_retains_each_native_member_interval() -> None:
     assert merged[0].members == locations
 
 
+@pytest.mark.parametrize(
+    "offset, count",
+    [((0.4, 0.3), 1), ((1.0, 0.0), 1), ((1.0001, 0.0), 2), ((0.8, 0.8), 2)],
+)
+def test_float_native_endpoint_grouping_uses_actual_one_nm_distance(
+    offset: tuple[float, float],
+    count: int,
+) -> None:
+    """Sub-nm projections join at corners without rounding unrelated endpoints together."""
+    from impedance.spacing_checks import (
+        NmBounds,
+        SpacingIssue,
+        SpacingLocation,
+        _merge_issues,
+    )
+
+    x, y = offset
+    locations = (
+        SpacingLocation(
+            "p0",
+            ("n0",),
+            (0.0, 1.0),
+            ((0.0, 0.0), (100.75, 0.0)),
+            ((0.0, 10.0), (100.75, 10.0)),
+            (0, 0, 101, 10),
+        ),
+        SpacingLocation(
+            "p1",
+            ("n1",),
+            (0.0, 1.0),
+            ((100.75 + x, y), (200.0, 0.0)),
+            ((100.75 + x, 10.0 + y), (200.0, 10.0)),
+            (100, 0, 200, 11),
+        ),
+    )
+    issues = tuple(
+        SpacingIssue(
+            "too_wide",
+            (location.source_trace_id,),
+            None,
+            NmBounds(10, 10),
+            "Wide",
+            location,
+        )
+        for location in locations
+    )
+    assert len(_merge_issues(issues)) == count
+
+
 def test_terminal_region_stops_at_unsplit_native_t_junction() -> None:
     """A branch endpoint on a native track interior ends the entry prefix there."""
     from impedance.spacing_checks import (
@@ -845,7 +920,7 @@ def test_multiple_connected_landing_candidates_remain_locally_unverified() -> No
     assert check.verdict != "match"
     assert check.unverified_length_nm > 0
     assert check.transition_length_nm < 2_000_000
-    assert any("transition boundary" in reason for reason in check.reasons)
+    assert any("Disconnected" in reason for reason in check.reasons)
 
 
 def test_landing_region_support_accounts_for_every_examined_disk() -> None:

@@ -10,7 +10,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, Optional
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -278,15 +278,7 @@ def phased_suite(ordered_suite: Path) -> Path:
             " time.sleep(60 if os.environ.get('PHASE_FAILURE')=='cancel' else 0.1)\n"
             " assert os.environ.get('PHASE_FAILURE')!='budget'\n"
         )
-    binaries = suite / "bin"
-    binaries.mkdir()
-    for name, body in {
-        "id": "echo 1001\n",
-        "dpkg": "echo amd64\n",
-    }.items():
-        command = binaries / name
-        command.write_text("#!/bin/sh\n" + body)
-        command.chmod(0o755)
+    _phase_binaries(suite)
     # Keep the production dispatcher and GNU timeout. Limit only this fixture's
     # auto worker count; the lane's existing four-worker cap is checked elsewhere.
     interpreter = suite / ".venv/bin/python"
@@ -311,6 +303,41 @@ def phased_suite(ordered_suite: Path) -> Path:
         shutil.copyfile(ROOT / "scripts" / name, scripts / name)
     (suite / ".cache/native-tests/native-wx-0").mkdir(parents=True)
     return suite
+
+
+def _phase_binaries(suite: Path) -> Path:
+    """Provide the shell fixture's private executable directory."""
+    timeout = None
+    for name in ("timeout", "gtimeout"):
+        candidate = shutil.which(name)
+        if candidate is None:
+            continue
+        try:
+            version = subprocess.run(
+                [candidate, "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if version.returncode == 0 and "GNU coreutils" in version.stdout:
+            timeout = Path(candidate).resolve()
+            break
+    if timeout is None:
+        pytest.skip("Shell phase integration requires GNU timeout or gtimeout")
+    binaries = suite / "bin"
+    binaries.mkdir()
+    (binaries / "timeout").symlink_to(timeout)
+    for name, body in {
+        "id": "echo 1001\n",
+        "dpkg": "echo amd64\n",
+    }.items():
+        command = binaries / name
+        command.write_text("#!/bin/sh\n" + body)
+        command.chmod(0o755)
+    return binaries
 
 
 def _phase_process(suite: Path, failure: str) -> subprocess.Popen[str]:
@@ -362,6 +389,78 @@ def _stop_phase_process(process: subprocess.Popen[str]) -> None:
     with suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
     process.wait(timeout=5)
+
+
+@pytest.mark.parametrize(
+    "available_command", ["timeout", "gtimeout", "non-gnu-timeout"]
+)
+def test_phase_fixture_resolves_real_gnu_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    available_command: str,
+) -> None:
+    """Either GNU command name provides the shell's real process timeout."""
+    installed = None
+    for name in ("timeout", "gtimeout"):
+        candidate = shutil.which(name)
+        if candidate is None:
+            continue
+        try:
+            version = subprocess.run(
+                [candidate, "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if version.returncode == 0 and "GNU coreutils" in version.stdout:
+            installed = candidate
+            break
+    if installed is None:
+        pytest.skip("Timeout behavior requires an installed GNU timeout or gtimeout")
+
+    def locate(command: str) -> Optional[str]:
+        if available_command == "non-gnu-timeout":
+            return sys.executable if command == "timeout" else installed
+        return installed if command == available_command else None
+
+    monkeypatch.setattr(shutil, "which", locate)
+    command = _phase_binaries(tmp_path) / "timeout"
+    assert command.is_file(), "The shell fixture must expose its resolved GNU timeout"
+    completed = subprocess.run(
+        [
+            str(command),
+            "--kill-after=1s",
+            "0.05s",
+            sys.executable,
+            "-c",
+            "import time; time.sleep(60)",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert completed.returncode == 124, completed.stdout + completed.stderr
+
+
+@pytest.mark.parametrize("dependency", ["missing", "non-gnu"])
+def test_phase_fixture_skips_precisely_without_gnu_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dependency: str
+) -> None:
+    """An unavailable host dependency skips shell cases before starting a lane."""
+
+    def locate(command: str) -> Optional[str]:
+        return None if dependency == "missing" else sys.executable
+
+    monkeypatch.setattr(shutil, "which", locate)
+    with pytest.raises(
+        pytest.skip.Exception,
+        match="Shell phase integration requires GNU timeout or gtimeout",
+    ):
+        _phase_binaries(tmp_path)
 
 
 @pytest.mark.parametrize("failure", ["", "bulk", "budget"])
