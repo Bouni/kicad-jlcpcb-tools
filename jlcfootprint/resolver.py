@@ -200,12 +200,13 @@ def _finish_multi_pin(
             f"pad counts differ ({verdict.pad_count_kicad} vs {verdict.pad_count_jlc}) "
             f"but the {len(kicad)} {paired} align"
         )
-    verdict.status = (
-        "yellow"
-        if verdict.missing_central_pad or verdict.fit == "fits_tight"
-        else "green"
-    )
+    verdict.status = "yellow" if _fits_with_caveat(verdict) else "green"
     return verdict
+
+
+def _fits_with_caveat(verdict: Verdict) -> bool:
+    """Return True when a part that fits is yellow for its fit: tight pads or a missing central pad."""
+    return verdict.missing_central_pad or verdict.fit == "fits_tight"
 
 
 def _resolve_by_function(
@@ -604,7 +605,7 @@ def _resolve_polarized(
         verdict.polarity_light = "yellow"
         verdict.status = "yellow"
         verdict.notes.append(YELLOW_NOTE)
-    if verdict.fit == "fits_tight":
+    if _fits_with_caveat(verdict):
         verdict.status = "yellow"
     _, swapped = _two_pad_pairing(kicad, _swapped(jlc), kicad_copper, jlc_copper)
     if fits_clearly_better(swapped, report):
@@ -660,7 +661,7 @@ def _resolve_axis(
     verdict.method = "axis"
     verdict.non_polar = True
     verdict.confidence = "high"
-    verdict.status = "yellow" if verdict.fit == "fits_tight" else "green"
+    verdict.status = "yellow" if _fits_with_caveat(verdict) else "green"
     return verdict
 
 
@@ -679,7 +680,7 @@ def _shape_alignment(
     verdict.non_polar = True
     verdict.confidence = "high"
     verdict.notes.append(SHAPE_NOTE)
-    verdict.status = "yellow" if verdict.fit == "fits_tight" else "green"
+    verdict.status = "yellow" if _fits_with_caveat(verdict) else "green"
     return verdict
 
 

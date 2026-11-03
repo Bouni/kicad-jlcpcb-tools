@@ -631,6 +631,25 @@ def test_a_polarized_part_whose_drawing_splits_a_terminal_still_votes():
     assert halves.origin == pytest.approx(whole.origin, abs=1e-9)
 
 
+def test_a_split_polarized_part_missing_a_central_pad_is_yellow():
+    """JLC's central pad numbered 1, which the KiCad footprint lacks, is the caveat it is elsewhere."""
+    kicad = [
+        Pad("1", -2.0, 0.0, 2.0, 2.0, 0.0, "K"),
+        Pad("2", 2.0, 0.0, 2.0, 2.0, 0.0, "A"),
+    ]
+    jlc = [
+        Pad("1", -2.0, 0.0, 2.0, 2.0),
+        Pad("2", 2.0, 0.0, 2.0, 2.0),
+        Pad("1", 0.0, 0.0, 1.0, 1.0),
+    ]
+    pins = [SymbolPin("1", "K"), SymbolPin("2", "A")]
+    verdict = resolve(kicad, "Diode_SMD:D_SMA", "ok", "SMA_L4-W2-LS6-RD", jlc, pins)
+    assert (verdict.method, verdict.rotation) == ("polarity", 0)
+    assert verdict.missing_central_pad
+    assert verdict.status == "yellow"
+    assert "JLC part has a central pad (1) your footprint lacks" in verdict.notes
+
+
 def _turned(pads, degrees):
     """Return the pads turned by ``degrees`` about the footprint origin."""
     turned = []
