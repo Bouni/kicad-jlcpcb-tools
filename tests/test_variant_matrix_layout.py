@@ -284,6 +284,47 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
     matrix(check, model=model)
 
 
+@pytest.mark.parametrize(
+    "value,params,lit",
+    [
+        ("4k7", "4.7kΩ ±1% 0603", ("4.7kΩ", "0603")),
+        ("4k7", "14.7kΩ ±1% 0603", ("0603",)),
+        ("100", "100kΩ ±1% 0603", ("0603",)),
+    ],
+)
+@pytest.mark.native_wx
+def test_parameter_colors_light_the_board_value_and_not_its_neighbours(
+    matrix: Any,
+    modules: tuple[ModuleType, ModuleType],
+    value: str,
+    params: str,
+    lit: tuple[str, ...],
+) -> None:
+    variants = ("", "A", "B")
+    model = sample_model(
+        modules[1],
+        changes={(0, variant): {"value": value} for variant in variants},
+        catalog={(0, variant): {"params": params} for variant in variants},
+    )
+
+    def check(h: Any) -> None:
+        col = model.column_for("A", "params")
+        dc = h.wx.ClientDC(h.view)
+        dc.SetFont(h.view.GetDefaultCellFont())
+        width = dc.GetTextExtent(params)[0] + h.view.FromDIP(20)
+        painted = paint_cell(h, 0, col, width=width)
+        baseline, *colored = painted.of("DrawText")
+        text, x, _y = baseline["args"]
+        assert text == params
+        assert len(colored) == len(lit)
+        for item, term in zip(colored, lit):
+            left = text.index(term)
+            left_width = dc.GetTextExtent(text[:left])[0] if left else 0
+            assert item["clip"][-4] == x + left_width
+
+    matrix(check, model=model)
+
+
 @pytest.mark.parametrize("field,text", [("value", "4.7k"), ("lcsc", "C456")])
 @pytest.mark.parametrize("different", [False, True])
 @pytest.mark.native_wx

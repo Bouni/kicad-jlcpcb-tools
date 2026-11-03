@@ -620,7 +620,9 @@ class MatrixCellRenderer(gridlib.GridCellRenderer):
         terms = expand_value(reference, str(model.get_value(row, value_col)))
         terms += expand_footprint(reference, str(model.get_value(row, 1)))
         spans = find_highlight_spans(
-            text, [term.casefold() for term in terms if len(term) > 1]
+            text,
+            [term.casefold() for term in terms if len(term) > 1],
+            whole_values=True,
         )
         if fitted is not None:
             spans = visible_highlight_spans(spans, fitted)
