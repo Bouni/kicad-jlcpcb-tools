@@ -3,10 +3,13 @@
 from base64 import b64decode
 from hashlib import sha256
 import importlib
+import json
 import os
 from pathlib import Path
 from struct import pack
 import sys
+import threading
+import time
 from types import ModuleType
 from typing import Any, Optional
 from zlib import compress, crc32
@@ -436,6 +439,7 @@ def test_native_checkbox_commits_before_queued_projection_rebuild(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
     refresh: bool,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A native checkbox click survives Save/Refresh before queued row repainting."""
     if isolated_native(request, "KICAD_IMPEDANCE_GRID_IMMEDIATE_INCLUDE_CHILD"):
@@ -456,14 +460,41 @@ def test_native_checkbox_commits_before_queued_projection_rebuild(
     snapshot = _board(api)
     saved: list[Any] = []
     saved_inclusion: list[set[str]] = []
+    started = time.monotonic()
+    lifecycle: list[dict[str, Any]] = []
+
+    def record(stage: str, dialog: Optional[Any] = None) -> None:
+        """Keep shutdown evidence even if the child aborts after pytest reports pass."""
+        state: dict[str, Any] = {
+            "stage": stage,
+            "ms": round((time.monotonic() - started) * 1000, 3),
+            "threads": [
+                {"name": worker.name, "ident": worker.ident, "daemon": worker.daemon}
+                for worker in threading.enumerate()
+            ],
+        }
+        if dialog:
+            state.update(
+                closing=dialog._closing,
+                modal=dialog.IsModal(),
+                width_active=dialog._calculation_cancel is not None,
+                capture_timer=dialog._capture_prepare_timer.IsRunning(),
+                width_timer=dialog._width_refresh_timer.IsRunning(),
+                catalog_attached=dialog._catalog_controller is not None,
+            )
+        lifecycle.append(state)
 
     def exercise(frame: Any, wx: Any) -> None:
         import wx.grid as gridlib
+
+        record("constructor.start")
+        lifecycle[-1]["wx"] = wx.version()
 
         def save(config: Any) -> None:
             """Audit selection at persistence without dispatching queued UI work."""
             saved_inclusion.append(set(dialog.session.included))
             saved.append(config)
+            record("save.callback", dialog)
 
         dialog = api.dialog.ImpedanceDialog(
             frame,
@@ -474,6 +505,7 @@ def test_native_checkbox_commits_before_queued_projection_rebuild(
             fetch_stackup_catalog=lambda *_args, **_kwargs: (),
             save_config=save,
         )
+        record("constructor.finish", dialog)
         failures: list[BaseException] = []
         remaining: set[str] = set()
 
@@ -495,6 +527,7 @@ def test_native_checkbox_commits_before_queued_projection_rebuild(
                         dialog._row_ids.index(removed), 0
                     )
                     _assert_rows(dialog, 2)
+                record("save.command", dialog)
                 _button(wx, dialog, wx.ID_OK)
             except BaseException as error:
                 failures.append(error)
@@ -504,6 +537,7 @@ def test_native_checkbox_commits_before_queued_projection_rebuild(
         wx.CallAfter(interact)
         try:
             assert dialog.ShowModal() == wx.ID_OK
+            record("modal.return", dialog)
             if failures:
                 raise failures[0]
             assert len(saved) == 1
@@ -512,10 +546,23 @@ def test_native_checkbox_commits_before_queued_projection_rebuild(
             assert saved[0].included_section_ids == ()
             assert saved[0].reviewed_digest == ""
         finally:
+            record("destroy.request", dialog)
             dialog.Destroy()
             pump(wx)
+            record("destroy.drained")
 
-    run_native(exercise)
+    try:
+        run_native(exercise)
+    finally:
+        record("runner.return")
+        # Successful-test capture would otherwise disappear before an atexit abort.
+        with capsys.disabled():
+            sys.stderr.write(
+                "Native checkbox lifecycle: "
+                + json.dumps(lifecycle, sort_keys=True)
+                + "\n"
+            )
+            sys.stderr.flush()
 
 
 def test_native_row_numbers_retain_identity_through_selection_save_and_reopen(

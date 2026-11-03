@@ -781,14 +781,14 @@ class CaptureSession:
         return CaptureEvidence(True, {row: self._hashes[row] for row in sections})
 
     def verify(self, expected: BoardSnapshot) -> None:
-        """Reject a changed source without adopting it in a nested editor."""
+        """Verify draft intent's source; require readable appearance to share pixels."""
         current = self.snapshot()
         revision = self._verification_revision(current)
-        if current != expected or revision is None:
+        if current != expected:
             raise ValidationError(
                 "The board changed. Review the updated workbook rows before approval."
             )
-        if revision == self.revision:
+        if revision is not None and revision == self.revision:
             self._commit_owned()
 
     def preview(

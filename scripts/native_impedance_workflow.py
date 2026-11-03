@@ -7,7 +7,7 @@ atomic publication use production implementations. Never run inside the editor.
 
 from base64 import b64decode
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, is_dataclass, replace
 from decimal import Decimal
@@ -37,6 +37,44 @@ HTML = "Required_impedance_control.html"
 SPACING_FIXTURE_CLASS = "Spacing acceptance"
 SPACING_QUIET_NETS = ("SPACING_ACCEPTANCE_QUIET_D+", "SPACING_ACCEPTANCE_QUIET_D-")
 SPACING_DEFECT_NETS = ("SPACING_ACCEPTANCE_DEFECT_D+", "SPACING_ACCEPTANCE_DEFECT_D-")
+
+
+def first_export_reuses_reviewed_pngs(
+    receipt: Mapping[str, Any],
+    expected_spacing: Mapping[str, int],
+    required_capture_count: int,
+) -> bool:
+    """Check reviewed PNG reuse and one deferred Original per approved concern."""
+    return (
+        receipt["rendered"]
+        == {"trace": 0, "spacing": 0, "original": len(expected_spacing)}
+        and receipt["rendered_inputs"]["original"] == expected_spacing
+        and receipt["cache_hits"] >= required_capture_count
+        and receipt["cache_misses"] == 0
+    )
+
+
+def complete_generate_workload(
+    counts: Mapping[str, int],
+    workbook_images: int,
+    approval_passes: Sequence[Mapping[str, Sequence[str]]],
+) -> bool:
+    """Require the complete approval and toolbar workload of the native scenario."""
+    return (
+        counts["approval_passes"] == 2
+        and len(approval_passes) == 2
+        and all(
+            approval_pass["expected"]
+            and len(set(approval_pass["expected"])) == len(approval_pass["expected"])
+            and Counter(approval_pass["approved"]) == Counter(approval_pass["expected"])
+            for approval_pass in approval_passes
+        )
+        and counts["spacing_explicit_approvals"]
+        == sum(len(approval_pass["expected"]) for approval_pass in approval_passes)
+        and counts["workbook_preview_visits"] == 72
+        and workbook_images == 32
+        and counts["generate_toolbar_events"] == 5
+    )
 
 
 @contextmanager
@@ -1709,6 +1747,7 @@ def _generate_workflow(
     frames: list[Any] = []
     configured_spacing: list[dict[str, Any]] = []
     spacing_previews: list[dict[str, Any]] = []
+    spacing_approval_passes: list[dict[str, Any]] = []
 
     def capture_state(frame: Any) -> dict[str, int]:
         cache = getattr(frame._impedance, "_owned_capture_cache", None)
@@ -1753,6 +1792,13 @@ def _generate_workflow(
                 role: dict(identities) for role, identities in renderer_inputs.items()
             },
             "render_receipts": render_receipts,
+            "spacing_approval_passes": [
+                {
+                    "expected": receipt["expected"],
+                    "approved": tuple(receipt["approved"]),
+                }
+                for receipt in spacing_approval_passes
+            ],
             "diagnostic_only": diagnostic_profile,
             "performance_acceptance_eligible": not diagnostic_profile,
             "phase_accounting": "nested phases overlap; worker total includes initialization and cleanup",
@@ -1884,6 +1930,11 @@ def _generate_workflow(
         check_row_numbers(dialog)
         entries = dialog.session.spacing_entries
         require(entries, "Explicit routed spacing defect has no separate review image")
+        approval_pass = {
+            "expected": tuple(entry.view_id for entry in entries),
+            "approved": [],
+        }
+        spacing_approval_passes.append(approval_pass)
         if dialog.session.pending_spacing_reviews:
             require(
                 not dialog.session.approved,
@@ -1897,6 +1948,9 @@ def _generate_workflow(
                     review_spacing_entry(dialog, entry)
             else:
                 review_spacing_entry(dialog, entry)
+            # The review handler verifies current consent before returning.
+            # Preserve successful identities independently of the planned set.
+            approval_pass["approved"].append(entry.view_id)
         require(
             not dialog.session.pending_spacing_reviews,
             "Spacing image approval skipped an entry",
@@ -2343,6 +2397,13 @@ def _generate_workflow(
                 role: value.copy() for role, value in renderer_inputs.items()
             }
             enabled_before_cache = capture_state(frame)
+            # Cold restoration already checked these identities against the
+            # current dialog entries. Export must reuse that independently
+            # verified set, whose size follows measured fixture geometry.
+            expected_spacing = render_receipts["cold_saved_reopen"]["rendered_inputs"][
+                "spacing"
+            ]
+            required_capture_count = len(plan.sections) + len(expected_spacing)
             generate(frame)
             require(not messages, "Native Generate failed: " + str(messages))
             first_export = render_activity(
@@ -2350,10 +2411,9 @@ def _generate_workflow(
             )
             render_receipts["first_enabled_export"] = first_export
             require(
-                first_export["rendered"] == {"trace": 0, "spacing": 0, "original": 65}
-                and first_export["rendered_inputs"]["original"]
-                == render_receipts["cold_saved_reopen"]["rendered_inputs"]["spacing"]
-                and first_export["cache_hits"] >= 97,
+                first_export_reuses_reviewed_pngs(
+                    first_export, expected_spacing, required_capture_count
+                ),
                 "Enabled Generate did not reuse reviewed PNGs while rendering every deferred Original",
             )
             if diagnostic_profile:
@@ -2478,7 +2538,11 @@ def _generate_workflow(
                 require(
                     failed_export["rendered"]
                     == {"trace": 0, "spacing": 0, "original": 0}
-                    and (failure != "publication" or failed_export["cache_hits"] >= 97),
+                    and failed_export["cache_misses"] == 0
+                    and (
+                        failure != "publication"
+                        or failed_export["cache_hits"] >= required_capture_count
+                    ),
                     "Warm failed Generate repeated native rendering or skipped owned PNG verification",
                 )
                 require(
@@ -2539,11 +2603,9 @@ def _generate_workflow(
                 "Configure or Generate changed the native board",
             )
             require(
-                counts["approval_passes"] == 2
-                and counts["spacing_explicit_approvals"] == 130
-                and counts["workbook_preview_visits"] == 72
-                and enabled["workbook_images"] == 32
-                and counts["generate_toolbar_events"] == 5,
+                complete_generate_workload(
+                    counts, enabled["workbook_images"], spacing_approval_passes
+                ),
                 "Generate workflow did not exercise its complete approval/toolbar workload",
             )
             return {

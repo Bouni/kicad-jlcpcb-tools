@@ -45,6 +45,7 @@ def save_api(
         snapshot=None,
         source_error=None,
         palette="initial-native-theme",
+        appearance_error=None,
         variant=None,
         owners=[],
         source_reads=[],
@@ -70,6 +71,8 @@ def save_api(
     def appearance(_pcbnew: object = None) -> str:
         """Expose one appearance revision to capture and dialog verification."""
         state.appearance_reads.append(state.palette)
+        if state.appearance_error is not None:
+            raise state.appearance_error
         return state.palette
 
     def source_revision() -> tuple[BoardSnapshot, Optional[str]]:
@@ -308,6 +311,78 @@ def _assert_reused(env: SimpleNamespace) -> None:
         "appearance_reads": 1,
         "analyses": 0,
     }
+
+
+@pytest.mark.parametrize("unavailable_on_open", [False, True])
+@pytest.mark.parametrize("edit_label", [False, True])
+def test_unreadable_theme_allows_child_apply_parent_save_and_reopen_as_draft(
+    save_api: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    unavailable_on_open: bool,
+    edit_label: bool,
+) -> None:
+    """Real source verification permits draft intent when pixels cannot be checked."""
+    env = save_api
+    approved = _approve_child(env, monkeypatch).session.config
+    env.captures.close()
+    if unavailable_on_open:
+        env.state.appearance_error = OSError("palette unavailable")
+    parent = env.main(approved)
+    parent.on_screen = True
+    env.state.appearance_error = OSError("palette unavailable")
+
+    def show(child: SpecificationDialog) -> int:
+        """Apply an actual class edit without readable appearance or capture proof."""
+        child.on_screen = True
+        if edit_label:
+            child.label.SetValue("Draft while theme is unavailable")
+        child.emit(env.api.wx.EVT_BUTTON, env.api.wx.ID_OK)
+        assert child.modal_result == env.api.wx.ID_OK
+        return child.modal_result
+
+    monkeypatch.setattr(
+        env.api.dialog.SpecificationDialog, "ShowModal", show, raising=False
+    )
+    parent.specifications.SelectRow(0)
+    parent.specifications.emit(env.api.dv.EVT_DATAVIEW_ITEM_ACTIVATED)
+    expected_label = (
+        "Draft while theme is unavailable"
+        if edit_label
+        else approved.specifications[0].label
+    )
+    assert parent.session.config.specifications[0].label == expected_label
+    _save(env, parent)
+    assert parent.modal_result == env.api.wx.ID_OK
+    saved = env.state.saved[-1]
+    assert not saved.reviewed_digest and not saved.reviewed_captures
+    assert saved.specifications[0].label == expected_label
+    reopened = env.main(saved)
+    assert not reopened.session.approved
+    assert reopened.session.config.specifications == saved.specifications
+
+
+def test_unreadable_theme_blocks_reapproval_but_allows_unchanged_draft_save(
+    save_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Losing only appearance removes consent even when all stored intent is unchanged."""
+    env = save_api
+    parent = _approve_child(env, monkeypatch)
+    parent.bindings[env.api.wx.EVT_PAINT, -1](SimpleNamespace(Skip=lambda: None))
+    env.api.drain()
+    env.api.paint(parent.preview_pane)
+    assert parent.preview_pane.ready
+    approved = parent.session.config
+    env.state.appearance_error = OSError("palette unavailable")
+    parent.approve_button.emit(env.api.wx.EVT_BUTTON)
+    assert not parent.session.approved
+    assert not parent.preview_pane.ready
+    _save(env, parent)
+    assert parent.modal_result == env.api.wx.ID_OK
+    saved = env.state.saved[-1]
+    assert saved.specifications == approved.specifications
+    assert not saved.reviewed_digest and not saved.reviewed_captures
+    reopened = env.main(saved)
+    assert not reopened.session.approved
 
 
 @pytest.mark.parametrize("count", [2, 6])

@@ -719,6 +719,49 @@ def test_unreadable_appearance_releases_renderer_and_downgrades_evidence(
         captures.close()
 
 
+@pytest.mark.parametrize("captured", [False, True])
+def test_source_verification_allows_drafts_without_readable_appearance(
+    harness: SimpleNamespace, tmp_path: Path, captured: bool
+) -> None:
+    """Theme failure keeps unchanged intent saveable without publishing pixels."""
+    captures, state, section = _session(harness, tmp_path)
+    try:
+        if captured:
+            captures.preview(section)
+            assert captures._pending_owned
+        harness.palette_error = OSError("palette unavailable")
+        captures.verify(state.snapshot)
+        assert captures.revision is None
+        assert not captures.images and not captures._hashes
+        assert not captures._pending_owned
+        assert not captures.owned_captures._images
+        assert all(renderer.closed for renderer in harness.renderers)
+        assert not captures.verify_captures(state.snapshot, (section,)).current
+        harness.palette_error = None
+        evidence = captures.verify_captures(captures.snapshot(), (section,))
+        assert evidence.current and evidence.hashes[section]
+    finally:
+        captures.close()
+
+
+def test_unreadable_appearance_does_not_allow_changed_source_verification(
+    harness: SimpleNamespace, tmp_path: Path
+) -> None:
+    """Unavailable theme cannot hide an actual source change during draft Apply."""
+    captures, state, section = _session(harness, tmp_path)
+    try:
+        captures.preview(section)
+        expected = state.snapshot
+        state.snapshot = replace(expected, context_digest="changed-board")
+        harness.palette_error = OSError("palette unavailable")
+        with pytest.raises(harness.model.ValidationError, match="board changed"):
+            captures.verify(expected)
+        assert not captures._pending_owned
+        assert not captures.owned_captures._images
+    finally:
+        captures.close()
+
+
 def test_unreadable_source_at_final_batch_boundary_propagates(
     harness: SimpleNamespace, tmp_path: Path
 ) -> None:

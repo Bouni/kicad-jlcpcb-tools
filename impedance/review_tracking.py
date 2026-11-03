@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, Optional
 
 if TYPE_CHECKING:
     from .model import BoardSnapshot, Section, Specification, Trace
+    from .spacing_review import SpacingReviewEntry
     from .stackup_model import Stackup, WidthResult
 
 MAX_IMAGE_RECORDS = 10_000
@@ -455,6 +456,60 @@ def find_spacing_image(
     )
 
 
+def find_spacing_review(
+    tracking: ReviewTracking,
+    entry: "SpacingReviewEntry",
+    *,
+    records: Optional[Mapping[tuple[str, str, str], SpacingImageReview]] = None,
+) -> Optional[SpacingImageReview]:
+    """Read old composition keys only when their exact issue and inputs match."""
+    record = (
+        find_spacing_image(tracking, entry.spec_id, entry.layer, entry.view_id)
+        if records is None
+        else records.get((entry.spec_id, entry.layer, entry.view_id))
+    )
+    if record is None and entry.legacy_view_id:
+        legacy = (
+            find_spacing_image(
+                tracking, entry.spec_id, entry.layer, entry.legacy_view_id
+            )
+            if records is None
+            else records.get((entry.spec_id, entry.layer, entry.legacy_view_id))
+        )
+        if (
+            legacy is not None
+            and legacy.issue_id == entry.issue_id
+            and legacy.input_digest == entry.input_digest
+        ):
+            record = legacy
+    return record
+
+
+def _bounded_spacing_images(
+    records: tuple[SpacingImageReview, ...],
+    *,
+    newest: Optional[SpacingImageReview] = None,
+) -> tuple[SpacingImageReview, ...]:
+    """Bound draft variants, preferring explicit consent over unapproved history."""
+    if len(records) > MAX_SPACING_IMAGE_RECORDS:
+        retained = sorted(
+            (record for record in records if record is not newest),
+            key=lambda record: (
+                bool(record.approved_at_utc),
+                record.viewed_at_utc,
+                record.spec_id,
+                record.layer,
+                record.view_id,
+            ),
+            reverse=True,
+        )
+        budget = MAX_SPACING_IMAGE_RECORDS - (newest is not None)
+        records = tuple(retained[:budget]) + ((newest,) if newest is not None else ())
+    return tuple(
+        sorted(records, key=lambda item: (item.spec_id, item.layer, item.view_id))
+    )
+
+
 def put_spacing_image(
     tracking: ReviewTracking, record: SpacingImageReview
 ) -> ReviewTracking:
@@ -468,12 +523,7 @@ def put_spacing_image(
     result = ReviewTracking(
         tracking.images,
         tracking.layers,
-        tuple(
-            sorted(
-                other_records + (record,),
-                key=lambda item: (item.spec_id, item.layer, item.view_id),
-            )
-        ),
+        _bounded_spacing_images(other_records + (record,), newest=record),
     )
     validate_tracking(result)
     return result
@@ -812,8 +862,14 @@ def merge_spec(
         + replacement.images,
         tuple(record for record in tracking.layers if record.spec_id != spec_id)
         + replacement.layers,
-        tuple(record for record in tracking.spacing_images if record.spec_id != spec_id)
-        + replacement.spacing_images,
+        _bounded_spacing_images(
+            tuple(
+                record
+                for record in tracking.spacing_images
+                if record.spec_id != spec_id
+            )
+            + replacement.spacing_images
+        ),
     )
     validate_tracking(result)
     return result

@@ -30,7 +30,7 @@ from .model import (
 )
 from .spacing_transitions import contact_seed, first_exit, landing_region
 
-SPACING_CHECK_POLICY_REVISION = 4
+SPACING_CHECK_POLICY_REVISION = 5
 SPACING_COMPARISON_BAND_NM = 1_000
 SpacingVerdict = Literal[
     "match", "deviation", "undetermined", "needs_target", "not_applicable"
@@ -50,12 +50,12 @@ class NmBounds:
 
 @dataclass(frozen=True)
 class SpacingCrossSection:
-    """An authoritative native centerline-to-centerline measurement witness."""
+    """A native centerline witness retaining sub-nanometre projection precision."""
 
     source_trace_id: str
     mate_trace_id: str
-    source_point: Point
-    mate_point: Point
+    source_point: _FPoint
+    mate_point: _FPoint
     source_width_nm: int
     mate_width_nm: int
 
@@ -67,8 +67,8 @@ class SpacingLocation:
     source_trace_id: str
     mate_trace_ids: tuple[str, ...]
     source_interval: tuple[float, float]
-    source_points: tuple[Point, ...]
-    mate_points: tuple[Point, ...]
+    source_points: tuple[_FPoint, ...]
+    mate_points: tuple[_FPoint, ...]
     bounds: Bounds
     mate_intervals: tuple[tuple[str, float, float], ...] = ()
     cross_sections: tuple[SpacingCrossSection, ...] = ()
@@ -219,13 +219,31 @@ class _BudgetExhausted(Exception):
 
 
 class _Budget:
-    """Share distance evaluation work across one entire pair/layer."""
+    """Bound preprocessing or one source's reserved share of pair/layer work."""
 
     def __init__(self, limits: SpacingLimits) -> None:
         self.limits = limits
         self.evaluations = 0
         self.intervals = 0
         self.trees: dict[tuple[int, ...], _Node] = {}
+
+    def share(self, count: int) -> "_Budget":
+        """Reserve equal work so a difficult source cannot starve a later source.
+
+        Preprocessing and all source reservations together use at most the
+        configured cap, plus one failed consume per source attempt. Tree caches are
+        shared; the independent counters cannot consume another source's share.
+        """
+        result = _Budget(
+            replace(
+                self.limits,
+                max_evaluations=max(0, self.limits.max_evaluations - self.evaluations)
+                // max(1, count),
+                max_intervals=self.limits.max_intervals // max(1, count),
+            )
+        )
+        result.trees = self.trees
+        return result
 
     def consume(self) -> None:
         """Account for an actual primitive distance evaluation."""
@@ -1019,7 +1037,9 @@ def _clip_terminal_transitions(
             for original, oriented in terminal.route:
                 end = first_exit(
                     oriented,
-                    lambda p, half=original.trace.width_nm, pads=terminal.contacts: min(
+                    lambda p,
+                    half=original.trace.width_nm / 2,
+                    pads=terminal.contacts: min(
                         _contact_distance(p, f, budget.consume) for f in pads
                     )
                     - half,
@@ -1104,16 +1124,6 @@ def _nearest(
     return best, tuple(nearest)
 
 
-def _competing(primitives: tuple[_Primitive, ...]) -> bool:
-    """Adjacent endpoint candidates are continuous; disjoint nearest legs are not."""
-    return any(
-        not {a.start, a.end}.intersection((b.start, b.end))
-        and a.trace.trace_id != b.trace.trace_id
-        for i, a in enumerate(primitives)
-        for b in primitives[i + 1 :]
-    )
-
-
 def _as_bounds(lower: float, upper: float) -> NmBounds:
     """Round outward, keeping arithmetic uncertainty separate from the band."""
     return NmBounds(math.floor(lower), math.ceil(upper))
@@ -1141,11 +1151,15 @@ def _parallel_gap(
     square = dx * dx + dy * dy
     groups: dict[tuple[float, int], list[tuple[float, float]]] = {}
     axis_distances: dict[tuple[float, int], Decimal] = {}
+    normal_ranges: dict[tuple[float, int], tuple[float, float]] = {}
     other_paths = []
     for mate in mates:
         budget.consume()
-        if mate.center is not None or dx * (mate.end[1] - mate.start[1]) != dy * (
-            mate.end[0] - mate.start[0]
+        if mate.center is not None or (
+            _parallel_uncertainty(source, mate) > corner_tolerance_nm
+            if corner_tolerance_nm
+            else dx * (mate.end[1] - mate.start[1])
+            != dy * (mate.end[0] - mate.start[0])
         ):
             other_paths.append(mate)
             continue
@@ -1160,6 +1174,24 @@ def _parallel_gap(
             other_paths.append(mate)
             continue
         key = (normal, mate.trace.width_nm)
+        if corner_tolerance_nm:
+            for existing in groups:
+                budget.consume()
+                if (
+                    existing[1] == key[1]
+                    and abs(existing[0] - normal) / math.sqrt(square)
+                    <= corner_tolerance_nm
+                ):
+                    key = existing
+                    break
+        other_normal = dx * (mate.end[1] - source.start[1]) - dy * (
+            mate.end[0] - source.start[0]
+        )
+        previous = normal_ranges.get(key, (normal, normal))
+        normal_ranges[key] = (
+            min(*previous, normal, other_normal),
+            max(*previous, normal, other_normal),
+        )
         groups.setdefault(key, []).append((min(values), max(values)))
         if dx == 0 or dy == 0:
             axis = 0 if dx == 0 else 1
@@ -1187,14 +1219,28 @@ def _parallel_gap(
             return None
         intervals = sorted(groups[best_groups[0]])
         covered = 0
+        projection_slop = math.sqrt(square) * 0.001 if corner_tolerance_nm else 0
         for start, end in intervals:
             budget.consume()
-            if start > covered:
+            if start > covered + projection_slop:
                 break
             covered = max(covered, end)
-        if covered < square:
+        if covered < square - projection_slop:
             return None
         proven_lower = float(best)
+        proven_upper = float(best)
+        if corner_tolerance_nm:
+            interval_gaps = []
+            for key, (lower, upper) in normal_ranges.items():
+                half = (source.trace.width_nm + key[1]) / 2
+                gap_lower = (
+                    0 if lower <= 0 <= upper else min(abs(lower), abs(upper))
+                ) / math.sqrt(square) - half
+                gap_upper = max(abs(lower), abs(upper)) / math.sqrt(square) - half
+                interval_gaps.append(gap_lower)
+                if key == best_groups[0]:
+                    proven_upper = gap_upper
+            proven_lower = min(interval_gaps)
         for mate in other_paths:
             budget.consume()
             if mate.center is None:
@@ -1211,9 +1257,95 @@ def _parallel_gap(
             if lower < float(best) - corner_tolerance_nm - 0.001:
                 return None
             proven_lower = min(proven_lower, lower)
-        if corner_tolerance_nm and proven_lower < float(best):
-            return NmBounds(math.floor(proven_lower), _decimal_bounds(best).upper_nm)
+        if corner_tolerance_nm:
+            return _as_bounds(proven_lower - 0.001, proven_upper + 0.001)
         return _decimal_bounds(best)
+
+
+class _RouteGeometry:
+    """Index degree-two collinear support runs without changing native witnesses."""
+
+    def __init__(self, primitives: tuple[_Primitive, ...], budget: _Budget) -> None:
+        endpoints: dict[Point, list[_Primitive]] = {}
+        for primitive in primitives:
+            budget.consume()
+            for point in (primitive.start, primitive.end):
+                endpoints.setdefault(point, []).append(primitive)
+        self.by_primitive: dict[int, _Primitive] = {}
+        self.by_trace: dict[str, list[tuple[_Primitive, _Primitive]]] = {}
+        runs = []
+        for primitive in primitives:
+            if id(primitive) in self.by_primitive:
+                continue
+            members = [primitive]
+            seen = {id(primitive)}
+            start, end = primitive.start, primitive.end
+            if primitive.center is None:
+                dx, dy = end[0] - start[0], end[1] - start[1]
+                for first in (True, False):
+                    point = start if first else end
+                    previous = primitive
+                    while len(endpoints[point]) == 2:
+                        budget.consume()
+                        other = next(
+                            part for part in endpoints[point] if part is not previous
+                        )
+                        if (
+                            id(other) in seen
+                            or other.center is not None
+                            or other.trace.width_nm != primitive.trace.width_nm
+                            or other.unverified_transition
+                            != primitive.unverified_transition
+                        ):
+                            break
+                        outer = other.end if other.start == point else other.start
+                        ox, oy = outer[0] - point[0], outer[1] - point[1]
+                        if (
+                            dx * oy != dy * ox
+                            or (dx * ox + dy * oy) * (-1 if first else 1) <= 0
+                        ):
+                            break
+                        seen.add(id(other))
+                        members.append(other)
+                        previous, point = other, outer
+                    if first:
+                        start = point
+                    else:
+                        end = point
+            run = (
+                replace(primitive, start=start, end=end)
+                if len(members) > 1
+                else primitive
+            )
+            runs.append(run)
+            for member in members:
+                self.by_primitive[id(member)] = run
+                self.by_trace.setdefault(member.trace.trace_id, []).append(
+                    (member, run)
+                )
+        self.runs = tuple(runs)
+        self.endpoints: dict[Point, list[_Primitive]] = {}
+        for run in runs:
+            for point in (run.start, run.end):
+                self.endpoints.setdefault(point, []).append(run)
+
+    def support(self, primitive: _Primitive) -> _Primitive:
+        """Find the native support run of an original or clipped source span."""
+        if id(primitive) in self.by_primitive:
+            return self.by_primitive[id(primitive)]
+        for original, run in self.by_trace.get(primitive.trace.trace_id, ()):
+            if (
+                original.source_interval[0] <= primitive.source_interval[0]
+                and original.source_interval[1] >= primitive.source_interval[1]
+            ):
+                return run
+        return primitive
+
+
+def _parallel_uncertainty(first: _Primitive, second: _Primitive) -> float:
+    """Bound transverse drift in nm over both complete finite support spans."""
+    a, b = _curve_direction(first, 0), _curve_direction(second, 0)
+    return abs(a[0] * b[1] - a[1] * b[0]) * max(first.length, second.length)
 
 
 def _corner_extended_mates(
@@ -1221,6 +1353,9 @@ def _corner_extended_mates(
     mates: tuple[_Primitive, ...],
     own: tuple[_Primitive, ...],
     budget: _Budget,
+    *,
+    own_geometry: Optional[_RouteGeometry] = None,
+    mate_geometry: Optional[_RouteGeometry] = None,
 ) -> tuple[_Primitive, ...]:
     """Complete only analytically corresponding mitered sidewalls.
 
@@ -1233,13 +1368,17 @@ def _corner_extended_mates(
     """
     if source.center is not None:
         return mates
-    own_endpoints: dict[Point, list[_Primitive]] = {}
-    mate_endpoints: dict[Point, list[_Primitive]] = {}
-    for primitives, endpoints in ((own, own_endpoints), (mates, mate_endpoints)):
-        for primitive in primitives:
-            budget.consume()
-            for point in (primitive.start, primitive.end):
-                endpoints.setdefault(point, []).append(primitive)
+    own_geometry = own_geometry or _RouteGeometry(own, budget)
+    mate_geometry = mate_geometry or _RouteGeometry(mates, budget)
+    source = own_geometry.support(source)
+    own_endpoints = own_geometry.endpoints
+    mate_endpoints = mate_geometry.endpoints
+    mates = tuple(
+        {
+            id(mate_geometry.support(mate)): mate_geometry.support(mate)
+            for mate in mates
+        }.values()
+    )
     direction = _curve_direction(source, 0)
     result = []
     for mate in mates:
@@ -1247,15 +1386,17 @@ def _corner_extended_mates(
         if mate.center is not None:
             result.append(mate)
             continue
-        mdir = _curve_direction(mate, 0)
-        if abs(direction[0] * mdir[1] - direction[1] * mdir[0]) > 1e-12:
+        if _parallel_uncertainty(source, mate) > 1.0:
             result.append(mate)
             continue
         start, end = mate.start, mate.end
         for endpoint, sign in ((source.start, -1), (source.end, 1)):
+            incident = own_endpoints.get(endpoint, ())
+            if len(incident) != 2:
+                continue
             source_neighbors = [
                 p
-                for p in own_endpoints.get(endpoint, ())
+                for p in incident
                 if p is not source
                 and (
                     p.trace.trace_id != source.trace.trace_id
@@ -1282,6 +1423,8 @@ def _corner_extended_mates(
             if abs(turn) < 1e-12:
                 continue
             for mate_endpoint in (mate.start, mate.end):
+                if len(mate_endpoints[mate_endpoint]) != 2:
+                    continue
                 continuation = [
                     p for p in mate_endpoints[mate_endpoint] if p is not mate
                 ]
@@ -1299,7 +1442,10 @@ def _corner_extended_mates(
                     else _reverse_primitive(other),
                     0,
                 )
-                if math.dist(outgoing, mout) > 1e-12:
+                if (
+                    sum(a * b for a, b in zip(outgoing, mout)) <= 0
+                    or _parallel_uncertainty(neighbor, other) > 1.0
+                ):
                     continue
                 # A corner with this source orientation must arrive at the
                 # candidate mate endpoint, rather than leave it along this leg.
@@ -1751,12 +1897,11 @@ def _projection_samples(source: _Primitive, mate: _Primitive) -> tuple[_FPoint, 
     return tuple(_closest_point(source.point(t), mate) for t in sorted(parameters))
 
 
-def _location(
-    source: _Primitive, mates: tuple[_Primitive, ...], start: float, end: float
-) -> SpacingLocation:
-    """Retain a compact native interval and nearest mate line for a visual mark."""
+def _location_parameters(
+    source: _Primitive, start: float, end: float
+) -> tuple[float, ...]:
+    """Choose native witness samples including exact circular-axis extrema."""
     parameters = {start, (start + end) / 2, end}
-    sliced = _slice_primitive(source, start, end)
     if source.center is not None:
         for angle in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2):
             offset = (
@@ -1767,14 +1912,22 @@ def _location(
             parameter = offset / abs(source.sweep)
             if start < parameter < end:
                 parameters.add(parameter)
-    samples = tuple(source.point(t) for t in sorted(parameters))
-    source_points = tuple(tuple(round(v) for v in point) for point in samples)
+    return tuple(sorted(parameters))
+
+
+def _location(
+    source: _Primitive, mates: tuple[_Primitive, ...], start: float, end: float
+) -> SpacingLocation:
+    """Retain a compact native interval and nearest mate line for a visual mark."""
+    sliced = _slice_primitive(source, start, end)
+    samples = tuple(source.point(t) for t in _location_parameters(source, start, end))
+    source_points = samples
     cross_sections = tuple(
         SpacingCrossSection(
             source.trace.trace_id,
             mate.trace.trace_id,
             source_point,
-            tuple(round(v) for v in _closest_point(point, mate)),
+            _closest_point(point, mate),
             source.trace.width_nm,
             mate.trace.width_nm,
         )
@@ -1903,7 +2056,11 @@ def _candidate_mates(
 
 
 def _constant_path_mates(
-    source: _Primitive, mates: tuple[_Primitive, ...], budget: _Budget
+    source: _Primitive,
+    mates: tuple[_Primitive, ...],
+    budget: _Budget,
+    *,
+    tolerance_nm: float = 0.0,
 ) -> tuple[_Primitive, ...]:
     """Retain only the analytic nearest path that establishes constant spacing.
 
@@ -1940,9 +2097,12 @@ def _constant_path_mates(
             )
             for mate in mates:
                 budget.consume()
-                if mate.center is not None or dx * (
-                    mate.end[1] - mate.start[1]
-                ) != dy * (mate.end[0] - mate.start[0]):
+                if mate.center is not None or (
+                    _parallel_uncertainty(source, mate) > tolerance_nm
+                    if tolerance_nm
+                    else dx * (mate.end[1] - mate.start[1])
+                    != dy * (mate.end[0] - mate.start[0])
+                ):
                     continue
                 normal = dx * (mate.start[1] - source.start[1]) - dy * (
                     mate.start[0] - source.start[0]
@@ -1963,7 +2123,11 @@ def _constant_path_mates(
                 records.append((gap, mate, overlaps))
         nearest = min((gap for gap, _, overlaps in records if overlaps), default=None)
         return tuple(
-            mate for gap, mate, overlaps in records if gap == nearest and overlaps
+            mate
+            for gap, mate, overlaps in records
+            if overlaps
+            and nearest is not None
+            and gap <= nearest + Decimal(str(tolerance_nm))
         )
 
 
@@ -1973,21 +2137,34 @@ def _measure_primitive(
     index: _Node,
     budget: _Budget,
     own: tuple[_Primitive, ...] = (),
+    *,
+    own_geometry: Optional[_RouteGeometry] = None,
+    mate_geometry: Optional[_RouteGeometry] = None,
 ) -> tuple[NmBounds, NmBounds, tuple[SpacingIssue, ...], tuple[str, ...]]:
     """Bound route extrema by adaptive global optimization with witness retention."""
-    native_mates = mates
     mates = _candidate_mates(source, mates, budget, index=index)
     constant = _parallel_gap(source, mates, budget) or _concentric_gap(
         source, mates, budget
     )
+    corner_tolerance = 0.0
     if constant is None and own:
-        corner_mates = _corner_extended_mates(source, native_mates, own, budget)
-        if corner_mates != native_mates:
+        corner_mates = _corner_extended_mates(
+            source,
+            mates,
+            own,
+            budget,
+            own_geometry=own_geometry,
+            mate_geometry=mate_geometry,
+        )
+        if corner_mates != mates:
+            corner_tolerance = 2.0
             constant = _parallel_gap(
-                source, corner_mates, budget, corner_tolerance_nm=1.0
+                source, corner_mates, budget, corner_tolerance_nm=corner_tolerance
             )
     if constant is not None:
-        location_mates = _constant_path_mates(source, mates, budget)
+        location_mates = _constant_path_mates(
+            source, mates, budget, tolerance_nm=corner_tolerance
+        )
         intervals = [(location_mates, 0.0, 1.0)]
         if source.center is None:
             dx, dy = source.end[0] - source.start[0], source.end[1] - source.start[1]
@@ -2005,18 +2182,45 @@ def _measure_primitive(
                 lower, upper = max(0.0, min(parameters)), min(1.0, max(parameters))
                 if lower < upper:
                     intervals.append(((mate,), lower, upper))
-        witnesses = tuple(
-            SpacingIssue(
-                "measured",
-                (source.trace.trace_id,),
-                tuple(round(v) for v in source.point(start)),
-                constant,
-                "Constant facing-sidewall spacing.",
-                _location(source, candidates, start, end),
+        # A split source wholly inside analytic miter completion has no finite
+        # parallel facing interval. Keep its global dimensional proof, while
+        # pair diagnostics use adjacent real sidewalls; never invent a native
+        # cross-section along an extrapolated support line.
+        witnesses = []
+        for candidates, start, end in intervals:
+            witness_gap = constant
+            if corner_tolerance:
+                budget.consume()
+                # Approximate support lines prove the pair's nearest gap, but
+                # the pictured native sidewall may differ within that bound.
+                # Enclose both so an image never claims a tighter gap than its
+                # actual finite native cross-sections establish.
+                a, b = source.point(start), source.point(end)
+                lower = min(
+                    _segment_distance(a, b, mate.start, mate.end)
+                    - (source.trace.width_nm + mate.trace.width_nm) / 2
+                    for mate in candidates
+                )
+                upper = max(
+                    max(mate.distance(a), mate.distance(b))
+                    - (source.trace.width_nm + mate.trace.width_nm) / 2
+                    for mate in candidates
+                )
+                witness_gap = NmBounds(
+                    min(constant.lower_nm, math.floor(lower - 0.001)),
+                    max(constant.upper_nm, math.ceil(upper + 0.001)),
+                )
+            witnesses.append(
+                SpacingIssue(
+                    "measured",
+                    (source.trace.trace_id,),
+                    tuple(round(v) for v in source.point(start)),
+                    witness_gap,
+                    "Constant facing-sidewall spacing.",
+                    _location(source, candidates, start, end),
+                )
             )
-            for candidates, start, end in intervals
-        )
-        return constant, constant, witnesses, ()
+        return constant, constant, tuple(witnesses), ()
     index = _tree(mates, budget)
     error = 0.001
     for primitive in (source, *mates):
@@ -2031,7 +2235,7 @@ def _measure_primitive(
     observed_low, observed_high = float("inf"), float("-inf")
 
     def evaluate(t: float) -> float:
-        """Cache target-independent samples and detect competing mate legs."""
+        """Cache target-independent nearest-native-mate samples."""
         nonlocal observed_low, observed_high
         if t not in values:
             values[t] = _nearest(source.point(t), source, index, budget)
@@ -2041,20 +2245,29 @@ def _measure_primitive(
 
     pending: list[tuple[float, float, float, float]] = []
     retained: list[tuple[float, float, float, float]] = []
+    active: Optional[tuple[float, float, float, float]] = None
     exhausted = False
+    finite_line = source.center is None and len(mates) == 1 and mates[0].center is None
     try:
+        # Location samples at native arc extrema must use the same globally
+        # nearest mate proof as adaptive samples. Preseed them inside the work
+        # budget so even partial locations need no post-exhaustion searches.
+        for parameter in _location_parameters(source, 0.0, 1.0):
+            evaluate(parameter)
         first = (evaluate(0), evaluate(0.5), evaluate(1))
         lo, hi = _interval_bounds(source, mates, 0, 1, first, budget, error)
         pending.append((0, 1, lo, hi))
         while pending:
-            start, end, lo, hi = pending.pop()
+            active = pending.pop()
+            start, end, lo, hi = active
             precision = budget.limits.precision_nm
             if (
                 lo >= observed_low - precision
                 and hi <= observed_high + precision
-                and hi - lo <= 500
+                and (finite_line or hi - lo <= 500)
             ):
                 retained.append((start, end, lo, hi))
+                active = None
                 continue
             budget.intervals += 1
             if budget.intervals > budget.limits.max_intervals:
@@ -2071,6 +2284,7 @@ def _measure_primitive(
                     source, mates, left, right, samples, budget, error
                 )
                 pending.append((left, right, lower, upper))
+            active = None
     except _BudgetExhausted:
         exhausted = True
         reasons.add(
@@ -2078,8 +2292,9 @@ def _measure_primitive(
         )
     if not values:
         raise _BudgetExhausted
-    # Unfinished intervals have no established global bounds, but the measured
-    # points remain valid tight witnesses. Their union cannot prove a wide gap.
+    # An unfinished search cannot claim converged global extrema. Computed
+    # interval bounds below remain valid dimensional evidence, independently
+    # of whether the global optimization reached its requested precision.
     if exhausted:
         lo = -(source.trace.width_nm + max(m.trace.width_nm for m in mates)) / 2
         hi = max(value[0] for value in values.values()) + source.length
@@ -2105,25 +2320,41 @@ def _measure_primitive(
         )
         for t in dict.fromkeys((minimum_t, maximum_t))
     )
-    if not exhausted:
-        witnesses = tuple(
-            SpacingIssue(
-                "measured",
-                tuple(
-                    dict.fromkeys(
-                        (
-                            source.trace.trace_id,
-                            *(p.trace.trace_id for p in values[(start + end) / 2][1]),
-                        )
-                    )
-                ),
-                tuple(round(v) for v in source.point((start + end) / 2)),
-                _as_bounds(lower, upper),
-                "Measured edge-to-edge spacing.",
-                _location(source, values[(start + end) / 2][1], start, end),
+    # Retain finished spans and any already bounded unfinished parent/pending
+    # spans. The latter can prove a continuous violation without pretending
+    # that the complete extrema search or precise coverage finished.
+    bounded = (
+        tuple(dict.fromkeys((*pending, *((active,) if active is not None else ()))))
+        if exhausted
+        else ()
+    )
+    intervals = tuple((interval, "measured") for interval in retained) + tuple(
+        (interval, "bounded") for interval in bounded
+    )
+    if intervals:
+        spans = []
+        for (start, end, lower, upper), code in sorted(intervals):
+            native_mates = tuple(
+                {
+                    id(mate): mate
+                    for parameter in _location_parameters(source, start, end)
+                    for mate in values[parameter][1]
+                }.values()
             )
-            for start, end, lower, upper in sorted(retained)
-        )
+            location = _location(source, native_mates, start, end)
+            spans.append(
+                SpacingIssue(
+                    code,
+                    tuple(
+                        dict.fromkeys((source.trace.trace_id, *location.mate_trace_ids))
+                    ),
+                    tuple(round(v) for v in source.point((start + end) / 2)),
+                    _as_bounds(lower, upper),
+                    "Measured edge-to-edge spacing.",
+                    location,
+                )
+            )
+        witnesses = (witnesses if exhausted or finite_line else ()) + tuple(spans)
     return minimum, maximum, witnesses, tuple(sorted(reasons))
 
 
@@ -2136,6 +2367,31 @@ def _merge_bounds(bounds: Sequence[NmBounds], *, minimum: bool) -> Optional[NmBo
         operation(value.lower_nm for value in bounds),
         operation(value.upper_nm for value in bounds),
     )
+
+
+def _combine_witness_bounds(
+    witnesses: Sequence[SpacingIssue],
+) -> tuple[SpacingIssue, ...]:
+    """Intersect repeated proofs for one native location without weakening its precision."""
+    located: dict[SpacingLocation, SpacingIssue] = {}
+    other = []
+    for witness in witnesses:
+        if witness.location is None or witness.gap_nm is None:
+            other.append(witness)
+            continue
+        previous = located.get(witness.location)
+        if previous is None:
+            located[witness.location] = witness
+            continue
+        assert previous.gap_nm is not None
+        gap = NmBounds(
+            max(previous.gap_nm.lower_nm, witness.gap_nm.lower_nm),
+            min(previous.gap_nm.upper_nm, witness.gap_nm.upper_nm),
+        )
+        assert gap.lower_nm <= gap.upper_nm
+        chosen = previous if previous.code == "measured" else witness
+        located[witness.location] = replace(chosen, gap_nm=gap)
+    return (*other, *located.values())
 
 
 def _trace_length(trace: Trace) -> int:
@@ -2180,7 +2436,14 @@ def measure_pair_spacing(
                 for trace in snapshot.traces
                 if trace.layer == layer and trace.net in pair
             ),
-            key=lambda trace: trace.trace_id,
+            key=lambda trace: (
+                trace.net,
+                min(trace.points, tuple(reversed(trace.points))),
+                trace.width_nm,
+                trace.is_native_arc,
+                trace.native_arc_midpoint or (0, 0),
+                trace.trace_id,
+            ),
         )
     )
     budget = _Budget(limits)
@@ -2271,6 +2534,7 @@ def measure_pair_spacing(
         indexes = {
             net: _tree(primitives[net], budget) for net in pair if primitives[net]
         }
+        geometry = {net: _RouteGeometry(primitives[net], budget) for net in pair}
     except _BudgetExhausted:
         reason = (
             "Spacing measurement work limit reached; remaining geometry is unverified."
@@ -2296,6 +2560,95 @@ def measure_pair_spacing(
             ),
             (reason,),
         )
+    sources = tuple(
+        sorted(
+            (
+                primitive
+                for parts in by_trace.values()
+                for primitive in parts
+                if not primitive.unverified_transition
+                and primitives[pair[1] if primitive.trace.net == pair[0] else pair[0]]
+            ),
+            key=lambda source: (
+                min(source.start, source.end),
+                max(source.start, source.end),
+                source.trace.net,
+                source.trace.width_nm,
+            ),
+        )
+    )
+    source_results = {}
+    incomplete = []
+    spent_evaluations, spent_intervals = budget.evaluations, budget.intervals
+
+    def assess(source: _Primitive, allowance: _Budget) -> None:
+        """Retain a source's result while accounting only work actually performed."""
+        nonlocal spent_evaluations, spent_intervals
+        mate_net = pair[1] if source.trace.net == pair[0] else pair[0]
+        try:
+            result = _measure_primitive(
+                source,
+                primitives[mate_net],
+                indexes[mate_net],
+                allowance,
+                primitives[source.trace.net],
+                own_geometry=geometry[source.trace.net],
+                mate_geometry=geometry[mate_net],
+            )
+        except _BudgetExhausted:
+            result = None
+        spent_evaluations += allowance.evaluations
+        spent_intervals += allowance.intervals
+        previous = source_results.get(id(source))
+        if result is not None:
+            if previous is not None and result[3]:
+                # Both attempts enclose the same extrema. Their intersection
+                # tightens bounds; every confirmed point/span remains evidence
+                # even when the retry still cannot finish the global proof.
+                result = (
+                    NmBounds(
+                        max(previous[0].lower_nm, result[0].lower_nm),
+                        min(previous[0].upper_nm, result[0].upper_nm),
+                    ),
+                    NmBounds(
+                        max(previous[1].lower_nm, result[1].lower_nm),
+                        min(previous[1].upper_nm, result[1].upper_nm),
+                    ),
+                    _combine_witness_bounds((*previous[2], *result[2])),
+                    tuple(dict.fromkeys((*previous[3], *result[3]))),
+                )
+            source_results[id(source)] = result
+        if result is None or result[3]:
+            incomplete.append(source)
+
+    # Every source gets the same reserved first pass, including those following
+    # a hard curve or a long endpoint overhang. Afterwards unused reservations
+    # can improve incomplete measurements without suppressing their witnesses.
+    for source in sources:
+        assess(source, budget.share(len(sources)))
+    retry = tuple(
+        sorted(
+            incomplete,
+            key=lambda source: (
+                min(source.start, source.end),
+                max(source.start, source.end),
+                source.trace.net,
+                source.trace.width_nm,
+            ),
+        )
+    )
+    incomplete.clear()
+    for offset, source in enumerate(retry):
+        remaining = len(retry) - offset
+        evaluations = max(0, limits.max_evaluations - spent_evaluations) // remaining
+        intervals = max(0, limits.max_intervals - spent_intervals) // remaining
+        if evaluations <= 0 or intervals <= 0:
+            continue
+        allowance = _Budget(
+            replace(limits, max_evaluations=evaluations, max_intervals=intervals)
+        )
+        allowance.trees = budget.trees
+        assess(source, allowance)
     measured: list[_MeasuredTrace] = []
     for trace in selected:
         mate_net = pair[1] if trace.net == pair[0] else pair[0]
@@ -2316,23 +2669,17 @@ def measure_pair_spacing(
             reasons.append(
                 "Some mate geometry is unavailable; a match or wide-gap proof is incomplete."
             )
+        local_coverage_supported = not reasons and not unknown_transition
         results = []
-        try:
-            if mates:
-                for primitive in own:
-                    results.append(
-                        _measure_primitive(
-                            primitive,
-                            mates,
-                            indexes[mate_net],
-                            budget,
-                            primitives[trace.net],
-                        )
+        if mates:
+            for primitive in own:
+                result = source_results.get(id(primitive))
+                if result is not None:
+                    results.append(result)
+                else:
+                    reasons.append(
+                        "Spacing measurement work limit reached; remaining geometry is unverified."
                     )
-        except _BudgetExhausted:
-            reasons.append(
-                "Spacing measurement work limit reached; remaining geometry is unverified."
-            )
         for result in results:
             reasons.extend(result[3])
         minimum = _merge_bounds([result[0] for result in results], minimum=True)
@@ -2359,6 +2706,31 @@ def measure_pair_spacing(
         known_verified = (
             bool(results) or bool(transitions.get(trace.trace_id))
         ) and not reasons
+        total_length = _trace_length(trace)
+        retained_length = (
+            round(sum(part.length for part in own)) if known_verified else 0
+        )
+        if local_coverage_supported and results and not known_verified:
+            # A global stop cannot erase already bounded native portions.
+            # Normalized source intervals are proportional to physical length,
+            # including multi-primitive traces and clipped terminal entries.
+            spans = sorted(
+                issue.location.source_interval
+                for result in results
+                for issue in result[2]
+                if issue.code == "measured"
+                and issue.location is not None
+                and issue.location.source_trace_id == trace.trace_id
+                and issue.location.source_interval[1]
+                > issue.location.source_interval[0]
+            )
+            covered, end = 0.0, 0.0
+            for lower, upper in spans:
+                if upper > end:
+                    covered += upper - max(lower, end)
+                    end = upper
+            available = max(0, total_length - transitions.get(trace.trace_id, 0))
+            retained_length = max(0, min(available - 1, round(total_length * covered)))
         if unknown_transition:
             reasons.append(
                 "Terminal transition boundary is unverified on local route portions."
@@ -2366,7 +2738,7 @@ def measure_pair_spacing(
         measured.append(
             _MeasuredTrace(
                 trace.trace_id,
-                max(0, _trace_length(trace) - transitions.get(trace.trace_id, 0)),
+                max(0, total_length - transitions.get(trace.trace_id, 0)),
                 (bool(results) or bool(transitions.get(trace.trace_id)))
                 and not reasons,
                 minimum,
@@ -2374,14 +2746,14 @@ def measure_pair_spacing(
                 witnesses,
                 tuple(dict.fromkeys(reasons)),
                 transitions.get(trace.trace_id, 0),
-                round(sum(part.length for part in own)) if known_verified else 0,
+                retained_length,
             )
         )
     reasons = () if selected else ("No routed pair geometry exists on this layer.",)
     return SpacingMeasurement(pair, layer, tuple(measured), reasons)
 
 
-def _compact_points(points: tuple[Point, ...]) -> tuple[Point, ...]:
+def _compact_points(points: tuple[_FPoint, ...]) -> tuple[_FPoint, ...]:
     """Bound overlay payload size; exact native intervals and boxes remain intact."""
     if len(points) <= 129:
         return points
@@ -2397,10 +2769,26 @@ def _merge_issues(issues: Sequence[SpacingIssue]) -> tuple[SpacingIssue, ...]:
     detailed reciprocal budget falls back to constant-work continuity lookups,
     preserving complete continuous concerns without dropping any witnesses.
     """
+    source_order: dict[str, tuple[_FPoint, _FPoint]] = {}
+    for issue in issues:
+        if issue.location is not None:
+            identity = issue.location.source_trace_id
+            extent = (
+                min(issue.location.source_points),
+                max(issue.location.source_points),
+            )
+            previous = source_order.get(identity, extent)
+            source_order[identity] = (
+                min(previous[0], extent[0]),
+                max(previous[1], extent[1]),
+            )
     ordered = sorted(
         issues,
         key=lambda issue: (
             issue.code,
+            source_order[issue.location.source_trace_id]
+            if issue.location
+            else ((0, 0), (0, 0)),
             issue.location.source_trace_id if issue.location else "",
             issue.location.source_interval if issue.location else (0.0, 0.0),
         ),
@@ -2415,8 +2803,8 @@ def _merge_issues(issues: Sequence[SpacingIssue]) -> tuple[SpacingIssue, ...]:
     ] = []
     sources: dict[tuple[str, str], set[int]] = {}
     mates: dict[tuple[str, str], set[int]] = {}
-    source_ends: dict[tuple[str, Point], set[int]] = {}
-    mate_ends: dict[tuple[str, Point], set[int]] = {}
+    source_ends: dict[tuple[str, int, int], set[tuple[_FPoint, int]]] = {}
+    mate_ends: dict[tuple[str, int, int], set[tuple[_FPoint, int]]] = {}
     latest: dict[tuple[str, str], tuple[int, tuple[float, float]]] = {}
     work = 0
 
@@ -2440,13 +2828,21 @@ def _merge_issues(issues: Sequence[SpacingIssue]) -> tuple[SpacingIssue, ...]:
         ranges[:] = sorted((*kept, interval))
 
     def nearby(
-        index: dict[tuple[str, Point], set[int]], code: str, points: tuple[Point, ...]
+        index: dict[tuple[str, int, int], set[tuple[_FPoint, int]]],
+        code: str,
+        points: tuple[_FPoint, ...],
     ) -> set[int]:
         """Find endpoint groups within the existing inclusive one-nm allowance."""
         result: set[int] = set()
-        for x, y in (points[0], points[-1]):
-            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
-                result.update(index.get((code, (x + dx, y + dy)), ()))
+        for point in (points[0], points[-1]):
+            x, y = (math.floor(value) for value in point)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    result.update(
+                        group
+                        for candidate, group in index.get((code, x + dx, y + dy), ())
+                        if math.dist(point, candidate) <= 1.0
+                    )
         return result
 
     def retain(index: int, code: str, additions: tuple[SpacingLocation, ...]) -> None:
@@ -2479,9 +2875,13 @@ def _merge_issues(issues: Sequence[SpacingIssue]) -> tuple[SpacingIssue, ...]:
             for identity in location.mate_trace_ids:
                 mates.setdefault((code, identity), set()).add(index)
             for point in (location.source_points[0], location.source_points[-1]):
-                source_ends.setdefault((code, point), set()).add(index)
+                source_ends.setdefault(
+                    (code, *(math.floor(value) for value in point)), set()
+                ).add((point, index))
             for point in (location.mate_points[0], location.mate_points[-1]):
-                mate_ends.setdefault((code, point), set()).add(index)
+                mate_ends.setdefault(
+                    (code, *(math.floor(value) for value in point)), set()
+                ).add((point, index))
             if work >= 100_000:
                 continue
             for identity, lower, upper in location.mate_intervals:
@@ -2683,6 +3083,7 @@ def _merge_issues(issues: Sequence[SpacingIssue]) -> tuple[SpacingIssue, ...]:
                 ),
             )
         result.append(replace(issue, location=location, members=tuple(members[index])))
+    result = _merge_interval_bridges(tuple(result))
     return tuple(
         sorted(
             result,
@@ -2693,6 +3094,120 @@ def _merge_issues(issues: Sequence[SpacingIssue]) -> tuple[SpacingIssue, ...]:
             ),
         )
     )
+
+
+def _merge_interval_bridges(
+    issues: tuple[SpacingIssue, ...],
+) -> tuple[SpacingIssue, ...]:
+    """Join late interval bridges with a bounded reciprocal sweep and exact members."""
+    if len(issues) < 2:
+        return issues
+    parents = list(range(len(issues)))
+
+    def root(index: int) -> int:
+        """Find a component with path compression."""
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    intervals: dict[tuple[str, str], list[tuple[float, float, int]]] = {}
+    paired: dict[
+        tuple[str, str, str], list[tuple[float, float, float, float, int, bool]]
+    ] = {}
+    for index, issue in enumerate(issues):
+        if issue.location is None or issue.gap_nm is None:
+            continue
+        for member in issue.members:
+            intervals.setdefault((issue.code, member.source_trace_id), []).append(
+                (*member.source_interval, index)
+            )
+            for mate, lower, upper in member.mate_intervals:
+                first, second = member.source_trace_id, mate
+                forward = first < second
+                source_range, mate_range = member.source_interval, (lower, upper)
+                if second < first:
+                    first, second = second, first
+                    source_range, mate_range = mate_range, source_range
+                paired.setdefault((issue.code, first, second), []).append(
+                    (*source_range, *mate_range, index, forward)
+                )
+    for spans in intervals.values():
+        previous = None
+        for lower, upper, index in sorted(spans):
+            if previous is not None and lower <= previous[0] + 1e-12:
+                first, second = root(previous[1]), root(index)
+                parents[max(first, second)] = min(first, second)
+                previous = (max(upper, previous[0]), index)
+            else:
+                previous = (upper, index)
+    work = 0
+    for rectangles in paired.values():
+        active = {True: [], False: []}
+        for lower, upper, other_lower, other_upper, index, forward in sorted(
+            rectangles
+        ):
+            kept = []
+            for previous in active[not forward]:
+                work += 1
+                if work > 100_000:
+                    break
+                if previous[1] < lower - 1e-12:
+                    continue
+                kept.append(previous)
+                if (
+                    other_lower <= previous[3] + 1e-12
+                    and previous[2] <= other_upper + 1e-12
+                ):
+                    first, second = root(previous[4]), root(index)
+                    parents[max(first, second)] = min(first, second)
+            if work > 100_000:
+                break
+            active[not forward] = kept
+            active[forward].append((lower, upper, other_lower, other_upper, index))
+        if work > 100_000:
+            break
+    groups: dict[int, list[SpacingIssue]] = {}
+    for index, issue in enumerate(issues):
+        groups.setdefault(root(index), []).append(issue)
+    result = []
+    for connected in groups.values():
+        if len(connected) == 1:
+            result.extend(connected)
+            continue
+        tight = connected[0].code == "too_tight"
+        chosen = min(
+            connected,
+            key=lambda issue: (
+                issue.gap_nm.upper_nm if tight else -issue.gap_nm.lower_nm,
+                issue.position or (0, 0),
+            ),
+        )
+        assert chosen.location is not None
+        members = tuple(
+            dict.fromkeys(member for issue in connected for member in issue.members)
+        )
+        bounds = tuple(
+            (min if axis < 2 else max)(member.bounds[axis] for member in members)
+            for axis in range(4)
+        )
+        result.append(
+            replace(
+                chosen,
+                trace_ids=tuple(
+                    sorted(
+                        {
+                            identity
+                            for issue in connected
+                            for identity in issue.trace_ids
+                        }
+                    )
+                ),
+                location=replace(chosen.location, bounds=bounds),
+                members=members,
+            )
+        )
+    return tuple(result)
 
 
 def compare_pair_spacing(

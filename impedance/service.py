@@ -513,7 +513,7 @@ def prepare(
             settings.ground_gap_nm,
             spec.target_ohms,
         )
-    from .review_tracking import find_spacing_image, spacing_image_current
+    from .review_tracking import find_spacing_review, spacing_image_current
     from .spacing_checks import SpacingContext
     from .spacing_review import spacing_review_entries
 
@@ -523,9 +523,7 @@ def prepare(
         config, snapshot, analysis.sections, context=spacing_context
     )
     for entry in entries:
-        record = find_spacing_image(
-            config.review_tracking, entry.spec_id, entry.layer, entry.view_id
-        )
+        record = find_spacing_review(config.review_tracking, entry)
         if (
             record is None
             or record.issue_id != entry.issue_id
@@ -579,7 +577,7 @@ def export_reports(
     from .review_tracking import (
         capture_fingerprint,
         expected_capture_digest,
-        find_spacing_image,
+        find_spacing_review,
         source_fingerprint,
         spacing_capture_fingerprint,
         spacing_image_current,
@@ -737,12 +735,7 @@ def export_reports(
                             "The spacing review capture has changed dimensions. Open "
                             "Configure to review the spacing images and generate again."
                         )
-                    record = find_spacing_image(
-                        plan.config.review_tracking,
-                        entry.spec_id,
-                        entry.layer,
-                        entry.view_id,
-                    )
+                    record = find_spacing_review(plan.config.review_tracking, entry)
                     if (
                         record is None
                         or record.issue_id != entry.issue_id

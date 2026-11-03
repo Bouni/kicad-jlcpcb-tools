@@ -1,6 +1,8 @@
 """Regressions derived from the user's live-board false spacing reports."""
 
 from dataclasses import replace
+import math
+from typing import Optional
 
 import pytest
 
@@ -96,6 +98,348 @@ def test_constant_gap_mitered_corners_have_no_endcap_deviation(turn: int) -> Non
     check = _assess(snapshot, 150_000)
     assert check.verdict == "match"
     assert check.coverage == "complete"
+
+
+def _mitered_serpentine(segments: int, squeeze: Optional[str] = None) -> BoardSnapshot:
+    """Offset a chamfered serpentine by an independently known 300 um pitch."""
+    points = [(0, 0)]
+    steps = ((10, 0), (2, 2), (0, 2), (-2, 2), (-10, 0), (-2, 2), (0, 2), (2, 2))
+    for index in range(segments):
+        x, y = points[-1]
+        dx, dy = steps[index % len(steps)]
+        points.append((x + dx * 1_000_000, y + dy * 1_000_000))
+    normals = [
+        (-(b[1] - a[1]) / math.dist(a, b), (b[0] - a[0]) / math.dist(a, b))
+        for a, b in zip(points, points[1:])
+    ]
+    mate = []
+    for index, point in enumerate(points):
+        before, after = normals[max(0, index - 1)], normals[min(index, segments - 1)]
+        scale = 1 + sum(a * b for a, b in zip(before, after))
+        offset = tuple(300_000 * (a + b) / scale for a, b in zip(before, after))
+        mate.append(tuple(round(value + delta) for value, delta in zip(point, offset)))
+    if squeeze:
+        vertex = {"start": 0, "middle": segments // 2, "end": segments}[squeeze]
+        normal = normals[vertex if squeeze == "middle" else max(0, vertex - 1)]
+        for index in (vertex, vertex + 1) if squeeze == "middle" else (vertex,):
+            mate[index] = tuple(
+                round(value - 100_000 * component)
+                for value, component in zip(mate[index], normal)
+            )
+    traces = tuple(
+        Trace(f"{net}{index:03}", "F.Cu", net, 150_000, (a, b))
+        for net, route in (("P", points), ("N", mate))
+        for index, (a, b) in enumerate(zip(route, route[1:]))
+    )
+    return BoardSnapshot(("F.Cu",), traces, differential_pairs=(("P", "N"),))
+
+
+@pytest.mark.parametrize("segments", [60, 80])
+def test_long_mitered_serpentine_completes_without_budget_starvation(
+    segments: int,
+) -> None:
+    """Ordinary length-tuned routing remains assessable under the default limits."""
+    check = _assess(_mitered_serpentine(segments), 150_000)
+    assert check.verdict == "match", check.reasons
+    assert check.coverage == "complete"
+    assert check.unverified_length_nm == 0
+
+
+@pytest.mark.parametrize("position", ["start", "middle", "end"])
+@pytest.mark.parametrize("variant", ["original", "ids", "direction", "shuffle"])
+def test_serpentine_violation_survives_trace_identity_order_and_direction(
+    position: str,
+    variant: str,
+) -> None:
+    """A 100 um squeeze anywhere on the route stays actionable after native reorderings."""
+    snapshot = _mitered_serpentine(160, squeeze=position)
+    baseline = _assess(snapshot, 150_000)
+    if variant == "ids":
+        snapshot = replace(
+            snapshot,
+            traces=tuple(
+                replace(
+                    trace,
+                    trace_id=trace.trace_id[0] + f"{159 - int(trace.trace_id[1:]):03}",
+                )
+                for trace in reversed(snapshot.traces)
+            ),
+        )
+    elif variant == "direction":
+        snapshot = replace(
+            snapshot,
+            traces=tuple(
+                replace(trace, points=tuple(reversed(trace.points)))
+                for trace in snapshot.traces
+            ),
+        )
+    elif variant == "shuffle":
+        snapshot = replace(
+            snapshot, traces=(*snapshot.traces[1::2], *snapshot.traces[::2])
+        )
+    check = _assess(snapshot, 150_000)
+    assert check.verdict == "deviation", check.reasons
+    assert any(issue.code == "too_tight" for issue in check.issues)
+    assert any(
+        issue.gap_nm is not None and issue.gap_nm.upper_nm <= 50_500
+        for issue in check.issues
+    )
+    assert check.coverage == baseline.coverage
+    assert check.minimum_gap_nm == baseline.minimum_gap_nm
+    assert check.maximum_gap_nm == baseline.maximum_gap_nm
+    if variant in ("ids", "shuffle"):
+        assert [
+            (issue.code, issue.position, issue.gap_nm) for issue in check.issues
+        ] == [(issue.code, issue.position, issue.gap_nm) for issue in baseline.issues]
+
+
+@pytest.mark.parametrize("split", [3_700_001, 3_850_000, 3_999_999])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_collinear_split_before_miter_cannot_create_wide_gap(
+    split: int, reverse: bool
+) -> None:
+    """A native collinear vertex cannot change a known 150 um offset sidewall."""
+    p = ((0, 0), (split, 0), (4_000_000, 0), (4_000_000, 4_000_000))
+    n = ((0, 300_000), (3_700_000, 300_000), (3_700_000, 4_000_000))
+    traces = tuple(
+        Trace(f"{net}{index}", "F.Cu", net, 150_000, (b, a) if reverse else (a, b))
+        for net, route in (("P", p), ("N", n))
+        for index, (a, b) in enumerate(zip(route, route[1:]))
+    )
+    check = _assess(
+        BoardSnapshot(("F.Cu",), traces, differential_pairs=(("P", "N"),)), 150_000
+    )
+    assert check.verdict == "match", check
+    assert check.coverage == "complete"
+
+
+def test_miter_only_split_keeps_global_proof_and_real_neighboring_review_evidence() -> (
+    None
+):
+    """The analytic corner span cannot manufacture a finite 150 um cross-section."""
+    from impedance.matching import analyze
+    from impedance.spacing_checks import _primitives
+    from impedance.spacing_review import spacing_review_entries
+    from tests.test_impedance_spacing_checks import _snapshot
+    from tests.test_impedance_spacing_review_entries import _config
+
+    points = ((0, 0), (3_850_000, 0), (4_000_000, 0), (4_000_000, 4_000_000))
+    mates = ((0, 300_000), (3_700_000, 300_000), (3_700_000, 4_000_000))
+    snapshot = _snapshot(
+        *(
+            Trace(f"{net}{index}", "F.Cu", net, 150_000, (a, b))
+            for net, route in (("P", points), ("N", mates))
+            for index, (a, b) in enumerate(zip(route, route[1:]))
+        )
+    )
+    measurement = measure_pair_spacing(snapshot, ("P", "N"), "F.Cu")
+    short = next(trace for trace in measurement.traces if trace.trace_id == "P1")
+    short_check = compare_pair_spacing(replace(measurement, traces=(short,)), 100_000)
+    assert short_check.verdict == "deviation" and short_check.coverage == "complete"
+    assert short.minimum.lower_nm >= 149_999 and short.maximum.upper_nm <= 150_001
+    assert short.witnesses == ()
+    check = compare_pair_spacing(measurement, 100_000)
+    assert (
+        check.verdict == "deviation" and check.coverage == "complete" and check.issues
+    )
+    native = {trace.trace_id: _primitives(trace) for trace in snapshot.traces}
+    for issue in check.issues:
+        for member in issue.members:
+            assert member.cross_sections
+            assert 0 <= member.source_interval[0] <= member.source_interval[1] <= 1
+            assert all(
+                0 <= lower <= upper <= 1 for _, lower, upper in member.mate_intervals
+            )
+            for section in member.cross_sections:
+                assert (
+                    min(
+                        span.distance(section.source_point)
+                        for span in native[section.source_trace_id]
+                    )
+                    < 0.001
+                )
+                assert (
+                    min(
+                        span.distance(section.mate_point)
+                        for span in native[section.mate_trace_id]
+                    )
+                    < 0.001
+                )
+    config = _config()
+    spec = config.specifications[0]
+    config = replace(
+        config,
+        specifications=(
+            replace(
+                spec,
+                layer_settings=(replace(spec.layer_settings[0], spacing_nm=100_000),),
+            ),
+        ),
+    )
+    entries = spacing_review_entries(
+        config, snapshot, analyze(config, snapshot).sections
+    )
+    assert entries and all(
+        entry.issue_code == "too_wide" and entry.representative is not None
+        for entry in entries
+    )
+
+
+@pytest.mark.parametrize("rounding", [-1, 1])
+def test_rounded_non_octilinear_miter_has_bounded_nanometre_uncertainty(
+    rounding: int,
+) -> None:
+    """A 3-4-5 support line rounded at its miter stays within 1 nm of its oracle."""
+    snapshot = BoardSnapshot(
+        ("F.Cu",),
+        (
+            Trace(
+                "p",
+                "F.Cu",
+                "P",
+                150_000,
+                ((0, 0), (4_000_000, 0), (7_000_000, 4_000_000)),
+            ),
+            Trace(
+                "n",
+                "F.Cu",
+                "N",
+                150_000,
+                ((0, 300_000), (3_850_000 + rounding, 300_000), (6_760_000, 4_180_000)),
+            ),
+        ),
+        differential_pairs=(("P", "N"),),
+    )
+    check = _assess(snapshot, 150_000)
+    assert check.verdict == "match", check
+    assert check.coverage == "complete"
+    assert check.minimum_gap_nm is not None and check.minimum_gap_nm.lower_nm >= 149_998
+    assert check.maximum_gap_nm is not None and check.maximum_gap_nm.upper_nm <= 150_002
+
+
+def test_rounded_segmented_mate_retains_every_native_sidewall_interval() -> None:
+    """Near-parallel native pieces all belong to the bounded dimensional proof."""
+    snapshot = BoardSnapshot(
+        ("F.Cu",),
+        (
+            Trace("pstart", "F.Cu", "P", 150_000, ((0, 0), (4_000_000, 0))),
+            Trace(
+                "pdiag", "F.Cu", "P", 150_000, ((4_000_000, 0), (7_000_000, 4_000_000))
+            ),
+            Trace("nstart", "F.Cu", "N", 150_000, ((0, 300_000), (3_850_000, 300_000))),
+            Trace(
+                "nfirst",
+                "F.Cu",
+                "N",
+                150_000,
+                ((3_850_000, 300_000), (5_305_001, 2_240_001)),
+            ),
+            Trace(
+                "nsecond",
+                "F.Cu",
+                "N",
+                150_000,
+                ((5_305_001, 2_240_001), (6_760_000, 4_180_000)),
+            ),
+        ),
+        differential_pairs=(("P", "N"),),
+    )
+    measurement = measure_pair_spacing(snapshot, ("P", "N"), "F.Cu")
+    check = compare_pair_spacing(measurement, 100_000)
+    assert check.verdict == "deviation" and check.coverage == "complete"
+    source = next(trace for trace in measurement.traces if trace.trace_id == "pdiag")
+    assert {
+        identity
+        for issue in source.witnesses
+        for identity in issue.location.mate_trace_ids
+    } == {"nfirst", "nsecond"}
+    for issue in source.witnesses:
+        assert issue.location is not None and issue.location.cross_sections
+        assert all(
+            0 <= start <= end <= 1 for _, start, end in issue.location.mate_intervals
+        )
+        for section in issue.location.cross_sections:
+            actual = (
+                math.dist(section.source_point, section.mate_point)
+                - (section.source_width_nm + section.mate_width_nm) / 2
+            )
+            assert issue.gap_nm.lower_nm <= actual <= issue.gap_nm.upper_nm
+
+
+def test_rounded_miter_proof_cannot_hide_a_closer_competing_native_path() -> None:
+    """Nearby copper remains a distance candidate after tolerant corner completion."""
+    snapshot = BoardSnapshot(
+        ("F.Cu",),
+        (
+            Trace("pstart", "F.Cu", "P", 150_000, ((0, 0), (4_000_000, 0))),
+            Trace(
+                "pdiag", "F.Cu", "P", 150_000, ((4_000_000, 0), (7_000_000, 4_000_000))
+            ),
+            Trace("nstart", "F.Cu", "N", 150_000, ((0, 300_000), (3_850_001, 300_000))),
+            Trace(
+                "ndiag",
+                "F.Cu",
+                "N",
+                150_000,
+                ((3_850_001, 300_000), (6_760_000, 4_180_000)),
+            ),
+            Trace(
+                "closer",
+                "F.Cu",
+                "N",
+                150_000,
+                ((3_850_001, 300_000), (5_340_000, 2_120_000)),
+            ),
+        ),
+        differential_pairs=(("P", "N"),),
+    )
+    measurement = measure_pair_spacing(snapshot, ("P", "N"), "F.Cu")
+    source = replace(
+        measurement,
+        traces=tuple(
+            trace for trace in measurement.traces if trace.trace_id == "pdiag"
+        ),
+    )
+    check = compare_pair_spacing(source, 150_000)
+    assert check.verdict == "deviation"
+    assert any(
+        issue.code == "too_tight" and issue.gap_nm.upper_nm <= 50_500
+        for issue in check.issues
+    )
+
+
+@pytest.mark.parametrize("both_ends", [False, True])
+def test_unequal_straight_lengths_keep_exact_extrema_without_dense_tessellation(
+    both_ends: bool,
+) -> None:
+    """Finite parallel tracks have a 150 um minimum and an endpoint-defined maximum."""
+    offset = 2_000_000 if both_ends else 3_000_000
+    snapshot = BoardSnapshot(
+        ("F.Cu",),
+        (
+            Trace("p", "F.Cu", "P", 150_000, ((0, 0), (10_000_000, 0))),
+            Trace(
+                "n",
+                "F.Cu",
+                "N",
+                150_000,
+                (
+                    (offset, 300_000),
+                    (10_000_000 - offset if both_ends else 10_000_000, 300_000),
+                ),
+            ),
+        ),
+        differential_pairs=(("P", "N"),),
+    )
+    check = _assess(snapshot, 150_000)
+    assert check.verdict == "deviation"
+    assert check.coverage == "complete", check.reasons
+    assert check.unverified_length_nm == 0
+    assert check.minimum_gap_nm is not None and check.minimum_gap_nm.lower_nm >= 149_999
+    assert check.maximum_gap_nm is not None
+    expected = math.hypot(offset, 300_000) - 150_000
+    assert check.maximum_gap_nm.lower_nm <= expected <= check.maximum_gap_nm.upper_nm
+    assert any(issue.code == "too_wide" for issue in check.issues)
 
 
 def test_local_jog_cannot_hide_a_later_centerline_crossing() -> None:

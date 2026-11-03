@@ -385,6 +385,32 @@ def test_nonparallel_long_pair_respects_work_limit_without_reporting_match(
     _isolated_spacing_samples("work-limit", record_property)
 
 
+def test_fair_source_reservations_keep_total_pair_work_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reserved first pass and retries cannot multiply the pair's operation cap."""
+    from tests.test_impedance_spacing_reported_geometry import _mitered_serpentine
+
+    snapshot = _mitered_serpentine(60, squeeze="middle")
+    limits = spacing_checks.SpacingLimits(max_evaluations=20_000)
+    calls = []
+    original = spacing_checks._Budget.consume
+
+    def consume(budget: Any) -> None:
+        calls.append(budget)
+        original(budget)
+
+    monkeypatch.setattr(spacing_checks._Budget, "consume", consume)
+    measurement = spacing_checks.measure_pair_spacing(
+        snapshot, ("P", "N"), "F.Cu", limits=limits
+    )
+    check = spacing_checks.compare_pair_spacing(measurement, 150_000)
+    assert len(set(calls)) > 2
+    assert len(calls) <= limits.max_evaluations + 2 * len(snapshot.traces)
+    assert check.verdict != "match"
+    assert any("work limit" in reason for reason in check.reasons)
+
+
 def _work_limit_sample() -> list[float]:
     """Limited refinement must expose unchecked routing rather than pass it."""
     snapshot, _config = differential_routed_draft(SimpleNamespace(model=model))
