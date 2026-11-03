@@ -620,6 +620,66 @@ def _resolve_polarized(
     return verdict
 
 
+def _hold_to_meaning(
+    verdict: Verdict,
+    kicad_terminals: list[Pad],
+    jlc_terminals: list[Pad],
+    kind: PartKind,
+    symbol_pins: list[SymbolPin],
+    marks: Optional[DrawingMarks],
+) -> Verdict:
+    """Check a part aligned by number round a shared centre against its terminals' meaning.
+
+    No turn swaps a terminal for the one round it, so the pads align by number and
+    the reference terminal must carry one number on both sides.  KiCad's comes from
+    the pin functions and JLC's from :func:`_reference_vote`, without the name
+    token, which names a side that terminals round one centre do not have.  A tied
+    vote is red, as on any polarized part; so is a reference on different numbers,
+    which is yellow instead when KiCad's was only assumed to be pad 1.  With nothing
+    to compare (no vote, or no KiCad pad 1 to assume) the alignment by number stands.
+    """
+    if verdict.rotation is None:
+        return verdict
+    kicad_ref, assumed, note = kicad_reference_pad(
+        kicad_terminals, kind.reference, kind.diode, kind.convention
+    )
+    if kicad_ref is None:
+        # Contradictory pin functions are unknown, as on any polarized part.
+        return verdict if assumed else verdict.unresolved("unknown", "no_data", note)
+    vote_notes: list[str] = []
+    jlc_ref, source, outvoted, _, _ = _reference_vote(
+        jlc_terminals, "", symbol_pins, marks, kind.reference, vote_notes
+    )
+    if jlc_ref is None and source == "unknown":
+        return verdict
+    verdict.notes.extend(vote_notes)
+    if jlc_ref is None:
+        # _reference_vote already recorded which sources disagree.
+        verdict.status = source
+        verdict.fit = "no_data"
+        verdict.rotation = None
+        verdict.method = "none"
+        return verdict
+    if jlc_ref.number != kicad_ref.number and not assumed:
+        return verdict.unresolved(
+            "red",
+            "numbering",
+            f"KiCad pad {kicad_ref.number} is the {kind.reference} terminal but JLC's "
+            f"is pad {jlc_ref.number}, and terminals that share a centre cannot swap",
+        )
+    verdict.polarity_source = source
+    if outvoted:
+        verdict.confidence = "medium"
+    if jlc_ref.number != kicad_ref.number:
+        verdict.notes.append(
+            f"{note}, but JLC puts the {kind.reference} terminal on pad "
+            f"{jlc_ref.number}: check the polarity"
+        )
+        verdict.confidence = "medium"
+        verdict.status = "yellow"
+    return verdict
+
+
 def _resolve_axis(
     kicad_named: list[Pad],
     jlc_named: list[Pad],
@@ -804,13 +864,15 @@ def resolve(
         if split and (_coincident(kicad_terminals) or _coincident(jlc_terminals)):
             # One terminal round the other (a coin cell's + tabs either side of its -
             # pad): meaning gives no axis, but the pads' layout fixes the turn, and a
-            # numbering that swapped the terminals would not fit.
+            # numbering that swapped the terminals would not fit.  The meaning is then
+            # held to that numbering.
             verdict.notes.append(SHARED_CENTRE_NOTE)
-            return _finish_resolve(
-                _resolve_multi_pin(kicad_pads, jlc_pads, verdict, symbol_pins),
-                kicad_courtyard,
-                marks,
-            )
+            _resolve_multi_pin(kicad_pads, jlc_pads, verdict, symbol_pins)
+            if kind.polarized:
+                _hold_to_meaning(
+                    verdict, kicad_terminals, jlc_terminals, kind, symbol_pins, marks
+                )
+            return _finish_resolve(verdict, kicad_courtyard, marks)
         if not kind.polarized:
             verdict.non_polar = True
             verdict.notes.append(NON_POLAR_TOKEN_NOTE)

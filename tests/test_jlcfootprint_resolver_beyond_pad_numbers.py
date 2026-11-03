@@ -683,6 +683,76 @@ def test_terminals_that_share_a_centre_align_by_number():
         assert (verdict.method, verdict.rotation) == ("geometry", degrees)
 
 
+# The coin holder above with KiCad's pin functions: the tabs are -, the centre pad +.
+SIGNED_HOLDER = [
+    Pad("1", -5.0, 0.0, 2.0, 3.0, pin_function="-"),
+    Pad("1", 5.0, 0.0, 2.0, 3.0, pin_function="-"),
+    Pad("2", 0.0, 0.0, 4.0, 4.0, pin_function="+"),
+]
+
+
+def _holder(kicad, jlc_pins, positive_pin):
+    """Resolve the shared-centre holder against JLC's unlabelled pads, pins and + mark."""
+    jlc = [pad._replace(pin_function="") for pad in SIGNED_HOLDER]
+    marks = DrawingMarks(positive_pin=positive_pin)
+    return resolve(kicad, "Battery:BatteryHolder_Coin", "ok", "X", jlc, jlc_pins, marks)
+
+
+def test_terminals_that_share_a_centre_keep_the_meaning_their_numbers_give():
+    """Aligned by number, the + must be one number on both sides: no turn can swap them."""
+    agrees = _holder(SIGNED_HOLDER, [SymbolPin("1", "-"), SymbolPin("2", "+")], "2")
+    assert (agrees.status, agrees.method, agrees.rotation) == ("green", "geometry", 0)
+    reversed_ = _holder(SIGNED_HOLDER, [SymbolPin("1", "+"), SymbolPin("2", "-")], "1")
+    assert (reversed_.status, reversed_.fit, reversed_.rotation) == (
+        "red",
+        "numbering",
+        None,
+    )
+    assert reversed_.notes[-1] == (
+        "KiCad pad 2 is the positive terminal but JLC's is pad 1, "
+        "and terminals that share a centre cannot swap"
+    )
+
+
+def test_terminals_that_share_a_centre_are_red_on_inconsistent_evidence():
+    """A pin-1 label and a + mark naming different pads tie, as on any polarized part."""
+    verdict = _holder(SIGNED_HOLDER, [SymbolPin("1", "+"), SymbolPin("2", "-")], "2")
+    assert (verdict.status, verdict.rotation) == ("red", None)
+    assert verdict.notes[-1] == (
+        "EasyEDA data inconsistent: symbol pin-1 label and symbol + mark disagree"
+    )
+
+
+def test_terminals_that_share_a_centre_on_an_assumed_pad_1_are_yellow():
+    """Without KiCad pin functions pad 1 is only assumed to be +, so JLC's + on pad 2 is a caveat."""
+    unsigned = [pad._replace(pin_function="") for pad in SIGNED_HOLDER]
+    verdict = _holder(unsigned, [], "2")
+    assert (verdict.status, verdict.rotation, verdict.confidence) == (
+        "yellow",
+        0,
+        "medium",
+    )
+    assert verdict.notes[-1] == (
+        "assumed KiCad pad 1 = +, but JLC puts the positive terminal on pad 2: "
+        "check the polarity"
+    )
+
+
+def test_terminals_that_share_a_centre_stand_on_numbers_unless_kicad_contradicts_itself():
+    """No KiCad pad 1 to assume leaves the numbers to decide; two + pads are unknown."""
+    lettered = [pad._replace(number="AB"[int(pad.number) - 1]) for pad in SIGNED_HOLDER]
+    unsigned = [pad._replace(pin_function="") for pad in lettered]
+    marks = DrawingMarks(positive_pin="A")
+    stands = resolve(
+        unsigned, "Battery:BatteryHolder_Coin", "ok", "X", unsigned, [], marks
+    )
+    assert (stands.status, stands.rotation) == ("green", 0)
+    both_plus = [pad._replace(pin_function="+") for pad in SIGNED_HOLDER]
+    verdict = _holder(both_plus, [SymbolPin("1", "-"), SymbolPin("2", "+")], "2")
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+    assert verdict.notes[-1] == "contradictory pin functions on the KiCad footprint"
+
+
 def test_a_split_polarized_part_with_nothing_to_vote_is_unknown():
     """Split terminals still need a vote: with no token, label or mark nothing is guessed."""
     holder = [
