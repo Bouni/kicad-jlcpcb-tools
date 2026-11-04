@@ -822,9 +822,15 @@ class Fabrication:
                     "Shorten the board filename or custom layer name before generating."
                 )
 
-        # delete all existing files in the output directory first
+        # delete all existing files in the output directory first.
+        # Only remove files: a subdirectory (e.g. a ".history" folder created
+        # by an editor's local-history feature) would otherwise make
+        # os.remove() raise PermissionError (WinError 5) on Windows /
+        # IsADirectoryError on POSIX and abort generation.
         for f in os.listdir(self.gerberdir):
-            os.remove(os.path.join(self.gerberdir, f))
+            path = os.path.join(self.gerberdir, f)
+            if os.path.isfile(path):
+                os.remove(path)
 
         for layer_info in plot_plan:
             popt.SetSkipPlotNPTH_Pads(IsCopperLayer(layer_info[1]))
