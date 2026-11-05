@@ -1,12 +1,12 @@
 """Pure native-net-class matching, route grouping, and review revision checking."""
 
 from collections import Counter
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 import hashlib
 import json
 import math
-from typing import Any
+from typing import Any, Optional
 
 from .copper_geometry import capsule_inside_polygons, polygon_inside_polygons
 from .model import (
@@ -60,6 +60,14 @@ _COVERED_STUB_STATUS = (
     "Covered stubs (⊘) are fully under same-net pad or via copper; "
     "review them in the list — they are not exported."
 )
+
+
+@dataclass
+class MatchingCache:
+    """Retain one immutable geometry result independently of calculator outputs."""
+
+    key: Optional[tuple[object, ...]] = None
+    analysis: Optional[Analysis] = None
 
 
 def _check_section_count(count: int) -> None:
@@ -877,15 +885,13 @@ def preview_sections(
     return _ordered_sections(rows, snapshot.layers)
 
 
-def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
-    """Match intent and produce candidates whose review becomes stale on relevant edits."""
-    _validate_snapshot(snapshot)
-    validate_config(config, snapshot.layers)
-    memberships = _netclass_memberships(snapshot) if config.specifications else {}
-    uses_pairs = any(
-        spec.kind.startswith("differential") for spec in config.specifications
-    )
-    mates = _differential_mates(snapshot) if uses_pairs else {}
+def _matched_geometry(
+    config: Config,
+    snapshot: BoardSnapshot,
+    memberships: dict[str, tuple[str, ...]],
+    mates: dict[str, str],
+) -> tuple[tuple[Section, ...], tuple[str, ...]]:
+    """Group physical copper and measure readability without calculator outputs."""
     sections: list[Section] = []
     source_sections: list[Section] = []
     warnings: list[str] = []
@@ -925,6 +931,40 @@ def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
             )
     if any(section.exclusion_reason == EXCLUSION_COVERED_STUB for section in ordered):
         warnings.append(_COVERED_STUB_STATUS)
+    return ordered, tuple(sorted(warnings))
+
+
+def analyze(
+    config: Config, snapshot: BoardSnapshot, *, cache: Optional[MatchingCache] = None
+) -> Analysis:
+    """Validate current intent and bind reusable geometry to its full review revision."""
+    _validate_snapshot(snapshot)
+    validate_config(config, snapshot.layers)
+    memberships = _netclass_memberships(snapshot) if config.specifications else {}
+    uses_pairs = any(
+        spec.kind.startswith("differential") for spec in config.specifications
+    )
+    mates = _differential_mates(snapshot) if uses_pairs else {}
+    spacing_policy: tuple[int, ...] = ()
+    if uses_pairs:
+        from .spacing_checks import SPACING_CHECK_POLICY_REVISION
+
+        spacing_policy = (SPACING_CHECK_POLICY_REVISION,)
+    # Surrounding copper and native metadata affect grouping/readability too.
+    # Only stackup and nominal results are excluded: they affect the digest below,
+    # but never which physical sections or warnings matching produces.
+    geometry_key = (
+        snapshot,
+        config.specifications,
+        ALGORITHM_VERSION,
+        CAPTURE_POLICY_REVISION,
+        COVERED_STUB_POLICY_REVISION,
+        *spacing_policy,
+    )
+    if cache is not None and cache.key == geometry_key and cache.analysis is not None:
+        ordered, warnings = cache.analysis.sections, cache.analysis.warnings
+    else:
+        ordered, warnings = _matched_geometry(config, snapshot, memberships, mates)
     spec_records = config.to_dict()["specifications"]
     for record in spec_records:
         # Linking is an editing preference; unchanged physical intent retains
@@ -1004,7 +1044,10 @@ def analyze(config: Config, snapshot: BoardSnapshot) -> Analysis:
             **spacing_context,
         }
     )
-    return Analysis(ordered, digest, tuple(sorted(warnings)))
+    result = Analysis(ordered, digest, warnings)
+    if cache is not None:
+        cache.key, cache.analysis = geometry_key, result
+    return result
 
 
 def validate_review(config: Config, analysis: Analysis) -> None:
