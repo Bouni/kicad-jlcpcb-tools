@@ -714,6 +714,41 @@ def test_terminals_that_share_a_centre_keep_the_meaning_their_numbers_give():
     )
 
 
+def test_terminals_that_share_a_centre_follow_a_pairing_by_pin_function():
+    """JLC's tabs 3 and centre 4 pair with KiCad's 1 and 2 by function; the + is checked through that."""
+    renumbered = [
+        pad._replace(number={"1": "3", "2": "4"}[pad.number], pin_function="")
+        for pad in SIGNED_HOLDER
+    ]
+    pins = [SymbolPin("3", "-"), SymbolPin("4", "+")]
+
+    def holder(positive_pin):
+        marks = DrawingMarks(positive_pin=positive_pin)
+        return resolve(
+            SIGNED_HOLDER,
+            "Battery:BatteryHolder_Coin",
+            "ok",
+            "X",
+            renumbered,
+            pins,
+            marks,
+        )
+
+    agrees = holder("4")
+    assert (agrees.status, agrees.method, agrees.rotation) == ("green", "geometry", 0)
+    assert agrees.paired_numbers == {"3": "1", "4": "2"}
+    reversed_ = holder("3")
+    assert (reversed_.status, reversed_.fit, reversed_.rotation) == (
+        "red",
+        "numbering",
+        None,
+    )
+    assert reversed_.notes[-1] == (
+        "KiCad pad 2 is the positive terminal but JLC's is pad 3, which pairs with "
+        "KiCad pad 1, and terminals that share a centre cannot swap"
+    )
+
+
 def test_terminals_that_share_a_centre_are_red_on_inconsistent_evidence():
     """A pin-1 label and a + mark naming different pads tie, as on any polarized part."""
     verdict = _holder(SIGNED_HOLDER, [SymbolPin("1", "+"), SymbolPin("2", "-")], "2")

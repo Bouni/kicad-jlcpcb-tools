@@ -120,6 +120,11 @@ class Verdict:
     body_excess_mm: Optional[float] = None  # the caveat: how far the JLC body overhangs
     notes: list[str] = field(default_factory=list)
     placement: Optional[Placement] = field(default=None, repr=False, compare=False)
+    # JLC pad number -> the KiCad pad number it paired with, by name or by pin
+    # function, on the multi-pin path.
+    paired_numbers: dict[str, str] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     @property
     def note_text(self) -> str:
@@ -172,14 +177,19 @@ def _mismatch_note(verdict: Verdict, fit: str) -> str:
 
 
 def _finish_multi_pin(
-    verdict: Verdict, kicad: dict[str, Pad], placement: Placement, by_name: bool = True
+    verdict: Verdict,
+    kicad: dict[str, Pad],
+    jlc: dict[str, Pad],
+    placement: Placement,
+    by_name: bool = True,
 ) -> Verdict:
-    """Set the rotation and status of a multi-pin part whose pads fit.
+    """Set the rotation, status and number pairing of a multi-pin part whose pads fit.
 
     ``by_name`` says how the pads were paired: on their numbers or, when that
     fails, by the pin functions the schematic gave them.  Only a by-name alignment
     can rest on "shared pad names", so the notes that say so are its own.
     """
+    verdict.paired_numbers = {jlc[key].number: kicad[key].number for key in kicad}
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "geometry"
     if verdict.confidence == "none":
@@ -252,7 +262,9 @@ def _resolve_by_function(
         jlc_number, kicad_number = pairing.eliminated
         note += f"; JLC pin {jlc_number} and pad {kicad_number} paired by elimination"
     verdict.notes.append(note)
-    return _finish_multi_pin(verdict, pairing.kicad, placement, by_name=False)
+    return _finish_multi_pin(
+        verdict, pairing.kicad, pairing.jlc, placement, by_name=False
+    )
 
 
 def _resolve_multi_pin(
@@ -321,7 +333,7 @@ def _resolve_multi_pin(
             "red", report.fit, _mismatch_note(verdict, report.fit)
         )
     verdict.take_fit(report)
-    return _finish_multi_pin(verdict, kicad, placement)
+    return _finish_multi_pin(verdict, kicad, jlc, placement)
 
 
 def _two_pad_pairing(
@@ -630,13 +642,16 @@ def _hold_to_meaning(
 ) -> Verdict:
     """Check a part aligned by number round a shared centre against its terminals' meaning.
 
-    No turn swaps a terminal for the one round it, so the pads align by number and
-    the reference terminal must carry one number on both sides.  KiCad's comes from
-    the pin functions and JLC's from :func:`_reference_vote`, without the name
-    token, which names a side that terminals round one centre do not have.  A tied
-    vote is red, as on any polarized part; so is a reference on different numbers,
-    which is yellow instead when KiCad's was only assumed to be pad 1.  With nothing
-    to compare (no vote, or no KiCad pad 1 to assume) the alignment by number stands.
+    No turn swaps a terminal for the one round it, so the pads align by number (or
+    by pin function, when the numbers differ) and JLC's reference terminal must
+    pair with KiCad's.  KiCad's comes from the pin functions and JLC's from
+    :func:`_reference_vote`, without the name token, which names a side that
+    terminals round one centre do not have; the alignment's own pairing
+    (``Verdict.paired_numbers``) says which KiCad pad JLC's pairs with.  A tied vote
+    is red, as on any polarized part; so is a reference that pairs with the other
+    terminal, which is yellow instead when KiCad's was only assumed to be pad 1.
+    With nothing to compare (no vote, or no KiCad pad 1 to assume) the alignment
+    stands.
     """
     if verdict.rotation is None:
         return verdict
@@ -660,17 +675,23 @@ def _hold_to_meaning(
         verdict.rotation = None
         verdict.method = "none"
         return verdict
-    if jlc_ref.number != kicad_ref.number and not assumed:
+    partner = verdict.paired_numbers.get(jlc_ref.number, jlc_ref.number)
+    if partner != kicad_ref.number and not assumed:
+        pairs = (
+            ""
+            if partner == jlc_ref.number
+            else f", which pairs with KiCad pad {partner}"
+        )
         return verdict.unresolved(
             "red",
             "numbering",
             f"KiCad pad {kicad_ref.number} is the {kind.reference} terminal but JLC's "
-            f"is pad {jlc_ref.number}, and terminals that share a centre cannot swap",
+            f"is pad {jlc_ref.number}{pairs}, and terminals that share a centre cannot swap",
         )
     verdict.polarity_source = source
     if outvoted:
         verdict.confidence = "medium"
-    if jlc_ref.number != kicad_ref.number:
+    if partner != kicad_ref.number:
         verdict.notes.append(
             f"{note}, but JLC puts the {kind.reference} terminal on pad "
             f"{jlc_ref.number}: check the polarity"
