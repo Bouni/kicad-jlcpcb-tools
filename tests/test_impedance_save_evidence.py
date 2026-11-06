@@ -109,10 +109,10 @@ def save_api(
 
     original_analyze = api.dialog.analyze
 
-    def analyze(config: Config, board: BoardSnapshot) -> object:
+    def analyze(config: Config, board: BoardSnapshot, **kwargs: object) -> object:
         """Count matching without replacing its analysis or validation behavior."""
         state.analyses.append((config, board))
-        return original_analyze(config, board)
+        return original_analyze(config, board, **kwargs)
 
     def save(config: Config) -> None:
         """Publish neither config nor closure after a failed persistence attempt."""

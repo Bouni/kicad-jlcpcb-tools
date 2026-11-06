@@ -29,7 +29,13 @@ from .calculator_config_cache import (
 from .capture_retry import retry_delay_ms
 from .catalog_cache import CatalogCache
 from .catalog_controller import CatalogController, CatalogState, compatible_stackup
-from .matching import analyze, preview_sections, validate_review, workbook_row_cells
+from .matching import (
+    MatchingCache,
+    analyze,
+    preview_sections,
+    validate_review,
+    workbook_row_cells,
+)
 from .model import (
     EXCLUSION_COVERED_STUB,
     Analysis,
@@ -548,6 +554,7 @@ class ReviewSession:
         self._source_digest = ""
         self.analysis: Optional[Analysis] = None
         self._analysis_key: Optional[tuple[object, ...]] = None
+        self._matching_cache = MatchingCache()
         self.included: set[str] = set()
         # Loaded hashes are current evidence, not image-view events. None marks
         # an unavailable capture while historical records remain untouched.
@@ -815,14 +822,14 @@ class ReviewSession:
                     previous
                     if previous is not None
                     and self._analysis_key == self._analysis_inputs(self.snapshot)
-                    else analyze(display, self.snapshot)
+                    else analyze(display, self.snapshot, cache=self._matching_cache)
                 )
             else:
                 result = (
                     previous
                     if previous is not None
                     and self._analysis_key == self._analysis_inputs(self.snapshot)
-                    else analyze(self.config, self.snapshot)
+                    else analyze(self.config, self.snapshot, cache=self._matching_cache)
                 )
         except Exception:
             self.analysis = None
@@ -986,7 +993,7 @@ class ReviewSession:
                     self.analysis
                     if self.analysis is not None
                     and self._analysis_key == self._analysis_inputs(current)
-                    else analyze(reviewed, current)
+                    else analyze(reviewed, current, cache=self._matching_cache)
                 )
                 self.analysis = analysis
                 self._analysis_key = self._analysis_inputs(current)
@@ -5276,7 +5283,6 @@ class ImpedanceDialog(wx.Dialog):
                 self._width_refresh_alert = alert
                 if not self._refresh_rows(self.session.snapshot):
                     return
-                self._populate_sections()
                 return
             merged = merge_width_results(config.width_results, results)
             candidate = replace(config, width_results=merged)
