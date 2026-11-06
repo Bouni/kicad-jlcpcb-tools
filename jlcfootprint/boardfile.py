@@ -429,6 +429,16 @@ def _parse_footprint(fp_node: list[object]) -> Optional[KiCadFootprint]:
 # ---------------------------------------------------------------------------
 
 
+def parse_kicad_pcb(path: str) -> list[KiCadFootprint]:
+    """Parse a .kicad_pcb file and return a list of KiCadFootprint objects.
+
+    Only footprints are extracted; tracks, zones, nets, setup, etc. are ignored.
+    """
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    return parse_kicad_pcb_text(text)
+
+
 def parse_kicad_pcb_text(text: str) -> list[KiCadFootprint]:
     """Parse a .kicad_pcb's or a .kicad_mod's text and return its footprints.
 

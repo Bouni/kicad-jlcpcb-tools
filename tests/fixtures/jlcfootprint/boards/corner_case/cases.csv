@@ -1,0 +1,48 @@
+reference,lib,footprint,lcsc,value,rotation,layer,pinfunctions,expect
+Q1,Package_TO_SOT_SMD,SOT-23,C2132,2SA812,0,F,,rotation
+Q2,Package_TO_SOT_SMD,SOT-23,C2132,2SA812,90,F,,rotation
+Q3,Package_TO_SOT_SMD,SOT-23,C2132,2SA812,180,F,,rotation
+Q4,Package_TO_SOT_SMD,SOT-23,C2132,2SA812,270,F,,rotation
+Q5,Package_TO_SOT_SMD,SOT-23,C2132,2SA812,0,B,,rotation
+Q6,Package_TO_SOT_SMD,SOT-23,C2132,2SA812,90,B,,rotation
+U1,Package_SO,SOIC-8_3.9x4.9mm_P1.27mm,C7950,LM358DR2G,0,F,,rotation
+U2,Package_SO,SOIC-8_3.9x4.9mm_P1.27mm,C7950,LM358DR2G,90,F,,rotation
+U3,Package_SO,SOIC-8_3.9x4.9mm_P1.27mm,C7950,LM358DR2G,0,B,,rotation
+U4,Package_DFN_QFN,QFN-16-1EP_3x3mm_P0.5mm_EP1.75x1.75mm,C19213,RFX2401C,0,F,,rotation
+U5,Package_TO_SOT_SMD,SOT-23-5,C3014306,LMV321IDBVR,0,F,,rotation
+U6,Package_TO_SOT_SMD,SOT-23-6,C84817,MT3608,0,F,,rotation
+U7,Package_TO_SOT_SMD,SOT-23-6,C3014306,LMV321IDBVR wrong pick,0,F,,red
+U8,Package_TO_SOT_SMD,SOT-223-3_TabPin2,C6186,AMS1117-3.3,0,F,,rotation
+U9,Package_TO_SOT_SMD,TO-252-2,C58069,L78M05ABDT-TR,0,F,,rotation
+U10,Package_DIP,DIP-8_W7.62mm,C46749,NE555P,0,F,,rotation
+D1,Diode_SMD,D_SMA,C2480,SS14,0,F,1=K;2=A,rotation
+D2,Diode_SMD,D_SMA,C2480,SS14,90,B,1=K;2=A,rotation
+D3,Diode_SMD,D_SMB,C13762,SS34B,0,F,1=K;2=A,rotation
+D4,Diode_SMD,D_SOD-123,C81598,1N4148W,0,F,1=K;2=A,rotation
+D5,Diode_SMD,D_SOD-123,C81598,1N4148W anode on pad 1,0,F,1=A;2=K,rotation
+D6,Diode_SMD,D_SOD-323,C7502694,BAT54WS,0,F,1=K;2=A,rotation
+D7,Diode_SMD,D_MiniMELF,C435829,LL4148,0,F,1=K;2=A,rotation
+D8,Diode_SMD,D_SMF,C1973411,SMF51A-E3-08 (-R-FD; numeric symbol pins),270,F,1=K;2=A,rotation
+D9,Diode_SMD,D_SMF,C1856655,VTVS12ASMF-M3-08,270,F,1=K;2=A,rotation
+D10,Diode_SMD,D_SMF,C707468,SMF7.0A (RD; pin 1 = C),0,F,1=K;2=A,rotation
+LED1,LED_SMD,LED_0603_1608Metric,C2286,KT-0603R,0,F,1=K;2=A,rotation
+LED2,LED_SMD,LED_0603_1608Metric,C50494,MIR60363T,0,F,1=K;2=A,rotation
+LED3,LED_SMD,LED_0603_1608Metric,C965804,XL-1608UGC-04,90,F,1=K;2=A,rotation
+C1,Capacitor_SMD,CP_Elec_6.3x7.7,C134220,UCD1V101MCL6GS,0,F,,rotation
+C2,Capacitor_SMD,CP_Elec_6.3x7.7,C3338,RVT1E101M0607,0,F,,rotation
+C3,Capacitor_SMD,CP_Elec_6.3x7.7,C88744,35TZV100M6.3X8,0,F,,rotation
+C4,Capacitor_SMD,CP_Elec_5x5.4,C72473,RVT1A101M0505,0,F,,rotation
+C5,Capacitor_Tantalum_SMD,CP_EIA-3216-18_Kemet-A,C7171,TAJA106K016RNJ,0,F,,rotation
+C6,Capacitor_Tantalum_SMD,CP_EIA-3528-21_Kemet-B,C16133,TAJB107K006RNJ,0,F,,rotation
+C7,Capacitor_SMD,C_0603_1608Metric,C14663,CC0603KRX7R9BB104,0,F,,rotation
+C8,Capacitor_SMD,C_1206_3216Metric,C13585,CL31A106KBHNNNE,0,F,,rotation
+R1,Resistor_SMD,R_0402_1005Metric,C2906861,FRC0402F1002TS,0,F,,rotation
+R2,Resistor_SMD,R_0603_1608Metric,C25804,0603WAF1002T5E,0,F,,rotation
+R3,Resistor_SMD,R_0603_1608Metric_Pad0.98x0.95mm_HandSolder,C25804,0603WAF1002T5E,90,F,,rotation
+R4,Resistor_SMD,R_0402_1005Metric,C25804,0603 part on 0402 pads,0,F,,tight
+J1,Connector_USB,USB_C_Receptacle_HRO_TYPE-C-31-M-12,C165948,TYPE-C-31-M-12,0,F,,rotation
+D11,Diode_SMD,D_SMB,C553979,SMBJ28A-E3/52 (-R-RD),0,F,1=K;2=A,rotation
+L1,Inductor_SMD,L_0402_1005Metric,C77110,LQG15HS6N8J02D (L0402-RD),0,F,,rotation
+Q7,Package_TO_SOT_SMD,SOT-23,C347207,HT7133S (SOT-23 -CW numbering),0,F,,red
+D12,Diode_SMD,D_SMA,C2836396,SS34-MS (DO-214AC -RD),0,F,1=K;2=A,rotation
+D13,Diode_SMD,D_SMF,C2857328,SMF15CA (-BI bidirectional; D_TVS pins A1/A2),90,F,1=A1;2=A2,rotation

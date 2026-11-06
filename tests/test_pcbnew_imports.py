@@ -16,8 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The plugin's entry point imports pcbnew for good.
 _PERMANENT = ("plugin.py",)
-# Its entry in pyproject.toml's TID251 exemptions, with the tests'.
-_PERMANENT_EXEMPTIONS = {"plugin.py", "tests/**"}
+# Its entry in pyproject.toml's TID251 exemptions, with the tests' and the
+# development tool that builds a gate board in KiCad's own Python, which is never
+# shipped.
+_PERMANENT_EXEMPTIONS = {
+    "plugin.py",
+    "tests/**",
+    "tools/jlcfootprint/make_corner_case_board.py",
+}
 # Imports by name not yet behind the backend, by module, with their count.
 # Fabrication's three go when gerber and drill output move to the backend.
 _ALLOWED = {"fabrication.py": 3}

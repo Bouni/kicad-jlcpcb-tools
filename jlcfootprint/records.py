@@ -34,7 +34,13 @@ class DrawingMarks:
 
 
 def pin1_polarity(pins: list[SymbolPin]) -> Optional[str]:
-    """Return 'K' or 'A' when pin 1's label names its terminal, else None."""
+    """Return 'K' or 'A' when pin 1's label names its terminal, else None.
+
+    Only two-pin symbols are read, as by the drawing readers: on a symbol with more
+    pins, a pin 1 labelled ``C`` is as likely a transistor's collector as a cathode.
+    """
+    if len(pins) != 2:
+        return None
     for pin in pins:
         if pin.number != "1":
             continue

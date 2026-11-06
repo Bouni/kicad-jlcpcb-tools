@@ -1,0 +1,17 @@
+reference,observed_rotation,note,origin_dx_mm,origin_dy_mm
+U1,270,"JLC numbers the tab 3 and the S lead 2; the schematic's G/D/S pair the pins (JLC's preview: right as emitted, as were U2 to U4 and every capacitor)",-1.845,0
+U2,270,"as U1 with IN/D/S: G pairs by elimination",-1.845,0
+U3,0,"U1 placed at 90: 90 + 270",-1.845,0
+U4,0,"TL-CW drawing, tab is pin 2 on both sides; the stub of the cut lead is pad 2 too, not a fourth pad",-1.843,0
+U5,,"refused by design: without pin functions the numbering difference stays red (the package aligns at 270; JLC's preview showed it at the raw angle, as a refusal must)",,
+C1,0,"right at the raw angle in JLC's preview; + marks beside pad 1",0,0
+C2,0,"as C1",0,0
+C3,0,"as C1",0,0
+C4,180,"half a turn from the raw angle in JLC's preview; + marks beside pad 1, which JLC draws on the right",0,0
+C5,180,"the -R-RD token and both + marks say 180; at the raw angle JLC's preview shows the + at the wrong end",0,0
+C6,180,"as C5",0,0
+C7,180,"as C5",0,0
+C8,0,"C1969735 (TMCP1A106MTRF on CAP-SMD_L2.0-W1.3-FD): right at the raw angle in JLC's preview; the -FD token and both + marks agree",0,0
+C9,0,"corner-case C3's part on a 4 mm footprint: fits with the body caveat (0.9 mm)",0,0
+C10,0,"corner-case C3's part on a 6.3 mm footprint: plain fit",0,0
+C11,90,"C1 on the bottom at 90: (180 - 90) + 0",0,0

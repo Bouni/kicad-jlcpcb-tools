@@ -1,0 +1,48 @@
+ref    lcsc       status   fit                rot name  orgdx  orgdy  footprint / package / notes
+C1     C134220    green    fits                 0    0   0.00   0.00  Capacitor_SMD:CP_Elec_6.3x7.7 / CAP-SMD_BD6.3-L6.6-W6.6-FD / assumed KiCad pad 1 = +
+C2     C3338      green    fits               180  180   0.00   0.00  Capacitor_SMD:CP_Elec_6.3x7.7 / CAP-SMD_BD6.3-L6.6-W6.6-LS7.2-R-RD / assumed KiCad pad 1 = +
+C3     C88744     green    fits                 0    0   0.00   0.00  Capacitor_SMD:CP_Elec_6.3x7.7 / CAP-SMD_BD6.3-L6.6-W6.6-FD / assumed KiCad pad 1 = +
+C4     C72473     green    fits_larger_pads     0    0   0.00   0.00  Capacitor_SMD:CP_Elec_5x5.4 / CAP-SMD_BD5.0-L5.3-W5.3-LS6.3-FD / assumed KiCad pad 1 = +
+C5     C7171      green    fits                 0  180   0.00   0.00  Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A / CAP-SMD_L3.2-W1.6-RD-C7171 / assumed KiCad pad 1 = +; name token names the other pad; symbol + mark, footprint + mark decide
+C6     C16133     green    fits                 0        0.00   0.00  Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B / CASE-B_3528 / assumed KiCad pad 1 = +; polarity from the + marks of the symbol and the footprint
+C7     C14663     green    fits                 0        0.00   0.00  Capacitor_SMD:C_0603_1608Metric / C0603 /
+C8     C13585     green    fits                 0        0.00   0.00  Capacitor_SMD:C_1206_3216Metric / C1206 /
+D1     C2480      green    fits_larger_pads     0    0   0.00   0.00  Diode_SMD:D_SMA / SMA_L4.2-W2.6-LS5.0-RD_1 /
+D2     C2480      green    fits_larger_pads     0    0   0.00   0.00  Diode_SMD:D_SMA / SMA_L4.2-W2.6-LS5.0-RD_1 /
+D3     C13762     green    fits                 0    0   0.00   0.00  Diode_SMD:D_SMB / SMB_L4.6-W3.6-LS5.3-RD /
+D4     C81598     green    fits                 0    0   0.00   0.00  Diode_SMD:D_SOD-123 / SOD-123F_L2.7-W1.6-LS3.8-RD /
+D5     C81598     yellow   fits               180    0   0.00   0.00  Diode_SMD:D_SOD-123 / SOD-123F_L2.7-W1.6-LS3.8-RD / the schematic puts the cathode on KiCad pad 2; the name's 0° assumes pad 1; JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
+D6     C7502694   green    fits                 0    0   0.00   0.00  Diode_SMD:D_SOD-323 / SOD-323_L1.7-W1.3-LS2.6-RD-1 / KiCad pads are smaller than JLC's land pattern
+D7     C435829    green    fits                 0    0   0.00   0.00  Diode_SMD:D_MiniMELF / LL-34_L3.5-W1.5-RD /
+D8     C1973411   green    fits_larger_pads   180  180   0.00   0.00  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-R-FD /
+D9     C1856655   yellow   fits               180  180   0.00   0.00  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-FD-1 / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
+D10    C707468    green    fits                 0    0   0.00   0.00  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-RD /
+D11    C553979    yellow   fits                 0    0   0.00   0.00  Diode_SMD:D_SMB / SMB_L4.3-W3.6-LS5.4-R-RD / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
+D12    C2836396   green    fits                 0    0   0.00   0.00  Diode_SMD:D_SMA / DO-214AC_L4.3-W2.7-LS5.0-RD / symbol pin-1 label names the other pad; name token, footprint + mark decide
+D13    C2857328   green    fits                 0    0   0.00   0.00  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-BI / bidirectional part; aligned by axis
+J1     C165948    green    fits                 0        0.00  -0.11  Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12 / USB-C_SMD-TYPE-C-31-M-12_1 / pad counts differ (17 vs 16) but the 8 shared names align
+L1     C77110     green    fits               180  180   0.00   0.00  Inductor_SMD:L_0402_1005Metric / L0402-RD / orientation token on a non-polar part: KiCad pad 1 goes where the token puts pin 1, which need not be JLC's pad 1; assumed KiCad pad 1 = the token's pin 1
+LED1   C2286      yellow   fits                 0    0   0.00   0.00  LED_SMD:LED_0603_1608Metric / LED-SMD_L1.6-W0.8-R-RD / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
+LED2   C50494     yellow   fits               180  180   0.00   0.00  LED_SMD:LED_0603_1608Metric / LED0603-FD / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
+LED3   C965804    green    fits                 0    0   0.00   0.00  LED_SMD:LED_0603_1608Metric / LED0603-RD_GREEN /
+Q1     C2132      green    fits               180  180   0.10   0.00  Package_TO_SOT_SMD:SOT-23 / SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR /
+Q2     C2132      green    fits               180  180   0.10   0.00  Package_TO_SOT_SMD:SOT-23 / SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR /
+Q3     C2132      green    fits               180  180   0.10   0.00  Package_TO_SOT_SMD:SOT-23 / SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR /
+Q4     C2132      green    fits               180  180   0.10   0.00  Package_TO_SOT_SMD:SOT-23 / SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR /
+Q5     C2132      green    fits               180  180   0.10   0.00  Package_TO_SOT_SMD:SOT-23 / SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR /
+Q6     C2132      green    fits               180  180   0.10   0.00  Package_TO_SOT_SMD:SOT-23 / SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR /
+Q7     C347207    red      numbering               180                Package_TO_SOT_SMD:SOT-23 / SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR-CW / pin numbering differs from JLC's part; the package itself aligns at 180°
+R1     C2906861   green    fits                 0        0.00   0.00  Resistor_SMD:R_0402_1005Metric / R0402 /
+R2     C25804     green    fits                 0        0.00   0.00  Resistor_SMD:R_0603_1608Metric / R0603 /
+R3     C25804     green    fits                 0        0.00   0.00  Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder / R0603 /
+R4     C25804     yellow   fits_tight           0        0.00   0.00  Resistor_SMD:R_0402_1005Metric / R0603 / JLC pads 1, 2 sit at the edge of your pads; check the placement preview
+U1     C7950      green    fits               270  270   0.00   0.00  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL /
+U2     C7950      green    fits               270  270   0.00   0.00  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL /
+U3     C7950      green    fits               270  270   0.00   0.00  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL /
+U4     C19213     green    fits               270  270   0.00   0.00  Package_DFN_QFN:QFN-16-1EP_3x3mm_P0.5mm_EP1.75x1.75mm / QFN-16_L3.0-W3.0-P0.50-BL-EP1.7 /
+U5     C3014306   green    fits               180  180  -0.01   0.00  Package_TO_SOT_SMD:SOT-23-5 / SOT-23-5_L2.9-W1.6-P0.95-LS2.8-BR /
+U6     C84817     green    fits               270  270   0.00   0.00  Package_TO_SOT_SMD:SOT-23-6 / SOT-23-6_L2.9-W1.6-P0.95-LS2.8-BL /
+U7     C3014306   red      count                   180                Package_TO_SOT_SMD:SOT-23-6 / SOT-23-5_L2.9-W1.6-P0.95-LS2.8-BR / does not fit: 6 vs 5 pads
+U8     C6186      green    fits               180  180  -0.18   0.00  Package_TO_SOT_SMD:SOT-223-3_TabPin2 / SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR / pad counts differ (3 vs 4) but the 3 shared names align
+U9     C58069     green    fits                 0    0  -0.72   0.00  Package_TO_SOT_SMD:TO-252-2 / TO-252-2_L6.5-W6.1-P4.58-LS10.0-TL / KiCad pads are smaller than JLC's land pattern; aligned on two shared pad names; remaining pads matched by position
+U10    C46749     green    fits               270  270   0.00   0.00  Package_DIP:DIP-8_W7.62mm / DIP-8_L9.8-W6.6-P2.54-LS7.6-BL /

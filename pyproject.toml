@@ -187,11 +187,14 @@ split-on-trailing-comma = false
 "common/partsdb.py" = ["T201"]
 "common/progress.py" = ["T201"]
 "tools/jlcfootprint/*.py" = ["T201"]
-# The action plugin and the tests may import pcbnew. The SWIG backend imports
-# nothing: it is handed the module. A leading "./" anchors a pattern at the
-# repository root, so a file of the same name elsewhere is not exempt.
+# The action plugin and the tests may import pcbnew, and so may the development
+# tool that builds a gate board in KiCad's own Python, which is never shipped.
+# The SWIG backend imports nothing: it is handed the module. A leading "./"
+# anchors a pattern at the repository root, so a file of the same name
+# elsewhere is not exempt.
 "./plugin.py" = ["TID251"]
 "./tests/**" = ["TID251"]
+"./tools/jlcfootprint/make_corner_case_board.py" = ["TID251"]
 # Modules that still import pcbnew themselves. Each migration to kicad_backend
 # removes its module from this list until none is left; a module that does not
 # import pcbnew is never listed, so the ban covers it.
