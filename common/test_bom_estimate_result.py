@@ -80,17 +80,21 @@ def test_price_values_preserve_dnp_assignment_prices_and_ignore_bom_exclusions()
 
 
 @pytest.mark.parametrize(
-    "encoded", ["", "invalid", "1-:-1", "1-:nan", "1-:inf", "1-:-inf"]
+    "encoded", ["", "invalid", "1:-1", "1-:-1", "1-:nan", "1-:inf", "1-:-inf"]
 )
-def test_unavailable_or_nonfinite_prices_never_become_comparable_zero(
+def test_invalid_prices_are_missing_from_comparison_and_totals(
     encoded: str,
 ) -> None:
-    """Malformed catalog prices cannot acquire a misleading price direction."""
-    prices = evaluate_bom_estimate(
+    """Invalid catalog prices appear as unavailable in the complete estimate."""
+    result = evaluate_bom_estimate(
         [_part("R1")], 5, lambda _lcsc: {"price": encoded}, sides={}
-    ).prices
+    )
 
-    assert prices == {"R1": None}
+    assert result.prices == {"R1": None}
+    assert result.price_labels == {"R1": "N/A"}
+    assert result.summary is not None
+    assert result.summary.component_cost == 0
+    assert result.summary.missing_prices == 1
 
 
 @pytest.mark.parametrize(
