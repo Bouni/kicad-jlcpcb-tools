@@ -24,6 +24,7 @@ from .partselector_columns import (
     PARAMS_COLUMN_KEY,
     PARTSELECTOR_COLUMN_KEYS,
     PARTSELECTOR_COLUMNS,
+    SORTABLE_COLUMN_INDEX_TO_DB,
 )
 from .value_normalize import sign_spellings
 from .window_layout import get_column_widths, restore_column_widths, to_dip
@@ -570,6 +571,7 @@ class PartSelectorDialog(wx.Dialog):
 
         self.part_list.Bind(dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnPartSelected)
         self.part_list.Bind(dv.EVT_DATAVIEW_ITEM_ACTIVATED, self.select_part)
+        self.part_list.Bind(dv.EVT_DATAVIEW_COLUMN_SORTED, self.OnSortPartList)
         scrolled_sizer = wx.BoxSizer(wx.VERTICAL)
         scrolled_sizer.Add(self.part_list, 1, wx.EXPAND)
         table_scroller.SetSizer(scrolled_sizer)
@@ -805,10 +807,28 @@ class PartSelectorDialog(wx.Dialog):
         self.keyword.SetInsertionPointEnd()
         self.search(None)
 
-    def OnSortPartList(self, e):
-        """Set order_by to the clicked column and trigger list refresh."""
-        self.parent.library.set_order_by(e.GetColumn())
-        self.search(None)
+    def OnSortPartList(self, e: dv.DataViewEvent) -> None:
+        """Search again when a catalog column's sort changes.
+
+        A search returns only its first 1000 parts, so the sort decides which
+        parts are shown, not just their order.  wx has already sorted the shown
+        rows and keeps sorting new ones the same way, so a sortable column the
+        catalog can't order by (none today) needs no search.  The search waits
+        for the dialog's timer: GTK sends this event from inside its sort.
+        """
+        e.Skip()
+        if self._catalog_order() is not None:
+            self.search_timer.StartOnce(1)
+
+    def _catalog_order(self) -> Optional[tuple[str, bool]]:
+        """Return the catalog field and direction the sorted column shows, if any."""
+        column = self.part_list.GetSortingColumn()
+        if column is None:
+            return None
+        field = SORTABLE_COLUMN_INDEX_TO_DB.get(column.GetModelColumn())
+        if field is None:
+            return None
+        return field, column.IsSortOrderAscending()
 
     def OnPartSelected(self, *_):
         """Enable the toolbar buttons when a selection was made."""
@@ -917,6 +937,9 @@ class PartSelectorDialog(wx.Dialog):
             "stock": self.assert_stock_checkbox.GetValue(),
             "quantity": len(self.parts),
         }
+        order = self._catalog_order()
+        if order is not None:
+            parameters["order_by"], parameters["ascending"] = order
         start = time.time()
         try:
             result = self.parent.library.search(parameters)
