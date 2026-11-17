@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import locale
 import logging
 import os
 import subprocess
@@ -43,6 +44,13 @@ def format_hook_error(result: HookRunResult, max_output_chars: int = 2000) -> st
     return "\n\n".join(parts)
 
 
+def _timeout_output(output: bytes | str | None) -> str:
+    """Decode partial output, which subprocess can return as bytes in text mode."""
+    if isinstance(output, bytes):
+        return output.decode(locale.getpreferredencoding(False), errors="replace")
+    return output or ""
+
+
 def run_hook_script(
     script_path: str,
     timeout_seconds: int,
@@ -81,10 +89,8 @@ def run_hook_script(
         result.stdout = completed.stdout
         result.stderr = completed.stderr
     except subprocess.TimeoutExpired as exc:
-        if isinstance(exc.stdout, str):
-            result.stdout = exc.stdout
-        if isinstance(exc.stderr, str):
-            result.stderr = exc.stderr
+        result.stdout = _timeout_output(exc.stdout)
+        result.stderr = _timeout_output(exc.stderr)
         result.error_message = (
             f"Hook timed out after {timeout} seconds: {normalized_path}"
         )
