@@ -100,6 +100,14 @@ def test_get_unit_price_returns_negative_one_for_fully_malformed_string():
     assert get_unit_price(5, "abc-def:0.10") == -1.0  # non-int range
 
 
+def test_invalid_prices_do_not_hide_valid_tiers():
+    """Keep valid catalog prices, including zero, when other tiers are invalid."""
+    bands = "1:-1,1-9:0,10-19:nan,20-29:-1,30-39:inf,40-:0.05"
+    assert get_unit_price(1, bands) == 0
+    assert get_unit_price(10, bands) == -1.0
+    assert get_unit_price(40, bands) == 0.05
+
+
 def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
     """Economic mode charges extended surcharge once per distinct LCSC."""
     parts = [_part("C123"), _part("C123")]
