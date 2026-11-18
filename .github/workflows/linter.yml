@@ -61,6 +61,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deadcode
-        run: pip install deadcode
+        run: pip install deadcode==2.4.1
       - name: Run deadcode
         run: deadcode .
