@@ -258,8 +258,6 @@ class Library:
     def __init__(self, parent: Any) -> None:
         self.logger = logging.getLogger(__name__)
         self.parent = parent
-        self.order_by = "LCSC Part"
-        self.order_dir = "ASC"
         self.datadir = ""
         self.selected_library = DEFAULT_LIBRARY
         self.partsdb_file = ""
@@ -499,19 +497,18 @@ class Library:
                     )
             self.correctionsdb_file = self.localcorrectionsdb_file
 
-    def set_order_by(self, n):
-        """Set which value we want to order by when getting data from the database."""
-        column = SORTABLE_COLUMN_INDEX_TO_DB.get(n)
-        if column is None:
-            return
-        if self.order_by == column and self.order_dir == "ASC":
-            self.order_dir = "DESC"
-        else:
-            self.order_by = column
-            self.order_dir = "ASC"
-
     def search(self, parameters):
-        """Search the database for parts that meet the given parameters."""
+        """Search the database for parts that meet the given parameters.
+
+        The first 1000 matches are returned, in the order of the optional
+        ``order_by`` field and ``ascending`` flag (default: LCSC number,
+        ascending).
+        """
+        order_by = parameters.get("order_by", "LCSC Part")
+        if order_by not in SORTABLE_COLUMN_INDEX_TO_DB.values():
+            # The field name is written into the query.
+            raise ValueError(f"Cannot order parts by {order_by!r}")
+        ascending = parameters.get("ascending", True)
 
         # skip searching if there are no keywords and the part number
         # field is empty as there are too many parts for the search
@@ -632,15 +629,12 @@ class Library:
             query += " AND ".join(query_chunks)
 
         quantity = max(1, int(parameters.get("quantity") or 1))
-        if self.order_by == "Price":
-            collation = (
-                "pricesort_desc"
-                if str(self.order_dir).upper() == "DESC"
-                else "pricesort_asc"
-            )
-            query += f' ORDER BY "{self.order_by}" COLLATE {collation} ASC'
+        if order_by == "Price":
+            collation = "pricesort_asc" if ascending else "pricesort_desc"
+            query += f' ORDER BY "Price" COLLATE {collation} ASC'
         else:
-            query += f' ORDER BY "{self.order_by}" COLLATE naturalsort {self.order_dir}'
+            direction = "ASC" if ascending else "DESC"
+            query += f' ORDER BY "{order_by}" COLLATE naturalsort {direction}'
         query += " LIMIT 1000"
 
         self.logger.debug("query '%s'", query)
