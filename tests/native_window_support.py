@@ -198,9 +198,18 @@ def choose_output(ui: Any, variant: str) -> None:
     choice.GetEventHandler().ProcessEvent(event)
 
 
-def select_result(ui: Any, selector: Any) -> None:
-    """Deliver the actual DataView selection event and check button availability."""
-    item = selector.part_list_model.ObjectToItem(selector.part_list_model.data[0])
+def select_result(ui: Any, selector: Any, lcsc: Optional[str] = None) -> None:
+    """Deliver the actual DataView selection event and check button availability.
+
+    The first result is selected, or the one with the given LCSC number.
+    """
+    model = selector.part_list_model
+    (row,) = (
+        [model.data[0]]
+        if lcsc is None
+        else [row for row in model.data if row[model.columns["lcsc"]] == lcsc]
+    )
+    item = model.ObjectToItem(row)
     selector.part_list.Select(item)
     event = ui.wx.dataview.DataViewEvent(
         ui.wx.dataview.wxEVT_DATAVIEW_SELECTION_CHANGED, selector.part_list, item

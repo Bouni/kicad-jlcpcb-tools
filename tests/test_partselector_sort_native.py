@@ -1,12 +1,12 @@
 """Sorting a real part selector column searches the catalog in that order."""
 
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 
-from .native_window_support import window_ui
+from .native_window_support import select_result, window_ui
 from .native_wx_support import pump, wait_until
-from .test_part_list_refill_native import displayed_lcsc
+from .test_part_list_refill_native import displayed_lcsc, part_buttons_enabled
 
 __all__ = ["window_ui"]
 pytestmark = pytest.mark.native_wx
@@ -16,8 +16,14 @@ PRICES = {"C1": "1-:0.30", "C2": "1-:0.10", "C3": "", "C4": "1-:0.20"}
 PRICE_ORDER = {True: ["C2", "C4", "C1", "C3"], False: ["C1", "C4", "C2", "C3"]}
 
 
-def open_selector(ui: Any) -> tuple[Any, list[dict[str, Any]]]:
-    """Open the selector over a catalog that answers in the requested order."""
+def open_selector(
+    ui: Any, limit: Optional[int] = None
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Open the selector over a catalog that answers in the requested order.
+
+    With a limit, the catalog returns only that many parts, as a search
+    returns only its first 1000.
+    """
     selector = ui.selector_module.PartSelectorDialog(ui.dialog, {"R1": "C1"})
     ui.dialog._part_selector = selector
     selector.Show()
@@ -41,7 +47,7 @@ def open_selector(ui: Any) -> tuple[Any, list[dict[str, Any]]]:
                 }.get(field, "")
                 for field in fields
             )
-            for lcsc in order
+            for lcsc in order[:limit]
         ]
 
     ui.catalog.search.side_effect = search
@@ -101,6 +107,58 @@ def test_sorted_price_column_searches_in_its_order(
             displayed_lcsc(view, model, model_column(ui, "lcsc"))
             == PRICE_ORDER[ascending]
         )
+        selector.Close()
+
+    window_ui.run(check)
+
+
+@pytest.mark.parametrize(
+    ("selected", "kept"), [("C2", True), ("C3", False)], ids=["shown", "cut-off"]
+)
+def test_price_sort_keeps_the_selected_part_while_it_is_shown(
+    window_ui: Any, selected: str, kept: bool
+) -> None:
+    """The selection survives a sort that still shows its part, and only then."""
+
+    def check(ui: Any) -> None:
+        # Three of four parts fit: by number C4 is cut off, by price unpriced C3.
+        selector, searches = open_selector(ui, limit=3)
+        view, model = selector.part_list, selector.part_list_model
+        selector.search(None)
+        pump(ui.wx)
+        select_result(ui, selector, selected)
+
+        column = price_column(ui, view)
+        column.SetSortOrder(True)
+        event = ui.wx.dataview.DataViewEvent(
+            ui.wx.dataview.wxEVT_DATAVIEW_COLUMN_SORTED, view, column
+        )
+        view.GetEventHandler().ProcessEvent(event)
+        count = len(searches)
+        wait_until(
+            ui.wx,
+            lambda: len(searches) > count,
+            reason="Sorting the price column did not search again",
+        )
+        pump(ui.wx)
+        assert displayed_lcsc(view, model, model_column(ui, "lcsc")) == [
+            "C2",
+            "C4",
+            "C1",
+        ]
+        if kept:
+            assert view.GetSelectedItemsCount() == 1
+            assert model.get_lcsc(view.GetSelection()) == selected
+            assert part_buttons_enabled(selector) == (True, True)
+        else:
+            assert view.GetSelectedItemsCount() == 0
+            assert part_buttons_enabled(selector) == (False, False)
+
+        # A typed search still starts with nothing selected.
+        if kept:
+            selector.search(None)
+            pump(ui.wx)
+            assert view.GetSelectedItemsCount() == 0
         selector.Close()
 
     window_ui.run(check)
