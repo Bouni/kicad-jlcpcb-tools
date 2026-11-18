@@ -3,7 +3,6 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 import logging
-import re
 from typing import Any, Optional
 
 import wx  # pylint: disable=import-error
@@ -20,7 +19,7 @@ from .dataview_highlight import (
     expand_footprint,
     expand_value,
 )
-from .helpers import apply_side_cell_style, loadIconScaled
+from .helpers import apply_side_cell_style, loadIconScaled, natural_sort_key
 from .lcsc import normalize_lcsc
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
 from .stock_display import format_stock, stock_sort_key
@@ -77,13 +76,7 @@ class _StockDataModel(dv.PyDataViewModel):
             return self._stock_value(self.ItemToObject(item))
         return self._nonstock_value(item, col)
 
-    @staticmethod
-    def natural_sort_key(value: str) -> list[Any]:
-        """Return case-insensitive text and numeric chunks for natural sorting."""
-        return [
-            int(text) if text.isdigit() else text.lower()
-            for text in re.split("([0-9]+)", value)
-        ]
+    natural_sort_key = staticmethod(natural_sort_key)
 
     def _comparison_value(self, item: Any, column: int) -> Any:
         """Return visible text for ordinary-column sorting."""

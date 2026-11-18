@@ -230,6 +230,25 @@ def test_a_column_without_a_catalog_field_keeps_the_shown_rows(
     assert 'ORDER BY "LCSC Part" COLLATE naturalsort ASC' in statements[-1]
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "order"),
+    [
+        ("Nexperia", "NEXPERIA", 0),
+        ("Texas Instruments", "TI", -1),
+        ("C2", "C10", -1),
+        ("R9", "r10", -1),
+        ("", "Yageo", -1),
+    ],
+)
+def test_catalog_text_order_is_consistent_in_both_argument_orders(
+    first: str, second: str, order: int
+) -> None:
+    """Names that differ only in case compare equal, and a < b means b > a."""
+    with load_correction_modules() as loaded:
+        collate = loaded.library.natural_sort_collation
+        assert (collate(first, second), collate(second, first)) == (order, -order)
+
+
 def test_catalog_rejects_an_unknown_order() -> None:
     """The order is written into the SQL, so only catalog columns are accepted."""
     with load_correction_modules() as loaded:
