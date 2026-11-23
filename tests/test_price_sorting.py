@@ -236,6 +236,18 @@ def test_price_sort_collation() -> None:
     assert price_sort_collation("invalid", "1-:0.05", ascending=False) > 0
 
 
+@pytest.mark.parametrize("ascending", [True, False], ids=["ascending", "descending"])
+def test_price_sort_collation_puts_a_zero_catalog_price_with_the_missing(
+    ascending: bool,
+) -> None:
+    """The selector shows a zero price as an error, so the search sorts it last."""
+    assert price_sort_collation("1-:0.001", "1-:0.000", ascending=ascending) < 0
+    assert price_sort_collation("1-:0.000", "1-:0.001", ascending=ascending) > 0
+    assert price_sort_collation("1-:0.000", "", ascending=ascending) > 0
+    # BOM list labels keep their numeric order.
+    assert price_sort_key("$0.0000", ascending) == (0, 0.0, "")
+
+
 def test_sqlite_price_collation_query_order_and_limit() -> None:
     """SQLite query with pricesort_desc keeps invalid rows last and does not displace valid rows under LIMIT."""
     con = sqlite3.connect(":memory:")

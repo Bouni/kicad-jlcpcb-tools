@@ -91,19 +91,23 @@ def loadIconScaled(filename, scale=1.0):
     return wx.Icon(bmp)
 
 
+def natural_sort_key(value: str) -> list:
+    """Return case-insensitive text and numeric chunks for natural sorting."""
+    return [
+        int(text) if text.isdigit() else text.lower()
+        for text in re.split("([0-9]+)", value)
+    ]
+
+
 def natural_sort_collation(a, b):
-    """Natural sort collation for use in sqlite."""
-    if a == b:
-        return 0
+    """Natural sort collation for use in sqlite.
 
-    def convert(text):
-        return int(text) if text.isdigit() else text.lower()
-
-    def alphanum_key(key):
-        return [convert(c) for c in re.split("([0-9]+)", key)]
-
-    natorder = sorted([a, b], key=alphanum_key)
-    return -1 if natorder.index(a) == 0 else 1
+    It orders text as the views' natural sort does, so text that differs only
+    in case compares equal.  SQLite needs a consistent comparison: when a
+    sorts before b, b must sort after a.
+    """
+    key_a, key_b = natural_sort_key(a), natural_sort_key(b)
+    return (key_a > key_b) - (key_a < key_b)
 
 
 def dict_factory(cursor, row) -> dict:

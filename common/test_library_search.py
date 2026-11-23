@@ -53,8 +53,6 @@ def search_library(tmp_path, monkeypatch):
         module = importlib.import_module(f"{_PACKAGE}.library")
         library = module.Library.__new__(module.Library)
         library.logger = logging.getLogger(__name__)
-        library.order_by = "LCSC Part"
-        library.order_dir = "ASC"
         library.partsdb_file = str(tmp_path / "parts-fts5.db")
 
         # Synthetic catalog; the two reported part IDs anchor the regression.

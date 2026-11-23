@@ -199,11 +199,18 @@ def parse_price(value: object, quantity: int = 1) -> Optional[float]:  # noqa: U
 
 
 def price_sort_key(
-    value: object, ascending: bool = True, quantity: int = 1
+    value: object,
+    ascending: bool = True,
+    quantity: int = 1,
+    *,
+    zero_is_missing: bool = False,
 ) -> tuple[int, float, str]:
-    """Sort key for prices, sorting valid prices numerically and errors/blanks at the end."""
+    """Sort key for prices, sorting valid prices numerically and errors/blanks at the end.
+
+    With ``zero_is_missing``, a price of zero sorts with the errors and blanks.
+    """
     price = parse_price(value, quantity=quantity)
-    if price is not None:
+    if price is not None and (price > 0 or not zero_is_missing):
         return (0, price if ascending else -price, "")
     text = "" if value is None else str(value).strip()
     return (1, 0.0, text.casefold())
@@ -212,11 +219,16 @@ def price_sort_key(
 def price_sort_collation(
     a: str, b: str, ascending: bool = True, quantity: int = 1
 ) -> int:
-    """Collation for use in sqlite when ordering by Price."""
+    """Collation for use in sqlite when ordering by Price.
+
+    The catalog lists some parts at a price of zero (``1-:0.000``), which the
+    part selector shows as "Error in price data", so a zero price sorts last
+    with the missing ones rather than first among the cheapest.
+    """
     if a == b:
         return 0
-    ka = price_sort_key(a, ascending, quantity=quantity)
-    kb = price_sort_key(b, ascending, quantity=quantity)
+    ka = price_sort_key(a, ascending, quantity=quantity, zero_is_missing=True)
+    kb = price_sort_key(b, ascending, quantity=quantity, zero_is_missing=True)
     if ka == kb:
         return (a > b) - (a < b)
     return (ka > kb) - (ka < kb)
