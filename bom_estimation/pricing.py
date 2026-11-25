@@ -149,7 +149,7 @@ def get_unit_price(quantity: int, prices: str) -> float:
         except ValueError:
             continue
         if not isfinite(unit_price) or unit_price < 0:
-            continue
+            unit_price = -1.0
         bands.append((lower, upper, unit_price))
 
     if not bands:

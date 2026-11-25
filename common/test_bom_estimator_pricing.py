@@ -108,6 +108,14 @@ def test_invalid_prices_do_not_hide_valid_tiers():
     assert get_unit_price(40, bands) == 0.05
 
 
+@pytest.mark.parametrize("price", ["-1", "nan", "inf"])
+def test_invalid_first_tier_does_not_use_next_tier_price(price):
+    """Keep the missing-price result for quantities in the first tier."""
+    bands = f"1-9:{price},10-:0.05"
+    assert get_unit_price(5, bands) == -1.0
+    assert get_unit_price(10, bands) == 0.05
+
+
 def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
     """Economic mode charges extended surcharge once per distinct LCSC."""
     parts = [_part("C123"), _part("C123")]
