@@ -136,7 +136,7 @@ jobs:
         run: bash scripts/run_test_lane.sh "$IMAGE" "$LANE" "$ARCHITECTURE"
       - name: Retain test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.lane }}
           path: .cache/native-tests/${{ matrix.lane }}
