@@ -2,7 +2,7 @@
 
 JLC places each part by the EasyEDA footprint of the LCSC part number you picked, not by your KiCad footprint. This package works out a part's CPL rotation from that footprint: it aligns the KiCad footprint's pads onto JLC's pads, and the turn that aligns them is the rotation the CPL needs. The same alignment says whether the picked part fits the pads at all.
 
-Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx or pcbnew, and these modules use the standard library only. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers and KiCad's library footprints are recorded under `tests/fixtures/jlcfootprint/`.
+Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx or pcbnew. `easyeda_client` imports `requests`, which the plugin already uses, only to make a request; everything else is the standard library. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers and KiCad's library footprints are recorded under `tests/fixtures/jlcfootprint/`.
 
 | Module | What it holds |
 | --- | --- |
@@ -18,6 +18,10 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `fit.py` | Pad pairing, the placement, the fit grades, JLC's package origin and the courtyard overhang |
 | `resolver.py` | One part's verdict: its rotation, fit and polarity |
 | `resolving.py` | The resolver called on a parsed EasyEDA record |
+| `easyeda_client.py` | The EasyEDA Pro client: the batch lookup, the footprint and symbol documents, the backoff |
+| `worker.py` | The background fetch thread: two paced queues and a breaker |
+| `cache.py` | The global cache of EasyEDA's answers |
+| `verdicts.py` | The per-project verdict store in `project.db` and the key a verdict is stored under |
 
 ## Frames and units
 
@@ -186,11 +190,47 @@ python3 $T/validate_board.py $B/pin_functions_and_marks/pin_functions_and_marks.
 
 All 47 parts on the corner-case board agree, from the classic answers and from the Pro host's, with the same report; on the second board all 16 agree. `tests/test_jlcfootprint_gate.py` runs the same comparisons in the test suite, compares each report with the committed one byte for byte, and pins a few of the verdicts.
 
+## Fetching from EasyEDA
+
+`easyeda_client.EasyEdaClient` makes the requests and `worker.FetchWorker` paces them on one daemon thread. Neither decides what to fetch: a caller queues LCSC numbers and uuids and handles each answer.
+
+- **One host.** Every request goes to EasyEDA's Pro host, `pro.easyeda.com`. The classic host answers one part per request and starts refusing after a short burst, so nothing here calls it; its answers appear only among the recorded fixtures. The two hosts serve the same library: the corner-case board's gate report, for one, is the same from either host's recorded answers.
+- **What is sent.** The batch lookup POSTs up to 200 LCSC numbers and the LCSC library's id on the Pro host (`LCSC_COMPANY_PATH`) to `/api/devices/searchByCodes`, and gets back each known part's symbol uuid, footprint uuid and package name. Each footprint and each symbol is then one GET of `/api/components/{uuid}`, with a uuid the lookup returned. The requests carry a browser-like `User-Agent` and an `Accept` header for JSON; there is no account, no cookie and nothing about the board beyond the part numbers. Each times out after 20 s.
+- **Pacing.** Each queue has a token bucket. Lookups get a burst of two, then one every two seconds; documents a burst of ten, then one every 1 to 1.2 seconds, well under the 2.5 document requests per second the Pro host has answered over long runs through EasyEDA's library without a refusal. A lookup waits half a second after the newest code arrives, so a burst of assignments shares one call; a settled lookup goes before the documents, and footprints before symbols. Successive workers may share one pair of buckets (`Buckets`), so starting a new worker does not reset the pace. `estimate_seconds` gives a rough wait for what is queued, counting two documents for every code still to be looked up.
+- **Backoff.** HTTP 403, 429, 500, 502, 503 and 504 wait for `Retry-After` when it is a number of seconds (at most ten minutes), otherwise 60, 120 and 240 s, and then fail. The client calls its `acquire` before every attempt, retries included, and its `wait` for each backoff; given the worker's `acquire` and `wait_for`, every attempt spends one of the worker's tokens and a stop request cuts any wait short.
+- **Failures.** A network error, an unreadable body, a refusal of the batch lookup and a status still failing after the backoff are transient: the request may be asked again later. HTTP 404 is `none` (EasyEDA has nothing there), another 5xx is transient, and any other status is final. A document EasyEDA refuses in its body is `none` with EasyEDA's not-found code (404) and otherwise a transient error, as a refused lookup is. A document EasyEDA serves that the parser cannot read is a final error marked `unreadable`: the same answer would come again. A lookup's failure fails its whole chunk. None of the calls raises.
+- **The breaker.** Three failures in a row, from either queue, transient or not, trip the worker: it serves neither queue again, what is queued stays pending, and one message is logged and passed to `on_tripped`. A run of final refusals (an API change, a block) stops the queue as a run of 503s does. A success in between resets the count, and so does a part EasyEDA has nothing for, which is an answer rather than a failure. A result that arrives once the worker is stopping is dropped: its handler does not run, and it neither counts nor resets the count.
+- **Threads.** One lock guards the queues and the in-flight slot, so queueing and the queries are safe from any thread; a job and its result handler run on the worker's thread, outside the lock. A job leaves the in-flight slot before its handler runs, so a handler that queues the same key again is heard. A job that raises counts as a transient failure, and a handler that raises is logged; neither stops the thread.
+
+## Storage
+
+### The EasyEDA cache
+
+`cache.Cache` keeps EasyEDA's answers in one sqlite file for every project (`cache.FILENAME`, `jlcfootprint-cache.db`), so a part is fetched once, not once per project.
+
+- **`lcsc_map`**, one row per LCSC number: the status (`ok`, `none`, or `error` with its reason), the footprint uuid, the symbol uuid, the symbol's pins and its drawing, the package name the lookup gave (used when the footprint document carries none), and when the row was written. Pin meaning is a per-part fact, so it is kept per part.
+- **`package`**, one row per footprint uuid, shared by every part that uses the footprint: the package name, the pads in the parsers' raw form, the footprint drawing and its origin, and where the footprint came from. The naming rule is not stored: the resolver reads it from the package name each time. Pads are converted to millimetres only when a part is judged, so a change to the frame conventions never invalidates the cache. A classic drawing keeps its own origin (its head x/y, already subtracted from the pads) because its body outline and marks are read against it; Pro text's is (0, 0). Drawings are stored as zlib-compressed JSON.
+- **Filled in steps.** What the batch lookup returns is stored first: a part's uuids and package name (`store_lookup`; a part with no symbol gets an empty pin list) or a `none` row (`store_lookup_miss`). The footprint document then gives the package row (`store_footprint`, never one without pads; a footprint EasyEDA has nothing for, or one it served unreadable, leaves its parts to be stored as `none` rows) and the symbol document the pins (`store_symbol`; one EasyEDA served unreadable is stored without pins, so the part is judged by its pads, and one whose fetch failed is not stored, so the part keeps asking for it). `needs(lcsc)` says what is still missing: `{"lookup"}`, some of `{"footprint", "symbol"}`, or nothing when the part can be judged from the cache. A footprint already stored for another part is not fetched again.
+- **Refresh rules.** No row expires on a timer; `needs` decides. A `none` row is looked up again after 30 days (`NONE_RETRY_S`), an `error` row the next time the part is checked, and an `ok` row never, until `forget` drops the part's row (its shared footprint row stays) or `clear` drops everything.
+- **The layout gate.** The file records `SCHEMA_VERSION` in its `meta` table. A file written under any other version, older or newer, is dropped and rebuilt when it is opened, not migrated: every row in it was fetched and can be fetched again, so a change to these tables only has to raise the version.
+- Every call opens its own connection, with a five-second busy timeout, so the worker thread may write while the main thread reads.
+
+### The verdict store
+
+`verdicts.VerdictStore` keeps one table, `footprint_verdict`, in a project's own `jlcpcb/project.db`, beside the plugin's other project tables.
+
+- **The key** is `(lcsc, footprint_hash)`, and the hash is `verdict_key`: the footprint's `pad_hash` when no pad has a pin function, otherwise a hash of the pad hash together with each pad's number and the resolver's three readings of its pin function: the polarity token (`K_1` reads `K`, `+_1` reads `+`), the whole signal name it pairs pads by (upper-case, less KiCad's `_<number>` suffix, so `DATA_IN` and `DATA_OUT` stay apart), and whether it names a pin at all (`1` does, `NC` does not). Pin functions are part of the key because two footprints with the same pads but swapped K/A functions need opposite rotations, as the corner-case board's D4 and D5 do (one LCSC, one footprint). So editing a footprint's pads or swapping its pin functions orphans its verdict and its override together, by design, and the same part on the top and on the bottom shares one row, its pads mirrored back.
+- **A row** holds the resolver's verdict (status, fit, rotation, method, confidence, the name's angle, the pin-1 light, the pad counts and the fit measurements, the courtyard overhang, JLC's package origin in the footprint frame, the notes, when it was resolved) and the user's override (`override_rotation`, `override_note`).
+- **Writing.** `save` stores a verdict and rewrites every column but the override's; a green or yellow verdict writes its package origin and anything else writes none. `mark_pending` records that a part waits for its EasyEDA data: a new row is created pending, and an existing one turns pending with its rotation, method, fit and notes cleared, while its override, its origin columns and its other measurements stay until the next `save`. `set_override` sets or clears the user's rotation; `delete` drops a row, override included.
+- **Reading.** `emitted_rotation` is the override, else the rotation of a green or yellow row, else None, which leaves the part at its raw angle; `source` says which (`override`, `derived`, `raw`). `origin` is JLC's package origin for a green or yellow row only, so a pending row reports none even though its columns are kept. `display_text` is the emitted rotation as text: `180°`, `90° !` for a yellow row, `270° set` for an override, or `raw`.
+- **The footprint name** a verdict was judged under is kept with it (`footprint_name`). The key is the pads, so a footprint swapped for a same-pad one of another kind (KiCad's `L_0402` and `LED_0402` share pads, and the name says which is polarized) finds the old row; its caller compares the names and judges the part again, the override kept. The courtyard is in neither the key nor the row: a courtyard edited on its own keeps the row, whose body caveat (a note, never the status or the rotation) is the one judged before, until the part is judged again.
+- Every call opens its own connection, with a five-second busy timeout, so a background thread may write while the main thread reads.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **Background fetch and storage**: the EasyEDA client, a paced worker, the response cache and per-project verdicts.
+- **The live reader**: a board's footprints read through `kicad_backend` into the resolver's inputs.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.
 - **Variant boards**: the check on boards with KiCad design variants.
