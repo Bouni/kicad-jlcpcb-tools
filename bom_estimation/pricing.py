@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable, Mapping
 import contextlib
 from dataclasses import dataclass, field
 import json
+from math import isfinite
 import re
 from typing import Optional
 
@@ -139,16 +140,16 @@ def get_unit_price(quantity: int, prices: str) -> float:
 
     bands = []
     for token in prices.split(","):
-        if ":" not in token or "-" not in token:
-            continue
-        quantity_range, price = token.split(":", maxsplit=1)
-        lower_s, upper_s = quantity_range.split("-", maxsplit=1)
         try:
+            quantity_range, price = token.split(":", maxsplit=1)
+            lower_s, upper_s = quantity_range.split("-", maxsplit=1)
             lower = int(lower_s)
             upper = int(upper_s) if upper_s else None
             unit_price = float(price)
         except ValueError:
             continue
+        if not isfinite(unit_price) or unit_price < 0:
+            unit_price = -1.0
         bands.append((lower, upper, unit_price))
 
     if not bands:
