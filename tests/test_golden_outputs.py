@@ -386,6 +386,7 @@ def golden_modules(native_bindings: SimpleNamespace) -> Iterator[SimpleNamespace
         "_golden_outputs_test",
         (
             "fabrication",
+            "kicad_backend.swig.dialects",
             "kicad_backend.swig.read",
             "store",
             "correction_data",
@@ -409,8 +410,9 @@ def export_ordinary(modules: SimpleNamespace, board_path: Path) -> Path:
     # The window reads the editor's board through its backend. This board is
     # loaded rather than open in an editor, so it is read directly, as fresh
     # on each call as the window's own reads.
+    dialect = modules.kicad_backend_swig_dialects.select(modules.pcbnew)
     parent._read_board = parent._held_board = (
-        lambda: modules.kicad_backend_swig_read.read_snapshot(board)
+        lambda: modules.kicad_backend_swig_read.read_snapshot(board, dialect)
     )
     parent.store = modules.store.Store(parent, str(board_path.parent))
     fabrication = modules.fabrication.Fabrication(parent, board)

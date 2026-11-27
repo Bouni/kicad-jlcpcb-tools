@@ -8,14 +8,20 @@ from typing import Any
 
 from .. import BoardChanged
 from ..records import BoardSnapshot
+from .dialects import select
 from .read import read_snapshot
 
 
 class SwigBackend:
-    """Read the board open in KiCad's PCB editor."""
+    """Read the board open in KiCad's PCB editor.
+
+    It speaks the dialect of the KiCad major ``pcbnew`` belongs to, chosen
+    when it is made; a major with no dialect raises Unsupported.
+    """
 
     def __init__(self, pcbnew: Any) -> None:
         self._pcbnew = pcbnew
+        self._dialect = select(pcbnew)
 
     def _board(self) -> Any:
         """Return the editor's board, or raise BoardChanged when it has none."""
@@ -29,4 +35,4 @@ class SwigBackend:
 
         Raise BoardChanged when no board is open.
         """
-        return read_snapshot(self._board())
+        return read_snapshot(self._board(), self._dialect)

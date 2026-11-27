@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ..native_kicad_support import set_native_field
+from ..native_kicad_support import add_native_field, set_native_field
 from .support import Board, Part, uuid_owner
 
 _PAD_LAYOUTS = {
@@ -34,37 +34,23 @@ class _Editor:
         return getattr(self._pcbnew, name)
 
 
-def _add_field(pcbnew: Any, footprint: Any, name: str, text: str) -> None:
-    """Add a field after the others, as KiCad's footprint dialog adds one.
+def _footprint(pcbnew: Any, dialect: Any, board: Any, part: Part) -> Any:
+    """Create one footprint the way the PCB editor stores it.
 
-    The dialog accepts a name the footprint already has, so this does too.
-    KiCad 10 numbers user fields as one kind; KiCad 9 gives each its own id,
-    and KiCad 8 numbers a new one after the others.
+    A repeated name is added after the others, as KiCad's footprint dialog
+    adds it, where this KiCad keeps two fields with one name; elsewhere the
+    later text replaces the earlier one.
     """
-    kind = getattr(pcbnew, "FIELD_T_USER", None)
-    if kind is None:
-        next_id = getattr(footprint, "GetNextFieldId", None)
-        kind = next_id() if callable(next_id) else footprint.GetFieldCount()
-    field = pcbnew.PCB_FIELD(footprint, kind, name)
-    field.SetText(text)
-    footprint.Add(field)
-
-
-def _footprint(pcbnew: Any, board: Any, part: Part) -> Any:
-    """Create one footprint the way the PCB editor stores it."""
     mm = pcbnew.FromMM
     footprint = pcbnew.FOOTPRINT(board)
     footprint.SetReference(part.reference)
     footprint.SetValue(part.value)
     library, name = part.footprint.split(":", 1)
     footprint.SetFPID(pcbnew.LIB_ID(library, name))
-    # KiCad 7 keeps the fields in a property map, where a repeated name
-    # replaces the earlier text.
-    keeps_repeats = hasattr(footprint, "GetFields")
     named = set()
     for name, text in part.fields:
-        if name in named and keeps_repeats:
-            _add_field(pcbnew, footprint, name, text)
+        if name in named and dialect.keeps_repeated_fields:
+            add_native_field(pcbnew, footprint, name, text)
         else:
             named.add(name)
             set_native_field(footprint, name, text)
@@ -77,7 +63,7 @@ def _footprint(pcbnew: Any, board: Any, part: Part) -> Any:
         | (0x04 if part.exclude_from_pos else 0)
         | (0x08 if part.exclude_from_bom else 0)
     )
-    if hasattr(footprint, "SetDNP"):  # KiCad 7 has no DNP flag
+    if dialect.holds_dnp:
         footprint.SetDNP(part.dnp)
     # FOOTPRINT.Add puts each pad first, so add them last to first.
     for spec in reversed(part.pads):
@@ -101,13 +87,19 @@ def _footprint(pcbnew: Any, board: Any, part: Part) -> Any:
 def swig_board(
     modules: SimpleNamespace, parts: Sequence[Part], request: pytest.FixtureRequest
 ) -> Board:
-    """Create a saved KiCad board holding the parts, open in a stand-in editor."""
+    """Create a saved KiCad board holding the parts, open in a stand-in editor.
+
+    The expectations of what this KiCad holds are taken from the facts of the
+    dialect the backend speaks.
+    """
     pcbnew = request.getfixturevalue("native_bindings").pcbnew
+    dialect = modules.dialects.select(pcbnew)
     filename = str(request.getfixturevalue("tmp_path") / "board.kicad_pcb")
     board = pcbnew.NewBoard(filename)
     board.SetFileName(filename)
     # BOARD.Add puts each footprint first, so add them last to first.
-    footprints = [_footprint(pcbnew, board, part) for part in reversed(parts)][::-1]
+    built = [_footprint(pcbnew, dialect, board, part) for part in reversed(parts)]
+    footprints = built[::-1]
     uuids = [str(footprint.m_Uuid.AsString()) for footprint in footprints]
     shared = {
         uuids[index]: uuids[uuid_owner(parts, index)]
@@ -130,19 +122,9 @@ def swig_board(
         editor.board = None
 
     return Board(
-        modules.swig.SwigBackend(editor), close, **_capabilities(pcbnew, board)
+        modules.swig.SwigBackend(editor),
+        close,
+        builtin_fields=dialect.builtin_fields,
+        holds_dnp=dialect.holds_dnp,
+        keeps_repeated_fields=dialect.keeps_repeated_fields,
     )
-
-
-def _capabilities(pcbnew: Any, board: Any) -> dict[str, Any]:
-    """Say what this KiCad's footprints hold, from a new footprint left unplaced."""
-    footprint = pcbnew.FOOTPRINT(board)
-    if hasattr(footprint, "GetFields"):
-        builtin = tuple(str(field.GetName()) for field in footprint.GetFields())
-    else:
-        builtin = ("Reference", "Value")  # KiCad 7 keeps these apart
-    return {
-        "builtin_fields": builtin,
-        "holds_dnp": hasattr(footprint, "SetDNP"),
-        "keeps_repeated_fields": hasattr(footprint, "GetFields"),
-    }

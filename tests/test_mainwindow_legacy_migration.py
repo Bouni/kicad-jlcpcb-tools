@@ -610,7 +610,10 @@ def test_native_disk_parser_keeps_unsaved_override_out_of_archive_proof(
     assert pcbnew.SaveBoard(filename, board)
     disk_before = Path(filename).read_bytes()
     set_native_field(footprint, "LCSC", "C456")
+    # The window now edits a board of the running KiCad, so it speaks its dialect.
     window.pcbnew.GetBoard = lambda: board
+    window.pcbnew.GetMajorMinorVersion = pcbnew.GetMajorMinorVersion
+    window.backend = mainwindow.SwigBackend(window.pcbnew)
     window._board_identity = mainwindow.board_identity(board)
     cached_loader = MagicMock(return_value=board)
     window.pcbnew.LoadBoard = cached_loader

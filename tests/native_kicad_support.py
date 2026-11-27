@@ -62,6 +62,30 @@ def set_native_field(footprint: Any, name: str, value: str) -> None:
         footprint.SetProperty(name, value)
 
 
+def new_native_field_id(pcbnew: ModuleType, footprint: Any) -> int:
+    """Return the id the running KiCad gives a field added after the others.
+
+    KiCad 10 gives every user field one kind; KiCad 9 numbers a new field
+    with GetNextFieldId() and KiCad 8 with GetFieldCount().
+    """
+    kind = getattr(pcbnew, "FIELD_T_USER", None)
+    if kind is not None:
+        return int(kind)
+    next_id = getattr(footprint, "GetNextFieldId", None)
+    return int(next_id() if callable(next_id) else footprint.GetFieldCount())
+
+
+def add_native_field(pcbnew: ModuleType, footprint: Any, name: str, text: str) -> None:
+    """Add a field after the others, even with a name the footprint holds.
+
+    KiCad 8's footprint dialog and later ones add a field this way; KiCad 7
+    has no field objects.
+    """
+    field = pcbnew.PCB_FIELD(footprint, new_native_field_id(pcbnew, footprint), name)
+    field.SetText(text)
+    footprint.Add(field)
+
+
 def native_fields(footprint: Any) -> dict[str, str]:
     """Read every field's text from KiCad 8's fields or KiCad 7's property map."""
     if hasattr(footprint, "GetFields"):

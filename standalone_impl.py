@@ -100,6 +100,10 @@ class Footprint_Stub:
         """Attributes."""
         return self.attributes
 
+    def IsDNP(self) -> bool:
+        """Whether the footprint is marked do not place; the demo part is fitted."""
+        return False
+
     def SetAttributes(self, attributes: int) -> None:
         """Set the footprint flags."""
         self.attributes = attributes
@@ -195,6 +199,10 @@ class PcbnewStub:
     def GetBuildVersion(self):
         """Get the kicad build version."""
         return "8.0.1"
+
+    def GetMajorMinorVersion(self):
+        """Get the kicad major and minor version."""
+        return "8.0"
 
     def GetCurrentSelection(self):
         """Get the currently selected board items."""

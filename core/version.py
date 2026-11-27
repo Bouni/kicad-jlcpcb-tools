@@ -1,6 +1,6 @@
 """Contains helper function used all over the plugin."""
 
-from packaging.version import InvalidVersion, Version
+from packaging.version import Version
 
 
 def _parse_version(version: str) -> Version:
@@ -12,11 +12,3 @@ def _parse_version(version: str) -> Version:
 def is_version7(version: str) -> bool:
     """Check if version is 7."""
     return Version("6.99") <= _parse_version(version) < Version("8.0")
-
-
-def is_supported_version(version: str) -> bool:
-    """Require KiCad 7.0 or newer before loading project-facing code."""
-    try:
-        return _parse_version(version) >= Version("7.0")
-    except InvalidVersion:
-        return False

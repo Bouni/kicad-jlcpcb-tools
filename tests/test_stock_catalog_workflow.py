@@ -577,6 +577,7 @@ def test_real_constructor_scopes_cache_and_readiness_to_initialized_library(
         board.GetFileName.return_value = str(board_path)
         board.GetFootprints.return_value = []
         provider.get_pcbnew().GetBoard.return_value = board
+        provider.get_pcbnew().GetMajorMinorVersion.return_value = "10.0"
         window = module.JLCPCBTools(None, provider)
         assert window._catalog_details == {}
         with pytest.raises(TypeError, match="Lcsc"):

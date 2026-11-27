@@ -49,7 +49,8 @@ class Board:
 
     The rest says what the backend's KiCad holds: the fields every footprint
     has, in order, whether a footprint has a DNP flag, and whether it keeps
-    two fields with one name. The defaults are KiCad 9's and 10's.
+    two fields with one name. The SWIG builder takes them from its KiCad's
+    dialect; the defaults, KiCad 9's and 10's, are the fake's.
     """
 
     backend: Any
